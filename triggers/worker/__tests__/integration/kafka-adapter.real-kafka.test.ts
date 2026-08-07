@@ -1,6 +1,6 @@
 import type { WorkerJob } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { KafkaAdapter } from "../../src/adapters/KafkaAdapter";
+import { KafkaAdapter } from "../../src/adapters/KafkaAdapter.js";
 
 /**
  * Real-Kafka integration test for `KafkaAdapter` (issue #593).

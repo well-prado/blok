@@ -46,8 +46,8 @@ vi.mock("@opentelemetry/api", () => {
 });
 
 import type { TriggerResponse } from "@blokjs/runner";
-import { PubSubTrigger } from "../src/PubSubTrigger";
-import type { PubSubMessage } from "../src/PubSubTrigger";
+import { PubSubTrigger } from "../src/PubSubTrigger.js";
+import type { PubSubMessage } from "../src/PubSubTrigger.js";
 
 class TestPubSubTrigger extends PubSubTrigger {
 	protected nodes = {};

@@ -1,6 +1,6 @@
 import type { WorkerJob } from "@blokjs/runner";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { PgBossAdapter } from "../../src/adapters/PgBossAdapter";
+import { PgBossAdapter } from "../../src/adapters/PgBossAdapter.js";
 
 /**
  * Real-Postgres integration test for `PgBossAdapter` (closes Phase 2.1

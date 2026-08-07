@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleDynamicRoute, validateRoute } from "../../src/runner/Util";
+import { handleDynamicRoute, validateRoute } from "../../src/runner/Util.js";
 
 describe("validateRoute()", () => {
 	it("should return true for exact match", () => {

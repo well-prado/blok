@@ -1,6 +1,6 @@
 import { GCPPubSubAdapter, PubSubTrigger } from "@blokjs/trigger-pubsub";
-import nodes from "../Nodes";
-import workflows from "../Workflows";
+import nodes from "../Nodes.js";
+import workflows from "../Workflows.js";
 
 /**
  * PubSubServer - Concrete Pub/Sub trigger implementation

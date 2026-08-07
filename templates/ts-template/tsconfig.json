@@ -1,8 +1,8 @@
 {
 	"compilerOptions": {
 		"target": "es2022",
-		"module": "es2022",
-		"moduleResolution": "bundler",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
 		"rootDir": "./",
 		"declaration": true,
 		"sourceMap": true,

@@ -51,7 +51,7 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import McpTriggerClass, { _setActiveMcpTrigger } from "./McpTrigger";
+import McpTriggerClass, { _setActiveMcpTrigger } from "./McpTrigger.js";
 
 // Unique port per test — avoids same-port sequential-teardown (ECONNRESET /
 // TIME_WAIT) races when several real HTTP servers start/stop in a row.

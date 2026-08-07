@@ -8,7 +8,7 @@
  */
 import { WorkflowTestRunner } from "@blokjs/runner/testing";
 import { describe, expect, it } from "vitest";
-import onMessage from "../template/src/workflows/messages/on-message";
+import onMessage from "../template/src/workflows/messages/on-message.js";
 
 describe("pubsub template workflow — @blokjs/core typed-handle migration", () => {
 	it("runs through the real engine; msg.body + msg.params refs resolve", async () => {

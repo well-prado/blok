@@ -52,7 +52,7 @@ vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
 }));
 
 import { WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger, { _resetBootErrorCounterForTests } from "../../src/runner/HttpTrigger";
+import HttpTrigger, { _resetBootErrorCounterForTests } from "../../src/runner/HttpTrigger.js";
 
 describe("HttpTrigger — OBS-06 boot-error metric", () => {
 	let reader: PeriodicExportingMetricReader;

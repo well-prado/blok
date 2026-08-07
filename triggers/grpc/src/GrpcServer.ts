@@ -2,7 +2,7 @@ import { DefaultLogger } from "@blokjs/runner";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { fastifyConnectPlugin } from "@connectrpc/connect-fastify";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import GRpcTrigger from "./GRpcTrigger";
+import GRpcTrigger from "./GRpcTrigger.js";
 
 export type GrpcServerOptions = {
 	host: string;

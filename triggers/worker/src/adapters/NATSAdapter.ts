@@ -21,7 +21,7 @@
 
 import type { WorkerTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
-import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger.js";
 
 /**
  * Tier 2 polish — compute the consumer-side hold time for a NATS message

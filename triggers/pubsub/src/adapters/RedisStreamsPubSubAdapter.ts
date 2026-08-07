@@ -30,7 +30,7 @@
 
 import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger.js";
 
 export interface RedisStreamsPubSubConfig {
 	host: string;

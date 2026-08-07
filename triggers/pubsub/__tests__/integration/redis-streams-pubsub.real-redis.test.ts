@@ -1,6 +1,6 @@
 import type { PubSubMessage } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RedisStreamsPubSubAdapter } from "../../src/adapters/RedisStreamsPubSubAdapter";
+import { RedisStreamsPubSubAdapter } from "../../src/adapters/RedisStreamsPubSubAdapter.js";
 
 /**
  * Real-Redis integration test for `RedisStreamsPubSubAdapter` (issue #584).

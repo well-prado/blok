@@ -5,7 +5,7 @@
  * provider is installed only by an explicit bootstrap call).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bootstrapMetrics, resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics";
+import { bootstrapMetrics, resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics.js";
 
 // `delete` is the only way to truly UNSET an env var — `= undefined` stores the
 // string "undefined". (biome's noDelete is a perf rule; irrelevant here.)

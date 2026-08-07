@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { KafkaAdapter } from "./KafkaAdapter";
-import { PgBossAdapter } from "./PgBossAdapter";
-import { RabbitMQAdapter } from "./RabbitMQAdapter";
-import { RedisStreamsAdapter } from "./RedisStreamsAdapter";
-import { SQSAdapter } from "./SQSAdapter";
+import { KafkaAdapter } from "./KafkaAdapter.js";
+import { PgBossAdapter } from "./PgBossAdapter.js";
+import { RabbitMQAdapter } from "./RabbitMQAdapter.js";
+import { RedisStreamsAdapter } from "./RedisStreamsAdapter.js";
+import { SQSAdapter } from "./SQSAdapter.js";
 
 describe("KafkaAdapter — v0.7 PR 5", () => {
 	it("reports provider 'kafka'", () => {

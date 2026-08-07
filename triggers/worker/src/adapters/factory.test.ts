@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { _resetAdapterPoolForTests, createWorkerAdapter, getOrCreateAdapter, resolveProvider } from "./factory";
+import { _resetAdapterPoolForTests, createWorkerAdapter, getOrCreateAdapter, resolveProvider } from "./factory.js";
 
 describe("adapter factory — v0.7 PR 5", () => {
 	beforeEach(() => {

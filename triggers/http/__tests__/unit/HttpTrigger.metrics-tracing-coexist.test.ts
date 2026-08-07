@@ -14,7 +14,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { bootstrapTracing, resetTracingBootstrap } from "@blokjs/runner";
 import { metrics } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bootstrapMetrics, resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics";
+import { bootstrapMetrics, resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics.js";
 
 /** Invoke the Prometheus exporter's Node req/res handler and capture the body. */
 function scrape(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<string> {

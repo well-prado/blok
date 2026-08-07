@@ -18,7 +18,7 @@ import { type BlokService, RunCancelledError, RunTracker, type TriggerResponse, 
 import type { Context } from "@blokjs/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type WorkerJob, WorkerTimeoutError, WorkerTrigger } from "./WorkerTrigger";
+import { type WorkerJob, WorkerTimeoutError, WorkerTrigger } from "./WorkerTrigger.js";
 
 const echoNode = defineNode({
 	name: "echo",

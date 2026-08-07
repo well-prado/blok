@@ -41,8 +41,8 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import SSETrigger, { _getActiveSSETrigger, _setActiveSSETrigger } from "./SSETrigger";
-import { _resetBusForTests, getBus } from "./bus";
+import SSETrigger, { _getActiveSSETrigger, _setActiveSSETrigger } from "./SSETrigger.js";
+import { _resetBusForTests, getBus } from "./bus.js";
 
 describe("SSETrigger — v0.7 PR 3", () => {
 	beforeEach(() => {

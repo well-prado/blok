@@ -17,7 +17,7 @@ import { type WorkflowV2Builder, workflow } from "@blokjs/helper";
 import { type BlokService, WorkflowRegistry, defineNode } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { WorkerTrigger } from "./WorkerTrigger";
+import { WorkerTrigger } from "./WorkerTrigger.js";
 
 const echoNode = defineNode({
 	name: "echo",

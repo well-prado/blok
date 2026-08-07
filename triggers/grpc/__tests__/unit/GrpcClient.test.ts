@@ -19,7 +19,7 @@ vi.mock("@connectrpc/connect-node", () => ({
 }));
 
 import { createConnectTransport, createGrpcTransport, createGrpcWebTransport } from "@connectrpc/connect-node";
-import GrpcClient, { TransportEnum, HttpVersionEnum, type RpcOptions } from "../../src/GrpcClient";
+import GrpcClient, { TransportEnum, HttpVersionEnum, type RpcOptions } from "../../src/GrpcClient.js";
 
 describe("GrpcClient", () => {
 	const defaultOpts: RpcOptions = {

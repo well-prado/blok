@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import MessageDecode from "../../src/MessageDecode";
-import { MessageEncoding, MessageType } from "../../src/gen/workflow_pb";
+import MessageDecode from "../../src/MessageDecode.js";
+import { MessageEncoding, MessageType } from "../../src/gen/workflow_pb.js";
 
 describe("MessageDecode", () => {
 	let decoder: MessageDecode;

@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Shared complete OTel double (OBS-02 B2 propagation surface).
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -42,7 +42,7 @@ vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new 
 import { workflow } from "@blokjs/helper";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { z } from "zod";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 // Trace off → no trace store deps; the RPC mount is registered regardless.
 process.env.BLOK_TRACE_ENABLED = "false";

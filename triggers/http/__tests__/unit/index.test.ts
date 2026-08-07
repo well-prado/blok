@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 process.env.DISABLE_TRIGGER_RUN = "true";
 
 // Mock OpenTelemetry — shared complete double (OBS-02 B2 propagation surface).
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -70,7 +70,7 @@ vi.mock("@blokjs/trigger-webhook", () => ({
 	},
 }));
 
-import App from "../../src/index";
+import App from "../../src/index.js";
 
 describe("App", () => {
 	describe("constructor()", () => {

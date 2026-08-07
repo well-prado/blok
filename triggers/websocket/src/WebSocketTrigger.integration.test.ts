@@ -57,7 +57,7 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import WebSocketTriggerClass, { _setActiveWebSocketTrigger } from "./WebSocketTrigger";
+import WebSocketTriggerClass, { _setActiveWebSocketTrigger } from "./WebSocketTrigger.js";
 
 // Bind to an EPHEMERAL port (0) and read the OS-assigned port back from the
 // serve() callback. A fixed port flakes with EADDRINUSE when a concurrent

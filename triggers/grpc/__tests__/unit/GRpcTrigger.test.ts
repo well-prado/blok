@@ -134,8 +134,8 @@ vi.mock("@blokjs/shared", () => ({
 	},
 }));
 
-import GRpcTrigger from "../../src/GRpcTrigger";
-import { MessageEncoding, MessageType } from "../../src/gen/workflow_pb";
+import GRpcTrigger from "../../src/GRpcTrigger.js";
+import { MessageEncoding, MessageType } from "../../src/gen/workflow_pb.js";
 
 describe("GRpcTrigger", () => {
 	let trigger: GRpcTrigger;

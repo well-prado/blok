@@ -71,7 +71,7 @@ export {
 	CronTrigger,
 	type ScheduledJob,
 	type CronExecutionContext,
-} from "./CronTrigger";
+} from "./CronTrigger.js";
 
 // Re-export types from helper for convenience
 export type { CronTriggerOpts } from "@blokjs/helper";

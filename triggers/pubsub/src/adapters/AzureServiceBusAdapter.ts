@@ -17,7 +17,7 @@ import type {
 } from "@azure/service-bus";
 import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger.js";
 
 /**
  * Azure Service Bus configuration

@@ -59,7 +59,7 @@ import type { Context as HonoContext } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
 import { v4 as uuid } from "uuid";
-import { getBus } from "./bus";
+import { getBus } from "./bus.js";
 
 // -----------------------------------------------------------------------------
 // Types

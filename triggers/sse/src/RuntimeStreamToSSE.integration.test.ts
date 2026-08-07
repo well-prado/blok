@@ -55,8 +55,8 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import SSETriggerClass, { _setActiveSSETrigger } from "./SSETrigger";
-import { _resetBusForTests } from "./bus";
+import SSETriggerClass, { _setActiveSSETrigger } from "./SSETrigger.js";
+import { _resetBusForTests } from "./bus.js";
 
 const TEST_PORT = 4903;
 

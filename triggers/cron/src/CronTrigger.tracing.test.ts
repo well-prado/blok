@@ -8,7 +8,7 @@
 import { NodeMap, resetTracingBootstrap } from "@blokjs/runner";
 import { trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CronTrigger } from "./CronTrigger";
+import { CronTrigger } from "./CronTrigger.js";
 
 // Minimal concrete trigger — no nodes/workflows, so listen() boots and returns
 // without scheduling any job. CronTrigger's constructor calls

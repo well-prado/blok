@@ -16,13 +16,13 @@
  */
 
 import type { PubSubProvider } from "@blokjs/helper";
-import type { PubSubAdapter } from "../PubSubTrigger";
-import { AWSSNSAdapter } from "./AWSSNSAdapter";
-import { AzureServiceBusAdapter } from "./AzureServiceBusAdapter";
-import { GCPPubSubAdapter } from "./GCPPubSubAdapter";
-import { KafkaPubSubAdapter } from "./KafkaPubSubAdapter";
-import { NATSPubSubAdapter } from "./NATSPubSubAdapter";
-import { RedisStreamsPubSubAdapter } from "./RedisStreamsPubSubAdapter";
+import type { PubSubAdapter } from "../PubSubTrigger.js";
+import { AWSSNSAdapter } from "./AWSSNSAdapter.js";
+import { AzureServiceBusAdapter } from "./AzureServiceBusAdapter.js";
+import { GCPPubSubAdapter } from "./GCPPubSubAdapter.js";
+import { KafkaPubSubAdapter } from "./KafkaPubSubAdapter.js";
+import { NATSPubSubAdapter } from "./NATSPubSubAdapter.js";
+import { RedisStreamsPubSubAdapter } from "./RedisStreamsPubSubAdapter.js";
 
 export function resolveProvider(provider?: PubSubProvider): PubSubProvider {
 	if (provider) return provider;

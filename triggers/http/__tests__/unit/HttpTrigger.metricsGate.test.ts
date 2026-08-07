@@ -33,8 +33,8 @@ vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() })
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 
 import { WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
-import { resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
+import { resetBootstrap } from "../../src/runner/metrics/opentelemetry_metrics.js";
 
 // `delete` truly unsets; `= undefined` stores the string "undefined".
 function setDisabled(v: string | undefined): void {

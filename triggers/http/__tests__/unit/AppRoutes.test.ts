@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import app from "../../src/AppRoutes";
+import app from "../../src/AppRoutes.js";
 
 describe("AppRoutes", () => {
 	it("should export a Hono app", () => {

@@ -1,6 +1,6 @@
 import type { PubSubMessage } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { AWSSNSAdapter } from "../../src/adapters/AWSSNSAdapter";
+import { AWSSNSAdapter } from "../../src/adapters/AWSSNSAdapter.js";
 
 /**
  * Real LocalStack integration test for `AWSSNSAdapter` (issue #587).

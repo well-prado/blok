@@ -66,7 +66,7 @@ import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import type { Hono, Context as HonoContext } from "hono";
 import { v4 as uuid } from "uuid";
 
-import { BUILTIN_VERIFIERS, type Verifier, type VerifyResult, buildCustomVerifier } from "./verifiers";
+import { BUILTIN_VERIFIERS, type Verifier, type VerifyResult, buildCustomVerifier } from "./verifiers.js";
 
 // -----------------------------------------------------------------------------
 // Types

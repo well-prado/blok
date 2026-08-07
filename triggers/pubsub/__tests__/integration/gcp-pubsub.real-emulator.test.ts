@@ -1,7 +1,7 @@
 import type { PubSubMessage } from "@blokjs/runner";
 import { Subscription } from "@google-cloud/pubsub";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { GCPPubSubAdapter } from "../../src/adapters/GCPPubSubAdapter";
+import { GCPPubSubAdapter } from "../../src/adapters/GCPPubSubAdapter.js";
 
 /**
  * Real-GCP-emulator integration test for `GCPPubSubAdapter` (closes

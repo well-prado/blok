@@ -33,9 +33,9 @@
  * ```
  */
 
-import McpTrigger, { _getActiveMcpTrigger, _setActiveMcpTrigger, parseUserContext } from "./McpTrigger";
+import McpTrigger, { _getActiveMcpTrigger, _setActiveMcpTrigger, parseUserContext } from "./McpTrigger.js";
 
 export default McpTrigger;
 export { McpTrigger, _getActiveMcpTrigger, _setActiveMcpTrigger, parseUserContext };
-export type { McpTriggerConfig, McpUserContext } from "./McpTrigger";
+export type { McpTriggerConfig, McpUserContext } from "./McpTrigger.js";
 export type { McpTriggerOpts } from "@blokjs/helper";

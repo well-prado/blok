@@ -1,6 +1,6 @@
 import type { PubSubMessage } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { KafkaPubSubAdapter } from "../../src/adapters/KafkaPubSubAdapter";
+import { KafkaPubSubAdapter } from "../../src/adapters/KafkaPubSubAdapter.js";
 
 /**
  * Narrow shapes for the bits of `kafkajs` we touch in this test. The

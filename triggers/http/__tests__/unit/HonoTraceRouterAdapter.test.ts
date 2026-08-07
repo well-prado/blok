@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it } from "vitest";
-import { createTraceRouterAdapter } from "../../src/runner/HonoTraceRouterAdapter";
+import { createTraceRouterAdapter } from "../../src/runner/HonoTraceRouterAdapter.js";
 
 class TestResponse extends EventEmitter {
 	headersSent = false;

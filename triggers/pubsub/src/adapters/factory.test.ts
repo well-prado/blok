@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { _resetAdapterPoolForTests, createPubSubAdapter, getOrCreateAdapter, resolveProvider } from "./factory";
+import { _resetAdapterPoolForTests, createPubSubAdapter, getOrCreateAdapter, resolveProvider } from "./factory.js";
 
 describe("pubsub adapter factory — v0.7 PR 6", () => {
 	beforeEach(() => {

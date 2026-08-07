@@ -56,7 +56,7 @@ vi.mock("@opentelemetry/api", () => ({
 	isSpanContextValid: () => false,
 }));
 
-import { CronTrigger } from "../src/CronTrigger";
+import { CronTrigger } from "../src/CronTrigger.js";
 
 /**
  * Concrete CronTrigger whose `run()` is stubbed to throw a caller-chosen

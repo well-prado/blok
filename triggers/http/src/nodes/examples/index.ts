@@ -1,5 +1,5 @@
-import ChatUI from "./chat-ui";
-import LoginFixtureUI from "./login-fixture-ui";
+import ChatUI from "./chat-ui/index.js";
+import LoginFixtureUI from "./login-fixture-ui/index.js";
 
 // The example-node bundle registered into --examples scaffolds (via the
 // generated src/Nodes.ts) and auto-discovered by the trigger's own boot.

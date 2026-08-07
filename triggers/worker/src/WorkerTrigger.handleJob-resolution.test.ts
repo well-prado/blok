@@ -19,7 +19,7 @@ import { type BlokService, Configuration, type TriggerResponse, defineNode } fro
 import { GlobalError, WORKFLOW_INPUT_VALIDATION } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type WorkerJob, WorkerTrigger } from "./WorkerTrigger";
+import { type WorkerJob, WorkerTrigger } from "./WorkerTrigger.js";
 
 // A trivial node so `Configuration.init` resolves the workflow's single step.
 const echoNode = defineNode({

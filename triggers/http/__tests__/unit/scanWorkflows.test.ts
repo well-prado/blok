@@ -2,7 +2,7 @@ import { promises as fsp } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deriveUrlFromFilePath, scanWorkflows } from "../../src/runner/scanWorkflows";
+import { deriveUrlFromFilePath, scanWorkflows } from "../../src/runner/scanWorkflows.js";
 
 describe("deriveUrlFromFilePath", () => {
 	it("flat file → /<name>", () => {

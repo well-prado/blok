@@ -20,7 +20,7 @@
  * ```
  */
 
-import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger.js";
 
 import type { WorkerTriggerOpts } from "@blokjs/helper";
 

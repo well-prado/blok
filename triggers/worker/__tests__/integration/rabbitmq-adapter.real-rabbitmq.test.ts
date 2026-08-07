@@ -1,6 +1,6 @@
 import type { WorkerJob } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RabbitMQAdapter } from "../../src/adapters/RabbitMQAdapter";
+import { RabbitMQAdapter } from "../../src/adapters/RabbitMQAdapter.js";
 
 /**
  * Real-RabbitMQ integration test for `RabbitMQAdapter` (closes Phase 2.1

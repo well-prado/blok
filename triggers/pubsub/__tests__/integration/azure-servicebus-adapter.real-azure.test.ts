@@ -8,8 +8,8 @@ import { randomBytes } from "node:crypto";
 import { ServiceBusClient, type ServiceBusReceivedMessage, type ServiceBusReceiver } from "@azure/service-bus";
 import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { describe, expect, it } from "vitest";
-import type { PubSubMessage } from "../../src/PubSubTrigger";
-import { AzureServiceBusAdapter } from "../../src/adapters/AzureServiceBusAdapter";
+import type { PubSubMessage } from "../../src/PubSubTrigger.js";
+import { AzureServiceBusAdapter } from "../../src/adapters/AzureServiceBusAdapter.js";
 
 const RUN = process.env.BLOK_INTEGRATION_AZURE_SB;
 const d = RUN ? describe : describe.skip;
