@@ -1,11 +1,24 @@
 import { fileURLToPath } from "node:url";
 import ApiCall from "@blokjs/api-call";
-import { BROWSER_NODES } from "@blokjs/browser";
 import { HELPER_NODES } from "@blokjs/helpers";
 import IfElse from "@blokjs/if-else";
 import { discoverNodes } from "@blokjs/runner";
 import type { BlokService } from "@blokjs/runner";
 import type { NodeBase } from "@blokjs/shared";
+
+// @blokjs/browser is OPTIONAL: it pulls Playwright (browser binaries), so a
+// scaffolded project doesn't get it by default. Install it to enable the
+// browser nodes. Non-literal specifier keeps TS/bundlers from requiring it.
+const browserPkg = "@blokjs/browser";
+let browserNodes: Record<string, BlokService<unknown>> = {};
+try {
+	const mod = (await import(browserPkg)) as { BROWSER_NODES?: unknown };
+	if (mod.BROWSER_NODES && typeof mod.BROWSER_NODES === "object") {
+		browserNodes = mod.BROWSER_NODES as Record<string, BlokService<unknown>>;
+	}
+} catch {
+	// not installed — browser nodes are simply unavailable
+}
 
 // THIRD-PARTY nodes are npm packages — not locally scannable, so they stay
 // explicitly imported + registered here. Each is keyed by its own `node.name`
@@ -14,7 +27,7 @@ import type { NodeBase } from "@blokjs/shared";
 const thirdParty: Record<string, BlokService<unknown>> = {
 	"@blokjs/api-call": ApiCall,
 	"@blokjs/if-else": IfElse,
-	...(BROWSER_NODES as unknown as Record<string, BlokService<unknown>>),
+	...browserNodes,
 	// v0.5 generic helpers: expr, ctx-publish, throw, log, audit-log,
 	// in-memory-kv, json-schema, etc. Registered globally so any workflow
 	// can use them via `use: "@blokjs/<name>"`.
