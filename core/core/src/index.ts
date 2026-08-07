@@ -15,6 +15,9 @@ export {
 	workflow,
 	step,
 	subworkflow,
+	// Escape hatch to a dynamically-published state key (#333) — see dsl.ts for
+	// the full rationale. Was missing from this hand-list (#717).
+	state,
 	branch,
 	forEach,
 	switchOn,

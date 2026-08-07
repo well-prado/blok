@@ -1,4 +1,5 @@
 import * as core from "@blokjs/core";
+import * as coreDsl from "@blokjs/core/dsl";
 import * as coreRuntime from "@blokjs/core/runtime";
 import type { Context, NodeBase } from "@blokjs/core/runtime";
 import * as coreTesting from "@blokjs/core/testing";
@@ -36,6 +37,16 @@ describe("@blokjs/core is a complete migration target for the deprecated package
 
 	it("@blokjs/core/testing re-exports every @blokjs/runner/testing value export", () => {
 		const missing = valueNames(runnerTesting).filter((k) => !(k in coreTesting));
+		expect(missing).toEqual([]);
+	});
+
+	it("@blokjs/core (.) re-exports every @blokjs/core/dsl value export (#717)", () => {
+		// `index.ts` hand-lists which `./dsl` exports reach the root barrel — a
+		// hand-list drifts silently when a new dsl.ts export forgets to be added
+		// here (exactly how `state` went missing, #717). This check is
+		// regenerable like the ones above: it derives the expected set from the
+		// real `./dsl` module, so it doesn't need updating when the DSL grows.
+		const missing = valueNames(coreDsl).filter((k) => !(k in core));
 		expect(missing).toEqual([]);
 	});
 
