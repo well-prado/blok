@@ -1,18 +1,24 @@
 /**
  * Testing Framework for Blok Nodes and Workflows
  *
- * Provides utilities for unit and integration testing of nodes,
- * workflows, and triggers without needing a running server.
+ * Unit- and integration-test nodes and workflows with no running server, no
+ * Docker, and no vitest configuration workarounds.
+ *
+ * Start with `runNode` / `runWorkflow`; the classes underneath them stay
+ * exported for tests that need finer control.
  *
  * @example
  * ```typescript
- * import {
- *   NodeTestHarness,
- *   WorkflowTestRunner,
- *   TestLogger,
- * } from "@blokjs/runner/testing";
+ * import { runNode, runWorkflow } from "@blokjs/core/testing";
+ *
+ * const out = await runNode(orderValidator, { body: { id: "o-1" } });
+ * const run = await runWorkflow(orderFlow, { id: "o-1", total: 120 });
  * ```
  */
+
+// Typed-first helpers (#688)
+export { runNode, runWorkflow } from "./run";
+export type { NodeMock, RunWorkflowOptions, StepRun, WorkflowRun } from "./run";
 
 // Test Logger
 export { TestLogger } from "./TestLogger";
