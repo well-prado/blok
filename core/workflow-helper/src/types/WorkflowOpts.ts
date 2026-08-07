@@ -84,14 +84,24 @@ export const WorkflowV2Schema = z.object({
 				"and don't have a public route of their own. See TRIGGER_SCHEMAS for per-kind shapes.",
 		),
 	middleware: z
-		.literal(true)
+		.union([z.literal(true), z.array(z.string().min(1))])
 		.optional()
 		.describe(
-			"v0.5 — when true, this workflow is registered as middleware and is NOT exposed as a " +
-				"public HTTP route. It's invoked by another workflow that lists this one's `name` in " +
-				"its `trigger.http.middleware: [...]` array. Middleware runs on the parent ctx (state " +
-				"mutations carry forward) and can short-circuit by setting `ctx.response` and using a " +
-				"step with `stop: true`. Middleware-only workflows MAY omit `trigger`.",
+			"Overloaded by design — the value's TYPE picks the meaning, and the two are mutually " +
+				"exclusive (setting both is impossible on one key; the normalizer throws if a builder " +
+				"produces it).\n\n" +
+				"`true` (v0.5) — MARKER: this workflow IS middleware. It is not exposed as a public " +
+				"route; it is invoked by another workflow that lists this one's `name`. Middleware runs " +
+				"on the parent ctx (state mutations carry forward) and can short-circuit by setting " +
+				"`ctx.response` and using a step with `stop: true`. Middleware-only workflows MAY omit " +
+				"`trigger`.\n\n" +
+				"`string[]` (v0.5.2) — CHAIN: the workflow-level middleware chain applied TO this " +
+				"workflow. Each entry is the `name` of a `middleware: true` workflow. Applies to ALL of " +
+				"this workflow's triggers and runs BEFORE any trigger-level chain — use it instead of " +
+				"repeating the same list under every `trigger.<kind>.middleware`. Resolution order is " +
+				"process-global (`BLOK_GLOBAL_MIDDLEWARE` / `setGlobalMiddleware`) → workflow-level " +
+				"(this field) → trigger-level (`trigger.<kind>.middleware`) → the workflow body. " +
+				"Normalized onto `appliedMiddleware` and merged by `TriggerBase.applyMiddlewareChain`.",
 		),
 	steps: z.array(V2StepSchema).min(1).describe("Pipeline of steps to execute in order. At least one step required."),
 	input: z

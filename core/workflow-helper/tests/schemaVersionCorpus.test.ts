@@ -96,18 +96,17 @@ function walkJson(dir: string): string[] {
 const relPath = (file: string) => file.slice(file.indexOf("/json/") + "/json/".length);
 
 // Files that fail strict-parse for a pre-existing, schemaVersion-unrelated
-// reason → expected failing issue path. `empty.json` ships an empty `steps`
-// (load-test fixture); the `middleware`-as-array files predate the
-// `middleware: z.literal(true)` marker; `v06-reliability-showcase.json` exercises
-// step keys not yet in V2StepSchema. Pin the issue path so a regression that
+// reason → expected failing issue path. Pin the issue path so a regression that
 // changes WHY a file fails still trips the net.
+//
+// #700 emptied this down to `empty.json`: the `middleware`-as-array files are now
+// described by the schema (the array form is the v0.5.2 workflow-level chain, not
+// a stale alias) and `v06-reliability-showcase.json`'s per-step `description` is
+// admitted. `empty.json` stays — it ships `steps: []` deliberately, the runtime
+// rejects it too ("Workflow must have at least one step"), so it is a negative
+// fixture rather than a schema gap.
 const QUARANTINE: Record<string, string> = {
 	"empty.json": "steps",
-	"v05-admin-delete-user.json": "middleware",
-	"v05-jwt-protected.json": "middleware",
-	"v05-hello-with-mw.json": "middleware",
-	"v05-redis-protected.json": "middleware",
-	"v06-reliability-showcase.json": "steps.0",
 };
 
 const corpus = walkJson(CORPUS_DIR);

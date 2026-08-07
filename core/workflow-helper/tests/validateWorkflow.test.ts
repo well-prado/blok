@@ -54,6 +54,57 @@ describe("validateWorkflow — v2", () => {
 		expect(r.kind).toBe("v2");
 	});
 
+	// #700 — `middleware` is type-overloaded in the IR: `true` is the marker,
+	// `string[]` is the v0.5.2 workflow-level chain (Configuration.appliedMiddleware
+	// → TriggerBase.applyMiddlewareChain). The schema now declares both.
+	it("accepts a workflow-level middleware CHAIN (`middleware: string[]`)", () => {
+		const r = validateWorkflow({
+			name: "guarded",
+			version: "1.0.0",
+			middleware: ["jwt-auth", "audit-log"],
+			trigger: { http: { method: "GET" } },
+			steps: [{ id: "respond", use: "@blokjs/respond" }],
+		});
+		expect(r.ok).toBe(true);
+		expect(r.kind).toBe("v2");
+	});
+
+	it("rejects a middleware chain that isn't `true` or a list of non-empty names", () => {
+		for (const bad of [false, "jwt-auth", [""], [1], {}]) {
+			const r = validateWorkflow({
+				name: "guarded",
+				version: "1.0.0",
+				middleware: bad,
+				trigger: { http: { method: "GET" } },
+				steps: [{ id: "respond", use: "@blokjs/respond" }],
+			});
+			expect(r.ok).toBe(false);
+			expect(r.errors.some((e) => e.path.startsWith("middleware"))).toBe(true);
+		}
+	});
+
+	// #700 — a per-step `description` is documentation the runner ignores;
+	// `.strict()` used to reject it on every one of the 8 step shapes.
+	it("accepts an optional `description` on all 8 step shapes", () => {
+		const r = validateWorkflow({
+			name: "documented",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [
+				{ id: "regular", use: "n", description: "calls a node" },
+				{ id: "branch", description: "forks", branch: { when: "ctx.x", then: [{ id: "a", use: "n" }] } },
+				{ id: "sub", description: "calls a child", subworkflow: "child" },
+				{ id: "wait", description: "pauses", wait: { for: "1s" } },
+				{ id: "each", description: "iterates", forEach: { in: "js/ctx.state.items", as: "item", do: [{}] } },
+				{ id: "loop", description: "polls", loop: { while: "ctx.x", do: [{}] } },
+				{ id: "switch", description: "routes", switch: { on: "js/ctx.x", cases: [{ when: "a", do: [{}] }] } },
+				{ id: "try", description: "guards", tryCatch: { try: [{}], catch: [{}] } },
+			],
+		});
+		expect(r.errors).toEqual([]);
+		expect(r.ok).toBe(true);
+	});
+
 	it("returns ok:false / kind:v2 with a path-bearing error for a missing step id", () => {
 		const r = validateWorkflow({
 			name: "bad",
@@ -250,30 +301,29 @@ describe("validateWorkflow — unknown / non-workflow inputs", () => {
 // each must be ok:true OR the distinct legacy verdict — anything else is a
 // strict-vs-tolerant GAP that enforcing the validator on load would break.
 //
-// The gap is EXPECTED to be non-empty (it quantifies what enforcement costs);
-// it is pinned to a known allowlist so a *new* regression (a previously-passing
-// file starting to fail) breaks the build, while the documented gap does not.
+// #700 — the gap is now EMPTY. `KNOWN_GAP` stays as a permanent TRIPWIRE: a new
+// entry means a NEW divergence between the published schema and the IR the
+// runtime accepts, and it must be closed on one side (fix the schema, or fix the
+// workflow) — never appended here to silence a failure.
 // =============================================================================
 
 const here = dirname(fileURLToPath(import.meta.url));
 const corpusDir = join(here, "../../../triggers/http/workflows/json");
 
-// Files that load-and-run today but DON'T pass strict v2 validation. Each is a
-// concrete data point on what making the validator mandatory would break.
-// Update this list (and the printed gap) deliberately — never to silence a new
-// failure. Reason per file is documented inline.
-const KNOWN_GAP: Record<string, string> = {
-	// empty steps[] — v2 schema requires >= 1 step; normalizer tolerates it.
-	"empty.json": "steps: [] (empty) — v2 requires >=1 step",
-	// `middleware: ["jwt-auth", ...]` is a trigger-level middleware ARRAY; the
-	// v2 `middleware` field is the literal `true` "this IS middleware" flag.
-	// Different concept — the normalizer accepts the array form.
-	"v05-admin-delete-user.json": "middleware is a string[] (trigger mw chain), not literal true",
-	"v05-jwt-protected.json": "middleware is a string[] (trigger mw chain), not literal true",
-	"v05-hello-with-mw.json": "middleware is a string[] (trigger mw chain), not literal true",
-	"v05-redis-protected.json": "middleware is a string[] (trigger mw chain), not literal true",
-	// Per-step `description` field — .strict() rejects it; normalizer ignores it.
-	"v06-reliability-showcase.json": "steps carry a `description` field rejected by .strict()",
+// Files that load-and-run today but DON'T pass strict v2 validation. MUST stay
+// empty (#700). See the block comment above before you touch this.
+const KNOWN_GAP: Record<string, string> = {};
+
+// Deliberately-invalid fixtures → the schema path that MUST report them.
+//
+// These are NOT gaps: the runtime rejects them too, so there is no strict-vs-
+// tolerant divergence. `empty.json` ships `steps: []` and exists precisely to
+// prove a zero-step workflow fails — `Configuration.ts` throws "Workflow must
+// have at least one step" and `tests/e2e/workflows/workflow-e2e.test.ts` asserts
+// `GET /empty` → 500. It lives in the scanned corpus dir because that e2e route
+// has to exist, so it is pinned here as an asserted negative instead.
+const NEGATIVE_FIXTURES: Record<string, string> = {
+	"empty.json": "steps",
 };
 
 describe("validateWorkflow — JSON corpus regression (#306)", () => {
@@ -285,7 +335,7 @@ describe("validateWorkflow — JSON corpus regression (#306)", () => {
 		expect(files.length).toBeGreaterThan(0);
 	});
 
-	it("every loadable JSON workflow is ok:true, legacy, OR a documented gap (no unexplained ok:false)", () => {
+	it("every loadable JSON workflow is ok:true or legacy (no unexplained ok:false)", () => {
 		const unexplained: { file: string; errors: string }[] = [];
 		const gapHit: string[] = [];
 
@@ -293,6 +343,8 @@ describe("validateWorkflow — JSON corpus regression (#306)", () => {
 			const doc = JSON.parse(readFileSync(join(corpusDir, f), "utf8"));
 			const r = validateWorkflow(doc);
 			if (r.ok || r.kind === "v1") continue;
+			// Deliberate negatives are asserted (must fail, at a pinned path) below.
+			if (f in NEGATIVE_FIXTURES) continue;
 			if (f in KNOWN_GAP) {
 				gapHit.push(f);
 				continue;
@@ -302,7 +354,7 @@ describe("validateWorkflow — JSON corpus regression (#306)", () => {
 
 		// Quantify the strict-vs-tolerant gap (acceptance: printed + counted).
 		console.log(
-			`\n[validateWorkflow corpus] ${files.length} JSON workflows; ${gapHit.length} would BREAK if the validator were enforced on load:\n${gapHit.map((f) => `  - ${f}: ${KNOWN_GAP[f]}`).join("\n")}`,
+			`\n[validateWorkflow corpus] ${files.length} JSON workflows; ${gapHit.length} would BREAK if the validator were enforced on load:${gapHit.map((f) => `\n  - ${f}: ${KNOWN_GAP[f]}`).join("")}`,
 		);
 
 		if (unexplained.length > 0) {
@@ -311,18 +363,25 @@ describe("validateWorkflow — JSON corpus regression (#306)", () => {
 			);
 		}
 		expect(unexplained).toEqual([]);
+		expect(gapHit).toEqual([]);
 	});
 
-	it("every documented-gap file still actually loads (fails v2 but is not v1/unknown)", () => {
-		// Guards the allowlist against bit-rot: if a gap file is fixed upstream it
-		// should be removed from KNOWN_GAP, surfaced here as a now-passing file.
-		const nowPassing: string[] = [];
-		for (const f of Object.keys(KNOWN_GAP)) {
-			if (!files.includes(f)) continue; // file removed from corpus — ignore.
+	it("KNOWN_GAP is empty — the published schema describes the IR the runtime accepts (#700)", () => {
+		// The tripwire. A new entry is a NEW divergence: fix the schema or fix the
+		// workflow, don't append here.
+		expect(Object.keys(KNOWN_GAP)).toEqual([]);
+	});
+
+	it("deliberate negative fixtures still fail, at the pinned path", () => {
+		// Guards against bit-rot in both directions: a fixture silently starting to
+		// pass (the negative is no longer negative) or failing for a NEW reason.
+		for (const [f, path] of Object.entries(NEGATIVE_FIXTURES)) {
+			expect(files).toContain(f);
 			const doc = JSON.parse(readFileSync(join(corpusDir, f), "utf8"));
 			const r = validateWorkflow(doc);
-			if (r.ok) nowPassing.push(f);
+			expect(r.ok).toBe(false);
+			expect(r.kind).toBe("v2");
+			expect(r.errors.map((e) => e.path)).toContain(path);
 		}
-		expect(nowPassing).toEqual([]);
 	});
 });
