@@ -12,7 +12,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../../..");
 const fixtures = path.resolve(here, "../../fixtures/migrate-refs");
 
+// #690 migrated the live JSON corpus to structural `{$ref}`, so the corpus is
+// no longer a source of legacy input for this codemod. The `real: true` cases
+// below are byte-for-byte SNAPSHOTS of those corpus files as they stood before
+// the migration, parked under `fixtures/migrate-refs/input/`. They must keep
+// the legacy `js/`/`$.` shapes verbatim — that is the whole point of a codemod
+// regression corpus — so `scripts/check-no-legacy-expressions.sh` allow-lists
+// this directory.
 interface GoldenCase {
+	/** Repo-relative path. `real: true` ⇒ a pre-#690 corpus snapshot. */
 	input: string;
 	expected: string;
 	real?: boolean;
@@ -24,7 +32,7 @@ interface GoldenCase {
 
 const CASES: GoldenCase[] = [
 	{
-		input: "triggers/http/workflows/json/agent-message.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/agent-message.json",
 		expected: "agent-message.json",
 		real: true,
 		buckets: ["pure-template", "dynamic-js", "expr-input", "ephemeral"],
@@ -33,7 +41,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: ["agent::apiKey", "agent::messages", "agent::model", "save-history::value"],
 	},
 	{
-		input: "triggers/http/workflows/json/chat-message.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/chat-message.json",
 		expected: "chat-message.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js"],
@@ -42,7 +50,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: ["stream::apiKey", "stream::model"],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-github.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-github.json",
 		expected: "webhook-github.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input"],
@@ -60,7 +68,7 @@ const CASES: GoldenCase[] = [
 		],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-github-issues.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-github-issues.json",
 		expected: "webhook-github-issues.json",
 		real: true,
 		buckets: ["expr-input"],
@@ -69,7 +77,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: [],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-github-pr.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-github-pr.json",
 		expected: "webhook-github-pr.json",
 		real: true,
 		buckets: ["expr-input"],
@@ -78,7 +86,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: [],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-github-push.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-github-push.json",
 		expected: "webhook-github-push.json",
 		real: true,
 		buckets: ["dynamic-js", "expr-input", "ephemeral"],
@@ -87,7 +95,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: ["log::message"],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-stripe.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-stripe.json",
 		expected: "webhook-stripe.json",
 		real: true,
 		buckets: ["pure-path", "key-field", "control-field"],
@@ -96,7 +104,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: [],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-stripe-invoice-paid.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-stripe-invoice-paid.json",
 		expected: "webhook-stripe-invoice-paid.json",
 		real: true,
 		buckets: ["dynamic-js", "expr-input", "ephemeral"],
@@ -105,7 +113,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: ["log::message"],
 	},
 	{
-		input: "triggers/http/workflows/json/webhook-stripe-customer-created.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/webhook-stripe-customer-created.json",
 		expected: "webhook-stripe-customer-created.json",
 		real: true,
 		buckets: ["expr-input"],
@@ -114,7 +122,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: [],
 	},
 	{
-		input: "triggers/http/workflows/json/countries-vs-facts.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/countries-vs-facts.json",
 		expected: "countries-vs-facts.json",
 		real: true,
 		buckets: ["control-field"],
@@ -123,7 +131,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: [],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-nested-control-flow.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-nested-control-flow.json",
 		expected: "v05-nested-control-flow.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input", "as-field"],
@@ -136,7 +144,7 @@ const CASES: GoldenCase[] = [
 		],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-user-signup-saga.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-user-signup-saga.json",
 		expected: "v05-user-signup-saga.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input"],
@@ -152,7 +160,7 @@ const CASES: GoldenCase[] = [
 		],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-travel-booking.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-travel-booking.json",
 		expected: "v05-travel-booking.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input"],
@@ -170,7 +178,7 @@ const CASES: GoldenCase[] = [
 		],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-order-fulfillment.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-order-fulfillment.json",
 		expected: "v05-order-fulfillment.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input", "as-field"],
@@ -179,7 +187,7 @@ const CASES: GoldenCase[] = [
 		markedInputs: ["charge-payment>record-failure::value"],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-csv-import.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-csv-import.json",
 		expected: "v05-csv-import.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input", "as-field"],
@@ -192,7 +200,7 @@ const CASES: GoldenCase[] = [
 		],
 	},
 	{
-		input: "triggers/http/workflows/json/v05-data-export.json",
+		input: "packages/cli/tests/fixtures/migrate-refs/input/v05-data-export.json",
 		expected: "v05-data-export.json",
 		real: true,
 		buckets: ["pure-path", "dynamic-js", "control-field", "expr-input", "as-field"],

@@ -18,7 +18,18 @@
 			"type": "module",
 			"inputs": {
 				"action": "get",
-				"key": "js/`blok:rate-limit:${ctx.state['compute-key']}`"
+				"key": {
+					"$tpl": [
+						"blok:rate-limit:",
+						{
+							"$ref": {
+								"step": "compute-key",
+								"path": []
+							}
+						},
+						""
+					]
+				}
 			}
 		},
 		{
@@ -35,12 +46,38 @@
 			"type": "module",
 			"inputs": {
 				"action": "set",
-				"key": "js/`blok:rate-limit:${ctx.state['compute-key']}`",
-				"value": {
-					"count": "js/ctx.state['next-state'].count",
-					"expiresAt": "js/ctx.state['next-state'].expiresAt"
+				"key": {
+					"$tpl": [
+						"blok:rate-limit:",
+						{
+							"$ref": {
+								"step": "compute-key",
+								"path": []
+							}
+						},
+						""
+					]
 				},
-				"ttlMs": "js/ctx.state['next-state'].ttlMs"
+				"value": {
+					"count": {
+						"$ref": {
+							"step": "next-state",
+							"path": ["count"]
+						}
+					},
+					"expiresAt": {
+						"$ref": {
+							"step": "next-state",
+							"path": ["expiresAt"]
+						}
+					}
+				},
+				"ttlMs": {
+					"$ref": {
+						"step": "next-state",
+						"path": ["ttlMs"]
+					}
+				}
 			}
 		},
 		{
@@ -60,7 +97,12 @@
 								"error": "Rate limit exceeded",
 								"limit": 5,
 								"windowSeconds": 60,
-								"retryAfterSec": "js/ctx.state['next-state'].retryAfterSec"
+								"retryAfterSec": {
+									"$ref": {
+										"step": "next-state",
+										"path": ["retryAfterSec"]
+									}
+								}
 							}
 						}
 					}

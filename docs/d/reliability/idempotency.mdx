@@ -50,14 +50,14 @@ export default workflow("ai-content-pipeline", { version: "1.0.0", trigger: http
         "channel": "generate",
         "apiKey": "js/process.env.OPENROUTER_API_KEY",
         "model": "openai/gpt-4o-mini",
-        "messages": [{ "role": "user", "content": "js/ctx.request.body.prompt" }]
+        "messages": [{ "role": "user", "content": { "$ref": { "step": "@trigger", "path": ["body", "prompt"] } } }]
       },
       "idempotencyKey": "js/ctx.request.body.requestId"
     },
     {
       "id": "respond",
       "use": "@blokjs/respond",
-      "inputs": { "body": "js/ctx.state.draft.fullText" }
+      "inputs": { "body": { "$ref": { "step": "draft", "path": ["fullText"] } } }
     }
   ]
 }

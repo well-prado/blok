@@ -24,7 +24,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -55,7 +60,12 @@
 												}
 											}
 										},
-										"data": "js/ctx.state.row"
+										"data": {
+											"$ref": {
+												"step": "row",
+												"path": []
+											}
+										}
 									}
 								},
 								{
@@ -70,8 +80,18 @@
 											"X-Op": "insert-row"
 										},
 										"body": {
-											"rowId": "js/ctx.state.row.id",
-											"value": "js/ctx.state.row.value"
+											"rowId": {
+												"$ref": {
+													"step": "row",
+													"path": ["id"]
+												}
+											},
+											"value": {
+												"$ref": {
+													"step": "row",
+													"path": ["value"]
+												}
+											}
 										},
 										"responseType": "application/json"
 									}

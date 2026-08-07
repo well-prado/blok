@@ -80,7 +80,7 @@ export default workflow("cats.facts", {
     {
       "id": "respond",
       "use": "@blokjs/respond",
-      "inputs": { "body": "js/ctx.state.fetch" }
+      "inputs": { "body": { "$ref": { "step": "fetch", "path": [] } } }
     }
   ]
 }
@@ -88,8 +88,12 @@ export default workflow("cats.facts", {
 </CodeGroup>
 
 In the TypeScript version, `step("fetch", …)` returns a handle you pass straight
-into the next step (`body: fetch`) — the JSON `"js/ctx.state.fetch"` string is the
-same reference, just untyped.
+into the next step (`body: fetch`) — the JSON `{"$ref": {"step": "fetch", "path": []}}`
+object is the same reference, structurally: it points at the whole output of the
+`fetch` step. Both compile to the same v2 IR. The
+[wire form](/d/reference/mapper) — `"js/ctx.state.fetch"` — only shows up later,
+as what a load-boundary lowering pass emits right before the node runs. It is
+not something you write by hand.
 
 ## Trigger section
 
@@ -115,10 +119,10 @@ Every step in v2 has these fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `id` | yes | Stable identifier. Other steps reference output as `ctx.state[id]`. |
+| `id` | yes | Stable identifier. Other steps reference its output via a structural ref: `{"$ref": {"step": id, "path": []}}`. |
 | `use` | yes | Node reference (e.g. `@blokjs/api-call`, `my-custom-node`). |
 | `type` | no | `"module"` or `"local"` — inferred from `use` when omitted. |
-| `inputs` | no | Inputs passed to the node. May contain `"js/ctx...."` mapper expressions. |
+| `inputs` | no | Inputs passed to the node. May contain structural `{"$ref": …}` / `{"$tpl": […]}` references to upstream data — see [Cross-step references](#cross-step-references). |
 
 `module` is for nodes installed as dependencies or class-based nodes
 exported by `src/Nodes.ts`. `local` is for nodes living in your local
@@ -126,16 +130,30 @@ filesystem.
 
 ## Cross-step references
 
-Every step's output auto-stores at `ctx.state[id]`. Reference it in a
-later step's inputs as `"js/ctx.state.<id>"`:
+Every step's output auto-stores at `ctx.state[id]`, but you don't write that
+path by hand — a step's `inputs` carry a **structural reference** instead:
+
+| Meaning | JSON |
+|---|---|
+| whole output of step `fetch` | `{ "$ref": { "step": "fetch", "path": [] } }` |
+| a field of it | `{ "$ref": { "step": "fetch", "path": ["data", "items"] } }` |
+| array index | `{ "$ref": { "step": "fetch", "path": ["items", 0, "id"] } }` |
+| trigger payload | `{ "$ref": { "step": "@trigger", "path": ["body", "url"] } }` |
+| caught error (inside `tryCatch.catch`) | `{ "$ref": { "step": "@error", "path": ["message"] } }` |
+| string with an embedded ref | `{ "$tpl": ["chat:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] }` |
 
 ```json
 {
   "id": "respond",
   "use": "@blokjs/respond",
-  "inputs": { "body": "js/ctx.state.fetch" }
+  "inputs": { "body": { "$ref": { "step": "fetch", "path": [] } } }
 }
 ```
+
+Structural refs are what you author. Right before a node runs, a deterministic
+load-boundary pass ([`lowerRefs`](/d/reference/mapper)) rewrites every `$ref` /
+`$tpl` into the `"js/ctx.…"` mapper-expression string the runtime actually
+evaluates — that's the internal wire format, not something you write by hand.
 
 For the full set of fields and persistence knobs (`as`, `spread`,
 `ephemeral`, `idempotencyKey`, `retry`, `subworkflow`), see

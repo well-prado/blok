@@ -27,7 +27,12 @@
 							},
 							"body": {
 								"step": "create",
-								"user": "js/ctx.request.body.user"
+								"user": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "user"]
+									}
+								}
 							},
 							"responseType": "application/json"
 						}
@@ -37,7 +42,12 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.middleUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "middleUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",

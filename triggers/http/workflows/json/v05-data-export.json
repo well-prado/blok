@@ -24,7 +24,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -49,7 +54,12 @@
 									},
 									"maxDuration": "5s",
 									"inputs": {
-										"url": "js/ctx.state.page.url",
+										"url": {
+											"$ref": {
+												"step": "page",
+												"path": ["url"]
+											}
+										},
 										"method": "GET",
 										"headers": {
 											"Accept": "application/json"
@@ -65,8 +75,18 @@
 									"type": "module",
 									"inputs": {
 										"event": "data-export-page-failure",
-										"page": "js/ctx.state.page.number",
-										"url": "js/ctx.state.page.url",
+										"page": {
+											"$ref": {
+												"step": "page",
+												"path": ["number"]
+											}
+										},
+										"url": {
+											"$ref": {
+												"step": "page",
+												"path": ["url"]
+											}
+										},
 										"reason": "js/ctx.error.message"
 									}
 								},

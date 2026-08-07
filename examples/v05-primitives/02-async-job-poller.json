@@ -17,7 +17,12 @@
 			"inputs": {
 				"url": "https://api.example.com/jobs",
 				"method": "POST",
-				"body": "js/ctx.request.body"
+				"body": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -28,14 +33,27 @@
 				"do": [
 					{
 						"id": "wait-tick",
-						"wait": { "for": "2s" }
+						"wait": {
+							"for": "2s"
+						}
 					},
 					{
 						"id": "check-status",
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/`https://api.example.com/jobs/${ctx.state['submit-job'].id}`",
+							"url": {
+								"$tpl": [
+									"https://api.example.com/jobs/",
+									{
+										"$ref": {
+											"step": "submit-job",
+											"path": ["id"]
+										}
+									},
+									""
+								]
+							},
 							"method": "GET"
 						}
 					}
@@ -56,7 +74,12 @@
 								"type": "module",
 								"inputs": {
 									"status": 200,
-									"body": "js/ctx.state['check-status'].result"
+									"body": {
+										"$ref": {
+											"step": "check-status",
+											"path": ["result"]
+										}
+									}
 								}
 							}
 						]
@@ -72,7 +95,12 @@
 									"status": 502,
 									"body": {
 										"error": "Job failed",
-										"reason": "js/ctx.state['check-status'].error"
+										"reason": {
+											"$ref": {
+												"step": "check-status",
+												"path": ["error"]
+											}
+										}
 									}
 								}
 							}
@@ -88,7 +116,12 @@
 							"status": 504,
 							"body": {
 								"error": "Job poll timeout",
-								"jobId": "js/ctx.state['submit-job'].id"
+								"jobId": {
+									"$ref": {
+										"step": "submit-job",
+										"path": ["id"]
+									}
+								}
 							}
 						}
 					}

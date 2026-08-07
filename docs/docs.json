@@ -141,7 +141,6 @@
 							"d/reference/workflow-registry",
 							"d/reference/run-states",
 							"d/reference/metadata-filtering",
-							"d/reference/mapper",
 							"d/reference/middleware",
 							{
 								"group": "Helper nodes",
@@ -174,6 +173,10 @@
 								]
 							}
 						]
+					},
+					{
+						"group": "Internals",
+						"pages": ["d/reference/mapper"]
 					},
 					{
 						"group": "CLI",
@@ -249,7 +252,8 @@
 							"c/migration-guides/index",
 							"c/migration-guides/v0.4-explicit-paths",
 							"c/migration-guides/v1-to-v2-reliability",
-							"c/migration-guides/dollar-proxy-removal"
+							"c/migration-guides/dollar-proxy-removal",
+							"c/migration-guides/legacy-expression-strings"
 						]
 					}
 				]

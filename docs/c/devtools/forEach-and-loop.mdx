@@ -18,31 +18,17 @@ Use `forEach` when you have N items to process. Use `loop` when you don't know h
 ### Authoring (TS DSL)
 
 ```ts
-import { workflow, forEach } from "@blokjs/helper";
+import { workflow, step, forEach, http } from "@blokjs/core";
+import ApiCallNode from "@blokjs/api-call";
 
-export default workflow({
-  name: "webhook-fanout",
-  trigger: { http: { method: "POST" } },
-  steps: [
-    forEach({
-      id: "dispatch-to-each",
-      in: "js/ctx.request.body.subscribers",
-      as: "subscriber",
-      mode: "parallel",
-      concurrency: 5,
-      do: [
-        {
-          id: "post",
-          use: "@blokjs/api-call",
-          inputs: {
-            url: "js/ctx.state.subscriber.url",
-            method: "POST",
-            body: "js/ctx.request.body.event",
-          },
-        },
-      ],
-    }),
-  ],
+export default workflow("webhook-fanout", { version: "1.0.0", trigger: http.post("/webhook-fanout") }, (req) => {
+  forEach(req.body.subscribers, (subscriber) => {
+    step("post", ApiCallNode, {
+      url: subscriber.url,
+      method: "POST",
+      body: req.body.event,
+    });
+  }, { as: "subscriber", id: "dispatch-to-each", mode: "parallel", concurrency: 5 });
 });
 ```
 
@@ -61,9 +47,9 @@ export default workflow({
         "id": "post",
         "use": "@blokjs/api-call",
         "inputs": {
-          "url": "js/ctx.state.subscriber.url",
+          "url": { "$ref": { "step": "subscriber", "path": ["url"] } },
           "method": "POST",
-          "body": "js/ctx.request.body.event"
+          "body": { "$ref": { "step": "@trigger", "path": ["body", "event"] } }
         }
       }
     ]
@@ -73,6 +59,7 @@ export default workflow({
 
 ### Runtime contract
 
+- **`in` is control config, not a step input.** The forEach engine resolves it directly off the live `ctx` before any iteration starts, so in JSON it stays a `"js/ctx.…"` path string; in the TS DSL you pass the array handle directly (`forEach(req.body.subscribers, …)`) and the DSL lowers it to that same path.
 - **Per-iteration scope.** Each iteration runs in a cloned context where `ctx.state[as]` is the current item and `ctx.state[as + "Index"]` is the 0-based position. Mutations inside one iteration do **not** bleed into the next iteration's scope.
 - **Output.** The forEach step's output is an array of per-iteration responses, stored at `ctx.state[<id>]`. Each entry is the iteration's `ctx.response` envelope (`{ data, success, error, contentType, ... }`) — read inner data via `ctx.state[<id>][i].data`.
 - **`mode: "sequential"` (default).** Awaits each iteration in turn. A throw from any iteration aborts the whole forEach and surfaces upstream.

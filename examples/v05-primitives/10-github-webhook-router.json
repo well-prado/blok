@@ -22,8 +22,18 @@
 								"id": "handle",
 								"subworkflow": "handle-push",
 								"inputs": {
-									"event": "js/ctx.request.body",
-									"deliveryId": "js/ctx.request.headers['x-github-delivery']"
+									"event": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body"]
+										}
+									},
+									"deliveryId": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["headers", "x-github-delivery"]
+										}
+									}
 								}
 							}
 						]
@@ -39,8 +49,18 @@
 								"id": "handle",
 								"subworkflow": "handle-pr-event",
 								"inputs": {
-									"event": "js/ctx.request.body",
-									"action": "js/ctx.request.body.action"
+									"event": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body"]
+										}
+									},
+									"action": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body", "action"]
+										}
+									}
 								}
 							}
 						]
@@ -52,7 +72,12 @@
 								"id": "handle",
 								"subworkflow": "handle-issue-event",
 								"inputs": {
-									"event": "js/ctx.request.body"
+									"event": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body"]
+										}
+									}
 								}
 							}
 						]
@@ -64,7 +89,12 @@
 								"id": "handle",
 								"subworkflow": "handle-release",
 								"inputs": {
-									"event": "js/ctx.request.body"
+									"event": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body"]
+										}
+									}
 								}
 							}
 						]
@@ -76,7 +106,12 @@
 								"id": "handle",
 								"subworkflow": "handle-workflow-run",
 								"inputs": {
-									"event": "js/ctx.request.body"
+									"event": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body"]
+										}
+									}
 								}
 							}
 						]
@@ -89,8 +124,18 @@
 						"type": "module",
 						"inputs": {
 							"event": "github-webhook-unhandled",
-							"eventType": "js/ctx.request.headers['x-github-event']",
-							"deliveryId": "js/ctx.request.headers['x-github-delivery']"
+							"eventType": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["headers", "x-github-event"]
+								}
+							},
+							"deliveryId": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["headers", "x-github-delivery"]
+								}
+							}
 						}
 					}
 				]
@@ -102,7 +147,9 @@
 			"type": "module",
 			"inputs": {
 				"status": 200,
-				"body": { "ok": true }
+				"body": {
+					"ok": true
+				}
 			}
 		}
 	]

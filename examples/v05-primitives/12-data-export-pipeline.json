@@ -51,7 +51,12 @@
 											"Authorization": "js/`Bearer ${ctx.env.UPSTREAM_API_TOKEN}`"
 										},
 										"query": {
-											"page": "js/ctx.state.page",
+											"page": {
+												"$ref": {
+													"step": "page",
+													"path": []
+												}
+											},
 											"size": 100
 										}
 									}
@@ -65,10 +70,30 @@
 									"inputs": {
 										"table": "export_failures",
 										"data": {
-											"exportId": "js/ctx.request.body.exportId",
-											"page": "js/ctx.state.page",
-											"error": "js/ctx.error.message",
-											"errorCode": "js/ctx.error.code",
+											"exportId": {
+												"$ref": {
+													"step": "@trigger",
+													"path": ["body", "exportId"]
+												}
+											},
+											"page": {
+												"$ref": {
+													"step": "page",
+													"path": []
+												}
+											},
+											"error": {
+												"$ref": {
+													"step": "@error",
+													"path": ["message"]
+												}
+											},
+											"errorCode": {
+												"$ref": {
+													"step": "@error",
+													"path": ["code"]
+												}
+											},
 											"failedAt": "new Date().toISOString()"
 										}
 									}
@@ -86,13 +111,29 @@
 			"idempotencyKey": "js/`export-${ctx.request.body.exportId}`",
 			"maxDuration": "120s",
 			"inputs": {
-				"exportId": "js/ctx.request.body.exportId",
+				"exportId": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "exportId"]
+					}
+				},
 				"pages": "js/ctx.state['fetch-pages'].filter(p => p['fetch'] !== undefined)",
 				"format": "csv",
 				"destination": {
 					"type": "s3",
 					"bucket": "js/ctx.env.EXPORT_BUCKET",
-					"key": "js/`exports/${ctx.request.body.exportId}.csv`"
+					"key": {
+						"$tpl": [
+							"exports/",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "exportId"]
+								}
+							},
+							".csv"
+						]
+					}
 				}
 			}
 		},
@@ -103,11 +144,42 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"exportId": "js/ctx.request.body.exportId",
-					"url": "js/ctx.state.assemble.s3Url",
-					"rowCount": "js/ctx.state.assemble.totalRows",
-					"failedPages": "js/ctx.state.assemble.failedPageCount",
-					"dlqUrl": "js/`/exports/${ctx.request.body.exportId}/failures`"
+					"exportId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "exportId"]
+						}
+					},
+					"url": {
+						"$ref": {
+							"step": "assemble",
+							"path": ["s3Url"]
+						}
+					},
+					"rowCount": {
+						"$ref": {
+							"step": "assemble",
+							"path": ["totalRows"]
+						}
+					},
+					"failedPages": {
+						"$ref": {
+							"step": "assemble",
+							"path": ["failedPageCount"]
+						}
+					},
+					"dlqUrl": {
+						"$tpl": [
+							"/exports/",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "exportId"]
+								}
+							},
+							"/failures"
+						]
+					}
 				}
 			}
 		}

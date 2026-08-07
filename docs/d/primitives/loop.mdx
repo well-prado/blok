@@ -36,7 +36,7 @@ reference implementation.
         "id": "check",
         "use": "@blokjs/api-call",
         "inputs": {
-          "url": "js/`https://internal/jobs/${ctx.request.body.jobId}/status`",
+          "url": { "$tpl": ["https://internal/jobs/", { "$ref": { "step": "@trigger", "path": ["body", "jobId"] } }, "/status"] },
           "method": "GET"
         }
       },

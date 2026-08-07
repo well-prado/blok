@@ -96,6 +96,16 @@ condition strings. Those are legacy/compiled forms, not the authoring
 model. (The `$` proxy that used to be a third such form is deleted
 entirely — see `docs/c/migration-guides/dollar-proxy-removal.mdx`.)
 
+In JSON workflows the same references are carried **structurally** in step
+`inputs` — `{"$ref": {"step": "fetch", "path": ["data"]}}`, `@trigger` for the
+trigger payload, `@error` for a caught error, `{"$tpl": [...]}` for a string
+that embeds one. A load-boundary pass lowers them to the wire format. Legacy
+`"js/ctx...."` inputs still load but warn once per workflow at boot; run
+`blokctl migrate refs` and see
+`docs/c/migration-guides/legacy-expression-strings.mdx`. `scripts/check-no-legacy-expr.sh`
+gates this on the authoring surface (docs, templates, examples, editor
+packages, these guides).
+
 ## Entry Handles
 
 Name the callback argument by trigger kind:

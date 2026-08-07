@@ -47,7 +47,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -78,8 +83,18 @@
 													"X-Op": "inventory-check"
 												},
 												"body": {
-													"sku": "js/ctx.state.item.sku",
-													"qty": "js/ctx.state.item.quantity"
+													"sku": {
+														"$ref": {
+															"step": "item",
+															"path": ["sku"]
+														}
+													},
+													"qty": {
+														"$ref": {
+															"step": "item",
+															"path": ["quantity"]
+														}
+													}
 												},
 												"responseType": "application/json"
 											}
@@ -113,8 +128,18 @@
 										"X-Op": "license-create"
 									},
 									"body": {
-										"orderId": "js/ctx.request.body.id",
-										"items": "js/ctx.request.body.items"
+										"orderId": {
+											"$ref": {
+												"step": "@trigger",
+												"path": ["body", "id"]
+											}
+										},
+										"items": {
+											"$ref": {
+												"step": "@trigger",
+												"path": ["body", "items"]
+											}
+										}
 									},
 									"responseType": "application/json"
 								}
@@ -158,16 +183,36 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.paymentUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "paymentUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
 								"X-Op": "stripe-charge"
 							},
 							"body": {
-								"orderId": "js/ctx.request.body.id",
-								"amount": "js/ctx.request.body.total",
-								"currency": "js/ctx.request.body.currency"
+								"orderId": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "id"]
+									}
+								},
+								"amount": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "total"]
+									}
+								},
+								"currency": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "currency"]
+									}
+								}
 							},
 							"responseType": "application/json"
 						}
@@ -191,9 +236,24 @@
 						"type": "module",
 						"inputs": {
 							"event": "order-fulfillment",
-							"orderId": "js/ctx.request.body.id",
-							"total": "js/ctx.request.body.total",
-							"identity": "js/ctx.state.identity"
+							"orderId": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "id"]
+								}
+							},
+							"total": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "total"]
+								}
+							},
+							"identity": {
+								"$ref": {
+									"step": "identity",
+									"path": []
+								}
+							}
 						}
 					}
 				]

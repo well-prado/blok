@@ -13,34 +13,23 @@ It mirrors JavaScript's `switch` semantics: cases are matched **in order**, the 
 ## Authoring (TS DSL)
 
 ```ts
-import { workflow, switchOn } from "@blokjs/helper";
+import { workflow, step, switchOn, http } from "@blokjs/core";
+import ApiCallNode from "@blokjs/api-call";
 
-export default workflow({
-  name: "event-router",
-  trigger: { http: { method: "POST" } },
-  steps: [
-    switchOn({
-      id: "route",
-      on: "js/ctx.request.body.event",
-      cases: [
-        {
-          when: "ping",
-          do: [
-            { id: "ping-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-          ],
-        },
-        {
-          when: ["order.created", "order.paid", "order.refunded"],
-          do: [
-            { id: "order-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-          ],
-        },
-      ],
-      default: [
-        { id: "unknown-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-      ],
-    }),
-  ],
+export default workflow("event-router", { version: "1.0.0", trigger: http.post("/events") }, (req) => {
+  switchOn(req.body.event, {
+    cases: [
+      {
+        when: "ping",
+        do: () => { step("ping-handler", ApiCallNode, { url: "...", method: "POST" }); },
+      },
+      {
+        when: ["order.created", "order.paid", "order.refunded"],
+        do: () => { step("order-handler", ApiCallNode, { url: "...", method: "POST" }); },
+      },
+    ],
+    default: () => { step("unknown-handler", ApiCallNode, { url: "...", method: "POST" }); },
+  }, { id: "route" });
 });
 ```
 
@@ -66,7 +55,7 @@ export default workflow({
 
 ## Runtime contract
 
-- **`on` is resolved before matching.** A `"js/ctx.request.body.event"` string (or, in the typed-handle DSL, a step/entry handle) evaluates against the live ctx; the resulting value is then compared against each case's `when`.
+- **`on` is resolved before matching.** A `switch.on` path string such as `"js/ctx.request.body.event"` (or, in the typed-handle DSL, a step/entry handle) evaluates against the live ctx; the resulting value is then compared against each case's `when`.
 - **Match rules:**
   - `when` is a scalar (string/number/boolean) → match if `on === when`.
   - `when` is an array → match if `when.includes(on)` (any-of, useful for grouping related events).

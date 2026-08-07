@@ -33,7 +33,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -45,15 +50,30 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.signupUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "signupUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
 								"X-Step": "create-account"
 							},
 							"body": {
-								"email": "js/ctx.request.body.email",
-								"displayName": "js/ctx.request.body.displayName"
+								"email": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
+								"displayName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "displayName"]
+									}
+								}
 							},
 							"responseType": "application/json"
 						}
@@ -70,7 +90,12 @@
 								"X-Step": "send-welcome"
 							},
 							"body": {
-								"to": "js/ctx.request.body.email",
+								"to": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
 								"template": "welcome"
 							},
 							"responseType": "application/json"
@@ -88,8 +113,18 @@
 								"X-Step": "create-profile"
 							},
 							"body": {
-								"email": "js/ctx.request.body.email",
-								"displayName": "js/ctx.request.body.displayName"
+								"email": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
+								"displayName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "displayName"]
+									}
+								}
 							},
 							"responseType": "application/json"
 						}
@@ -114,7 +149,12 @@
 										},
 										"body": {
 											"reason": "signup-saga-rollback",
-											"email": "js/ctx.request.body.email"
+											"email": {
+												"$ref": {
+													"step": "@trigger",
+													"path": ["body", "email"]
+												}
+											}
 										},
 										"responseType": "application/json"
 									}
@@ -168,7 +208,12 @@
 						"type": "module",
 						"inputs": {
 							"event": "signup-attempt",
-							"email": "js/ctx.request.body.email"
+							"email": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "email"]
+								}
+							}
 						}
 					}
 				]

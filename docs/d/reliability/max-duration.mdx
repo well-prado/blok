@@ -42,14 +42,14 @@ export default workflow("scrape-page", { version: "1.0.0", trigger: http.post("/
     {
       "id": "fetch",
       "use": "@blokjs/api-call",
-      "inputs": { "url": "js/ctx.request.body.url" },
+      "inputs": { "url": { "$ref": { "step": "@trigger", "path": ["body", "url"] } } },
       "maxDuration": "10s",
       "retry": { "maxAttempts": 3 }
     },
     {
       "id": "parse",
       "use": "@blokjs/parse-html",
-      "inputs": { "html": "js/ctx.state.fetch" }
+      "inputs": { "html": { "$ref": { "step": "fetch", "path": [] } } }
     }
   ]
 }

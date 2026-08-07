@@ -100,6 +100,17 @@ to the producing step handle, templates to `tpl`, and branch comparisons to
 typed operators. `@blokjs/expr` is the exception: its `expression` input is
 plain JavaScript for that node, without a mapper prefix.
 
+JSON workflows carry the same references structurally in step `inputs`:
+`{"$ref": {"step": "fetch", "path": ["data"]}}`, with `@trigger` for the
+trigger payload and `@error` for a caught error, and
+`{"$tpl": ["text", {"$ref": …}]}` for a string that embeds one. Hand-written
+`"js/ctx...."` inputs still load but warn once per workflow at boot
+(`BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` silences); `blokctl migrate refs`
+rewrites them. Control/trigger-config positions keep path strings:
+`branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
+`forEach.in`, `wait.for`/`until`, `subworkflow`, step `idempotencyKey`,
+trigger `concurrencyKey` / `debounce.key`.
+
 ## Do NOT
 
 - Do not create class-based `BlokService` nodes.

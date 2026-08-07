@@ -43,7 +43,12 @@
 								"inputs": {
 									"action": "js/ctx.request.body.action || null",
 									"pull_request": "js/ctx.request.body.pull_request || null",
-									"_eventType": "js/ctx.request.headers['x-github-event']"
+									"_eventType": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["headers", "x-github-event"]
+										}
+									}
 								}
 							}
 						]
@@ -57,7 +62,12 @@
 								"inputs": {
 									"action": "js/ctx.request.body.action || null",
 									"issue": "js/ctx.request.body.issue || null",
-									"_eventType": "js/ctx.request.headers['x-github-event']"
+									"_eventType": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["headers", "x-github-event"]
+										}
+									}
 								}
 							}
 						]

@@ -147,7 +147,7 @@ dispatch time, after the namespace prefix is applied.
 | `secretEnv` | Name of the env var holding the signing secret. |
 | `tolerance` | Drift window in seconds. |
 | `namespace: "stripe"` | Prefix applied to the resolved sub-workflow name. |
-| `idempotencyKey: "js/ctx.request.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
+| `idempotencyKey: "js/ctx.request.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. Trigger config is resolved against the live `ctx` before any step handle exists, so it's a raw path string, not a handle. |
 
 To handle a new event type, add a workflow with the matching name —
 no router update needed:

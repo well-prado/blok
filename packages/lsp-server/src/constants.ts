@@ -158,8 +158,8 @@ export const FIELD_DOCS: Record<string, HoverDoc> = {
 	inputs: {
 		title: "Node Inputs",
 		description:
-			"Input values for the node. Supports static values, template variables (${ctx.request.body.field}), JavaScript evaluation (js/ prefix), and context variable references.",
-		example: `"inputs": {\n  "url": "https://api.example.com/users",\n  "userId": "\${ctx.request.params.id}",\n  "computed": "js/ctx.response.data.items.length"\n}`,
+			'Input values for the node. Static values, or a structural reference to an upstream step\'s output — {"$ref": {"step", "path"}} — with {"$tpl": [...]} for a string that embeds one. Use "@trigger" as the step to read the trigger payload, "@error" inside a tryCatch catch arm.',
+		example: `"inputs": {\n  "url": "https://api.example.com/users",\n  "userId": { "$ref": { "step": "@trigger", "path": ["params", "id"] } },\n  "items": { "$ref": { "step": "fetch", "path": ["data", "items"] } }\n}`,
 	},
 	conditions: {
 		title: "Conditional Branches",

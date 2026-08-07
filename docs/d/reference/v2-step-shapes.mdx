@@ -55,9 +55,15 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Inputs
 
 <ParamField path="inputs" type="Record<string, unknown>">
-  Inputs passed to the node. May contain `js/...` expressions (e.g.
-  `js/ctx.state.foo`, `js/ctx.request.body.id`) for runtime
-  evaluation.
+  Inputs passed to the node. Reference another step's output or the
+  trigger payload with `{"$ref": {"step": "<id>", "path": [...]}}`; a
+  string built around a ref uses `{"$tpl": [...]}`. These structural
+  refs are the authoring form — a deterministic load-boundary pass
+  lowers them to `js/ctx....` expression strings internally, and
+  genuine escape hatches (fallbacks, optional chaining, `process.env`
+  reads, and other non-structural expressions) stay as `js/...`
+  strings verbatim. See [Mapper](/d/reference/mapper) for the full
+  expression grammar and wire format.
 </ParamField>
 
 ### Persistence
@@ -83,7 +89,10 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Reliability (Tier 1)
 
 <ParamField path="idempotencyKey" type="string">
-  Cache key — literal string or a `js/ctx....` expression. See
+  Cache key — a literal string or a `js/ctx....` expression. This
+  field is reliability config, not a step input, so it's a raw ctx
+  path string rather than a `$ref` handle — the runner resolves it
+  against the live `ctx` directly, outside the mapper. See
   [idempotent step caching](/d/reliability/idempotency).
 </ParamField>
 
@@ -189,10 +198,12 @@ Authoritative source: `V2SubworkflowStepSchema`. See
 <ParamField path="subworkflow" type="string (min 1)" required>
   Name of the workflow to invoke. **Literal names** (`"send-receipt"`)
   are looked up directly. **Polymorphic expressions**
-  (`"js/ctx.request.body.kind"`) resolve against the live ctx at dispatch
-  time — pair with `allowList` to constrain which workflows the
-  expression may resolve to. Must match a `name:` field registered in
-  the [Workflow Registry](/d/reference/workflow-registry).
+  (`subworkflow: "js/ctx.request.body.kind"`) resolve against the live ctx at
+  dispatch time — this field is dispatch config, not a step input, so
+  it's a raw ctx path string rather than a `$ref` handle. Pair with
+  `allowList` to constrain which workflows the expression may resolve
+  to. Must match a `name:` field registered in the
+  [Workflow Registry](/d/reference/workflow-registry).
 </ParamField>
 
 <ParamField path="inputs" type="Record<string, unknown>">
@@ -211,7 +222,8 @@ Authoritative source: `V2SubworkflowStepSchema`. See
 </ParamField>
 
 <ParamField path="idempotencyKey" type="string">
-  Caches the **whole** sub-workflow's result. Read the
+  Caches the **whole** sub-workflow's result — same raw ctx-path
+  string as the regular step field above, not a step input. Read the
   [composition warning](/d/composition/sub-workflows#composing-with-idempotency-caching)
   before using on side-effect-bearing children.
 </ParamField>

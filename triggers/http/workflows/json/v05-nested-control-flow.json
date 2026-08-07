@@ -28,7 +28,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -55,14 +60,24 @@
 														"use": "@blokjs/api-call",
 														"type": "module",
 														"inputs": {
-															"url": "js/ctx.state.item.handlerUrl",
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
 															"method": "POST",
 															"headers": {
 																"Content-Type": "application/json",
 																"X-Handler": "physical"
 															},
 															"body": {
-																"sku": "js/ctx.state.item.sku",
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
 																"type": "physical"
 															},
 															"responseType": "application/json"
@@ -78,14 +93,24 @@
 														"use": "@blokjs/api-call",
 														"type": "module",
 														"inputs": {
-															"url": "js/ctx.state.item.handlerUrl",
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
 															"method": "POST",
 															"headers": {
 																"Content-Type": "application/json",
 																"X-Handler": "digital"
 															},
 															"body": {
-																"sku": "js/ctx.state.item.sku",
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
 																"type": "digital"
 															},
 															"responseType": "application/json"
@@ -101,14 +126,24 @@
 														"use": "@blokjs/api-call",
 														"type": "module",
 														"inputs": {
-															"url": "js/ctx.state.item.handlerUrl",
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
 															"method": "POST",
 															"headers": {
 																"Content-Type": "application/json",
 																"X-Handler": "service"
 															},
 															"body": {
-																"sku": "js/ctx.state.item.sku",
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
 																"type": "service"
 															},
 															"responseType": "application/json"
@@ -139,7 +174,12 @@
 									"type": "module",
 									"inputs": {
 										"event": "item-process-failure",
-										"sku": "js/ctx.state.item.sku",
+										"sku": {
+											"$ref": {
+												"step": "item",
+												"path": ["sku"]
+											}
+										},
 										"reason": "js/ctx.error.message"
 									}
 								},

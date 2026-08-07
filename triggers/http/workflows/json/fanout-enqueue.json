@@ -25,8 +25,18 @@
 						"inputs": {
 							"queue": "fanout-jobs",
 							"payload": {
-								"item": "js/ctx.state.item",
-								"index": "js/ctx.state.itemIndex",
+								"item": {
+									"$ref": {
+										"step": "item",
+										"path": []
+									}
+								},
+								"index": {
+									"$ref": {
+										"step": "itemIndex",
+										"path": []
+									}
+								},
 								"tenantId": "js/ctx.request.body.tenantId || 'default'",
 								"enqueuedAt": "js/Date.now()"
 							},

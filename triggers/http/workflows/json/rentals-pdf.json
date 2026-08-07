@@ -28,7 +28,12 @@
 			"use": "array-map",
 			"type": "module",
 			"inputs": {
-				"array": "js/ctx.prev.data.data",
+				"array": {
+					"$ref": {
+						"step": "get-rentals",
+						"path": ["data"]
+					}
+				},
 				"map": "{ product: data.product, quantity: parseInt(data.quantity), total: parseInt(data.total), price: parseInt(data.price), rental_month: data.rental_month }"
 			}
 		},
@@ -38,7 +43,12 @@
 			"type": "runtime.python3",
 			"inputs": {
 				"title": "Top 20 Films by Revenue",
-				"sales_data": "js/ctx.prev.data"
+				"sales_data": {
+					"$ref": {
+						"step": "format-data",
+						"path": []
+					}
+				}
 			}
 		},
 		{
@@ -54,7 +64,12 @@
 			"use": "@blokjs/respond",
 			"type": "module",
 			"inputs": {
-				"body": "js/ctx.state.decode",
+				"body": {
+					"$ref": {
+						"step": "decode",
+						"path": []
+					}
+				},
 				"contentType": "application/pdf",
 				"headers": {
 					"Content-Disposition": "attachment; filename=\"rentals.pdf\""

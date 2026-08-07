@@ -16,35 +16,28 @@ Use it for:
 ## Authoring (TS DSL)
 
 ```ts
-import { workflow, tryCatch } from "@blokjs/helper";
+import { workflow, step, tryCatch, http } from "@blokjs/core";
+import ApiCallNode from "@blokjs/api-call";
+import { AuditLogNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "saga",
-  trigger: { http: { method: "POST" } },
-  steps: [
-    tryCatch({
-      id: "transactional-write",
-      try: [
-        { id: "create",   use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-        { id: "risky",    use: "@blokjs/api-call", inputs: { url: "js/ctx.request.body.url", method: "POST" } },
-        { id: "finalize", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-      ],
-      catch: [
-        {
-          id: "rollback",
-          use: "@blokjs/api-call",
-          inputs: {
-            url: "...",
-            method: "POST",
-            body: { reason: "js/ctx.error.message", errorName: "js/ctx.error.name" },
-          },
-        },
-      ],
-      finally: [
-        { id: "metric", use: "@blokjs/audit-log", inputs: { event: "saga-completed" } },
-      ],
-    }),
-  ],
+export default workflow("saga", { version: "1.0.0", trigger: http.post("/saga") }, (req) => {
+  tryCatch("transactional-write", {
+    try: () => {
+      step("create", ApiCallNode, { url: "...", method: "POST" });
+      step("risky", ApiCallNode, { url: req.body.url, method: "POST" });
+      step("finalize", ApiCallNode, { url: "...", method: "POST" });
+    },
+    catch: (error) => {
+      step("rollback", ApiCallNode, {
+        url: "...",
+        method: "POST",
+        body: { reason: error.message, errorName: error.name },
+      });
+    },
+    finally: () => {
+      step("metric", AuditLogNode, { event: "saga-completed" });
+    },
+  });
 });
 ```
 
@@ -60,7 +53,10 @@ export default workflow({
         "id": "rollback",
         "use": "@blokjs/api-call",
         "inputs": {
-          "body": { "reason": "js/ctx.error.message", "errorName": "js/ctx.error.name" }
+          "body": {
+            "reason": { "$ref": { "step": "@error", "path": ["message"] } },
+            "errorName": { "$ref": { "step": "@error", "path": ["name"] } }
+          }
         }
       }
     ],
@@ -84,7 +80,7 @@ export default workflow({
 
 ### The error envelope (`ctx.error`)
 
-Read it as `error.<field>` via the typed-handle DSL's `catch: (error) => {...}` arm, or as a `"js/ctx.error.<field>"` string in JSON / legacy object-style workflows.
+Read it as `error.<field>` via the typed-handle DSL's `catch: (error) => {...}` arm. In JSON / legacy object-style workflows, a `catch`-arm step input reads it as a structural ref: `{"$ref": {"step": "@error", "path": ["<field>"]}}`.
 
 | Field | Type | Source |
 |---|---|---|
@@ -156,8 +152,8 @@ A common saga pattern: only roll back work that actually completed. Pre-v0.5.1 t
           "code": 500,
           "body": {
             "outcome": "failed",
-            "failedAt": "js/ctx.error.stepId",
-            "reason": "js/ctx.error.message",
+            "failedAt": { "$ref": { "step": "@error", "path": ["stepId"] } },
+            "reason": { "$ref": { "step": "@error", "path": ["message"] } },
             "upstreamCode": "js/ctx.error.code || null"
           }
         }

@@ -34,7 +34,7 @@ export default workflow("stripe-webhook", {
       path: "/webhooks/stripe",
       secretEnv: "STRIPE_WEBHOOK_SECRET",
       tolerance: 300,
-      idempotencyKey: "ctx.request.body.id",
+      idempotencyKey: "js/ctx.request.body.id",
     },
   },
 }, () => {
@@ -107,7 +107,7 @@ internal webhooks — anywhere a partner sends an HMAC-signed body.
 | `tolerance` | `number` (seconds) | `300` | Drift window for timestamp-based schemes. |
 | `events` | `string[]` | — | Allowlist of `eventType` values. Verified-but-out-of-scope events return 200 + `{status: "ignored"}` (no retry storm). |
 | `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow("dispatch", event.body.type, ...)` + `namespace: "stripe"` → looks up `stripe.<type>`). |
-| `idempotencyKey` | `string` (literal or `js/ctx....`) | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
+| `idempotencyKey` | `string` — literal, or `js/ctx....` resolved at run-entry | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so it's a path string, not a handle. Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
 
 ## The `event` handle
 
@@ -146,7 +146,7 @@ export default workflow("stripe-router", {
       provider: "stripe",
       namespace: "stripe",
       secretEnv: "STRIPE_WEBHOOK_SECRET",
-      idempotencyKey: "ctx.request.body.id",
+      idempotencyKey: "js/ctx.request.body.id",
     },
   },
 }, (event) => {

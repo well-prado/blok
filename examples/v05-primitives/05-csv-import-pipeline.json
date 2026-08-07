@@ -16,7 +16,12 @@
 			"use": "csv-parser",
 			"type": "module",
 			"inputs": {
-				"data": "js/ctx.request.body",
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				},
 				"headers": true,
 				"delimiter": ","
 			}
@@ -37,8 +42,18 @@
 									"use": "row-validator",
 									"type": "module",
 									"inputs": {
-										"row": "js/ctx.state.row",
-										"rowNumber": "js/ctx.state.rowIndex"
+										"row": {
+											"$ref": {
+												"step": "row",
+												"path": []
+											}
+										},
+										"rowNumber": {
+											"$ref": {
+												"step": "rowIndex",
+												"path": []
+											}
+										}
 									}
 								},
 								{
@@ -46,7 +61,12 @@
 									"use": "row-transformer",
 									"type": "module",
 									"inputs": {
-										"row": "js/ctx.state.row"
+										"row": {
+											"$ref": {
+												"step": "row",
+												"path": []
+											}
+										}
 									}
 								},
 								{
@@ -56,7 +76,12 @@
 									"idempotencyKey": "js/`${ctx.request.body.importId}-${ctx.state.rowIndex}`",
 									"inputs": {
 										"table": "users",
-										"data": "js/ctx.state.transform"
+										"data": {
+											"$ref": {
+												"step": "transform",
+												"path": []
+											}
+										}
 									}
 								}
 							],
@@ -68,11 +93,36 @@
 									"inputs": {
 										"table": "import_failures",
 										"data": {
-											"importId": "js/ctx.request.body.importId",
-											"rowNumber": "js/ctx.state.rowIndex",
-											"row": "js/ctx.state.row",
-											"error": "js/ctx.error.message",
-											"errorCode": "js/ctx.error.code",
+											"importId": {
+												"$ref": {
+													"step": "@trigger",
+													"path": ["body", "importId"]
+												}
+											},
+											"rowNumber": {
+												"$ref": {
+													"step": "rowIndex",
+													"path": []
+												}
+											},
+											"row": {
+												"$ref": {
+													"step": "row",
+													"path": []
+												}
+											},
+											"error": {
+												"$ref": {
+													"step": "@error",
+													"path": ["message"]
+												}
+											},
+											"errorCode": {
+												"$ref": {
+													"step": "@error",
+													"path": ["code"]
+												}
+											},
 											"failedAt": "new Date().toISOString()"
 										}
 									}
@@ -88,8 +138,18 @@
 			"use": "import-summary",
 			"type": "module",
 			"inputs": {
-				"results": "js/ctx.state['process-rows']",
-				"importId": "js/ctx.request.body.importId"
+				"results": {
+					"$ref": {
+						"step": "process-rows",
+						"path": []
+					}
+				},
+				"importId": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "importId"]
+					}
+				}
 			}
 		},
 		{
@@ -99,11 +159,42 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"importId": "js/ctx.request.body.importId",
-					"totalRows": "js/ctx.state['parse-csv'].rows.length",
-					"succeeded": "js/ctx.state.summarize.succeeded",
-					"failed": "js/ctx.state.summarize.failed",
-					"dlqUrl": "js/`/imports/csv/${ctx.request.body.importId}/failures`"
+					"importId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "importId"]
+						}
+					},
+					"totalRows": {
+						"$ref": {
+							"step": "parse-csv",
+							"path": ["rows", "length"]
+						}
+					},
+					"succeeded": {
+						"$ref": {
+							"step": "summarize",
+							"path": ["succeeded"]
+						}
+					},
+					"failed": {
+						"$ref": {
+							"step": "summarize",
+							"path": ["failed"]
+						}
+					},
+					"dlqUrl": {
+						"$tpl": [
+							"/imports/csv/",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "importId"]
+								}
+							},
+							"/failures"
+						]
+					}
 				}
 			}
 		}

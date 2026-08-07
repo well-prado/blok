@@ -59,7 +59,7 @@ export default workflow(
     }
   },
   "steps": [
-    { "id": "save", "use": "@blokjs/postgres-write", "inputs": { "row": "js/ctx.request.body" } }
+    { "id": "save", "use": "@blokjs/postgres-write", "inputs": { "row": { "$ref": { "step": "@trigger", "path": ["body"] } } } }
   ]
 }
 ```
@@ -79,7 +79,7 @@ Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](https://githu
   Debounce key — a literal string or a `js/ctx....` expression the
   runner resolves against the live `ctx`. Pings sharing the resolved key
   collapse. Typically derived from the request payload
-  (`"js/ctx.request.params.docId"`, `"js/ctx.request.body.userId"`). It's a config string,
+  (`key: "js/ctx.request.params.docId"`, `key: "js/ctx.request.body.userId"`). It's a config string,
   not a handle — the debounce gate runs at run-entry, before the
   workflow body.
 </ParamField>
@@ -319,20 +319,20 @@ to keep the timeline readable under burst.
 
 <AccordionGroup>
   <Accordion title="Document autosave (trailing + maxDelay)">
-    `mode: "trailing", delay: "500ms", maxDelay: "5s"` keyed on
-    `"js/ctx.request.params.docId"`. Rapid keystrokes collapse into one save
+    `mode: "trailing", delay: "500ms", maxDelay: "5s"` with
+    `key: "js/ctx.request.params.docId"`. Rapid keystrokes collapse into one save
     after silence; continuous typing guarantees a save within 5
     seconds of the first keystroke.
   </Accordion>
 
   <Accordion title="Click suppression (leading)">
-    `mode: "leading", delay: "1s"` keyed on `"js/ctx.request.params.postId"`. The
+    `mode: "leading", delay: "1s"` with `key: "js/ctx.request.params.postId"`. The
     first like fires; rapid double-clicks within a second drop
     silently.
   </Accordion>
 
   <Accordion title="Search-typeahead (trailing)">
-    `mode: "trailing", delay: "300ms"` keyed on `"js/ctx.request.body.sessionId"`
+    `mode: "trailing", delay: "300ms"` with `key: "js/ctx.request.body.sessionId"`
     (one debounce window per search session). Fires once when the user
     stops typing for 300ms.
   </Accordion>

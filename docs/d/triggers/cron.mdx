@@ -33,7 +33,7 @@ This fires at 2:00 AM every day in `America/New_York`.
 |---|---|---|---|
 | `schedule` | `string` | required | Standard cron expression (`m h dom mon dow`). |
 | `timezone` | `string` | `"UTC"` | IANA timezone — `"America/New_York"`, `"Europe/London"`, etc. |
-| `concurrencyKey` | `string` (literal or `js/ctx....`) | — | Useful when one schedule fans out per-tenant; concurrencyKey prevents overlap. |
+| `concurrencyKey` | `string` — literal, or `js/ctx....` resolved at run-entry | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so it's a path string, not a handle. Useful when one schedule fans out per-tenant; concurrencyKey prevents overlap. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware. |
 
 ## Cron expression reference
@@ -122,7 +122,7 @@ export default workflow("daily-metrics-digest", {
     model: "gpt-4o-mini", messages: "...", channel: "internal-summary",
   });
   step("post-slack", apiCall, {
-    url: "js/process.env.SLACK_WEBHOOK_URL",
+    url: process.env.SLACK_WEBHOOK_URL,
     method: "POST",
     body: { text: summary.fullText },
   });

@@ -119,6 +119,43 @@ packages on npm version independently within each release line.
   A webhook validation failure now returns a real 4xx and is **not** recorded as a
   processed delivery, so the sender can retry after correcting the payload.
 
+### Deprecated
+
+- **Hand-written `js/ctx....` and `${ctx....}` strings are no longer an
+  authoring form.** They are the runtime wire format that the load-boundary
+  lowering pass (`lowerRefs`, ADR 0001) emits, and nothing else. You author with
+  typed handles in TypeScript, or with structural references in JSON:
+  `{"$ref": {"step": "fetch", "path": ["data"]}}`, `@trigger` for the trigger
+  payload, `@error` for a caught error, `{"$tpl": ["text", {"$ref": …}]}` for a
+  string that embeds one.
+  - **Nothing breaks.** Workflows carrying the old strings load and run
+    unchanged. The runner now logs **one** structured deprecation warning per
+    workflow whose step `inputs` still hold hand-written path strings, naming
+    the workflow, each offending step and the count. Silence it with
+    `BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1`. Removal target: **next major**.
+  - The warning fires only for expressions that have an exact structural
+    equivalent — the set `blokctl migrate refs` can rewrite. Non-structural
+    expressions (fallbacks, optional chaining, `.map`/`.reduce`, calls,
+    `process.env`) are the sanctioned ADR 0008 escape hatch: the `` js`…` `` tag
+    in TypeScript, a plain `js/` string in JSON. They never warn.
+  - Control and trigger-config positions are unaffected and keep path strings —
+    `branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
+    `forEach.in`, `wait.for` / `wait.until`, `subworkflow`, step
+    `idempotencyKey`, and trigger `concurrencyKey` / `debounce.key`. The
+    lowering pass is scoped to step `inputs`; a structural ref elsewhere would
+    be walked into by the Mapper rather than resolved.
+  - The docs were re-layered to match. `docs/d/reference/mapper.mdx` moved under
+    a new **Internals** nav group and opens with a banner stating it is the wire
+    format, not an authoring API. `@blokjs/expr` stays the documented exception
+    (its `expression` input is verbatim JS and must **not** carry a `js/`
+    prefix). Full before/after for every legacy shape: [legacy expression
+    strings migration guide](docs/c/migration-guides/legacy-expression-strings.mdx).
+  - A CI gate (`bun run check:no-legacy-expr`,
+    `.github/workflows/no-legacy-expr.yml`) fails the build if a pure-path
+    `js/ctx....` string or a `${ctx....}` interpolation reappears on the public
+    authoring surface — docs, templates, examples, editor packages, and the
+    repo's agent guides.
+
 ### Breaking changes
 
 - **The `$` proxy is deleted.** `import { $ } from "@blokjs/core"` and

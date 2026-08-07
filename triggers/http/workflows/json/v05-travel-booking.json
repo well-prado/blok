@@ -30,7 +30,12 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		{
@@ -42,7 +47,12 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.flightUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "flightUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
@@ -59,7 +69,12 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.hotelUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "hotelUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
@@ -76,7 +91,12 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.request.body.carUrl",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "carUrl"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",

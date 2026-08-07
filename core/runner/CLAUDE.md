@@ -119,7 +119,7 @@ inner-try wrap) yield `stepId: undefined`.
 Step authors opt in by setting `idempotencyKey` on the step:
 
 ```ts
-{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "..." }, idempotencyKey: $.req.body.requestId }
+{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "..." }, idempotencyKey: "js/ctx.request.body.requestId" }
 ```
 
 The runner consults the cache **before** `step.process()`. On hit, it
@@ -290,8 +290,8 @@ without a switch step:
 ```ts
 {
   id: "dispatch",
-  subworkflow: "$.req.body.kind",
-  inputs: { event: $.req.body },
+  subworkflow: "js/ctx.request.body.kind",
+  inputs: { event: "js/ctx.request.body" },
   allowList: ["handler.payment", "handler.shipping"],
 }
 ```
@@ -384,7 +384,7 @@ trigger: {
   http: {
     method: "POST",
     path: "/render",
-    concurrencyKey: $.req.body.userId,  // literal or $-proxy
+    concurrencyKey: "js/ctx.request.body.userId",  // MUST be js/-prefixed — a bare string is a LITERAL key
     concurrencyLimit: 5,                 // default 1 (Trigger.dev parity)
   },
 }
@@ -460,7 +460,7 @@ trigger: {
   http: {
     method: "POST",
     path: "/render",
-    concurrencyKey: $.req.body.tenantId,
+    concurrencyKey: "js/ctx.request.body.tenantId",
     concurrencyLimit: 5,
     onLimit: "queue",   // default "throw" (current behavior)
   },
@@ -528,7 +528,7 @@ trigger: {
     method: "POST",
     path: "/save/:docId",
     debounce: {
-      key: $.req.params.docId,      // per-doc coalescing
+      key: "js/ctx.request.params.docId",      // per-doc coalescing (js/-prefixed, or it is a literal)
       mode: "trailing",              // default; or "leading"
       delay: "500ms",                // wait for silence
       maxDelay: "5s",                // tail-latency bound (trailing only)

@@ -118,7 +118,7 @@
 			"\t\"nodes\": {",
 			"\t\t\"${6:handle-event}\": {",
 			"\t\t\t\"inputs\": {",
-			"\t\t\t\t\"event\": \"\\${ctx.request.body}\"",
+			"\t\t\t\t\"event\": { \"\\$ref\": { \"step\": \"@trigger\", \"path\": [\"body\"] } }",
 			"\t\t\t}",
 			"\t\t}",
 			"\t}",

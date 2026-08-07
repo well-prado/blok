@@ -175,14 +175,14 @@ third-party API (`https://api.weatherapi.com/v1/current.json`).
       "use": "@blokjs/redis-kv",
       "inputs": {
         "action": "get",
-        "key": "js/`agent:${ctx.request.params.sessionId}:history`"
+        "key": { "$tpl": ["agent:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] }
       }
     },
     {
       "id": "agent",
       "use": "@blokjs/llm-agent",
       "inputs": {
-        "channel": "js/`agent:${ctx.request.params.sessionId}`",
+        "channel": { "$tpl": ["agent:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }] },
         "apiKey": "js/process.env.OPENROUTER_API_KEY",
         "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
         "messages": "js/[{ role: 'system', content: 'You are a helpful agent with two tools: get_weather(city) returns current weather; calculate(expression) evaluates arithmetic. Use them when relevant. Be concise.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]",
@@ -221,7 +221,7 @@ third-party API (`https://api.weatherapi.com/v1/current.json`).
       "ephemeral": true,
       "inputs": {
         "action": "set",
-        "key": "js/`agent:${ctx.request.params.sessionId}:history`",
+        "key": { "$tpl": ["agent:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] },
         "value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.agent.fullText }]",
         "ttlMs": 86400000
       }

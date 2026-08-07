@@ -23,7 +23,12 @@
 			"use": "@blokjs/sse-stream",
 			"type": "module",
 			"inputs": {
-				"source": "js/ctx.state.sub"
+				"source": {
+					"$ref": {
+						"step": "sub",
+						"path": []
+					}
+				}
 			}
 		}
 	]

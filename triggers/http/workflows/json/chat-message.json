@@ -15,10 +15,26 @@
 			"use": "@blokjs/llm-stream",
 			"type": "module",
 			"inputs": {
-				"channel": "js/`chat:${ctx.request.params.sessionId}`",
+				"channel": {
+					"$tpl": [
+						"chat:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": ["params", "sessionId"]
+							}
+						},
+						""
+					]
+				},
 				"apiKey": "js/process.env.OPENROUTER_API_KEY",
 				"model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
-				"messages": "js/ctx.request.body.messages"
+				"messages": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "messages"]
+					}
+				}
 			}
 		}
 	]

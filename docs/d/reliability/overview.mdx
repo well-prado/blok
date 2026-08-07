@@ -35,8 +35,8 @@ crash recovery).
     `failed`). Composes with `retry` per-attempt.
   </Card>
   <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
-    Per-tenant rate limiting on triggers. `concurrencyKey:
-    "js/ctx.request.body.tenantId"` plus a `concurrencyLimit`. Over-limit HTTP
+    Per-tenant rate limiting on triggers:
+    `concurrencyKey: "js/ctx.request.body.tenantId"` plus a `concurrencyLimit`. Over-limit HTTP
     returns `429 Retry-After`; worker NACKs. `onLimit: "queue"` defers
     instead of rejecting.
   </Card>

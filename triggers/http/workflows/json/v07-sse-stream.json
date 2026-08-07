@@ -14,13 +14,23 @@
 			"id": "sub",
 			"use": "@blokjs/sse-subscribe",
 			"type": "module",
-			"inputs": { "channels": ["sse-demo"] }
+			"inputs": {
+				"channels": ["sse-demo"]
+			}
 		},
 		{
 			"id": "stream",
 			"use": "@blokjs/sse-stream",
 			"type": "module",
-			"inputs": { "source": "js/ctx.state.sub", "eventName": "message" }
+			"inputs": {
+				"source": {
+					"$ref": {
+						"step": "sub",
+						"path": []
+					}
+				},
+				"eventName": "message"
+			}
 		}
 	]
 }

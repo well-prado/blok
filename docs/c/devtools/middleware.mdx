@@ -137,7 +137,7 @@ Every failure mode produces a structured `401` response with a stable `reason` d
 | `claim_validation_failed` | Generic claim validation failure (other than the specific cases above) |
 | `verification_failed` | Catch-all for unrecognized failures |
 
-The HTTP response body always carries `{ error: "Unauthorized", reason: "<reason>", message: "<human readable>" }`. A `tryCatch` catch arm wrapping a downstream step can also read these via the typed error handle — `error.code === 401` and `error.message` (legacy JSON workflows: `"js/ctx.error.code === 401"` / `"js/ctx.error.message"`).
+The HTTP response body always carries `{ error: "Unauthorized", reason: "<reason>", message: "<human readable>" }`. A `tryCatch` catch arm wrapping a downstream step can also read these via the typed error handle — `error.code === 401` and `error.message` (legacy JSON workflows read the same fields as structural refs: `{"$ref": {"step": "@error", "path": ["code"]}}` / `{"$ref": {"step": "@error", "path": ["message"]}}`).
 
 ### Auth check (header-token equality, demo only)
 

@@ -38,6 +38,7 @@ gates() {
   step "Lint (Biome)"; bun run lint:check
   step "Proto drift check"; bun run proto:check
   step "No \$ proxy check"; bun run check:no-dollar-proxy
+  step "No legacy expression strings check"; bun run check:no-legacy-expr
   # `bun run build`, not bare `nx run-many -t build` — the root script appends
   # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
   step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build

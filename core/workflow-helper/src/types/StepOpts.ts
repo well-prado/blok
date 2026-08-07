@@ -244,8 +244,11 @@ export const V2RegularStepSchema = z
 			.record(z.unknown())
 			.optional()
 			.describe(
-				"Inputs passed to the node. May contain 'js/...' expressions for runtime evaluation " +
-					"(e.g. 'js/ctx.state.foo', 'js/ctx.request.body.id'), or typed step/trigger handles in the TS DSL.",
+				"Inputs passed to the node. Static values, or a structural reference to an upstream step's output: " +
+					'{"$ref": {"step": "fetch", "path": ["data", "items"]}}. Use step "@trigger" for the trigger payload ' +
+					'and "@error" inside a tryCatch catch arm; {"$tpl": ["text", {"$ref": …}]} for a string that embeds one. ' +
+					"In the TS DSL these are typed step/trigger handles. The load-boundary lowering pass compiles them to " +
+					"the runtime wire format; hand-written 'js/ctx....' strings still load but are deprecated.",
 			),
 		ui: V2StepUiSchema,
 		as: z
@@ -482,9 +485,10 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.record(z.unknown())
 				.optional()
 				.describe(
-					"Inputs passed to the child as `ctx.request.body`. The child reads " +
-						"them via `ctx.request.body.<key>` (or the trigger entry handle in the TS DSL) " +
-						"exactly as if HTTP-triggered. May contain `js/...` expressions.",
+					"Inputs passed to the child as its trigger payload. The child reads " +
+						"them via its trigger entry handle (or `ctx.request.body.<key>`) exactly as if " +
+						'HTTP-triggered. Same shape as step `inputs` — structural `{"$ref"}` / `{"$tpl"}` ' +
+						"references, or typed handles in the TS DSL.",
 				),
 			ui: V2StepUiSchema,
 			wait: z
@@ -707,7 +711,14 @@ export const V2ForEachStepSchema = z.lazy(() =>
 			id: z.string().min(1).describe("Stable identifier for the forEach step. Visible in traces."),
 			forEach: z
 				.object({
-					in: z.unknown().describe("Array source. Literal expression string (e.g. `'js/ctx.state.items'`)."),
+					in: z
+						.unknown()
+						.describe(
+							"Array source for `forEach.in`. A control field the mapper resolves directly, not a step " +
+								"input — the lowering pass does not run over it, so it is a literal value or a path " +
+								"string (e.g. `'js/ctx.state.items'`), never a structural `$ref`. The TS DSL passes a " +
+								"handle here and lowers it for you.",
+						),
 					as: z
 						.string()
 						.min(1)

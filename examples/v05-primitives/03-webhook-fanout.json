@@ -15,7 +15,12 @@
 			"use": "subscriber-list",
 			"type": "module",
 			"inputs": {
-				"eventType": "js/ctx.request.body.type"
+				"eventType": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "type"]
+					}
+				}
 			}
 		},
 		{
@@ -39,14 +44,34 @@
 						"idempotencyKey": "js/`${ctx.request.body.id}-${ctx.state.subscriber.id}`",
 						"maxDuration": "10s",
 						"inputs": {
-							"url": "js/ctx.state.subscriber.url",
+							"url": {
+								"$ref": {
+									"step": "subscriber",
+									"path": ["url"]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
-								"X-Webhook-Signature": "js/ctx.state.subscriber.signature",
-								"X-Event-Id": "js/ctx.request.body.id"
+								"X-Webhook-Signature": {
+									"$ref": {
+										"step": "subscriber",
+										"path": ["signature"]
+									}
+								},
+								"X-Event-Id": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "id"]
+									}
+								}
 							},
-							"body": "js/ctx.request.body"
+							"body": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body"]
+								}
+							}
 						}
 					}
 				]
@@ -59,8 +84,18 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"eventId": "js/ctx.request.body.id",
-					"dispatched": "js/ctx.state['dispatch-to-each'].length",
+					"eventId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "id"]
+						}
+					},
+					"dispatched": {
+						"$ref": {
+							"step": "dispatch-to-each",
+							"path": ["length"]
+						}
+					},
 					"subscriberIds": "js/ctx.state['load-subscribers'].map(s => s.id)"
 				}
 			}

@@ -24,8 +24,18 @@
 				},
 				"body": {
 					"action": "delete-user",
-					"targetUserId": "js/ctx.request.body.userId",
-					"deletedBy": "js/ctx.state.identity.sub"
+					"targetUserId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "userId"]
+						}
+					},
+					"deletedBy": {
+						"$ref": {
+							"step": "identity",
+							"path": ["sub"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
