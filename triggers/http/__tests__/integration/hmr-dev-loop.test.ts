@@ -231,3 +231,54 @@ describe("#692 · blokctl dev loop — HMR is real (BLOK_HMR=true, no CLI, no NO
 		expect(process.pid).toBe(bootPid);
 	}, 20_000);
 });
+
+// =========================================================================
+// #695 — TypeScript workflows are now scanned into the SAME route table as
+// JSON (previously `scannedTs` was computed and discarded — see #695). This
+// proves the HMR half of that fix: a `.ts` file dropped into
+// `src/workflows/` WHILE the server is running becomes routable with no
+// restart, exactly like JSON already does above — the mechanism is
+// identical (`scanWorkflows` + cache-busted `import()` +
+// `buildFileBasedRoutes`'s `hmrOverlay`); TS just wasn't wired into the
+// route table until #695.
+//
+// This writes into the REAL `triggers/http/src/workflows/` directory. The
+// TS scan root has no env override (see the design note on `HttpTrigger.
+// buildFileBasedRoutes` — it's a deliberate, documented decision, unlike
+// JSON's `WORKFLOWS_PATH`), and that's also why this test belongs here
+// rather than in the scratch `projectRoot`: this suite's `beforeAll` already
+// boots a trigger that watches it (`TriggerBase.resolveHmrRoots()` adds
+// `src/workflows` unconditionally). Cleanup is try/finally-scoped to the
+// single test so a failure never leaves the fixture behind.
+// =========================================================================
+
+describe("#695 · a hot-added TS workflow (no restart, no Workflows.ts entry)", () => {
+	const tsWorkflowsDir = join(__dirname, "..", "..", "src", "workflows");
+	const freshTsFile = join(tsWorkflowsDir, "zzz-hmr-e2e-fresh.ts");
+
+	function freshTsWorkflowSource(freshValue: string): string {
+		return `import { http, node, step, workflow } from "@blokjs/core";
+
+export default workflow("hmr.tsFresh", { version: "1.0.0", trigger: http.get("/hmr/ts-fresh") }, () => {
+	step("answer", node("@blokjs/expr"), { expression: "({ value: '${freshValue}' })" });
+});
+`;
+	}
+
+	it("a new .ts file under src/workflows/ serves 200 with no restart and no manual registration, then 404s again once deleted", async () => {
+		expect((await get("/hmr/ts-fresh")).status).not.toBe(200);
+
+		try {
+			writeFileSync(freshTsFile, freshTsWorkflowSource("brand-new-ts"));
+			await waitFor(async () => (await get("/hmr/ts-fresh")).status === 200, 4000, "new TS workflow route to appear");
+			expect(await value(await get("/hmr/ts-fresh"))).toBe("brand-new-ts");
+			expect(process.pid).toBe(bootPid);
+
+			rmSync(freshTsFile);
+			await waitFor(async () => (await get("/hmr/ts-fresh")).status === 404, 2000, "deleted TS workflow route to 404");
+			expect(process.pid).toBe(bootPid);
+		} finally {
+			rmSync(freshTsFile, { force: true });
+		}
+	}, 15_000);
+});

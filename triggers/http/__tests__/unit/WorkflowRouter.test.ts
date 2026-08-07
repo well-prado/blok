@@ -229,6 +229,94 @@ describe("buildRouteTable", () => {
 	});
 
 	// =========================================================================
+	// #695 — a TS workflow scanned from disk AND registered by hand in
+	// `Workflows.ts` is the common shape mid-migration, and must be silent-OK
+	// (exactly one route), not a collision. A genuinely DIFFERENT object at
+	// the same route still collides exactly like the "manual registrations
+	// override scanned ones via collision detection" test above.
+	// =========================================================================
+
+	describe("scan + manual double registration of the SAME workflow (#695)", () => {
+		it("collapses to exactly one route when scanned and manual point at the identical workflow object", () => {
+			// The literal same object — mirrors what actually happens at boot:
+			// `Workflows.ts`'s static import and the TS scanner's `import()` of
+			// the same file resolve to one module-cache entry.
+			const dsl = {
+				name: "countries.list",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/countries-helper" } },
+			};
+			const out = buildRouteTable(
+				[
+					{
+						source: "/src/workflows/countries-helper.ts",
+						kind: "ts",
+						defaultPath: "/countries-helper",
+						workflow: dsl,
+						name: dsl.name,
+					},
+				],
+				[{ key: "countries-helper", workflow: dsl, sourcePath: "/src/workflows/countries-helper.ts" }],
+			);
+			expect(out).toHaveLength(1);
+			// Manual's key/label wins — least surprise for callers already
+			// depending on the `Workflows.ts` key.
+			expect(out[0].workflowKey).toBe("countries-helper");
+			expect(out[0].source).toBe('Workflows.ts["countries-helper"]');
+		});
+
+		it("does not report a collision for the same-object double registration", () => {
+			const dsl = {
+				name: "countries.list",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/countries-helper" } },
+			};
+			const collisions: RouteCollision[] = [];
+			const out = buildRouteTable(
+				[
+					{
+						source: "/src/workflows/countries-helper.ts",
+						kind: "ts",
+						defaultPath: "/countries-helper",
+						workflow: dsl,
+						name: dsl.name,
+					},
+				],
+				[{ key: "countries-helper", workflow: dsl, sourcePath: "/src/workflows/countries-helper.ts" }],
+				{ onCollision: (c) => collisions.push(c) },
+			);
+			expect(out).toHaveLength(1);
+			expect(collisions).toEqual([]);
+		});
+
+		it("still throws for a genuinely DIFFERENT object at the same route — identity dedup does not mask real collisions", () => {
+			expect(() =>
+				buildRouteTable(
+					[scanned({ source: "/scanned.ts", kind: "ts", defaultPath: "/dup", name: "A" })],
+					[
+						{
+							key: "dup",
+							workflow: { name: "B", version: "1.0.0", trigger: { http: { method: "GET", path: "/dup" } } },
+						},
+					],
+				),
+			).toThrow(RouteCollisionError);
+		});
+
+		it('hasHttpTrigger filter also excludes a scanned kind: "ts" workflow without an http trigger', () => {
+			const cronTs: ScannedWorkflow = {
+				source: "/src/workflows/cron.ts",
+				kind: "ts",
+				defaultPath: "/cron",
+				workflow: { name: "C", version: "1.0.0", trigger: { cron: { schedule: "0 * * * *" } } },
+				name: "C",
+			};
+			const out = buildRouteTable([cronTs]);
+			expect(out).toEqual([]);
+		});
+	});
+
+	// =========================================================================
 	// v0.4+ explicit-path-only routing
 	// =========================================================================
 
