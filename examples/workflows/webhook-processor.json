@@ -25,7 +25,12 @@
 		"verify-signature": {
 			"inputs": {
 				"payload": "js/JSON.stringify(ctx.request.body)",
-				"signature": "${ctx.request.headers['x-hub-signature-256']}",
+				"signature": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["headers", "x-hub-signature-256"]
+					}
+				},
 				"secret": "${process.env.GITHUB_WEBHOOK_SECRET}",
 				"algorithm": "sha256"
 			}
@@ -63,11 +68,36 @@
 		"parse-event": {
 			"inputs": {
 				"model": {
-					"eventType": "${ctx.request.headers['x-github-event']}",
-					"deliveryId": "${ctx.request.headers['x-github-delivery']}",
-					"action": "${ctx.request.body.action}",
-					"repository": "${ctx.request.body.repository.full_name}",
-					"sender": "${ctx.request.body.sender.login}"
+					"eventType": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["headers", "x-github-event"]
+						}
+					},
+					"deliveryId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["headers", "x-github-delivery"]
+						}
+					},
+					"action": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "action"]
+						}
+					},
+					"repository": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "repository", "full_name"]
+						}
+					},
+					"sender": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "sender", "login"]
+						}
+					}
 				}
 			}
 		},
@@ -162,10 +192,30 @@
 			"inputs": {
 				"model": {
 					"branch": "js/ctx.request.body.ref.replace('refs/heads/', '')",
-					"commits": "js/ctx.request.body.commits.length",
-					"headCommit": "${ctx.request.body.head_commit.message}",
-					"pusher": "${ctx.request.body.pusher.name}",
-					"compareUrl": "${ctx.request.body.compare}"
+					"commits": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "commits", "length"]
+						}
+					},
+					"headCommit": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "head_commit", "message"]
+						}
+					},
+					"pusher": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pusher", "name"]
+						}
+					},
+					"compareUrl": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "compare"]
+						}
+					}
 				}
 			}
 		},
@@ -177,7 +227,46 @@
 					"Content-Type": "application/json"
 				},
 				"body": {
-					"text": "New push to ${ctx.vars['parse-event'].repository} on branch ${ctx.vars['process-push'].branch} by ${ctx.vars['process-push'].pusher}: ${ctx.vars['process-push'].headCommit} (${ctx.vars['process-push'].commits} commits)"
+					"text": {
+						"$tpl": [
+							"New push to ",
+							{
+								"$ref": {
+									"step": "parse-event",
+									"path": ["repository"]
+								}
+							},
+							" on branch ",
+							{
+								"$ref": {
+									"step": "process-push",
+									"path": ["branch"]
+								}
+							},
+							" by ",
+							{
+								"$ref": {
+									"step": "process-push",
+									"path": ["pusher"]
+								}
+							},
+							": ",
+							{
+								"$ref": {
+									"step": "process-push",
+									"path": ["headCommit"]
+								}
+							},
+							" (",
+							{
+								"$ref": {
+									"step": "process-push",
+									"path": ["commits"]
+								}
+							},
+							" commits)"
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -191,9 +280,24 @@
 					"Authorization": "Bearer ${process.env.CI_API_TOKEN}"
 				},
 				"body": {
-					"repository": "${ctx.vars['parse-event'].repository}",
-					"branch": "${ctx.vars['process-push'].branch}",
-					"commitSha": "${ctx.request.body.head_commit.id}"
+					"repository": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["repository"]
+						}
+					},
+					"branch": {
+						"$ref": {
+							"step": "process-push",
+							"path": ["branch"]
+						}
+					},
+					"commitSha": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "head_commit", "id"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -203,22 +307,72 @@
 				"model": {
 					"status": "processed",
 					"event": "push",
-					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
-					"branch": "${ctx.vars['process-push'].branch}",
-					"commits": "js/ctx.vars['process-push'].commits"
+					"deliveryId": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["deliveryId"]
+						}
+					},
+					"branch": {
+						"$ref": {
+							"step": "process-push",
+							"path": ["branch"]
+						}
+					},
+					"commits": {
+						"$ref": {
+							"step": "process-push",
+							"path": ["commits"]
+						}
+					}
 				}
 			}
 		},
 		"process-pull-request": {
 			"inputs": {
 				"model": {
-					"prNumber": "js/ctx.request.body.number",
-					"title": "${ctx.request.body.pull_request.title}",
-					"action": "${ctx.request.body.action}",
-					"author": "${ctx.request.body.pull_request.user.login}",
-					"baseBranch": "${ctx.request.body.pull_request.base.ref}",
-					"headBranch": "${ctx.request.body.pull_request.head.ref}",
-					"url": "${ctx.request.body.pull_request.html_url}"
+					"prNumber": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "number"]
+						}
+					},
+					"title": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pull_request", "title"]
+						}
+					},
+					"action": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "action"]
+						}
+					},
+					"author": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pull_request", "user", "login"]
+						}
+					},
+					"baseBranch": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pull_request", "base", "ref"]
+						}
+					},
+					"headBranch": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pull_request", "head", "ref"]
+						}
+					},
+					"url": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "pull_request", "html_url"]
+						}
+					}
 				}
 			}
 		},
@@ -230,7 +384,45 @@
 					"Content-Type": "application/json"
 				},
 				"body": {
-					"text": "PR #${ctx.vars['process-pull-request'].prNumber} ${ctx.vars['process-pull-request'].action} in ${ctx.vars['parse-event'].repository}: ${ctx.vars['process-pull-request'].title} by ${ctx.vars['process-pull-request'].author}"
+					"text": {
+						"$tpl": [
+							"PR #",
+							{
+								"$ref": {
+									"step": "process-pull-request",
+									"path": ["prNumber"]
+								}
+							},
+							" ",
+							{
+								"$ref": {
+									"step": "process-pull-request",
+									"path": ["action"]
+								}
+							},
+							" in ",
+							{
+								"$ref": {
+									"step": "parse-event",
+									"path": ["repository"]
+								}
+							},
+							": ",
+							{
+								"$ref": {
+									"step": "process-pull-request",
+									"path": ["title"]
+								}
+							},
+							" by ",
+							{
+								"$ref": {
+									"step": "process-pull-request",
+									"path": ["author"]
+								}
+							}
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -240,21 +432,61 @@
 				"model": {
 					"status": "processed",
 					"event": "pull_request",
-					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
-					"prNumber": "js/ctx.vars['process-pull-request'].prNumber",
-					"action": "${ctx.vars['process-pull-request'].action}"
+					"deliveryId": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["deliveryId"]
+						}
+					},
+					"prNumber": {
+						"$ref": {
+							"step": "process-pull-request",
+							"path": ["prNumber"]
+						}
+					},
+					"action": {
+						"$ref": {
+							"step": "process-pull-request",
+							"path": ["action"]
+						}
+					}
 				}
 			}
 		},
 		"process-issue": {
 			"inputs": {
 				"model": {
-					"issueNumber": "js/ctx.request.body.issue.number",
-					"title": "${ctx.request.body.issue.title}",
-					"action": "${ctx.request.body.action}",
-					"author": "${ctx.request.body.issue.user.login}",
+					"issueNumber": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "issue", "number"]
+						}
+					},
+					"title": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "issue", "title"]
+						}
+					},
+					"action": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "action"]
+						}
+					},
+					"author": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "issue", "user", "login"]
+						}
+					},
 					"labels": "js/ctx.request.body.issue.labels.map(l => l.name)",
-					"url": "${ctx.request.body.issue.html_url}"
+					"url": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "issue", "html_url"]
+						}
+					}
 				}
 			}
 		},
@@ -266,7 +498,45 @@
 					"Content-Type": "application/json"
 				},
 				"body": {
-					"text": "Issue #${ctx.vars['process-issue'].issueNumber} ${ctx.vars['process-issue'].action} in ${ctx.vars['parse-event'].repository}: ${ctx.vars['process-issue'].title} by ${ctx.vars['process-issue'].author}"
+					"text": {
+						"$tpl": [
+							"Issue #",
+							{
+								"$ref": {
+									"step": "process-issue",
+									"path": ["issueNumber"]
+								}
+							},
+							" ",
+							{
+								"$ref": {
+									"step": "process-issue",
+									"path": ["action"]
+								}
+							},
+							" in ",
+							{
+								"$ref": {
+									"step": "parse-event",
+									"path": ["repository"]
+								}
+							},
+							": ",
+							{
+								"$ref": {
+									"step": "process-issue",
+									"path": ["title"]
+								}
+							},
+							" by ",
+							{
+								"$ref": {
+									"step": "process-issue",
+									"path": ["author"]
+								}
+							}
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -276,9 +546,24 @@
 				"model": {
 					"status": "processed",
 					"event": "issues",
-					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
-					"issueNumber": "js/ctx.vars['process-issue'].issueNumber",
-					"action": "${ctx.vars['process-issue'].action}"
+					"deliveryId": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["deliveryId"]
+						}
+					},
+					"issueNumber": {
+						"$ref": {
+							"step": "process-issue",
+							"path": ["issueNumber"]
+						}
+					},
+					"action": {
+						"$ref": {
+							"step": "process-issue",
+							"path": ["action"]
+						}
+					}
 				}
 			}
 		},
@@ -294,9 +579,24 @@
 					"level": "info",
 					"message": "Unhandled GitHub event type received",
 					"metadata": {
-						"eventType": "${ctx.vars['parse-event'].eventType}",
-						"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
-						"repository": "${ctx.vars['parse-event'].repository}"
+						"eventType": {
+							"$ref": {
+								"step": "parse-event",
+								"path": ["eventType"]
+							}
+						},
+						"deliveryId": {
+							"$ref": {
+								"step": "parse-event",
+								"path": ["deliveryId"]
+							}
+						},
+						"repository": {
+							"$ref": {
+								"step": "parse-event",
+								"path": ["repository"]
+							}
+						}
 					}
 				},
 				"responseType": "application/json"
@@ -306,8 +606,18 @@
 			"inputs": {
 				"model": {
 					"status": "acknowledged",
-					"event": "${ctx.vars['parse-event'].eventType}",
-					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+					"event": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["eventType"]
+						}
+					},
+					"deliveryId": {
+						"$ref": {
+							"step": "parse-event",
+							"path": ["deliveryId"]
+						}
+					},
 					"message": "Event type not currently handled."
 				}
 			}

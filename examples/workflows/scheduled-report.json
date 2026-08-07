@@ -70,9 +70,24 @@
 		"aggregate-data": {
 			"inputs": {
 				"records": {
-					"sales": "js/ctx.vars['query-sales-data'].data",
-					"users": "js/ctx.vars['query-user-metrics'].data",
-					"support": "js/ctx.vars['query-support-tickets'].data"
+					"sales": {
+						"$ref": {
+							"step": "query-sales-data",
+							"path": ["data"]
+						}
+					},
+					"users": {
+						"$ref": {
+							"step": "query-user-metrics",
+							"path": ["data"]
+						}
+					},
+					"support": {
+						"$ref": {
+							"step": "query-support-tickets",
+							"path": ["data"]
+						}
+					}
 				},
 				"aggregations": {
 					"totalRevenue": "js/ctx.vars['query-sales-data'].data.reduce((sum, row) => sum + row.revenue, 0)",
@@ -129,13 +144,43 @@
 					"periodStart": "js/new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]",
 					"periodEnd": "js/new Date().toISOString().split('T')[0]",
 					"sales": {
-						"dailyBreakdown": "js/ctx.vars['query-sales-data'].data",
-						"totalRevenue": "js/ctx.vars['aggregate-data'].totalRevenue",
-						"totalOrders": "js/ctx.vars['aggregate-data'].totalOrders",
-						"avgOrderValue": "js/ctx.vars['aggregate-data'].avgOrderValue"
+						"dailyBreakdown": {
+							"$ref": {
+								"step": "query-sales-data",
+								"path": ["data"]
+							}
+						},
+						"totalRevenue": {
+							"$ref": {
+								"step": "aggregate-data",
+								"path": ["totalRevenue"]
+							}
+						},
+						"totalOrders": {
+							"$ref": {
+								"step": "aggregate-data",
+								"path": ["totalOrders"]
+							}
+						},
+						"avgOrderValue": {
+							"$ref": {
+								"step": "aggregate-data",
+								"path": ["avgOrderValue"]
+							}
+						}
 					},
-					"users": "js/ctx.vars['query-user-metrics'].data[0]",
-					"support": "js/ctx.vars['query-support-tickets'].data[0]"
+					"users": {
+						"$ref": {
+							"step": "query-user-metrics",
+							"path": ["data", 0]
+						}
+					},
+					"support": {
+						"$ref": {
+							"step": "query-support-tickets",
+							"path": ["data", 0]
+						}
+					}
 				},
 				"format": "html"
 			}
@@ -157,7 +202,17 @@
 									"name": "${process.env.REPORT_RECIPIENT_NAME}"
 								}
 							],
-							"subject": "Weekly Business Report - ${ctx.vars['generate-report-html'].reportDate}"
+							"subject": {
+								"$tpl": [
+									"Weekly Business Report - ",
+									{
+										"$ref": {
+											"step": "generate-report-html",
+											"path": ["reportDate"]
+										}
+									}
+								]
+							}
 						}
 					],
 					"from": {
@@ -167,7 +222,12 @@
 					"content": [
 						{
 							"type": "text/html",
-							"value": "${ctx.vars['generate-report-html'].html}"
+							"value": {
+								"$ref": {
+									"step": "generate-report-html",
+									"path": ["html"]
+								}
+							}
 						}
 					]
 				},
@@ -185,8 +245,18 @@
 				"body": {
 					"reportType": "weekly-summary",
 					"generatedAt": "js/new Date().toISOString()",
-					"data": "js/ctx.vars['aggregate-data']",
-					"html": "${ctx.vars['generate-report-html'].html}"
+					"data": {
+						"$ref": {
+							"step": "aggregate-data",
+							"path": []
+						}
+					},
+					"html": {
+						"$ref": {
+							"step": "generate-report-html",
+							"path": ["html"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -196,7 +266,12 @@
 				"model": {
 					"success": true,
 					"message": "Weekly report generated and sent successfully.",
-					"reportDate": "js/ctx.vars['generate-report-html'].reportDate",
+					"reportDate": {
+						"$ref": {
+							"step": "generate-report-html",
+							"path": ["reportDate"]
+						}
+					},
 					"recipientCount": 1
 				}
 			}

@@ -24,7 +24,12 @@
 	"nodes": {
 		"fetch-source-data": {
 			"inputs": {
-				"url": "${ctx.request.body.sourceUrl}",
+				"url": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "sourceUrl"]
+					}
+				},
 				"method": "GET",
 				"headers": {
 					"Content-Type": "application/json",
@@ -70,7 +75,12 @@
 		},
 		"transform-data": {
 			"inputs": {
-				"records": "js/ctx.response.data.records",
+				"records": {
+					"$ref": {
+						"step": "fetch-source-data",
+						"path": ["data", "records"]
+					}
+				},
 				"mapping": {
 					"id": "$.record_id",
 					"name": "$.full_name",
@@ -92,13 +102,26 @@
 						"type": "object",
 						"required": ["id", "name", "email"],
 						"properties": {
-							"id": { "type": "string" },
-							"name": { "type": "string", "minLength": 1 },
-							"email": { "type": "string", "format": "email" }
+							"id": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string",
+								"minLength": 1
+							},
+							"email": {
+								"type": "string",
+								"format": "email"
+							}
 						}
 					}
 				},
-				"data": "js/ctx.response.data.transformedRecords"
+				"data": {
+					"$ref": {
+						"step": "transform-data",
+						"path": ["data", "transformedRecords"]
+					}
+				}
 			}
 		},
 		"route-validation": {
@@ -150,8 +173,18 @@
 					"Authorization": "Bearer ${process.env.DATABASE_API_KEY}"
 				},
 				"body": {
-					"collection": "${ctx.request.body.targetCollection}",
-					"records": "js/ctx.vars['transform-data'].transformedRecords",
+					"collection": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "targetCollection"]
+						}
+					},
+					"records": {
+						"$ref": {
+							"step": "transform-data",
+							"path": ["transformedRecords"]
+						}
+					},
 					"upsert": true
 				},
 				"responseType": "application/json"
@@ -165,7 +198,24 @@
 					"Content-Type": "application/json"
 				},
 				"body": {
-					"text": "Data pipeline completed successfully. Records processed: ${ctx.vars['store-records'].insertedCount}. Source: ${ctx.request.body.sourceUrl}"
+					"text": {
+						"$tpl": [
+							"Data pipeline completed successfully. Records processed: ",
+							{
+								"$ref": {
+									"step": "store-records",
+									"path": ["insertedCount"]
+								}
+							},
+							". Source: ",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "sourceUrl"]
+								}
+							}
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -178,7 +228,18 @@
 					"Content-Type": "application/json"
 				},
 				"body": {
-					"text": "Data pipeline validation failed. Source: ${ctx.request.body.sourceUrl}. Check logs for details."
+					"text": {
+						"$tpl": [
+							"Data pipeline validation failed. Source: ",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "sourceUrl"]
+								}
+							},
+							". Check logs for details."
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -189,9 +250,24 @@
 					"success": true,
 					"message": "Pipeline completed successfully.",
 					"stats": {
-						"fetched": "js/ctx.vars['fetch-source-data'].records.length",
-						"transformed": "js/ctx.vars['transform-data'].transformedRecords.length",
-						"stored": "js/ctx.vars['store-records'].insertedCount"
+						"fetched": {
+							"$ref": {
+								"step": "fetch-source-data",
+								"path": ["records", "length"]
+							}
+						},
+						"transformed": {
+							"$ref": {
+								"step": "transform-data",
+								"path": ["transformedRecords", "length"]
+							}
+						},
+						"stored": {
+							"$ref": {
+								"step": "store-records",
+								"path": ["insertedCount"]
+							}
+						}
 					}
 				}
 			}
@@ -201,7 +277,12 @@
 				"model": {
 					"success": false,
 					"message": "Pipeline failed during data validation.",
-					"errors": "js/ctx.response.data.errors"
+					"errors": {
+						"$ref": {
+							"step": "validate-transformed-data",
+							"path": ["data", "errors"]
+						}
+					}
 				}
 			}
 		},

@@ -51,12 +51,17 @@
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		"check-existing-user": {
 			"inputs": {
-				"url": "${process.env.USER_SERVICE_URL}/api/users?email=${ctx.request.body.email}",
+				"url": "js/`${process.env.USER_SERVICE_URL}/api/users?email=${ctx.request.body.email}`",
 				"method": "GET",
 				"headers": {
 					"Content-Type": "application/json",
@@ -113,7 +118,12 @@
 		},
 		"hash-password": {
 			"inputs": {
-				"password": "${ctx.request.body.password}",
+				"password": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "password"]
+					}
+				},
 				"algorithm": "bcrypt",
 				"rounds": 12
 			}
@@ -127,10 +137,30 @@
 					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
 				},
 				"body": {
-					"email": "${ctx.request.body.email}",
-					"passwordHash": "${ctx.response.data.hash}",
-					"firstName": "${ctx.request.body.firstName}",
-					"lastName": "${ctx.request.body.lastName}",
+					"email": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "email"]
+						}
+					},
+					"passwordHash": {
+						"$ref": {
+							"step": "hash-password",
+							"path": ["data", "hash"]
+						}
+					},
+					"firstName": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "firstName"]
+						}
+					},
+					"lastName": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "lastName"]
+						}
+					},
 					"role": "user",
 					"status": "active"
 				},
@@ -146,11 +176,21 @@
 					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}"
 				},
 				"body": {
-					"to": "${ctx.request.body.email}",
+					"to": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "email"]
+						}
+					},
 					"from": "${process.env.FROM_EMAIL}",
 					"templateId": "${process.env.WELCOME_EMAIL_TEMPLATE_ID}",
 					"dynamicTemplateData": {
-						"firstName": "${ctx.request.body.firstName}",
+						"firstName": {
+							"$ref": {
+								"step": "@trigger",
+								"path": ["body", "firstName"]
+							}
+						},
 						"loginUrl": "${process.env.APP_URL}/login"
 					}
 				},
@@ -163,10 +203,30 @@
 					"success": true,
 					"message": "User registered successfully.",
 					"user": {
-						"id": "${ctx.response.data.id}",
-						"email": "${ctx.request.body.email}",
-						"firstName": "${ctx.request.body.firstName}",
-						"lastName": "${ctx.request.body.lastName}"
+						"id": {
+							"$ref": {
+								"step": "create-user",
+								"path": ["data", "id"]
+							}
+						},
+						"email": {
+							"$ref": {
+								"step": "@trigger",
+								"path": ["body", "email"]
+							}
+						},
+						"firstName": {
+							"$ref": {
+								"step": "@trigger",
+								"path": ["body", "firstName"]
+							}
+						},
+						"lastName": {
+							"$ref": {
+								"step": "@trigger",
+								"path": ["body", "lastName"]
+							}
+						}
 					}
 				}
 			}
