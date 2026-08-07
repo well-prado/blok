@@ -84,9 +84,10 @@ export class HotReloadManager extends EventEmitter {
 			this.emit("error", err);
 		});
 		this.fileWatcher.on("log", (msg: string) => this.emit("log", msg));
+		// `HmrDevConsole` renders the ready banner (with the directory list); a
+		// second "active, watching N directories" line here just duplicated it.
 		this.fileWatcher.on("ready", (info: { watchedPaths: string[] }) => {
 			this.emit("ready", info);
-			this.emit("log", `[HMR] Hot reload active, watching ${info.watchedPaths.length} directories`);
 		});
 
 		await this.fileWatcher.start();
@@ -177,12 +178,17 @@ export class HotReloadManager extends EventEmitter {
 	private async handleChange(event: HMREvent): Promise<void> {
 		if (this.disabled) return;
 
-		// Check cooldown
-		const lastReload = this.cooldowns.get(event.filePath);
+		// Cooldown, keyed by event TYPE as well as path. Keying it by path alone
+		// meant a file that was created and then deleted (or renamed) inside the
+		// window had its `:remove` swallowed by its own `:add` — the route stayed
+		// mounted against a file that no longer existed. Repeated saves of the
+		// same file still coalesce, which is all the cooldown was ever for.
+		const cooldownKey = `${event.type}:${event.filePath}`;
+		const lastReload = this.cooldowns.get(cooldownKey);
 		if (lastReload && Date.now() - lastReload < (this.config.cooldownMs || 1000)) {
 			return;
 		}
-		this.cooldowns.set(event.filePath, Date.now());
+		this.cooldowns.set(cooldownKey, Date.now());
 
 		try {
 			const category = event.type.split(":")[0] as "node" | "workflow" | "trigger";

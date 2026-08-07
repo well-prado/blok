@@ -11,7 +11,7 @@ import type { HotReloadManager, HotReloadStats } from "./HotReloadManager";
 export class HmrDevConsole {
 	constructor(private hmr: HotReloadManager) {
 		this.hmr.on("ready", (info: { watchedPaths: string[] }) => {
-			console.log("\n  [HMR] Hot reload active");
+			console.log("\n  [HMR] Hot reload active (BLOK_HMR)");
 			console.log(`  Watching ${info.watchedPaths.length} director${info.watchedPaths.length === 1 ? "y" : "ies"}`);
 			for (const p of info.watchedPaths) {
 				console.log(`    - ${p}`);
@@ -22,8 +22,14 @@ export class HmrDevConsole {
 		this.hmr.on("reload", (event: HMREvent) => {
 			const timestamp = new Date().toLocaleTimeString();
 			const label = this.formatEventType(event.type);
-			console.log(`  [HMR] [${timestamp}] ${label}: ${event.relativePath}`);
+			const took = Date.now() - event.timestamp;
+			// Always name the file, the action, and WHY — a dev loop that
+			// silently does something is indistinguishable from one that does
+			// nothing, which is exactly how the `bun --watch` regression hid.
+			console.log(`  [HMR] [${timestamp}] hot reload · ${label}: ${event.relativePath} — ${event.reason} (${took}ms)`);
 		});
+
+		this.hmr.on("log", (msg: string) => console.log(msg));
 
 		this.hmr.on("reload-error", ({ event, error }: { event: HMREvent; error: Error }) => {
 			const timestamp = new Date().toLocaleTimeString();

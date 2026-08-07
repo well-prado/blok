@@ -220,8 +220,9 @@ export abstract class PubSubTrigger extends TriggerBase {
 
 			this.logger.log(`Pub/Sub trigger started. Listening to ${pubsubWorkflows.length} subscription(s)`);
 
-			// Enable HMR in development mode
-			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+			// Hot reload. `BLOK_HMR=true` alone is enough on any entrypoint; the
+			// gate lives in TriggerBase so every trigger answers it identically.
+			if (TriggerBase.isHotReloadEnabled()) {
 				await this.enableHotReload();
 			}
 

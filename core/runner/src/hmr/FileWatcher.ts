@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import { type FSWatcher, watch } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
+import { type ChangeAction, classifyChange } from "./classifyChange";
 
 export type HMREventType =
 	| "node:change"
@@ -27,6 +28,10 @@ export interface HMREvent {
 	filePath: string;
 	relativePath: string;
 	timestamp: number;
+	/** What the dev loop did with this path — see {@link classifyChange}. */
+	action: ChangeAction;
+	/** Why it did that. Printed by `HmrDevConsole`. */
+	reason: string;
 }
 
 export interface FileWatcherConfig {
@@ -223,11 +228,24 @@ export class FileWatcher extends EventEmitter {
 			}
 		}
 
+		// The watcher only watches hot-class roots, but the reason string comes
+		// from the same classifier `blokctl dev`'s restart watcher uses — one
+		// table, one source of truth, no drift between the two halves of the
+		// dev loop.
+		const { action, reason } = classifyChange(filePath, {
+			workflowPaths: this.config.workflowPaths,
+			nodePaths: this.config.nodePaths,
+			triggerPaths: this.config.triggerPaths,
+		});
+		if (action === "ignore") return;
+
 		const event: HMREvent = {
 			type: eventType,
 			filePath,
 			relativePath,
 			timestamp: Date.now(),
+			action,
+			reason,
 		};
 
 		this.emit("change", event);

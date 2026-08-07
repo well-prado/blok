@@ -492,6 +492,13 @@ export type {
 	PrometheusBootstrapResult,
 } from "./monitoring/PrometheusBootstrap";
 
+// HMR — the dev-loop contract. `classifyChange` is the single source of truth
+// for hot-vs-restart and is consumed by both the in-process watcher and
+// `blokctl dev`'s restart watcher.
+export { classifyChange } from "./hmr/classifyChange";
+export type { ChangeAction, ChangeClassification, ClassifyRoots } from "./hmr/classifyChange";
+export { loadDotenvFiles, parseDotenv, resetDotenvLoader } from "./utils/loadDotenv";
+
 // HMR types
 export type {
 	FileWatcherConfig,
