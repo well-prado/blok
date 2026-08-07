@@ -51,7 +51,7 @@ The `http.*` helper sets `method` + `path`; the rest go in its options object �
 ## File-based routing
 
 `BLOK_FILE_BASED_ROUTING=true` (default since v0.6) maps workflow file
-paths to URLs:
+paths to URLs — for **both** JSON and TypeScript workflows:
 
 | File | URL |
 |---|---|
@@ -60,20 +60,30 @@ paths to URLs:
 | `workflows/json/users/index.json` | `/users` |
 | `workflows/json/users/[id].json` | `/users/:id` |
 | `workflows/json/users/[id]/orders.json` | `/users/:id/orders` |
+| `src/workflows/health.ts` | `/health` (or the workflow's own `trigger.http.path`) |
+| `src/workflows/users/[id].ts` | `/users/:id` (when the path isn't explicit) |
 
 Files / folders starting with `_` or `.` are skipped (drafts, utility
 files). If `trigger.http.path` is set explicitly, it overrides the
-derived path.
+derived path — the typed DSL's `http.get(path, ...)` / `.post(...)` /
+etc. helpers make `path` optional for exactly this reason (see
+[Quickstart](/d/get-started/quickstart#3-compose-a-workflow)).
 
 When `BLOK_FILE_BASED_ROUTING=false`, the legacy `/<workflow-name>`
 catch-all dispatch handles requests.
 
 <Note>
-File-scan auto-routing covers **JSON workflows** under `workflows/json/`.
-TypeScript workflows (`src/workflows/*.ts`) still need one entry in
-`src/Workflows.ts` — see [Quickstart](/d/get-started/quickstart#3-compose-a-workflow).
-This is the one manual step left in the default setup; everything else
-(nodes, node registration, path derivation) is automatic.
+File-scan auto-routing covers **both JSON workflows** (`workflows/json/`,
+override the root with `WORKFLOWS_PATH`) **and TypeScript workflows**
+(`src/workflows/*.ts`, fixed at that path — no env override, since it's a
+source-file convention, not a build-output directory). A `.ts` file with
+an `http` trigger routes itself; no `src/Workflows.ts` entry required.
+
+`src/Workflows.ts` is now the **advanced / back-compat** path: still
+consulted at boot, still the only way to register a workflow that lives
+outside the scan root, and still fine to keep during a migration — a
+workflow present in BOTH the scan and the map resolves to exactly one
+route, no error. It's no longer a step new workflows need.
 </Note>
 
 ### Debugging an unknown route

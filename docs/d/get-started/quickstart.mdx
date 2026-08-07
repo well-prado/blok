@@ -77,10 +77,20 @@ export default workflow("greet.hello", { version: "1.0.0", trigger: http.get("/g
 `step("say-hello", greet, …)` returns a handle shaped like `greet`'s output — fully typed. The
 last step's output becomes the HTTP response body.
 
-Register it in `src/Workflows.ts` (TypeScript workflows are registered here; the map key is the
-workflow name). This is the one manual step left in the default setup — JSON workflows under
-`workflows/json/` route themselves from the filesystem, but a TypeScript file still needs this
-one-line entry:
+That's it — file-based routing picks up `src/workflows/greet.ts` automatically, the same way it
+already does for JSON workflows under `workflows/json/`. No registration step.
+
+<Tip>
+Route not showing up? Run `blokctl routes` to print every registered route, or just hit the URL —
+in dev mode the 404 names the scan roots it checked and the closest registered match. See
+[debugging an unknown route](/d/triggers/http#debugging-an-unknown-route).
+</Tip>
+
+<Accordion title="Advanced: registering a workflow by hand (src/Workflows.ts)">
+`src/Workflows.ts` is a back-compat / advanced path, not something new workflows need. Use it
+when a workflow lives outside `src/workflows/` (a shared package, a different directory), or
+during a gradual migration where you want an explicit map alongside the scan. A workflow that's
+in both the scan and the map still resolves to exactly one route — no conflict.
 
 ```ts src/Workflows.ts {2,6}
 // ...existing imports
@@ -93,12 +103,7 @@ const workflows = {
 
 export default workflows;
 ```
-
-<Tip>
-Forgot this step? Run `blokctl routes` to print every registered route, or just hit the URL —
-in dev mode the 404 names the scan roots it checked and the closest registered match. See
-[debugging an unknown route](/d/triggers/http#debugging-an-unknown-route).
-</Tip>
+</Accordion>
 
 ## 4. Call it
 

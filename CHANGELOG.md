@@ -8,7 +8,31 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **TypeScript workflows are now auto-routed by file-scan, like JSON
+  already was** (#695). `HttpTrigger.buildFileBasedRoutes()` scanned
+  `src/workflows/*.ts` at boot but only used the result to build a
+  display map — the route table itself was built from JSON + the manual
+  `src/Workflows.ts` map only, so a `.ts` workflow with an `http` trigger
+  produced **zero routes** until it was ALSO hand-registered in
+  `Workflows.ts`. That made the framework's own recommended authoring
+  format the one that still needed a manual step. A workflow scanned from
+  disk AND listed in `Workflows.ts` (the common shape mid-migration)
+  resolves to exactly one route — not a collision — with a deterministic
+  winner and a boot warning if the two sources genuinely disagree.
+  `Workflows.ts` is now the back-compat / advanced path (workflows
+  outside the scan root, or a deliberate explicit map), not something new
+  workflows need — see the [HTTP trigger docs](docs/d/triggers/http.mdx#file-based-routing).
+
+  > **⚠️ Upgrade note:** if your project has `.ts` files under
+  > `src/workflows/` that declare an `http` trigger but were never added
+  > to `src/Workflows.ts` — leftover experiments, half-finished drafts,
+  > copy-pasted scaffolds — those routes were previously **silently
+  > inert**. After upgrading they **start serving traffic** at their
+  > declared (or file-derived) path. Audit `src/workflows/` before
+  > upgrading in production, or run `blokctl routes` to see the full
+  > table before deploying.
 
 ## [2.0.1] — 2026-08-07
 
