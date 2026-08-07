@@ -307,14 +307,28 @@ function publishedKeys(step: Record<string, unknown>): string[] {
 	const use = asString(step.use);
 	const inputs = isPlainObject(step.inputs) ? step.inputs : undefined;
 	if (!use || !inputs) return [];
-	if (use === "@blokjs/ctx-publish") {
+	if (refIs(use, "@blokjs/ctx-publish")) {
 		const name = asString(inputs.name);
 		return name ? [name] : [];
 	}
-	if (use === "@blokjs/ctx-publish-many" && isPlainObject(inputs.values)) {
+	if (refIs(use, "@blokjs/ctx-publish-many") && isPlainObject(inputs.values)) {
 		return Object.keys(inputs.values);
 	}
 	return [];
+}
+
+/**
+ * Scope-insensitive node-ref compare. The runner's canonical node-key rule
+ * (ADR 0002) resolves the bare form (`ctx-publish`) and the scoped form
+ * (`@blokjs/ctx-publish`) to the SAME node, and the shipped corpus writes
+ * both — `examples/v05-primitives/09-polling-with-backoff.json` publishes
+ * `attempt` via bare `ctx-publish`. Matching only the scoped form made every
+ * bare-ref publish invisible, which surfaced as 8 false dangling-step errors
+ * the moment #690's corpus migration turned previously-unparseable `$.state`
+ * strings into structural refs this pass could finally read.
+ */
+function refIs(use: string, canonical: string): boolean {
+	return use === canonical || use === canonical.replace(/^@[^/]+\//, "");
 }
 
 /** True for the control-flow shapes that never persist their own state slot. */

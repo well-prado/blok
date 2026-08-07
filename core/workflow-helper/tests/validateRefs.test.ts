@@ -537,3 +537,50 @@ describe("validateRefs — graceful degradation", () => {
 		expect(codes(result)).toEqual(["dangling-step"]);
 	});
 });
+
+// ─────────────── ctx-publish slots — scoped AND bare node refs ───────────────
+//
+// The runner's canonical node-key rule (ADR 0002) resolves `ctx-publish` and
+// `@blokjs/ctx-publish` to the same node, and the shipped corpus uses BOTH
+// forms (`examples/v05-primitives/09-polling-with-backoff.json` publishes
+// `attempt` via bare `ctx-publish`). Regression: matching only the scoped form
+// produced 8 false dangling-step errors on the integration merge with #690's
+// corpus migration — the migration turned `$.state…` strings this pass could
+// not parse into structural refs it suddenly could.
+
+describe("validateRefs — published slots resolve for scoped and bare refs", () => {
+	const flow = (publishRef: string, manyRef: string) => ({
+		name: "publish-forms",
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path: "/p" } },
+		steps: [
+			{ id: "init", use: publishRef, inputs: { name: "attempt", value: 0 } },
+			{ id: "seed", use: manyRef, inputs: { values: { lastStatus: "pending" } } },
+			{
+				id: "respond",
+				use: "@blokjs/respond",
+				inputs: {
+					body: {
+						n: { $ref: { step: "attempt", path: [] } },
+						s: { $ref: { step: "lastStatus", path: [] } },
+					},
+				},
+			},
+		],
+	});
+
+	it("bare `ctx-publish` / `ctx-publish-many` refs register their slots (no dangling-step)", () => {
+		const result = validateRefs(flow("ctx-publish", "ctx-publish-many"), { nodes: lookup({}) });
+		expect(errors(result)).toEqual([]);
+	});
+
+	it("scoped `@blokjs/ctx-publish[-many]` refs register their slots (no dangling-step)", () => {
+		const result = validateRefs(flow("@blokjs/ctx-publish", "@blokjs/ctx-publish-many"), { nodes: lookup({}) });
+		expect(errors(result)).toEqual([]);
+	});
+
+	it("an unrelated bare ref does NOT register a slot — dangling still fires", () => {
+		const result = validateRefs(flow("some-other-node", "ctx-publish-many"), { nodes: lookup({}) });
+		expect(codes(result)).toContain("dangling-step");
+	});
+});
