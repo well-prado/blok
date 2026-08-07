@@ -228,6 +228,10 @@ async function main() {
 			.description("Start the development server")
 			.option("--skip-version-check", "Skip runtime version validation")
 			.option("--port <port>", "Port for the HTTP trigger (overrides PORT and the project config)")
+			.option(
+				"--watch-all",
+				"Run every trigger under `bun --watch` — full process restart on ANY source change, preempting in-process hot reload. Escape hatch for the pre-0.8 behaviour; also settable with BLOK_DEV_WATCH_ALL=1",
+			)
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "dev",

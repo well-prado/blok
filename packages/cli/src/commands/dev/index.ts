@@ -15,6 +15,7 @@ import {
 	validateProjectRuntimes,
 } from "../../services/runtime-setup.js";
 import { regenRuntimeStubs } from "../nodes/syncNodes.js";
+import { startDevWatcher } from "./watch.js";
 
 /**
  * Resolve the HTTP-trigger port override for `blokctl dev`.
@@ -58,6 +59,18 @@ const exec = util.promisify(child_process.exec);
 
 const runningProcesses: ChildProcess[] = [];
 
+/**
+ * Should `blokctl dev` fall back to running every trigger under `bun --watch`?
+ *
+ * Default is NO — a blanket `--watch` restarts the process on any source change
+ * and preempts in-process HMR entirely, which is exactly the regression that
+ * made consumers report "no hot reload". Kept as an explicit escape hatch for
+ * anyone whose project depends on the old restart-everything behaviour.
+ */
+export function shouldWatchAll(opts: { watchAll?: unknown }): boolean {
+	return opts.watchAll === true || process.env.BLOK_DEV_WATCH_ALL === "1";
+}
+
 function spawnProcess(
 	cmd: string,
 	args: string[],
@@ -85,6 +98,29 @@ function spawnProcess(
 	});
 
 	return child;
+}
+
+/** Everything needed to respawn one trigger after a restart-class change. */
+interface TriggerProcess {
+	child: ChildProcess;
+	readonly cmd: string;
+	readonly args: string[];
+	readonly name: string;
+	readonly env: Record<string, string>;
+}
+
+/** SIGTERM a detached child's whole process group, then SIGKILL stragglers. */
+function killGroup(child: ChildProcess): void {
+	if (!child.pid || child.exitCode !== null) return;
+	try {
+		process.kill(-child.pid, "SIGTERM");
+	} catch {
+		try {
+			child.kill("SIGTERM");
+		} catch {
+			// already gone
+		}
+	}
 }
 
 /**
@@ -377,22 +413,32 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// 2. Wait for all runtimes to be healthy before starting NodeJS runner.
+	// 2. Probe the runtimes in the BACKGROUND. Boot used to block here for up to
+	// 2 minutes waiting on gRPC handshakes before a single HTTP request could be
+	// served, so a project with a slow-compiling sidecar (Rust, Java) paid that
+	// on every restart even for workflows that only use module nodes. The
+	// adapters connect lazily on first use anyway (GrpcClientPool), so nothing
+	// needed the wait — module-node workflows now serve immediately and
+	// `runtime.*` steps fail loudly on their own if their sidecar never comes up.
 	// IPv4/IPv6 TCP-connect probe lifted from the in-repo orchestrator
 	// (scripts/dev-full.ts).
-	if (healthChecks.length > 0) {
-		console.log("\nWaiting for runtimes to be ready...");
-		const maxWait = 120_000; // 2 minutes (Rust can take a while to compile)
-		const results = await Promise.all(healthChecks.map((hc) => waitForGrpcPort(hc.port, maxWait, hc.proc)));
-		const allReady = results.every(Boolean);
-		if (allReady) {
-			console.log("All runtimes ready.\n");
-		} else {
-			const failedPorts = healthChecks.filter((_, i) => !results[i]).map((hc) => hc.port);
-			console.log(`Warning: Some runtimes did not become healthy: ports ${failedPorts.join(", ")}`);
-			console.log("Starting NodeJS runner anyway.\n");
-		}
-	}
+	const runtimesReady: Promise<boolean> =
+		healthChecks.length === 0
+			? Promise.resolve(true)
+			: (async () => {
+					console.log("\nProbing runtimes in the background (triggers start without waiting)...");
+					const maxWait = 120_000; // 2 minutes (Rust can take a while to compile)
+					const results = await Promise.all(healthChecks.map((hc) => waitForGrpcPort(hc.port, maxWait, hc.proc)));
+					const failedPorts = healthChecks.filter((_, i) => !results[i]).map((hc) => hc.port);
+					if (failedPorts.length === 0) {
+						console.log("All runtimes ready.\n");
+						return true;
+					}
+					console.log(
+						`\n  Warning: runtime sidecar(s) on gRPC port ${failedPorts.join(", ")} never became healthy. Module-node workflows keep serving; \`runtime.*\` steps targeting those ports will fail until the sidecar starts.\n`,
+					);
+					return false;
+				})();
 
 	// Phase: ship-with-CLI persistence. Default to SQLite at
 	// `.blok/trace.db` so users get Prisma-Studio-style "open the
@@ -418,26 +464,35 @@ export async function devProject(opts: OptionValues) {
 		BLOK_TRANSPORT: "grpc",
 	};
 
-	// 3. Start triggers from config, or fallback to single runner
+	// 3. Start triggers from config, or fallback to single runner.
+	//
+	// NO `bun --watch` unless the operator explicitly asks for it. Watching
+	// every app source restarts the process on any edit, which preempts the
+	// in-process hot reloader entirely — the trigger sets BLOK_HMR=true and
+	// owns `workflows/**` + `nodes/**` itself. The restart watcher below covers
+	// the rest (entrypoints, `.env*`, config).
+	const watchAll = shouldWatchAll(opts);
+	const triggerProcesses: TriggerProcess[] = [];
 	if (config?.triggers && Object.keys(config.triggers).length > 0) {
 		console.log("Starting triggers...");
 		for (const [, trigger] of Object.entries(config.triggers)) {
 			const cmdParts = trigger.startCmd.split(" ");
 			const cmd = cmdParts[0];
 			const args = cmdParts.slice(1);
-			// Add --watch for development
-			if (cmd === "bun" && !args.includes("--watch")) {
+			if (watchAll && cmd === "bun" && !args.includes("--watch")) {
 				args.unshift("--watch");
 			}
 			const triggerPort = portFor(trigger);
-			spawnProcess(cmd, args, `${trigger.label} (port ${triggerPort})`, currentPath, undefined, {
-				PORT: String(triggerPort),
-				...triggerEnv,
-			});
+			const name = `${trigger.label} (port ${triggerPort})`;
+			const env = { PORT: String(triggerPort), ...triggerEnv };
+			const child = spawnProcess(cmd, args, name, currentPath, undefined, env);
+			triggerProcesses.push({ child, cmd, args, name, env });
 		}
 	} else {
 		// Legacy fallback: single trigger at src/index.ts
-		spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath, undefined, triggerEnv);
+		const args = watchAll ? ["--watch", "run", "src/index.ts"] : ["run", "src/index.ts"];
+		const child = spawnProcess("bun", args, "Blok Runner", currentPath, undefined, triggerEnv);
+		triggerProcesses.push({ child, cmd: "bun", args, name: "Blok Runner", env: triggerEnv });
 	}
 
 	// 4. Once the HTTP trigger is listening (it serves GET /__blok/nodes),
@@ -446,11 +501,66 @@ export async function devProject(opts: OptionValues) {
 	// are runtime sidecars to stub for. Fire-and-forget so it doesn't block the
 	// keep-alive loop — failures warn and continue (never crash dev).
 	const httpTrigger = config?.triggers?.http;
-	if (httpTrigger && healthChecks.length > 0) {
-		const baseUrl = `http://localhost:${portFor(httpTrigger)}`;
-		const outDir = path.join(currentPath, "nodes-gen");
-		void regenStubsWhenReady(baseUrl, outDir);
+	const stubOutDir = path.join(currentPath, "nodes-gen");
+	const httpBaseUrl = httpTrigger ? `http://localhost:${portFor(httpTrigger)}` : null;
+	if (httpBaseUrl && healthChecks.length > 0) {
+		// Chain off the background probe so the first regen sees a live catalog.
+		void runtimesReady.then(() => regenStubsWhenReady(httpBaseUrl, stubOutDir));
 	}
+
+	// 5. The restart watcher — the half of the dev loop HMR can't do. Watches
+	// trigger entrypoints, `.env*`, `.blok/config.json` (restart) and the
+	// polyglot sidecar node dirs (regenerate stubs; closes the watcher-less TODO
+	// that `regenStubsWhenReady` used to carry). Every action names the file and
+	// the reason, so it's always visible which half of the loop handled a change.
+	const triggerWatchPaths = [path.join(currentPath, "src", "triggers"), path.join(currentPath, "src", "index.ts")];
+	const runtimeWatchPaths = Object.values(config?.runtimes ?? {}).map((rt) =>
+		path.resolve(currentPath, "runtimes", rt.kind),
+	);
+
+	let restarting = false;
+	const watcher = startDevWatcher({
+		root: currentPath,
+		triggerPaths: triggerWatchPaths,
+		runtimePaths: runtimeWatchPaths,
+		onRestart: (file, reason) => {
+			if (restarting) return;
+			restarting = true;
+			const rel = path.relative(currentPath, file) || file;
+			console.log(`\n  [dev] restart · ${rel} — ${reason}`);
+			for (const proc of triggerProcesses) {
+				killGroup(proc.child);
+				const index = runningProcesses.indexOf(proc.child);
+				if (index !== -1) runningProcesses.splice(index, 1);
+			}
+			// Give the old process group a beat to release its port before the
+			// replacement binds it.
+			setTimeout(() => {
+				for (const proc of triggerProcesses) {
+					proc.child = spawnProcess(proc.cmd, proc.args, proc.name, currentPath, undefined, proc.env);
+				}
+				restarting = false;
+			}, 300);
+		},
+		onRegen: (file, reason) => {
+			const rel = path.relative(currentPath, file) || file;
+			console.log(`\n  [dev] regen · ${rel} — ${reason}`);
+			if (!httpBaseUrl) return;
+			void regenRuntimeStubs(httpBaseUrl, stubOutDir)
+				.then((count) => {
+					if (count > 0) console.log(`  [dev] regenerated ${count} runtime stub file(s)`);
+				})
+				.catch((err: unknown) => {
+					console.log(`  [dev] stub regen failed: ${err instanceof Error ? err.message : String(err)}`);
+				});
+		},
+	});
+
+	console.log(
+		watchAll
+			? "\n  [dev] --watch-all: every trigger runs under `bun --watch` (full restart on any source change; in-process HMR is preempted)."
+			: "\n  [dev] hot reload owns workflows/** and nodes/**; entrypoints, .env* and .blok/config.json restart. Use --watch-all to restart on everything.",
+	);
 
 	// Keep the event loop alive — detached children don't prevent Node
 	// from exiting, so without this the process would exit immediately
@@ -464,6 +574,7 @@ export async function devProject(opts: OptionValues) {
 		stopping = true;
 		console.log("\nStopping processes...");
 		clearInterval(keepAlive);
+		watcher.stop();
 
 		killAllGroups("SIGTERM");
 
