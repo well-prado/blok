@@ -39,16 +39,17 @@ gates() {
   step "Proto drift check"; bun run proto:check
   step "No \$ proxy check"; bun run check:no-dollar-proxy
   step "No legacy expression strings check"; bun run check:no-legacy-expr
-  # #702 — every publishable package's SOURCE entry must import cleanly under
-  # Bun's per-file loader (`bun -e`, in-monorepo scripts, bundler source-
-  # aliasing), not just its built dist/ (that's check:packaging, #687/#696).
-  step "Source-under-Bun import check"; bun run check:source-imports
   # #709 — template SOURCE must carry explicit ESM extensions: scaffolded
   # projects compile it with their own tsc, which never rewrites specifiers.
   step "Template-source ESM extensions check"; bun run check:template-esm
   # `bun run build`, not bare `nx run-many -t build` — the root script appends
   # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
   step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build
+  # #702 — every publishable package's SOURCE entry must import cleanly under
+  # Bun's per-file loader. Runs AFTER the build: source files import sibling
+  # workspace PACKAGES, whose exports maps resolve to dist/ — untracked since
+  # the v2 packaging work, so a fresh checkout has none until a build runs.
+  step "Source-under-Bun import check"; bun run check:source-imports
 }
 
 run_fast() {
