@@ -780,60 +780,64 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						{/* Deploy draft guard (feat/studio-deploy-ux, ION/ATOMIC/BuildShip pattern):
 						    structural edits accumulate in a local draft; Deploy is the only thing
 						    that writes, and it's disabled until the background dry-run validation
-						    says the workflow is valid — see useEditWorkflowDefinition. */}
-						{editDefinition.hasDraft ? (
-							<div className="flex items-center gap-1.5">
-								<button
-									type="button"
-									onClick={editDefinition.discard}
-									disabled={editDefinition.deploying}
-									title="Discard undeployed changes and go back to the deployed definition"
-									className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
-								>
-									<RotateCcw className="h-3.5 w-3.5" /> Discard
-								</button>
-								<button
-									type="button"
-									onClick={() => editDefinition.deploy()}
-									disabled={editDefinition.deploying || editDefinition.validation.status !== "valid"}
-									title={
-										editDefinition.validation.status === "invalid" || editDefinition.validation.status === "stale"
-											? editDefinition.validation.message
-											: editDefinition.validation.status === "pending"
-												? "Validating…"
-												: "Deploy your changes to the running workflow"
-									}
-									className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
-								>
-									{editDefinition.deploying || editDefinition.validation.status === "pending" ? (
-										<Loader2 className="h-3.5 w-3.5 animate-spin" />
-									) : (
-										<Rocket className="h-3.5 w-3.5" />
-									)}
-									Deploy
-									{editDefinition.validation.status === "valid" && !editDefinition.deploying && (
-										<span
-											aria-hidden="true"
-											title="Undeployed changes"
-											className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
-										/>
-									)}
-								</button>
-							</div>
-						) : (
-							editDefinition.justDeployed && (
-								<span className="inline-flex items-center gap-1 text-xs text-blok-green-300">
-									<CheckCircle2 className="h-3.5 w-3.5" /> Deployed
-								</span>
-							)
+						    says the workflow is valid — see useEditWorkflowDefinition. BuildShip
+						    deploy-bar hierarchy (2026-08-06): Deploy is the ONE filled accent
+						    control and always renders (disabled + "No undeployed changes" with no
+						    draft) so the bar never jumps; Run is demoted to a ghost control. */}
+						{editDefinition.hasDraft && (
+							<button
+								type="button"
+								onClick={editDefinition.discard}
+								disabled={editDefinition.deploying}
+								title="Discard undeployed changes and go back to the deployed definition"
+								className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								<RotateCcw className="h-3.5 w-3.5" /> Discard
+							</button>
 						)}
-						<div className="flex overflow-hidden rounded-md border border-blok-green-500/50">
+						{editDefinition.justDeployed && (
+							<span className="inline-flex items-center gap-1 text-xs text-blok-green-300">
+								<CheckCircle2 className="h-3.5 w-3.5" /> Deployed
+							</span>
+						)}
+						<button
+							type="button"
+							onClick={() => editDefinition.deploy()}
+							disabled={
+								!editDefinition.hasDraft || editDefinition.deploying || editDefinition.validation.status !== "valid"
+							}
+							title={
+								!editDefinition.hasDraft
+									? "No undeployed changes"
+									: editDefinition.validation.status === "invalid" || editDefinition.validation.status === "stale"
+										? editDefinition.validation.message
+										: editDefinition.validation.status === "pending"
+											? "Validating…"
+											: "Deploy your changes to the running workflow"
+							}
+							className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							{editDefinition.deploying || editDefinition.validation.status === "pending" ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<Rocket className="h-3.5 w-3.5" />
+							)}
+							Deploy
+							{editDefinition.hasDraft && editDefinition.validation.status === "valid" && !editDefinition.deploying && (
+								<span
+									aria-hidden="true"
+									title="Undeployed changes"
+									className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+								/>
+							)}
+						</button>
+						<div data-testid="run-control-group" className="flex overflow-hidden rounded-md border border-zinc-700">
 							<select
 								aria-label="Run mode"
 								value={launchMode}
 								onChange={(event) => setLaunchMode(event.target.value as typeof launchMode)}
 								disabled={startingRun || runActive}
-								className="border-r border-blok-green-500/40 bg-zinc-900 px-2 text-[10px] font-medium text-zinc-300 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400 focus-visible:ring-inset disabled:opacity-40"
+								className="border-r border-zinc-700 bg-zinc-900 px-2 text-[10px] font-medium text-zinc-300 outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-inset disabled:opacity-40"
 							>
 								<option value="run">Run</option>
 								<option value="debug">Debug</option>
@@ -848,7 +852,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 										? "Runs the last deployed version — Deploy to include your changes"
 										: undefined
 								}
-								className="inline-flex items-center gap-1.5 bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+								className="run-ghost-button inline-flex items-center gap-1.5 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
 							>
 								{startingRun || runActive ? (
 									<Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -154,9 +154,20 @@ describe("WorkflowGraph — Deploy guard (feat/studio-deploy-ux)", () => {
 		mocks.startTestRun.mockResolvedValue({ runId: "run-123", stream: "/runs/run-123/stream" });
 	});
 
-	it("hides Deploy until a draft exists", () => {
+	it("shows Deploy disabled (not hidden) until a draft exists — BuildShip bar never jumps", () => {
 		renderGraph();
-		expect(screen.queryByRole("button", { name: /^deploy$/i })).not.toBeInTheDocument();
+		const deployButton = screen.getByRole("button", { name: /^deploy$/i });
+		expect(deployButton).toBeDisabled();
+		expect(deployButton).toHaveAttribute("title", "No undeployed changes");
+	});
+
+	it("renders Run as a ghost control attached to the run-mode select in one group", () => {
+		renderGraph();
+		const runButton = screen.getByRole("button", { name: /^run$/i });
+		expect(runButton).toHaveClass("run-ghost-button");
+		const group = screen.getByTestId("run-control-group");
+		expect(group).toContainElement(runButton);
+		expect(group).toContainElement(screen.getByLabelText("Run mode"));
 	});
 
 	it("disables Deploy while the dry run is pending, then enables it once valid", async () => {
@@ -198,9 +209,9 @@ describe("WorkflowGraph — Deploy guard (feat/studio-deploy-ux)", () => {
 		expect(reloadButton).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /^deploy$/i })).toBeDisabled();
 
-		// Clicking it drops the draft — Deploy disappears again.
+		// Clicking it drops the draft — Deploy stays visible but goes back to disabled.
 		await user.click(reloadButton);
-		await waitFor(() => expect(screen.queryByRole("button", { name: /^deploy$/i })).not.toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole("button", { name: /^deploy$/i })).toBeDisabled());
 	});
 
 	it("does not block Run when a draft exists, but hints it runs the deployed version", async () => {

@@ -48,6 +48,12 @@ vi.mock("@/hooks/useWorkflows", () => ({
 		reset: mocks.editReset,
 		isPending: false,
 		error: null,
+		hasDraft: false,
+		validation: { status: "idle" },
+		discard: vi.fn(),
+		deploy: vi.fn(),
+		deploying: false,
+		justDeployed: false,
 	}),
 	useNodeCatalog: () => ({
 		data: {

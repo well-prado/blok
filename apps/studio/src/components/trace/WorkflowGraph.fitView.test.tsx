@@ -37,7 +37,18 @@ vi.mock("@/hooks/useWorkflows", () => ({
 		refetch: vi.fn(),
 	}),
 	useSaveWorkflowStudio: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null }),
-	useEditWorkflowDefinition: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null }),
+	useEditWorkflowDefinition: () => ({
+		mutate: vi.fn(),
+		reset: vi.fn(),
+		isPending: false,
+		error: null,
+		hasDraft: false,
+		validation: { status: "idle" },
+		discard: vi.fn(),
+		deploy: vi.fn(),
+		deploying: false,
+		justDeployed: false,
+	}),
 	useNodeCatalog: () => ({ data: { nodes: [], count: 0 }, isLoading: false, error: null }),
 }));
 
