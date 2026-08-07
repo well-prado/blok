@@ -127,59 +127,47 @@
 		],
 		"description": "Create a legacy class-based Blok node (prefer defineNode instead)"
 	},
-	"Node Test (TestHarness)": {
+	"Node Test (runNode)": {
 		"prefix": ["blok-test", "blok-node-test"],
 		"body": [
+			"import { runNode } from \"@blokjs/core/testing\";",
 			"import { describe, it, expect } from \"vitest\";",
-			"import { NodeTestHarness, TestLogger } from \"@blokjs/runner\";",
-			"import ${1:MyNode} from \"./${2:my-node}\";",
+			"import { ${1:myNode} } from \"./${2:my-node}\";",
 			"",
-			"describe(\"${1:MyNode}\", () => {",
-			"\tconst harness = new NodeTestHarness(${1:MyNode});",
+			"describe(\"${1:myNode}\", () => {",
+			"\tit(\"${3:processes input correctly}\", async () => {",
+			"\t\tconst out = await runNode(${1:myNode}, { ${4:field}: ${5:\"test-value\"} });",
 			"",
-			"\tit(\"should ${3:process input correctly}\", async () => {",
-			"\t\tconst result = await harness.execute({",
-			"\t\t\t${4:field}: ${5:\"test-value\"},",
-			"\t\t});",
-			"",
-			"\t\tharness.assertSuccess(result);",
-			"\t\texpect(result.data).toHaveProperty(\"${6:result}\");",
+			"\t\texpect(out).toEqual({ ${6:result}: ${7:\"expected\"} });",
 			"\t});",
 			"",
-			"\tit(\"should handle errors\", async () => {",
-			"\t\tconst result = await harness.execute({",
-			"\t\t\t${4:field}: ${7:\"\"},",
-			"\t\t});",
-			"",
-			"\t\tharness.assertError(result);",
+			"\tit(\"rejects invalid input\", async () => {",
+			"\t\tawait expect(runNode(${1:myNode}, {} as never)).rejects.toThrow(/${4:field}/);",
 			"\t});",
 			"});"
 		],
-		"description": "Create a test for a Blok node using TestHarness"
+		"description": "Unit-test a Blok node in isolation with runNode()"
 	},
-	"Workflow Test (WorkflowTestRunner)": {
+	"Workflow Test (runWorkflow)": {
 		"prefix": ["blok-workflow-test"],
 		"body": [
+			"import { runWorkflow } from \"@blokjs/core/testing\";",
 			"import { describe, it, expect } from \"vitest\";",
-			"import { WorkflowTestRunner } from \"@blokjs/runner\";",
+			"import ${1:myWorkflow} from \"./${2:my-workflow}\";",
 			"",
-			"describe(\"${1:My Workflow}\", () => {",
-			"\tconst runner = new WorkflowTestRunner();",
-			"",
-			"\tit(\"should execute successfully\", async () => {",
-			"\t\trunner.mockNode(\"${2:step-name}\", async (ctx, input) => ({",
-			"\t\t\t${3:result}: \"mocked\",",
-			"\t\t}));",
-			"",
-			"\t\tconst result = await runner.execute(\"${4:./workflows/json/${5:my-workflow}.json}\", {",
-			"\t\t\tbody: { ${6:key}: ${7:\"value\"} },",
+			"describe(\"${1:myWorkflow}\", () => {",
+			"\tit(\"${3:runs end to end}\", async () => {",
+			"\t\tconst run = await runWorkflow(${1:myWorkflow}, { ${4:key}: ${5:\"value\"} }, {",
+			"\t\t\t// Mock by node ref — the return value is validated against that node's output schema.",
+			"\t\t\tmock: { \"${6:node-ref}\": async () => ({ ${7:field}: \"mocked\" }) },",
 			"\t\t});",
 			"",
-			"\t\texpect(result.success).toBe(true);",
-			"\t\trunner.assertNodeExecuted(result, \"${2:step-name}\");",
+			"\t\texpect(run.ok).toBe(true);",
+			"\t\texpect(run.state(\"${8:step-id}\")).toEqual({ ${7:field}: \"mocked\" });",
+			"\t\texpect(run.step(\"${8:step-id}\")?.executed).toBe(true);",
 			"\t});",
 			"});"
 		],
-		"description": "Create a workflow test using WorkflowTestRunner"
+		"description": "Test a typed-handle workflow with runWorkflow()"
 	}
 }

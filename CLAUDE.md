@@ -67,6 +67,22 @@ runner persist it.
   `retry`, and `maxDuration`.
 - `ephemeral: true` means no state slot; do not read the returned handle.
 
+## Testing
+
+`runNode` / `runWorkflow` from `@blokjs/core/testing` — no server, no Docker, no
+vitest config. See `docs/d/fundamentals/testing.mdx`.
+
+```ts
+const out = await runNode(orderValidator, { body: { id: "o-1" } });
+const run = await runWorkflow(orderFlow, { id: "o-1", total: 120 }, {
+  mock: { "charge-card": async () => ({ receipt: "rc_1" }) },
+});
+run.ok; run.state("validate"); run.step("charge")?.inputs; run.step("flag")?.executed;
+```
+
+`runWorkflow` takes the `workflow()` export directly. Mocks are keyed by node
+ref and validated against that node's Zod output schema.
+
 ## Footguns
 
 1. Arm-scoped handles do not escape their branch/switch/tryCatch arm.
