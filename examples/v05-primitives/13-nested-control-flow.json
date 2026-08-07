@@ -13,7 +13,7 @@
 		{
 			"id": "per-item-pipeline",
 			"forEach": {
-				"in": "$.req.body.items",
+				"in": "js/ctx.request.body.items",
 				"as": "item",
 				"mode": "sequential",
 				"do": [
@@ -24,7 +24,7 @@
 								{
 									"id": "by-type",
 									"switch": {
-										"on": "$.state.item.type",
+										"on": "js/ctx.state.item.type",
 										"cases": [
 											{
 												"when": "physical",
@@ -34,8 +34,8 @@
 														"use": "inventory-reserve",
 														"type": "module",
 														"inputs": {
-															"sku": "$.state.item.sku",
-															"qty": "$.state.item.qty"
+															"sku": "js/ctx.state.item.sku",
+															"qty": "js/ctx.state.item.qty"
 														}
 													},
 													{
@@ -43,8 +43,8 @@
 														"use": "shipping-schedule",
 														"type": "module",
 														"inputs": {
-															"address": "$.req.body.shipTo",
-															"sku": "$.state.item.sku"
+															"address": "js/ctx.request.body.shipTo",
+															"sku": "js/ctx.state.item.sku"
 														}
 													}
 												]
@@ -57,8 +57,8 @@
 														"use": "license-create",
 														"type": "module",
 														"inputs": {
-															"productId": "$.state.item.productId",
-															"userId": "$.state.identity.sub"
+															"productId": "js/ctx.state.item.productId",
+															"userId": "js/ctx.state.identity.sub"
 														}
 													}
 												]
@@ -71,9 +71,9 @@
 														"use": "service-schedule",
 														"type": "module",
 														"inputs": {
-															"kind": "$.state.item.serviceKind",
-															"date": "$.state.item.scheduledFor",
-															"customerId": "$.state.identity.sub"
+															"kind": "js/ctx.state.item.serviceKind",
+															"date": "js/ctx.state.item.scheduledFor",
+															"customerId": "js/ctx.state.identity.sub"
 														}
 													}
 												]
@@ -85,7 +85,7 @@
 												"use": "throw",
 												"type": "module",
 												"inputs": {
-													"message": "Unknown item type: $.state.item.type"
+													"message": "js/`Unknown item type: ${ctx.state.item.type}`"
 												}
 											}
 										]
@@ -99,21 +99,21 @@
 									"type": "module",
 									"inputs": {
 										"event": "item-process-failure",
-										"item": "$.state.item",
-										"error": "$.error.message"
+										"item": "js/ctx.state.item",
+										"error": "js/ctx.error.message"
 									}
 								},
 								{
 									"id": "decide-on-failure",
 									"branch": {
-										"when": "$.state.item.required === true",
+										"when": "ctx.state.item.required === true",
 										"then": [
 											{
 												"id": "rethrow",
 												"use": "throw",
 												"type": "module",
 												"inputs": {
-													"message": "Required item $.state.item.sku failed: $.error.message"
+													"message": "js/`Required item ${ctx.state.item.sku} failed: ${ctx.error.message}`"
 												}
 											}
 										],
@@ -124,7 +124,7 @@
 												"type": "module",
 												"inputs": {
 													"level": "warn",
-													"message": "Optional item $.state.item.sku skipped due to: $.error.message"
+													"message": "js/`Optional item ${ctx.state.item.sku} skipped due to: ${ctx.error.message}`"
 												}
 											}
 										]
@@ -143,8 +143,8 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"orderId": "$.req.body.id",
-					"itemsProcessed": "$.state['per-item-pipeline'].length"
+					"orderId": "js/ctx.request.body.id",
+					"itemsProcessed": "js/ctx.state['per-item-pipeline'].length"
 				}
 			}
 		}

@@ -33,7 +33,7 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Identity
 
 <ParamField path="id" type="string (min 1)" required>
-  Stable identifier. Other steps reference output as `$.state[id]`.
+  Stable identifier. Other steps reference output as `ctx.state[id]`.
 </ParamField>
 
 <ParamField path="use" type="string (min 1)" required>
@@ -55,8 +55,8 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Inputs
 
 <ParamField path="inputs" type="Record<string, unknown>">
-  Inputs passed to the node. May contain `$`-proxy refs (e.g.
-  `$.state.foo`, `$.req.body.id`) or `js/...` expressions for runtime
+  Inputs passed to the node. May contain `js/...` expressions (e.g.
+  `js/ctx.state.foo`, `js/ctx.request.body.id`) for runtime
   evaluation.
 </ParamField>
 
@@ -83,7 +83,7 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Reliability (Tier 1)
 
 <ParamField path="idempotencyKey" type="string">
-  Cache key — literal or `$`-proxy. See
+  Cache key — literal string or a `js/ctx....` expression. See
   [idempotent step caching](/d/reliability/idempotency).
 </ParamField>
 
@@ -135,7 +135,7 @@ Authoritative source: `V2BranchStepSchema`.
 {
   id: "route",
   branch: {
-    when: '$.req.method === "POST"',
+    when: 'ctx.request.method === "POST"',
     then: [
       { id: "create", use: "...", inputs: {} },
     ],
@@ -153,9 +153,9 @@ Authoritative source: `V2BranchStepSchema`.
 </ParamField>
 
 <ParamField path="branch.when" type="string" required>
-  JavaScript expression. Truthy → run `then`; falsy → run `else`.
-  `$`-proxy expressions compile to strings at the call site (e.g.
-  `$.req.query.kind === "true"`).
+  JavaScript expression, evaluated directly against `ctx` (no `$`
+  proxy, no `js/` prefix). Truthy → run `then`; falsy → run `else`
+  (e.g. `ctx.request.query.kind === "true"`).
 </ParamField>
 
 <ParamField path="branch.then" type="V2Step[]" required>
@@ -174,9 +174,8 @@ Authoritative source: `V2BranchStepSchema`.
   If true, the workflow halts after this step.
 </ParamField>
 
-For equality comparisons in `when`, use a string literal:
-`'$.req.method === "POST"'`. JavaScript's `===` operator can't be
-intercepted by the proxy.
+For equality comparisons, `when` is a plain string containing a JS
+expression: `'ctx.request.method === "POST"'`.
 
 ## Sub-workflow step
 
@@ -184,13 +183,13 @@ Authoritative source: `V2SubworkflowStepSchema`. See
 [sub-workflows](/d/composition/sub-workflows) for the full author guide.
 
 <ParamField path="id" type="string (min 1)" required>
-  Stable identifier. The child's response lands at `$.state[id]`.
+  Stable identifier. The child's response lands at `ctx.state[id]`.
 </ParamField>
 
 <ParamField path="subworkflow" type="string (min 1)" required>
   Name of the workflow to invoke. **Literal names** (`"send-receipt"`)
-  are looked up directly. **Polymorphic expressions** (`"$.req.body.kind"`,
-  `"js/ctx.req.body.kind"`) resolve against the live ctx at dispatch
+  are looked up directly. **Polymorphic expressions**
+  (`"js/ctx.request.body.kind"`) resolve against the live ctx at dispatch
   time — pair with `allowList` to constrain which workflows the
   expression may resolve to. Must match a `name:` field registered in
   the [Workflow Registry](/d/reference/workflow-registry).
@@ -266,7 +265,7 @@ Authoritative source:
 Spread from [`ConcurrencyOptsFields`](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L19-L50).
 
 <ParamField path="concurrencyKey" type="string">
-  Per-key concurrency gate. Literal string or `$.<path>` proxy
+  Per-key concurrency gate. Literal string or a `js/ctx....`
   expression evaluated against the live `ctx`. When unset, no gating
   applies. See [concurrency keys](/d/reliability/concurrency-keys).
 </ParamField>
@@ -314,7 +313,7 @@ Spread from [`SchedulingOptsFields`](https://github.com/deskree-inc/blok/blob/ma
 ### DebounceOpts
 
 <ParamField path="key" type="string" required>
-  Literal string or `$.<path>` proxy expression. Pings sharing the
+  Literal string or a `js/ctx....` expression. Pings sharing the
   resolved key collapse.
 </ParamField>
 

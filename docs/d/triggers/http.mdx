@@ -41,7 +41,7 @@ The `http.*` helper sets `method` + `path`; the rest go in its options object �
 | `accept` | `string` | `"application/json"` | Response content-type. Use `"text/html"` for UI nodes. |
 | `headers` | `Record<string, string>` | — | Required headers validated at trigger entry. A request missing any declared header is rejected before any step runs. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware chain. Resolved by name from the middleware registry. |
-| `concurrencyKey` | `string` \| `$.path` | — | Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `concurrencyKey` | `string` (literal or `js/ctx....`) | — | Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 | `onLimit` | `"throw"` \| `"queue"` | `"throw"` | What happens when the limit is hit. |
 | `delay` | `string` \| `number` | — | Defer the run. See [delay & TTL](/d/scheduling/delay-and-ttl). |

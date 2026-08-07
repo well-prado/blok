@@ -153,7 +153,8 @@ export default abstract class BlokService<T> extends NodeBase {
 
 		// Hand the raw result back to the runner. RunnerSteps mirrors
 		// response.data into ctx.response so adjacent-step access via
-		// `ctx.prev` / `$.prev` keeps working.
+		// `ctx.prev` (or `js/ctx.prev` / `js/ctx.response` in JSON) keeps
+		// working.
 		response.data = result;
 		// Mirror the inner BlokResponse error state onto the outer envelope
 		// the metrics block at the bottom of run() reads. Without this flip

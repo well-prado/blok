@@ -21,15 +21,15 @@ import { useState } from "react";
  * get `lowerRefs` — WorkflowNormalizer.ts:604-609). At RUN time,
  * `RunnerSteps.ts`'s `computeDeadline` (lines 445-464) only ever calls
  * `Number(waitUntil)` or `Date.parse(waitUntil)` on the stored value — no
- * ctx/Mapper resolution either. A `js/ctx...` or `$.state...` string
- * written here is stored VERBATIM and fails to parse as a number or date
- * at run time (RunnerSteps.ts:456-458 throws a clear "cannot parse" error)
- * — the StepOpts.ts JSDoc's "or a $-proxy expression" claim for `until`
- * does not match the shipped runtime. Two v0.5-primitives example fixtures
- * (`examples/v05-primitives/09-polling-with-backoff.json`) write
- * `"for": "$.state['compute-delay']"` — that pattern does NOT work against
- * the real runtime; treat those examples as aspirational/stale, not
- * authoritative.
+ * ctx/Mapper resolution either. Any expression string written here — a
+ * handle ref, a `tpl`, or a raw `js/ctx...` — is stored VERBATIM and fails
+ * to parse as a number or date at run time (RunnerSteps.ts:456-458 throws a
+ * clear "cannot parse" error). `wait` is LITERAL-ONLY, in both fields.
+ *
+ * `examples/v05-primitives/09-polling-with-backoff.json` used to encode a
+ * computed backoff here and could never have worked; it now uses a literal
+ * interval and documents the limitation. Dynamic delays belong inside a
+ * node until `wait` grows a resolution pass.
  *
  * `for` grammar mirrors `DurationSchema` (core/workflow-helper/src/types/
  * TriggerOpts.ts:167-175): a non-negative integer (ms) or `<int><unit>`

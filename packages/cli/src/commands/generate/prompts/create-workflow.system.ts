@@ -24,7 +24,7 @@ What to return:
 }
 \`\`\`
 
-- \`id\` (required): unique identifier for the step. Every step's output is auto-persisted to \`ctx.state[<id>]\` on success — reference it later as \`"$.state.<id>"\`.
+- \`id\` (required): unique identifier for the step. Every step's output is auto-persisted to \`ctx.state[<id>]\` on success — reference it later as \`"js/ctx.state.<id>"\`.
 - \`use\` (required): the node to run — a package name (\`"@blokjs/api-call"\`) or a local node name (\`"fetch-user"\`).
 - \`inputs\` (optional): the node's input object (see Input Value Patterns).
 - \`type\` (optional): inferred from \`use\` when omitted. Use \`"runtime.<lang>"\` (e.g. \`"runtime.go"\`, \`"runtime.python3"\`) for cross-runtime nodes.
@@ -33,7 +33,7 @@ What to return:
 
 - \`"as": "name"\` — store the output at \`ctx.state[name]\` instead of \`ctx.state[id]\`.
 - \`"spread": true\` — shallow-merge the node's \`result.data\` keys into \`ctx.state\` (multi-output nodes). Mutually exclusive with \`as\`.
-- \`"ephemeral": true\` — skip persistence (only the immediately next step can read it via \`$.prev\`). Use for logging / response-only steps.
+- \`"ephemeral": true\` — skip persistence (only the immediately next step can read it via \`"js/ctx.prev"\`). Use for logging / response-only steps.
 
 ## Conditional Routing (branch)
 
@@ -50,26 +50,26 @@ A conditional is a SINGLE step with a \`branch\` object — NOT a \`conditions\`
 }
 \`\`\`
 
-- \`when\` is a RAW JavaScript expression over \`ctx.*\` — e.g. \`"ctx.state.user.active === true"\`, \`"ctx.req.body.amount > 100"\`. **Never** prefix it with \`js/\` or \`$.\` (those throw at runtime).
+- \`when\` is a RAW JavaScript expression over \`ctx.*\` — e.g. \`"ctx.state.user.active === true"\`, \`"ctx.request.body.amount > 100"\`. **Never** prefix it with \`js/\` (throws at runtime).
 - \`then\` (required) and \`else\` (optional) are arrays of steps, same shape as top-level steps.
 - Step ids are FLAT across the whole workflow, including branch arms — every id must be unique.
 
 ## Input Value Patterns
 
 1. **Static values**: \`"message": "Hello World"\`, \`"retries": 3\`, \`"headers": { "Accept": "application/json" }\`
-2. **Reference another step's output**: \`"$.state.<step-id>"\` — e.g. \`"body": "$.state.fetch-user"\`. Access a field with dot paths: \`"$.state.fetch-user.user.id"\`.
-3. **Request data**: \`"$.req.body"\`, \`"$.req.params.id"\`, \`"$.req.query.search"\`, \`"$.req.headers"\`, \`"$.req.method"\`.
-4. **Previous step (adjacent only)**: \`"$.prev"\` — the immediately previous step's output. For non-adjacent reads always use \`"$.state.<id>"\`.
-5. **Inline JavaScript** (when you need logic): a \`"js/..."\` string — e.g. \`"url": "js/\\\`https://api/users/\\\${ctx.req.params.id}\\\`"\`. \`$.\` strings compile to \`js/ctx.\` automatically; \`js/\` lets you write the expression by hand.
+2. **Reference another step's output**: \`"js/ctx.state.<step-id>"\` — e.g. \`"body": "js/ctx.state.fetch-user"\`. Access a field with dot paths: \`"js/ctx.state.fetch-user.user.id"\`.
+3. **Request data**: \`"js/ctx.request.body"\`, \`"js/ctx.request.params.id"\`, \`"js/ctx.request.query.search"\`, \`"js/ctx.request.headers"\`, \`"js/ctx.request.method"\`.
+4. **Previous step (adjacent only)**: \`"js/ctx.prev"\` — the immediately previous step's output. For non-adjacent reads always use \`"js/ctx.state.<id>"\`.
+5. **Inline JavaScript** (when you need logic): a \`"js/..."\` string — e.g. \`"url": "js/\\\`https://api/users/\\\${ctx.request.params.id}\\\`"\`.
 
-(\`$.request\` = \`$.req\`, \`$.response\` = \`$.prev\`, \`$.vars\` = \`$.state\` are legacy aliases — prefer the canonical \`$.req\` / \`$.prev\` / \`$.state\`.)
+(\`ctx.req\` = \`ctx.request\`, \`ctx.prev\` = \`ctx.response\`, \`ctx.vars\` = \`ctx.state\` are legacy aliases — prefer the canonical \`ctx.request\` / \`ctx.response\` / \`ctx.state\`.)
 
 ## Controlling the HTTP response
 
 End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers / cookies / redirect / binary. Mark it \`"ephemeral": true\`.
 
 \`\`\`json
-{ "id": "send", "use": "@blokjs/respond", "inputs": { "status": 201, "body": "$.state.create" }, "ephemeral": true }
+{ "id": "send", "use": "@blokjs/respond", "inputs": { "status": 201, "body": "js/ctx.state.create" }, "ephemeral": true }
 \`\`\`
 
 ## Trigger Types (exactly one)
@@ -86,7 +86,7 @@ End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers
 "trigger": { "worker": { "queue": "background-jobs", "provider": "nats", "concurrency": 5, "retries": 3 } }
 \`\`\`
 - This is the trigger for ANY queued / async / background work. **Never use a \`queue\` trigger — it is dead and throws at construction.**
-- Job payload arrives as \`$.req.body\`; metadata as \`$.req.params.{queue,jobId,attempt}\`.
+- Job payload arrives as \`"js/ctx.request.body"\`; metadata as \`"js/ctx.request.params.{queue,jobId,attempt}"\`.
 
 ### Cron (scheduled)
 \`\`\`json
@@ -123,9 +123,9 @@ End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers
 * The JSON MUST be valid and well-formed (2-space indentation, no trailing commas, no comments)
 * Every step MUST have a unique \`id\` and a \`use\` (or a \`branch\`)
 * Do NOT emit a \`nodes\` object, a \`conditions\` array, \`set_var\`, \`ctx.vars[...] =\`, or \`js/ctx.response\`
-* Branch \`when\` MUST be a raw \`ctx.*\` expression (never \`js/\` or \`$.\`)
+* Branch \`when\` MUST be a raw \`ctx.*\` expression (never \`js/\`-prefixed)
 * Use \`"ANY"\` for the wildcard HTTP method (never \`"*"\`)
-* Reference earlier outputs with \`"$.state.<id>"\` and request data with \`"$.req.*"\`
+* Reference earlier outputs with \`"js/ctx.state.<id>"\` and request data with \`"js/ctx.request.*"\`
 * The workflow MUST have exactly ONE trigger type
 * Use descriptive kebab-case step ids (e.g. "fetch-user", "validate-input")
 
@@ -141,7 +141,7 @@ End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers
   "steps": [
     { "id": "get-countries", "use": "@blokjs/api-call",
       "inputs": { "url": "https://countriesnow.space/api/v0.1/countries/capital", "method": "GET" } },
-    { "id": "respond", "use": "@blokjs/respond", "inputs": { "body": "$.state.get-countries" }, "ephemeral": true }
+    { "id": "respond", "use": "@blokjs/respond", "inputs": { "body": "js/ctx.state['get-countries']" }, "ephemeral": true }
   ]
 }
 \`\`\`
@@ -154,12 +154,12 @@ End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers
   "version": "1.0.0",
   "trigger": { "http": { "method": "POST", "path": "/orders" } },
   "steps": [
-    { "id": "validate", "use": "order-validator", "inputs": { "order": "$.req.body" } },
+    { "id": "validate", "use": "order-validator", "inputs": { "order": "js/ctx.request.body" } },
     { "id": "route",
       "branch": {
         "when": "ctx.state.validate.total > 100",
-        "then": [{ "id": "vip-save",   "use": "order-store", "inputs": { "data": "$.state.validate", "tier": "vip" } }],
-        "else": [{ "id": "std-save",   "use": "order-store", "inputs": { "data": "$.state.validate", "tier": "std" } }]
+        "then": [{ "id": "vip-save",   "use": "order-store", "inputs": { "data": "js/ctx.state.validate", "tier": "vip" } }],
+        "else": [{ "id": "std-save",   "use": "order-store", "inputs": { "data": "js/ctx.state.validate", "tier": "std" } }]
       }
     }
   ]
@@ -174,9 +174,9 @@ End an HTTP workflow with a \`@blokjs/respond\` step for custom status / headers
   "version": "1.0.0",
   "trigger": { "worker": { "queue": "uploads", "provider": "nats", "retries": 3 } },
   "steps": [
-    { "id": "process", "use": "file-processor", "inputs": { "payload": "$.req.body", "jobId": "$.req.params.jobId" } },
+    { "id": "process", "use": "file-processor", "inputs": { "payload": "js/ctx.request.body", "jobId": "js/ctx.request.params.jobId" } },
     { "id": "notify",  "use": "@blokjs/api-call",
-      "inputs": { "url": "https://hooks.example.com/done", "method": "POST", "body": "$.state.process" } }
+      "inputs": { "url": "https://hooks.example.com/done", "method": "POST", "body": "js/ctx.state.process" } }
   ]
 }
 \`\`\`
@@ -196,8 +196,8 @@ Given the existing workflow JSON below, enhance or modify it according to the us
 1. Valid v2 JSON structure: name, description, version, trigger, steps (inline inputs, NO nodes map)
 2. Consistent trigger configuration (exactly one trigger type)
 3. Unique \`id\` on every step (flat across branch arms)
-4. Branch conditions as raw \`ctx.*\` expressions (never \`js/\` or \`$.\`)
-5. References via \`"$.state.<id>"\` / \`"$.req.*"\` and persistence knobs (\`as\`/\`spread\`/\`ephemeral\`)
+4. Branch conditions as raw \`ctx.*\` expressions (never \`js/\`-prefixed)
+5. References via \`"js/ctx.state.<id>"\` / \`"js/ctx.request.*"\` and persistence knobs (\`as\`/\`spread\`/\`ephemeral\`)
 
 What to return:
 * Return only the full updated workflow JSON

@@ -15,13 +15,13 @@
 			"use": "subscriber-list",
 			"type": "module",
 			"inputs": {
-				"eventType": "$.req.body.type"
+				"eventType": "js/ctx.request.body.type"
 			}
 		},
 		{
 			"id": "dispatch-to-each",
 			"forEach": {
-				"in": "$.state['load-subscribers']",
+				"in": "js/ctx.state['load-subscribers']",
 				"as": "subscriber",
 				"mode": "parallel",
 				"concurrency": 10,
@@ -36,17 +36,17 @@
 							"maxTimeoutInMs": 10000,
 							"factor": 2
 						},
-						"idempotencyKey": "$.req.body.id-$.state.subscriber.id",
+						"idempotencyKey": "js/`${ctx.request.body.id}-${ctx.state.subscriber.id}`",
 						"maxDuration": "10s",
 						"inputs": {
-							"url": "$.state.subscriber.url",
+							"url": "js/ctx.state.subscriber.url",
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
-								"X-Webhook-Signature": "$.state.subscriber.signature",
-								"X-Event-Id": "$.req.body.id"
+								"X-Webhook-Signature": "js/ctx.state.subscriber.signature",
+								"X-Event-Id": "js/ctx.request.body.id"
 							},
-							"body": "$.req.body"
+							"body": "js/ctx.request.body"
 						}
 					}
 				]
@@ -59,9 +59,9 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"eventId": "$.req.body.id",
-					"dispatched": "$.state['dispatch-to-each'].length",
-					"subscriberIds": "$.state['load-subscribers'].map(s => s.id)"
+					"eventId": "js/ctx.request.body.id",
+					"dispatched": "js/ctx.state['dispatch-to-each'].length",
+					"subscriberIds": "js/ctx.state['load-subscribers'].map(s => s.id)"
 				}
 			}
 		}

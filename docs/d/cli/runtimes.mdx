@@ -115,7 +115,7 @@ runtime. Write your node under `runtimes/<lang>/nodes/`, then declare the step:
   "id": "resize",
   "use": "image-resizer",
   "type": "runtime.python3",
-  "inputs": { "image": "$.req.body.image" }
+  "inputs": { "image": "js/ctx.request.body.image" }
 }
 ```
 

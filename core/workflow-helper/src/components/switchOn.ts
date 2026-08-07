@@ -1,12 +1,10 @@
-import { unwrapProxies } from "../proxy/$";
 import type { V2Step, V2StepUi, V2SwitchStep } from "../types/StepOpts";
 
 /**
  * Author-facing options for {@link switchOn}.
  *
- * `on` accepts either a `$` proxy expression (compiles to a `js/...`
- * string at definition time) or a literal value. Whatever it resolves
- * to at run time is matched against each `case.when`:
+ * `on` accepts a `js/...` expression string or a literal value. Whatever it
+ * resolves to at run time is matched against each `case.when`:
  *
  * - `when` is a literal scalar → match if `on === when`
  * - `when` is an array → match if `array.includes(on)` (group related cases)
@@ -18,8 +16,8 @@ export interface SwitchCase {
 	/**
 	 * Match value. Literal scalar (number/string/boolean) for strict
 	 * equality, or an array for any-of matching. Resolved by the
-	 * blueprint mapper before comparison — `$` proxies and `js/...`
-	 * strings are evaluated against the live ctx.
+	 * blueprint mapper before comparison — `js/...` strings are evaluated
+	 * against the live ctx.
 	 */
 	when: unknown;
 	/** Sub-pipeline run when this case matches. */
@@ -27,11 +25,12 @@ export interface SwitchCase {
 }
 
 export interface SwitchOpts {
-	/** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+	/** Stable identifier — visible in traces, referenced as `ctx.state[id]`. */
 	id: string;
 	/**
-	 * Value to match against. `$` proxy expression (`$.req.headers["x-tenant-id"]`),
-	 * `js/...` string, or any literal. Resolved at run time before matching.
+	 * Value to match against. `js/...` expression string (e.g.
+	 * `"js/ctx.request.headers['x-tenant-id']"`) or any literal. Resolved at
+	 * run time before matching.
 	 */
 	on: unknown;
 	/** Ordered list of cases. First match wins. */
@@ -57,7 +56,7 @@ export interface SwitchOpts {
  * @example
  *   switchOn({
  *     id: "route-by-event",
- *     on: $.req.headers["x-github-event"],
+ *     on: "js/ctx.request.headers['x-github-event']",
  *     cases: [
  *       { when: "push", do: [{ id: "handle-push", subworkflow: "handle-push" }] },
  *       {
@@ -102,17 +101,17 @@ export function switchOn(opts: SwitchOpts): V2SwitchStep {
 		}
 	}
 
-	const onExpr = unwrapProxies(opts.on);
+	const onExpr = opts.on;
 	const cases = opts.cases.map((c) => ({
-		when: unwrapProxies(c.when),
-		do: unwrapProxies(c.do) as V2Step[],
+		when: c.when,
+		do: c.do as V2Step[],
 	}));
 	const result: V2SwitchStep = {
 		id: opts.id,
 		switch: {
 			on: onExpr,
 			cases,
-			...(opts.default !== undefined ? { default: unwrapProxies(opts.default) as V2Step[] } : {}),
+			...(opts.default !== undefined ? { default: opts.default as V2Step[] } : {}),
 		},
 		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};

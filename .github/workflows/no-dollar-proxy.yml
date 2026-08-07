@@ -1,0 +1,32 @@
+name: No $ proxy
+
+# The `$` proxy authoring sugar is deleted (issue #689) — this gate keeps it
+# deleted. It's a plain `git grep`, no build/install needed, so it runs on
+# EVERY push/PR with no paths-ignore — unlike integration.yml and
+# scaffold-smoke.yml, which skip docs-only changes for speed. Docs are
+# exactly where a stray old-style example is most likely to creep back in.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: no-dollar-proxy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: No $ proxy shapes outside the allowed files
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: No $ proxy check
+        run: bash scripts/check-no-dollar-proxy.sh

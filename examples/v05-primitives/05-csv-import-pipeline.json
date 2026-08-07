@@ -16,7 +16,7 @@
 			"use": "csv-parser",
 			"type": "module",
 			"inputs": {
-				"data": "$.req.body",
+				"data": "js/ctx.request.body",
 				"headers": true,
 				"delimiter": ","
 			}
@@ -24,7 +24,7 @@
 		{
 			"id": "process-rows",
 			"forEach": {
-				"in": "$.state['parse-csv'].rows",
+				"in": "js/ctx.state['parse-csv'].rows",
 				"as": "row",
 				"mode": "sequential",
 				"do": [
@@ -37,8 +37,8 @@
 									"use": "row-validator",
 									"type": "module",
 									"inputs": {
-										"row": "$.state.row",
-										"rowNumber": "$.state.rowIndex"
+										"row": "js/ctx.state.row",
+										"rowNumber": "js/ctx.state.rowIndex"
 									}
 								},
 								{
@@ -46,17 +46,17 @@
 									"use": "row-transformer",
 									"type": "module",
 									"inputs": {
-										"row": "$.state.row"
+										"row": "js/ctx.state.row"
 									}
 								},
 								{
 									"id": "insert",
 									"use": "db-insert",
 									"type": "module",
-									"idempotencyKey": "$.req.body.importId-$.state.rowIndex",
+									"idempotencyKey": "js/`${ctx.request.body.importId}-${ctx.state.rowIndex}`",
 									"inputs": {
 										"table": "users",
-										"data": "$.state.transform"
+										"data": "js/ctx.state.transform"
 									}
 								}
 							],
@@ -68,11 +68,11 @@
 									"inputs": {
 										"table": "import_failures",
 										"data": {
-											"importId": "$.req.body.importId",
-											"rowNumber": "$.state.rowIndex",
-											"row": "$.state.row",
-											"error": "$.error.message",
-											"errorCode": "$.error.code",
+											"importId": "js/ctx.request.body.importId",
+											"rowNumber": "js/ctx.state.rowIndex",
+											"row": "js/ctx.state.row",
+											"error": "js/ctx.error.message",
+											"errorCode": "js/ctx.error.code",
 											"failedAt": "new Date().toISOString()"
 										}
 									}
@@ -88,8 +88,8 @@
 			"use": "import-summary",
 			"type": "module",
 			"inputs": {
-				"results": "$.state['process-rows']",
-				"importId": "$.req.body.importId"
+				"results": "js/ctx.state['process-rows']",
+				"importId": "js/ctx.request.body.importId"
 			}
 		},
 		{
@@ -99,11 +99,11 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"importId": "$.req.body.importId",
-					"totalRows": "$.state['parse-csv'].rows.length",
-					"succeeded": "$.state.summarize.succeeded",
-					"failed": "$.state.summarize.failed",
-					"dlqUrl": "/imports/csv/$.req.body.importId/failures"
+					"importId": "js/ctx.request.body.importId",
+					"totalRows": "js/ctx.state['parse-csv'].rows.length",
+					"succeeded": "js/ctx.state.summarize.succeeded",
+					"failed": "js/ctx.state.summarize.failed",
+					"dlqUrl": "js/`/imports/csv/${ctx.request.body.importId}/failures`"
 				}
 			}
 		}

@@ -33,7 +33,7 @@ This fires at 2:00 AM every day in `America/New_York`.
 |---|---|---|---|
 | `schedule` | `string` | required | Standard cron expression (`m h dom mon dow`). |
 | `timezone` | `string` | `"UTC"` | IANA timezone — `"America/New_York"`, `"Europe/London"`, etc. |
-| `concurrencyKey` | `string` \| `$.path` | — | Useful when one schedule fans out per-tenant; concurrencyKey prevents overlap. |
+| `concurrencyKey` | `string` (literal or `js/ctx....`) | — | Useful when one schedule fans out per-tenant; concurrencyKey prevents overlap. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware. |
 
 ## Cron expression reference

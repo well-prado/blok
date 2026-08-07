@@ -39,9 +39,9 @@ Core principle: **TS gives you autocomplete + Zod validation at definition time.
 import type { ForEachStep, V2Step } from "@blokjs/helper";
 
 export interface ForEachOpts {
-  /** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+  /** Stable identifier — visible in traces, referenced as `ctx.state[id]`. */
   id: string;
-  /** Array source. Literal expression string or `$` proxy. */
+  /** Array source. Literal value or a `"js/ctx...."` expression string. */
   in: string | unknown;
   /**
    * Per-iteration variable name. Each iteration sets `ctx.state[as]` to the
@@ -70,15 +70,19 @@ export function forEach(opts: ForEachOpts): ForEachStep;
 {
   id: opts.id,
   forEach: {
-    in: typeof opts.in === "string" ? opts.in : unwrapProxies(opts.in),
+    in: opts.in,
     as: opts.as,
     mode: opts.mode ?? "sequential",
     concurrency: opts.concurrency ?? 10,
-    do: unwrapProxies(opts.do),
+    do: opts.do,
   },
   // active / stop hoisted to top level if set
 }
 ```
+
+(As shipped at v0.5, `in`/`do` also compiled a `$` proxy value to its `js/ctx....`
+string form here — the `$` proxy was fully removed in the later core redesign;
+`in`/`do` are passed through unchanged today.)
 
 **Zod validation at definition time:**
 
@@ -134,7 +138,7 @@ export interface SwitchCase {
 
 export interface SwitchOpts {
   id: string;
-  /** Value to switch on. Literal or `$` proxy. */
+  /** Value to switch on. Literal or a `"js/ctx...."` expression string. */
   on: string | unknown;
   cases: SwitchCase[];
   /** Run when no case matches. Omitted = no-op (skip the switch step). */
@@ -155,7 +159,7 @@ export interface TryCatchOpts {
   id: string;
   /** Run first. If any step throws or returns an error, switch to catch[]. */
   try: V2Step[];
-  /** Runs when try[] errors. Has access to `$.error`. */
+  /** Runs when try[] errors. Has access to `ctx.error`. */
   catch: V2Step[];
   /** Always runs, after try[] succeeds OR after catch[] finishes (even on catch errors). */
   finally?: V2Step[];
@@ -166,7 +170,7 @@ export interface TryCatchOpts {
 export function tryCatch(opts: TryCatchOpts): TryCatchStep;
 ```
 
-**`$.error` proxy:** new proxy variable accessible only inside `catch[]`. Shape: `{ message: string, code?: number, name?: string, stack?: string, cause?: unknown }`. Resolves at expression-evaluation time inside catch steps.
+**`ctx.error`:** new binding accessible only inside `catch[]`. Shape: `{ message: string, code?: number, name?: string, stack?: string, cause?: unknown }`. Resolves at expression-evaluation time inside catch steps. (Originally authored as a `$.error` proxy read; the `$` proxy was later removed — authors read it as `"js/ctx.error...."` in JSON workflows or as the typed `error` handle passed to `catch` in the `@blokjs/core` DSL.)
 
 ### Middleware shape
 
@@ -439,7 +443,7 @@ private async runTryCatchStep(ctx: Context, step: TryCatchInternalStep) {
     finalResponse = ctx.response;
   } catch (err: unknown) {
     caughtError = err instanceof Error ? err : new Error(String(err));
-    // Expose $.error to catch[] via ctx
+    // Expose ctx.error to catch[]
     (ctx as unknown as Record<string, unknown>).error = serializeError(caughtError);
     try {
       await catchRunner.run(ctx);
@@ -467,7 +471,7 @@ private async runTryCatchStep(ctx: Context, step: TryCatchInternalStep) {
 
 **Implementation notes:**
 
-- `$.error` proxy resolves to `ctx.error` set inside the catch path.
+- Authors read the caught error via `ctx.error`, set inside the catch path.
 - Cleared after `finally` completes so downstream steps don't see stale error state.
 - `finally` ALWAYS runs, even if catch throws (matches JS `try/catch/finally` semantics).
 - If catch succeeds (no rethrow), the tryCatch step succeeds — error is consumed.
@@ -722,7 +726,7 @@ done | sort | uniq -c
 | Mock | Replace with |
 |---|---|
 | `compute-delay` expr | Real (uses `@blokjs/expr`) |
-| `wait-backoff` with computed delay | Real (`wait` already supports `$.state` references) |
+| `wait-backoff` with computed delay | Real (`wait` already supports `ctx.state` references) |
 | `check` to `api.example.com/status` | `@blokjs/api-call` to a sub-workflow `fake-status` that returns "pending" twice then "ready" via in-memory KV counter |
 
 **Curl test:**
@@ -900,7 +904,7 @@ describe("ForEachNode", () => {
   it("propagates errors to the parent");
   it("preserves index order in parallel results");
   it("isolates per-iteration state");
-  it("resolves $.req / $.state expressions in `in`");
+  it("resolves js/ctx.request / js/ctx.state expressions in `in`");
 });
 ```
 
@@ -948,7 +952,7 @@ Single page covering all four flow primitives. Sections:
 3. **`switch`** — multi-branch by value, examples, when-to-use vs `branch`
 4. **`forEach`** — sequential vs parallel, concurrency cap, examples
 5. **`loop`** — while-condition, maxIterations safety, examples
-6. **`tryCatch`** — try/catch/finally, `$.error` proxy, composition with retry
+6. **`tryCatch`** — try/catch/finally, error handling via `ctx.error`, composition with retry
 7. **Composition guide** — when to nest what, depth limits, common anti-patterns
 8. **Reliability composition** — how each primitive composes with `idempotencyKey`, `retry`, `maxDuration`
 
@@ -1012,11 +1016,11 @@ Deliverables:
 
 Ships as one PR.
 
-### Phase C — `tryCatch` + `$.error` proxy (2-3 days)
+### Phase C — `tryCatch` + error-handling primitive (2-3 days)
 
 Deliverables:
 1. Runner-intercepted `tryCatch` execution in `RunnerSteps.ts`. Tested for try-success, try-fail/catch-success, try-fail/catch-fail, finally-always-runs, finally-throws-handled.
-2. `$.error` proxy in `core/workflow-helper/src/proxy/$.ts`.
+2. Authoring sugar for reading the caught error at `ctx.error` inside `catch[]`. (Shipped originally as a typed proxy over that path; the proxy module was fully removed in the later core redesign — authors now use `"js/ctx.error...."` strings in JSON workflows, or the typed `error` handle passed to `catch` in the `@blokjs/core` DSL. See the [$ proxy removal migration guide](/c/migration-guides/dollar-proxy-removal).)
 3. `tryCatch()` helper. Zod schema.
 4. Normalizer extension for `step.tryCatch`.
 5. **Real working examples 01 (order-fulfillment), 05 (csv-import), 11 (signup-saga), 12 (data-export), 14 (travel-saga)** — these use `tryCatch`.
@@ -1103,7 +1107,7 @@ When `as: "item"` is set, where does `ctx.state.item` live? Options:
 
 Should we add `count: 10` for "do this 10 times"? Or only `while`?
 
-**Recommendation:** `while` only for v0.5. `count` is `loop({ while: '$.state.iIndex < 10', do: [...] })` — slightly verbose but unambiguous. Add `count` sugar in v0.6 if users ask.
+**Recommendation:** `while` only for v0.5. `count` is `loop({ while: 'ctx.state.iIndex < 10', do: [...] })` — slightly verbose but unambiguous. Add `count` sugar in v0.6 if users ask.
 
 ### Q4. `tryCatch` — does an error in `catch` propagate after `finally`?
 
@@ -1127,13 +1131,13 @@ Both are workflows. Both are looked up in `WorkflowRegistry`. Both run during re
 
 **Recommendation:** crisply documented in `docs/d/composition/middleware.mdx`. The `middleware: true` flag in the workflow envelope is the formal distinguishing marker — middleware-marked workflows can't be invoked as sub-workflows and vice versa.
 
-### Q6. `$.error` proxy availability
+### Q6. `ctx.error` availability
 
-Should `$.error` be available everywhere or only inside `catch[]`?
+Should the caught error be available everywhere or only inside `catch[]`?
 
 **Recommendation:** only inside `catch[]`. Outside, it's `undefined`. Resolved at expression-evaluation time — the runner sets `ctx.error` when entering a catch block and clears it on exit. Documented.
 
-Alternative considered: `$.tryError` (more explicit, doesn't shadow potentially-named `error` keys in user data). Slightly safer but unfamiliar. Going with `$.error` because it's the obvious choice.
+Alternative considered: naming it `tryError` (more explicit, doesn't shadow potentially-named `error` keys in user data) instead of `error`. Slightly safer but unfamiliar. Went with `error` because it's the obvious choice.
 
 ### Q7. Helper nodes package — bundled with `@blokjs/runner` or separate?
 
@@ -1157,7 +1161,7 @@ Pulling it together:
 |---|---|---|
 | A — forEach + loop + helpers | 3-4 | 3-4 |
 | B — switch | 1-2 | 4-6 |
-| C — tryCatch + `$.error` | 2-3 | 6-9 |
+| C — tryCatch + `ctx.error` | 2-3 | 6-9 |
 | D — Middleware | 3-4 | 9-13 |
 | E — Studio rendering | 1-2 | 10-15 |
 | F — Documentation + remaining examples | 2-3 | 12-18 |

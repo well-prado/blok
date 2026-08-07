@@ -712,7 +712,7 @@ describe("TraceRouter", () => {
 					trigger: { http: { method: "GET", path: "/countries" } },
 					steps: [
 						{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://example.com" } },
-						{ id: "respond", use: "@blokjs/respond", inputs: { body: "$.state.fetch" } },
+						{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.state.fetch" } },
 					],
 				};
 				WorkflowRegistry.getInstance().register({

@@ -283,8 +283,8 @@ function PrimitiveBanner({ node }: { node: NodeRun }) {
 				<p className="text-rose-200/70 leading-snug">
 					Try arm ran first; on throw, ctx.error was populated and the catch arm ran. Finally arm runs unconditionally
 					(after success, after caught error, AND after an uncaught throw from catch).{" "}
-					<code className="font-mono">$.error.message</code> resolves the underlying author-thrown text inside the catch
-					arm.
+					<code className="font-mono">ctx.error.message</code> resolves the underlying author-thrown text inside the
+					catch arm.
 				</p>
 			</div>
 		);

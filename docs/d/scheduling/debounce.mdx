@@ -29,7 +29,7 @@ export default workflow(
     version: "1.0.0",
     trigger: http.post("/save/:docId", {
       debounce: {
-        key: "$.req.params.docId",
+        key: "js/ctx.request.params.docId",
         mode: "trailing",
         delay: "500ms",
         maxDelay: "5s",
@@ -51,7 +51,7 @@ export default workflow(
       "method": "POST",
       "path": "/save/:docId",
       "debounce": {
-        "key": "$.req.params.docId",
+        "key": "js/ctx.request.params.docId",
         "mode": "trailing",
         "delay": "500ms",
         "maxDelay": "5s"
@@ -59,7 +59,7 @@ export default workflow(
     }
   },
   "steps": [
-    { "id": "save", "use": "@blokjs/postgres-write", "inputs": { "row": "$.req.body" } }
+    { "id": "save", "use": "@blokjs/postgres-write", "inputs": { "row": "js/ctx.request.body" } }
   ]
 }
 ```
@@ -76,10 +76,10 @@ elapsed since the first ping (whichever comes first).
 Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L128-L163).
 
 <ParamField path="key" type="string" required>
-  Debounce key — a literal string or a `$.<path>` path string the
+  Debounce key — a literal string or a `js/ctx....` expression the
   runner resolves against the live `ctx`. Pings sharing the resolved key
   collapse. Typically derived from the request payload
-  (`"$.req.params.docId"`, `"$.req.body.userId"`). It's a config string,
+  (`"js/ctx.request.params.docId"`, `"js/ctx.request.body.userId"`). It's a config string,
   not a handle — the debounce gate runs at run-entry, before the
   workflow body.
 </ParamField>
@@ -158,7 +158,7 @@ endpoint from double-firing on rapid clicks.
 ```ts
 trigger: http.post("/like/:postId", {
   debounce: {
-    key: "$.req.params.postId",
+    key: "js/ctx.request.params.postId",
     mode: "leading",
     delay: "1s",
   },
@@ -320,19 +320,19 @@ to keep the timeline readable under burst.
 <AccordionGroup>
   <Accordion title="Document autosave (trailing + maxDelay)">
     `mode: "trailing", delay: "500ms", maxDelay: "5s"` keyed on
-    `"$.req.params.docId"`. Rapid keystrokes collapse into one save
+    `"js/ctx.request.params.docId"`. Rapid keystrokes collapse into one save
     after silence; continuous typing guarantees a save within 5
     seconds of the first keystroke.
   </Accordion>
 
   <Accordion title="Click suppression (leading)">
-    `mode: "leading", delay: "1s"` keyed on `"$.req.params.postId"`. The
+    `mode: "leading", delay: "1s"` keyed on `"js/ctx.request.params.postId"`. The
     first like fires; rapid double-clicks within a second drop
     silently.
   </Accordion>
 
   <Accordion title="Search-typeahead (trailing)">
-    `mode: "trailing", delay: "300ms"` keyed on `"$.req.body.sessionId"`
+    `mode: "trailing", delay: "300ms"` keyed on `"js/ctx.request.body.sessionId"`
     (one debounce window per search session). Fires once when the user
     stops typing for 300ms.
   </Accordion>

@@ -1,50 +1,38 @@
 ---
 title: "Input mapper"
-description: "How `$.path` proxy expressions and `js/...` strings resolve against the live ctx. Configure failure mode via BLOK_MAPPER_MODE."
+description: "How `js/...` expression strings and `${path}` interpolation resolve against the live ctx. Configure failure mode via BLOK_MAPPER_MODE."
 icon: "function-square"
 ---
 
 Every step's `inputs:` field can interpolate values from the live `ctx`
-via two equivalent syntaxes. The runner's blueprint mapper resolves
-each expression **before** the node runs, so node authors see fully
-resolved values.
+via the `js/` prefix (full expression) or `${path}` interpolation. The
+runner's blueprint mapper resolves each expression **before** the node
+runs, so node authors see fully resolved values.
 
-## Two syntaxes — same semantics
+This page documents that wire-level string syntax — the format used by
+**legacy object-style workflows** (`workflow({ steps: [...] })` from
+`@blokjs/helper`) and **JSON workflows**. New TypeScript workflows
+authored via the typed-handle DSL (`@blokjs/core`) don't write this
+syntax by hand: `step()` returns a typed handle that lowers to the
+same structural reference automatically. See
+[handles and footguns](/d/primitives/handles-and-footguns). (There
+used to be a third way to write this — a `$` proxy object, e.g.
+`$.req.body.url`, that compiled to a `"js/ctx.request.body.url"`
+string at workflow-build time. It's been removed; see the
+[`$` proxy removal](/c/migration-guides/dollar-proxy-removal) guide.)
 
-### TypeScript: `$` proxy
-
-In TypeScript workflows authored via `@blokjs/helper`:
-
-```typescript
-import { workflow, $ } from "@blokjs/helper";
-
-export default workflow({
-  steps: [
-    {
-      id: "fetch",
-      use: "@blokjs/api-call",
-      inputs: { url: $.req.body.url, headers: $.req.headers },
-    },
-  ],
-});
-```
-
-`$.req.body.url` is a typed proxy. At workflow-build time it compiles
-to the string `"js/ctx.request.body.url"`.
-
-### JSON: `js/` prefix
-
-In JSON workflows, write the same compiled string directly:
+## `js/` prefix (full expression)
 
 ```json
 {
   "id": "fetch",
   "use": "@blokjs/api-call",
-  "inputs": { "url": "js/ctx.request.body.url" }
+  "inputs": { "url": "js/ctx.request.body.url", "headers": "js/ctx.request.headers" }
 }
 ```
 
-Both forms resolve identically at run time.
+The whole field is replaced by evaluating the JS expression (after
+stripping the `js/` prefix) against the live `ctx`.
 
 ## What's in scope
 
@@ -127,10 +115,10 @@ workflow load) but new workflows should use v2:
 
 | v1 | v2 | Notes |
 |---|---|---|
-| `js/ctx.vars['x']` | `$.state.x` (TS) / `js/ctx.state.x` (JSON) | `ctx.vars` still works as an alias of `ctx.state`. |
-| `js/ctx.response.data` | `$.prev.data` (TS) / `js/ctx.prev.data` (JSON) | `ctx.response` still works as an alias. |
-| `js/ctx.request.body` | `$.req.body` (TS) / `js/ctx.request.body` (JSON) | `ctx.req` is a shorthand alias. |
-| `${path}` interpolation | `js/...` or `$.path` | The runner still parses `${path}` for back-compat but warns. |
+| `js/ctx.vars['x']` | The producing step's handle (typed-handle DSL) / `js/ctx.state.x` (legacy object-style / JSON) | `ctx.vars` still works as an alias of `ctx.state`. |
+| `js/ctx.response.data` | The producing step's handle (typed-handle DSL) / `js/ctx.prev.data` (legacy object-style / JSON) | `ctx.response` still works as an alias. |
+| `js/ctx.request.body` | The trigger entry handle, e.g. `req.body` (typed-handle DSL) / `js/ctx.request.body` (legacy object-style / JSON) | `ctx.req` is a shorthand alias. |
+| `${path}` interpolation | `js/...` | The runner still parses `${path}` for back-compat but warns. |
 
 ## Security
 

@@ -531,8 +531,9 @@ export class ForEachNode extends RunnerNode {
 			}
 
 			response.data = results;
-			// Persist to ctx.state[this.name] so downstream steps can read via
-			// $.state[id]. Class-based RunnerNode subclasses must call
+			// Persist to ctx.state[this.name] so downstream steps can read it
+			// (a typed handle, or `js/ctx.state[id]`). Class-based RunnerNode
+			// subclasses must call
 			// applyStepOutput explicitly (BlokService does it implicitly via
 			// its `run()` method, but we own our own run() here).
 			applyStepOutput(ctx, this, { data: results });

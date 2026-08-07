@@ -13,7 +13,7 @@
 		{
 			"id": "route-by-tenant",
 			"switch": {
-				"on": "$.req.headers['x-tenant-id']",
+				"on": "js/ctx.request.headers['x-tenant-id']",
 				"cases": [
 					{
 						"when": "acme",
@@ -22,8 +22,8 @@
 								"id": "delegate",
 								"subworkflow": "acme-process",
 								"inputs": {
-									"body": "$.req.body",
-									"requestId": "$.state.requestId"
+									"body": "js/ctx.request.body",
+									"requestId": "js/ctx.state.requestId"
 								}
 							}
 						]
@@ -35,8 +35,8 @@
 								"id": "delegate",
 								"subworkflow": "globex-process",
 								"inputs": {
-									"body": "$.req.body",
-									"requestId": "$.state.requestId"
+									"body": "js/ctx.request.body",
+									"requestId": "js/ctx.state.requestId"
 								}
 							}
 						]
@@ -48,8 +48,8 @@
 								"id": "delegate",
 								"subworkflow": "initech-process",
 								"inputs": {
-									"body": "$.req.body",
-									"requestId": "$.state.requestId"
+									"body": "js/ctx.request.body",
+									"requestId": "js/ctx.state.requestId"
 								}
 							}
 						]
@@ -78,7 +78,7 @@
 			"type": "module",
 			"inputs": {
 				"status": 200,
-				"body": "$.state.delegate"
+				"body": "js/ctx.state.delegate"
 			}
 		}
 	]

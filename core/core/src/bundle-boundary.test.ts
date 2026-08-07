@@ -71,8 +71,8 @@ describe("@blokjs/core bundle boundaries", () => {
 		const bundle = await bundleFixture(
 			"dsl-esm",
 			`
-				import { workflow, $, branch, forEach } from "@blokjs/core/dsl";
-				console.log(workflow, $, branch, forEach);
+				import { workflow, branch, forEach } from "@blokjs/core/dsl";
+				console.log(workflow, branch, forEach);
 			`,
 		);
 
@@ -88,7 +88,7 @@ describe("@blokjs/core bundle boundaries", () => {
 			"dsl-cjs",
 			`
 				const dsl = require("@blokjs/core/dsl");
-				console.log(dsl.workflow, dsl.$, dsl.branch, dsl.forEach);
+				console.log(dsl.workflow, dsl.branch, dsl.forEach);
 			`,
 			"cjs",
 		);
@@ -105,9 +105,9 @@ describe("@blokjs/core bundle boundaries", () => {
 			"dsl-trigger-type",
 			`
 				import type { CronTriggerOpts } from "@blokjs/trigger-cron";
-				import { workflow, $, branch, forEach } from "@blokjs/core/dsl";
+				import { workflow, branch, forEach } from "@blokjs/core/dsl";
 				const _opts = null as CronTriggerOpts | null;
-				console.log(workflow, $, branch, forEach, _opts);
+				console.log(workflow, branch, forEach, _opts);
 			`,
 		);
 

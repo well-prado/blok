@@ -41,7 +41,7 @@ ws.onopen = () => ws.send(JSON.stringify({ hello: "world" }));
 |---|---|---|---|
 | `path` | `string` | required | URL path. Supports dynamic params (e.g. `/ws/room/:roomId`). |
 | `events` | `string[]` | `["message"]` | Which WS lifecycle events trigger the workflow. Supported: `"open"`, `"message"`, `"close"`, `"error"`. |
-| `concurrencyKey` | `string` \| `$.path` | — | Per-key cap on concurrent connections. |
+| `concurrencyKey` | `string` (literal or `js/ctx....`) | — | Per-key cap on concurrent connections. |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 
 ## The `conn` handle

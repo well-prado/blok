@@ -11,9 +11,9 @@
 // @blokjs/helper — the workflow & node authoring surface.
 //
 // This entry is intentionally small: the symbols a workflow/node AUTHOR needs.
-// Validation schemas, step-shape type-guards, trigger-config schemas, the
-// `$`-proxy internals, and the runtime step/workflow types live behind
-// `@blokjs/helper/internal` — tooling occasionally needs them, authors don't.
+// Validation schemas, step-shape type-guards, trigger-config schemas, and the
+// runtime step/workflow types live behind `@blokjs/helper/internal` — tooling
+// occasionally needs them, authors don't.
 
 import { type BranchOpts, branch } from "./components/branch";
 import { eq, gt, gte, lt, lte, ne, not } from "./components/eq";
@@ -31,7 +31,6 @@ import {
 	type WorkflowOpts as WorkflowV2Opts,
 	workflow,
 } from "./components/workflowV2";
-import { $ } from "./proxy/$";
 import type { V2StepUi } from "./types/StepOpts";
 import type {
 	CronTriggerOpts,
@@ -71,8 +70,6 @@ export {
 	loop,
 	switchOn,
 	tryCatch,
-	// typed runtime-context proxy
-	$,
 	// v2 DSL option types
 	type BranchOpts,
 	type ForEachOpts,

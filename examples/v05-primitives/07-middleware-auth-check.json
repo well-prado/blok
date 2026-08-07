@@ -9,7 +9,7 @@
 			"use": "expr",
 			"type": "module",
 			"inputs": {
-				"expression": "($.req.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
+				"expression": "(ctx.request.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
 			}
 		},
 		{
@@ -17,16 +17,16 @@
 			"use": "verify-jwt-node",
 			"type": "module",
 			"inputs": {
-				"token": "$.state['extract-token']",
-				"secret": "$.env.JWT_SECRET",
-				"issuer": "$.env.JWT_ISSUER",
-				"audience": "$.env.JWT_AUDIENCE"
+				"token": "js/ctx.state['extract-token']",
+				"secret": "js/ctx.env.JWT_SECRET",
+				"issuer": "js/ctx.env.JWT_ISSUER",
+				"audience": "js/ctx.env.JWT_AUDIENCE"
 			}
 		},
 		{
 			"id": "deny-if-invalid",
 			"branch": {
-				"when": "!$.state['verify-jwt'].valid",
+				"when": "!ctx.state['verify-jwt'].valid",
 				"then": [
 					{
 						"id": "respond-401",
@@ -36,7 +36,7 @@
 							"status": 401,
 							"body": {
 								"error": "Unauthorized",
-								"reason": "$.state['verify-jwt'].reason"
+								"reason": "js/ctx.state['verify-jwt'].reason"
 							}
 						},
 						"stop": true
@@ -50,7 +50,7 @@
 			"type": "module",
 			"inputs": {
 				"name": "identity",
-				"value": "$.state['verify-jwt'].claims"
+				"value": "js/ctx.state['verify-jwt'].claims"
 			}
 		}
 	]

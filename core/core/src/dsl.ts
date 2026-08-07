@@ -34,6 +34,5 @@ export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, Module
 // bare `use: "<name>"` string for published/named nodes).
 export { runtimeNode, node } from "@blokjs/runner/handles";
 
-export { $ } from "@blokjs/helper";
 export { http } from "./http";
 export type { HttpTriggerBlock } from "./http";

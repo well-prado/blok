@@ -743,7 +743,7 @@ describe("WorkflowValidator", () => {
 					...base,
 					steps: [
 						{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://x" } },
-						{ id: "respond", use: "@blokjs/respond", inputs: { body: "$.state.fetch" }, ephemeral: true },
+						{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.state.fetch" }, ephemeral: true },
 					],
 				}),
 			);

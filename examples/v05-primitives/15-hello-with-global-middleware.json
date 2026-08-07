@@ -17,7 +17,7 @@
 				"status": 200,
 				"body": {
 					"message": "hello",
-					"requestId": "$.state.requestId"
+					"requestId": "js/ctx.state.requestId"
 				}
 			}
 		}

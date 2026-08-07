@@ -173,7 +173,7 @@ the handle DSL.)
 `const h = step("id", node, inputs)` returns a **handle**:
 
 - Every step **auto-persists** its output to `ctx.state["id"]` **on success** (a step that
-  throws writes nothing). `h` / `h.field` is how you reference it later — never `$.state.id`.
+  throws writes nothing). `h` / `h.field` is how you reference it later.
 - Field access (`h.user.id`, `order.qty`) records a typed reference the runner resolves
   before the next node runs. Arrays support index (`items[0]`) but **not** `.map`/`.length`
   in inputs — do that work inside a node.
@@ -455,9 +455,9 @@ These compile to the same IR and keep working — recognize them, but author new
 workflows with the handle DSL above.
 
 - **Object-style** (`@blokjs/helper`): `workflow({ name, version, trigger, steps: [...] })`
-  with `$.state.<id>` / `$.req.body` references and `branch: { when, then, else }`.
+  with `"js/ctx.state.<id>"` / `"js/ctx.request.body"` references and `branch: { when, then, else }`.
 - **JSON** (`workflows/json/**.json`): the same shape as a string; reference outputs as
-  `"$.state.<id>"`; branch `when` is a raw `"ctx.state.x > 10"` string (never `js/…` or `$.…`).
+  `"js/ctx.state.<id>"`; branch `when` is a raw `"ctx.state.x > 10"` string (never `js/…`-prefixed).
 
 ---
 

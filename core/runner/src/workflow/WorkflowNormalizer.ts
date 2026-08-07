@@ -513,8 +513,8 @@ const SUBWORKFLOW_NODE_REF = "@blokjs/subworkflow";
  * (Configuration.nodeTypes.subworkflow).
  *
  * Inputs are placed on `nodeConfig.inputs` so the existing
- * blueprint-mapper resolution path resolves `$.state.<id>` /
- * `$.req.body.<key>` refs into concrete values BEFORE the
+ * blueprint-mapper resolution path resolves `js/ctx.state.<id>` /
+ * `js/ctx.request.body.<key>` refs into concrete values BEFORE the
  * sub-workflow node runs (mirrors how regular steps work).
  */
 function normalizeSubworkflowStep(

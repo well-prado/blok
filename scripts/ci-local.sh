@@ -37,6 +37,7 @@ step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 gates() {
   step "Lint (Biome)"; bun run lint:check
   step "Proto drift check"; bun run proto:check
+  step "No \$ proxy check"; bun run check:no-dollar-proxy
   # `bun run build`, not bare `nx run-many -t build` — the root script appends
   # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
   step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build

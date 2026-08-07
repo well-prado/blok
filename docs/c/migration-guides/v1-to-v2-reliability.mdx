@@ -42,15 +42,15 @@ default-store-on-success.
   },
 }
 
-// v2 — inline inputs, id + use, $.state.<id> chains
-import { workflow, $ } from "@blokjs/helper";
+// v2 — inline inputs, id + use, "js/ctx.state.<id>" chains
+import { workflow } from "@blokjs/helper";
 
 export default workflow({
   name: "Fetch and respond",
   trigger: { http: { method: "GET", path: "/countries" } },
   steps: [
     { id: "fetch",   use: "@blokjs/api-call", inputs: { url: "https://countriesnow.space/..." } },
-    { id: "respond", use: "@blokjs/respond",  inputs: { body: $.state.fetch } },
+    { id: "respond", use: "@blokjs/respond",  inputs: { body: "js/ctx.state.fetch" } },
   ],
 });
 ```
@@ -62,7 +62,7 @@ under `triggers/http/workflows/json/` in bulk. The codemod:
 - Inlines `nodes[<step>].inputs` onto the step.
 - Drops `set_var: true` (default-store handles it).
 - Rewrites `set_var: false` → `ephemeral: true`.
-- Rewrites `js/ctx.vars[...]` → `$.state.<id>` (or `js/ctx.state.<id>`).
+- Rewrites `js/ctx.vars[...]` → `js/ctx.state.<id>`.
 
 The runner ALSO normalizes v1 workflows at load time, so the migration
 is forward-compatible: you can ship v2-only workflows alongside the
@@ -81,10 +81,10 @@ want repeated on retry, replay, or duplicate trigger.
   id: "charge",
   use: "stripe.create-charge",
   inputs: {
-    customer: $.req.body.customerId,
-    amount: $.req.body.amount,
+    customer: "js/ctx.request.body.customerId",
+    amount: "js/ctx.request.body.amount",
   },
-  idempotencyKey: $.req.body.requestId,  // or a literal string
+  idempotencyKey: "js/ctx.request.body.requestId",  // or a literal string
   idempotencyKeyTTL: 24 * 60 * 60 * 1000,  // optional; default 24h
 }
 ```
@@ -107,7 +107,7 @@ typically clear within a few seconds.
 {
   id: "send-email",
   use: "sendgrid.send",
-  inputs: { to: $.state.user.email, template: "welcome" },
+  inputs: { to: "js/ctx.state.user.email", template: "welcome" },
   retry: {
     maxAttempts: 5,      // default 1 (= no retry)
     minTimeoutInMs: 500, // default 1000
@@ -135,7 +135,7 @@ hang. You want SLA-clean failure rather than indefinite blocking.
 {
   id: "render-pdf",
   use: "pdf.render",
-  inputs: { template: $.state.template, data: $.state.data },
+  inputs: { template: "js/ctx.state.template", data: "js/ctx.state.data" },
   maxDuration: "30s",   // or a number of ms
   retry: { maxAttempts: 3 }, // optional — each attempt gets its OWN 30s budget
 }
@@ -162,7 +162,7 @@ trigger: {
   http: {
     method: "POST",
     path: "/render",
-    concurrencyKey: $.req.body.tenantId,
+    concurrencyKey: "js/ctx.request.body.tenantId",
     concurrencyLimit: 5,         // default 1 (Trigger.dev parity)
     onLimit: "queue",            // default "throw" — 429 with Retry-After
     queueRetry: { minBackoffMs: 1000, maxBackoffMs: 30_000, factor: 2 },
@@ -213,7 +213,7 @@ trigger: {
     method: "POST",
     path: "/save/:docId",
     debounce: {
-      key: $.req.params.docId,   // per-doc coalescing
+      key: "js/ctx.request.params.docId",   // per-doc coalescing
       mode: "trailing",          // default; or "leading"
       delay: "500ms",            // wait for silence
       maxDelay: "5s",            // tail-latency bound (trailing only)
@@ -245,7 +245,7 @@ workflow at a checkpoint.
 {
   id: "send-receipt",
   subworkflow: "send-receipt-email",   // literal name
-  inputs: { user: $.state.user, order: $.state.order },
+  inputs: { user: "js/ctx.state.user", order: "js/ctx.state.order" },
   // wait: true (default) — synchronous
   // dispatch: "in-process" (default) — same process
 }
@@ -254,7 +254,7 @@ workflow at a checkpoint.
 {
   id: "queue-render",
   subworkflow: "render-pdf",
-  inputs: { template: $.state.template },
+  inputs: { template: "js/ctx.state.template" },
   wait: false,
   dispatch: "http-self",  // POST to ${BLOK_SELF_BASE_URL}${child.trigger.http.path}
 }
@@ -266,7 +266,7 @@ What it buys you:
 - **`wait: false`** — fire-and-forget. Parent gets back `{runId, workflowName, scheduledAt}` immediately. Child runs asynchronously; errors don't propagate to the parent.
 - **`dispatch: "in-process"`** (default) — child runs in the same Node process. Cheapest, no extra hops.
 - **`dispatch: "http-self"`** — child is dispatched as a fresh HTTP request to `BLOK_SELF_BASE_URL` (must have an `http` trigger). Each child can land on a different process in a horizontally-scaled deployment. Lineage crosses the HTTP boundary via `X-Blok-Parent-Run-Id` headers.
-- **Polymorphic dispatch** — `subworkflow:` accepts a `$.<path>` expression that resolves at dispatch time. Pair with `allowList: ["a", "b"]` to constrain which names the expression can resolve to.
+- **Polymorphic dispatch** — `subworkflow:` accepts a `"js/ctx...."` expression that resolves at dispatch time. Pair with `allowList: ["a", "b"]` to constrain which names the expression can resolve to.
 
 Verify in Studio: open the parent run's detail view. The sub-workflow step renders a `↳ sub` (sync) or `↳ async` (fire-and-forget) badge; HTTP-self dispatches gain an extra `http` chip. The "Sub-runs" strip at the top of the parent surfaces the child's status with click-through.
 

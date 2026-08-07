@@ -16,8 +16,8 @@ import { node, step, workflow } from "@blokjs/core";
  *   { maxDuration: "30s" }                 — fail the step if it hangs
  *
  * Trigger-level reliability (on the `worker` block):
- *   concurrencyKey: "$.req.body.tenantId"  — per-tenant fairness
- *   onLimit: "queue"                        — defer instead of reject
+ *   concurrencyKey: "js/ctx.request.body.tenantId"  — per-tenant fairness
+ *   onLimit: "queue"                                 — defer instead of reject
  */
 export default workflow(
 	"Process Background Job",

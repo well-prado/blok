@@ -23,7 +23,9 @@ export default defineNode({
 	input: z.object({
 		source: z
 			.unknown()
-			.describe("Iterator handle — usually `$.state.<sse-subscribe step id>` returning `{ iterator }`."),
+			.describe(
+				"Iterator handle — usually the sse-subscribe step's typed handle, or `js/ctx.state.<sse-subscribe step id>`, returning `{ iterator }`.",
+			),
 		eventName: z.string().optional().describe("Default event name applied when the bus event doesn't carry one."),
 		retryMs: z
 			.number()

@@ -219,7 +219,7 @@ parent's lifecycle.
 
 ## Output shape
 
-The returned handle (and `$.state[<id>]`) carries whatever the child
+The returned handle (and `ctx.state[<id>]`) carries whatever the child
 put in `ctx.response` — typically via `@blokjs/respond` as the last
 step. Feed it straight into downstream node inputs:
 

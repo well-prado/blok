@@ -277,7 +277,7 @@ G1 (cancellation cascade) shipped in `a67d992`. Two open:
 
 #### G3 · Polymorphic workflow names
 
-**Effort:** ~1 day. Today `subworkflow: "X"` is static. `subworkflow: $.req.body.kind` would allow dynamic dispatch. Trade-off: workflow name resolution becomes a runtime concern (typos surface late). Add behind a strict flag with required allowlist: `workflowName: { kind: "expression", value: "$.req.body.kind", allowList: [...] }`.
+**Effort:** ~1 day. Today `subworkflow: "X"` is static. `subworkflow: "js/ctx.request.body.kind"` would allow dynamic dispatch. Trade-off: workflow name resolution becomes a runtime concern (typos surface late). Add behind a strict flag with required allowlist: `workflowName: { kind: "expression", value: "js/ctx.request.body.kind", allowList: [...] }`.
 
 **Reference:** [BACKLOG.md G2, G3](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#tier-g--sub-workflow-polish)
 

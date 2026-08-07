@@ -37,10 +37,10 @@ function resolveKey(rawKey: string | undefined, ctx: Context): KeyResolution {
 /**
  * Resolve a step's `idempotencyKey` value against the live context.
  *
- * Authors may write a literal string (`"static-key"`) OR a `$ proxy`
- * expression that compiled to a `js/...` string at workflow-definition
- * time (`"js/ctx.req.body.requestId"` produced by `$.req.body.requestId`).
- * This helper handles both.
+ * Authors may write a literal string (`"static-key"`) OR a `js/...`
+ * expression (`"js/ctx.request.body.requestId"`, or a typed handle in the
+ * `@blokjs/core` DSL that lowers to that same string). This helper handles
+ * both.
  *
  * Returns `null` when:
  * - the key is undefined / empty / not a string

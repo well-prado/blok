@@ -248,7 +248,8 @@
 						"pages": [
 							"c/migration-guides/index",
 							"c/migration-guides/v0.4-explicit-paths",
-							"c/migration-guides/v1-to-v2-reliability"
+							"c/migration-guides/v1-to-v2-reliability",
+							"c/migration-guides/dollar-proxy-removal"
 						]
 					}
 				]

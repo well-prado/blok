@@ -91,9 +91,10 @@ The authoring rule is simple:
 - Use `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, or `not` for branch conditions.
 - Use the `js` tagged template only for non-structural escape hatches.
 
-Do not write new workflow data flow with `$` proxies, `js/` strings, or raw
-`ctx` condition strings. Those are legacy/compiled forms, not the authoring
-model.
+Do not write new workflow data flow with `js/` strings or raw `ctx`
+condition strings. Those are legacy/compiled forms, not the authoring
+model. (The `$` proxy that used to be a third such form is deleted
+entirely — see `docs/c/migration-guides/dollar-proxy-removal.mdx`.)
 
 ## Entry Handles
 
@@ -402,8 +403,8 @@ import { z } from "zod";
 
 ## Do Not
 
-- Do not author new workflow data flow with `$` proxies, mapper strings, or raw
-  condition strings.
+- Do not author new workflow data flow with mapper strings or raw condition
+  strings. (`$` proxies no longer exist — the import doesn't compile.)
 - Do not mutate `ctx.state` or `ctx.vars` inside nodes.
 - Do not read ephemeral handles.
 - Do not reuse step ids anywhere in a workflow.

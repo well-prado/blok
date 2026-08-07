@@ -31,6 +31,7 @@
 		"lint:check": "biome check --no-errors-on-unmatched --files-ignore-unknown=true",
 		"proto:sync": "bun run scripts/sync-proto.ts",
 		"proto:check": "bun run scripts/sync-proto.ts --check",
+		"check:no-dollar-proxy": "bash scripts/check-no-dollar-proxy.sh",
 		"test": "nx run-many -t test",
 		"test:coverage": "nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage",
 		"test:integration": "bash scripts/integration-test.sh",

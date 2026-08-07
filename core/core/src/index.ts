@@ -29,7 +29,6 @@ export {
 	lt,
 	lte,
 	not,
-	$,
 	http,
 } from "./dsl";
 

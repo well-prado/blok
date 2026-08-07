@@ -51,7 +51,7 @@ es.addEventListener("tick", (ev) => console.log(JSON.parse(ev.data)));
 | `path` | `string` | required | URL path. Supports `:name` dynamic params (e.g. `/sse/chat/:sessionId`). |
 | `heartbeatInterval` | `number` (ms) | `15000` | Comment-line keepalive interval to keep proxies from closing the connection. |
 | `retryInterval` | `number` (ms) | `3000` | Reconnection hint sent to the browser (the `retry:` SSE field). |
-| `concurrencyKey` | `string` \| `$.path` | — | Per-key cap on concurrent connections. |
+| `concurrencyKey` | `string` (literal or `js/ctx....`) | — | Per-key cap on concurrent connections. |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 
 ## Same-port mounting

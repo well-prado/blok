@@ -61,7 +61,6 @@ describe("@blokjs/core is a complete migration target for the deprecated package
 			"tryCatch",
 			"tpl",
 			"js",
-			"$",
 			"http",
 			"eq",
 			"ne",

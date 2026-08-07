@@ -128,7 +128,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 					{
 						id: "each",
 						forEach: {
-							in: "$.req.body.items",
+							in: "js/ctx.request.body.items",
 							as: "item",
 							do: [step("persist")],
 						},
@@ -162,7 +162,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 					{
 						id: "route",
 						switch: {
-							on: "$.req.body.kind",
+							on: "js/ctx.request.body.kind",
 							cases: [
 								{ when: "a", do: [step("handle")] },
 								{ when: "b", do: [step("handle")] },
@@ -183,7 +183,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 					{
 						id: "route",
 						switch: {
-							on: "$.req.body.kind",
+							on: "js/ctx.request.body.kind",
 							cases: [
 								{ when: "a", do: [step("handle")] },
 								{ when: "b", do: [step("handle-b")] },
@@ -223,7 +223,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 					{
 						id: "each",
 						forEach: {
-							in: "$.req.body.items",
+							in: "js/ctx.request.body.items",
 							as: "item",
 							do: [
 								{

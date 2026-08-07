@@ -657,7 +657,7 @@ describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
 						{
 							id: "feInBranch",
 							forEach: {
-								in: "$.state.reg",
+								in: "js/ctx.state.reg",
 								as: "row",
 								do: [{ id: "deep", use: "@blokjs/respond", inputs: {}, ui: { notes: "forEach inside branch" } }],
 							},
@@ -675,7 +675,7 @@ describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
 			{
 				id: "fe",
 				forEach: {
-					in: "$.state.reg",
+					in: "js/ctx.state.reg",
 					as: "item",
 					do: [{ id: "feBody", use: "@blokjs/respond", inputs: {}, ui: { notes: "forEach body" } }],
 				},
@@ -694,7 +694,7 @@ describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
 			{
 				id: "sw",
 				switch: {
-					on: "$.state.reg",
+					on: "js/ctx.state.reg",
 					cases: [
 						{ when: "a", do: [{ id: "caseStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "switch case" } }] },
 					],
@@ -847,7 +847,7 @@ describe("WorkflowNormalizer — active:false / stop:true survive normalization"
 					},
 					{
 						id: "fe",
-						forEach: { in: "$.state.br", as: "row", do: [{ id: "feBody", use: "@blokjs/respond", inputs: {} }] },
+						forEach: { in: "js/ctx.state.br", as: "row", do: [{ id: "feBody", use: "@blokjs/respond", inputs: {} }] },
 						stop: true,
 					},
 				],

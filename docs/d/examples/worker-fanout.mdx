@@ -156,7 +156,7 @@ export default workflow(
         queue: "fanout-jobs",
         concurrency: 10,
         // Trigger-level expression, resolved against ctx by the gate.
-        concurrencyKey: "$.req.body.tenantId",
+        concurrencyKey: "js/ctx.request.body.tenantId",
         concurrencyLimit: 3,
       },
     },
@@ -270,10 +270,10 @@ If concurrency caps aren't enough, layer on
 trigger: {
   worker: {
     queue: "fanout-jobs",
-    concurrencyKey: "$.req.body.tenantId",
+    concurrencyKey: "js/ctx.request.body.tenantId",
     concurrencyLimit: 3,
     debounce: {
-      key: "$.req.body.tenantId",
+      key: "js/ctx.request.body.tenantId",
       mode: "trailing",
       delay: "100ms",
     },

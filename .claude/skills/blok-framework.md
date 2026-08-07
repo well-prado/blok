@@ -674,35 +674,29 @@ inputs: {
 
 **Non-adjacent steps (Step 3 needs Step 1's output):**
 
-v2 default-stores every step's output at `ctx.state[<step-id>]`. Reference it from any later step's inputs as `$.state.<id>` (TS DSL) or `"$.state.<id>"` / `"js/ctx.state.<id>"` (JSON). The legacy `set_var` field was removed in v0.5 — the runner rejects it at workflow load with a migration hint.
+v2 default-stores every step's output at `ctx.state[<step-id>]`. Reference it from any later step's inputs via the producing step's typed handle (TS DSL, canonical) or `"js/ctx.state.<id>"` (object-style/JSON). The legacy `set_var` field was removed in v0.5 — the runner rejects it at workflow load with a migration hint.
 
-**TS DSL example:**
+**Typed-handle DSL example (canonical):**
 
 ```typescript
-import { workflow, $ } from "@blokjs/helper";
+import { step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Multi-step pipeline",
-  version: "1.0.0",
-  trigger: { http: { method: "POST" } },
-  steps: [
-    { id: "step-1", use: "fetch-user",   inputs: { id: $.req.body.userId } },
-    { id: "step-2", use: "fetch-orders", inputs: { userId: $.state["step-1"].id } },
-    { id: "step-3", use: "generate-report",
-      inputs: { user: $.state["step-1"], orders: $.state["step-2"] } },
-  ],
+export default workflow("Multi-step pipeline", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (req) => {
+  const step1 = step("step-1", fetchUser, { id: req.body.userId });
+  const step2 = step("step-2", fetchOrders, { userId: step1.id });
+  step("step-3", generateReport, { user: step1, orders: step2 });
 });
 ```
 
-**JSON equivalent:**
+**Object-style / JSON equivalent (legacy):**
 
 ```json
 {
   "steps": [
-    { "id": "step-1", "use": "fetch-user",   "inputs": { "id": "$.req.body.userId" } },
-    { "id": "step-2", "use": "fetch-orders", "inputs": { "userId": "$.state.step-1.id" } },
+    { "id": "step-1", "use": "fetch-user",   "inputs": { "id": "js/ctx.request.body.userId" } },
+    { "id": "step-2", "use": "fetch-orders", "inputs": { "userId": "js/ctx.state.step-1.id" } },
     { "id": "step-3", "use": "generate-report",
-      "inputs": { "user": "$.state.step-1", "orders": "$.state.step-2" } }
+      "inputs": { "user": "js/ctx.state.step-1", "orders": "js/ctx.state.step-2" } }
   ]
 }
 ```
@@ -1278,10 +1272,10 @@ Every new workflow → add to `Workflows.ts`
 
 ```typescript
 // WRONG — Step 3 trying to read Step 1's output via ctx.prev (only carries Step 2's)
-{ id: "step-3", use: "c", inputs: { step1Data: "$.prev" } }
+{ id: "step-3", use: "c", inputs: { step1Data: "js/ctx.prev" } }
 
 // RIGHT — every step default-stores at ctx.state[<id>]; reference it directly
-{ id: "step-3", use: "c", inputs: { step1Data: "$.state.step-1" } }
+{ id: "step-3", use: "c", inputs: { step1Data: "js/ctx.state.step-1" } }
 ```
 
 ### NEVER use class-based nodes
@@ -1376,7 +1370,7 @@ Workflow({ name, version, description? })
 2. **"Validation failed"** → Check Zod schema vs actual input data
 3. **"undefined in step input"** → Are you reading `ctx.response.data` from a non-adjacent step? It's overwritten.
 4. **"Runtime execution error"** → Is the runtime process running? Check `GET http://localhost:{port}/health`
-5. **"ctx.state['X'] is undefined"** → Source step has `ephemeral: true`, OR the id doesn't match what's referenced in `$.state.<id>` (typo / id mismatch).
+5. **"ctx.state['X'] is undefined"** → Source step has `ephemeral: true`, OR the id doesn't match what's referenced by the handle / `js/ctx.state.<id>` (typo / id mismatch).
 6. **"set_var, which was removed in v0.5"** → Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1 workflows.
-7. **No data flowing between steps** → Check `$.state.<id>` / `js/` expression syntax. Common: typo in step id, or stale id from a renamed step.
+7. **No data flowing between steps** → Check `js/ctx.state.<id>` expression syntax. Common: typo in step id, or stale id from a renamed step.
 7. **Condition not matching** → Check condition string syntax. Must be valid JS with access to `ctx`.

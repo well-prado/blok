@@ -6,7 +6,7 @@ import { http, forEach, node, step, subworkflow, workflow } from "@blokjs/core";
  *
  * Demonstrates the ONE correct context pattern:
  *   - every step's output auto-persists to `ctx.state[<id>]` on success
- *   - later steps read it via `$.state.<id>` (compiles to `js/ctx.state.<id>`)
+ *   - later steps read it via the producing step's typed handle
  *   - inside a forEach, the per-iteration item is `ctx.state.item`
  *   - the subworkflow's response lands at `ctx.state.retrieve.data`
  *

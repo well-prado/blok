@@ -60,8 +60,9 @@ function isStructuralRef(value: object): value is StructuralRef {
  * `core/runner/src/stepBuilder.ts:makeHandle("@trigger")`). It is NOT a real
  * step — the runner never writes `ctx.state["@trigger"]`; the trigger payload
  * lives at `ctx.request` (TriggerBase.createContext sets `ctx.state = {}`).
- * So a ref rooted here lowers to `js/ctx.request`, mirroring the existing
- * `$.req` proxy. Keep this string in sync with stepBuilder's sentinel.
+ * So a ref rooted here lowers to `js/ctx.request` — the same wire string
+ * object-style workflows write by hand. Keep this string in sync with
+ * stepBuilder's sentinel.
  *
  * Scope: ALL request-shaped triggers funnel into ctx.request, so the typed
  * per-trigger entry handles (#336 — http`req`/webhook`event`/cron`tick`/
@@ -82,14 +83,13 @@ const TRIGGER_SENTINEL = "@trigger";
  */
 const ERROR_SENTINEL = "@error";
 
-/** Valid JS identifier — same shape `$.ts`'s proxy encoder accepts for `.k`. */
+/** Valid JS identifier — the shape that's safe to encode as a bare `.k` access. */
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 /**
- * Encode a single path segment into its wire-string suffix, mirroring
- * `unwrapProxies` (core/workflow-helper/src/proxy/$.ts) EXACTLY — three
- * branches, not two: numeric → `[n]`; valid JS identifier → `.k`; anything
- * else (dash, dot, space, leading digit on a string key) → `[${JSON.stringify(k)}]`.
+ * Encode a single path segment into its wire-string suffix — three branches,
+ * not two: numeric → `[n]`; valid JS identifier → `.k`; anything else (dash,
+ * dot, space, leading digit on a string key) → `[${JSON.stringify(k)}]`.
  * The bracket-quote form is the only one that survives the Mapper's `js/...`
  * eval — `.fan-out` would parse as `fan - out`.
  */

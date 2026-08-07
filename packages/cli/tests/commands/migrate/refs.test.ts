@@ -345,21 +345,73 @@ export default workflow({
 });`;
 
 		const once = migrateTsSource(input);
-		expect(once.value).toContain('import { workflow, $, eq, gt } from "@blokjs/helper";');
-		expect(once.value).toContain('when: eq($.request.method, "GET")');
-		expect(once.value).toContain("when: $.state.stock.inStock");
-		expect(once.value).toContain("when: gt($.state.order.total, 10)");
-		expect(once.value).toContain("when: eq($.state.missing, undefined)");
+		// No `$`/`eq`/`gt` import is ever introduced — `when` stays a plain raw ctx string.
+		expect(once.value).toContain('import { workflow } from "@blokjs/helper";');
+		expect(once.value).toContain('when: "ctx.request.method === \\"GET\\""');
+		expect(once.value).toContain('when: "ctx.state.stock.inStock"');
+		// Already-canonical raw ctx strings ("big", "missing") need no rewrite.
+		expect(once.value).toContain('when: "ctx.state.order.total > 10"');
+		expect(once.value).toContain('when: "ctx.state.missing === undefined"');
 		expect(once.value).toContain("// blok-migrate: hand-migrate (dynamic expression / branch.when not handle-safe)");
 		expect(once.value).toContain(
 			'when: "ctx.request.method.toLowerCase() === \\"get\\" && ctx.request.params.function === undefined"',
 		);
 		expect(once.value).toContain('when: "$.req.method === \\"GET\\""');
-		expect(once.stats).toEqual({ migrated: 4, marked: 2 });
+		expect(once.stats).toEqual({ migrated: 2, marked: 2 });
 
 		const twice = migrateTsSource(once.value);
 		expect(twice.value).toBe(once.value);
 		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
+	});
+
+	it("converts a bare `$`-proxy `when` (TS code, not a string) to a raw ctx string", () => {
+		// `when: $.req.method` (proxy used directly as a VALUE, not wrapped in a
+		// string) would be a compile error once `$` is deleted — must be rewritten,
+		// not skipped.
+		const input = `import { $, workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Truthy",
+	version: "1.0.0",
+	trigger: { http: { method: "POST" } },
+	steps: [{ id: "has-kind", branch: { when: $.req.query.kind, then: [] } }],
+});`;
+		const once = migrateTsSource(input);
+		expect(once.value).toContain('when: "ctx.request.query.kind"');
+		expect(once.value).not.toContain("$.req");
+		// The last live `$` reference is gone — the dead import specifier is pruned
+		// too, or the file would fail to compile once `$` no longer exists.
+		expect(once.value).toContain('import { workflow } from "@blokjs/helper";');
+		expect(once.value).not.toMatch(/\bimport\b.*\$/);
+		expect(once.stats).toEqual({ migrated: 1, marked: 0 });
+	});
+
+	it("converts eq()/not() call-expression `when` values (TS code) to raw ctx strings", () => {
+		// `when: eq($.req.method, "POST")` was the SANCTIONED pattern before `$`
+		// was deleted — the codemod must not leave it referencing dead imports.
+		const input = `import { $, eq, gt, not, workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Comparators",
+	version: "1.0.0",
+	trigger: { http: { method: "POST" } },
+	steps: [
+		{ id: "is-post", branch: { when: eq($.req.method, "POST"), then: [] } },
+		{ id: "big", branch: { when: gt($.state.order.total, 100), then: [] } },
+		{ id: "not-ready", branch: { when: not($.state.ready), then: [] } },
+	],
+});`;
+		const once = migrateTsSource(input);
+		expect(once.value).toContain('when: "ctx.request.method === \\"POST\\""');
+		expect(once.value).toContain('when: "ctx.state.order.total > 100"');
+		expect(once.value).toContain('when: "!(ctx.state.ready)"');
+		expect(once.value).not.toContain("$.req");
+		expect(once.value).not.toContain("$.state");
+		// `$` is fully unused now — pruned from the import; `eq`/`gt`/`not` stay
+		// (still valid `@blokjs/helper` exports, just unused by this file — the
+		// codemod doesn't run a general unused-import cleanup).
+		expect(once.value).toContain('import { eq, gt, not, workflow } from "@blokjs/helper";');
+		expect(once.stats).toEqual({ migrated: 3, marked: 0 });
 	});
 
 	it("keeps TS @blokjs/expr raw while migrating non-HTTP entry refs", () => {
@@ -421,9 +473,9 @@ export default workflow({
 			}
 		}
 
-		expect(tsBranchWhen(tsOutput, "undefined-literal")).toBe("eq($.request.params.function, undefined)");
-		expect(tsBranchWhen(tsOutput, "empty-string-literal")).toBe("eq($.request.params.function, '')");
-		expect(tsBranchWhen(tsOutput, "null-literal")).toBe("eq($.state.payload, null)");
+		expect(tsBranchWhen(tsOutput, "undefined-literal")).toBe("ctx.request.params.function === undefined");
+		expect(tsBranchWhen(tsOutput, "empty-string-literal")).toBe("ctx.request.params.function === ''");
+		expect(tsBranchWhen(tsOutput, "null-literal")).toBe("ctx.state.payload === null");
 	});
 
 	it("leaves branch.when footguns raw and marked", () => {
@@ -507,13 +559,16 @@ ${steps}
 });`;
 }
 
+/** Extracts a step's `branch.when` and unwraps it: post-migration `when` is always
+ * a plain string literal holding the raw ctx expression (never a `$`/`eq()` call). */
 function tsBranchWhen(source: string, id: string): string {
 	const start = source.indexOf(`id: ${JSON.stringify(id)}`);
 	if (start < 0) throw new Error(`missing branch step ${id}`);
 	const whenStart = source.indexOf("when:", start);
 	const thenStart = source.indexOf(", then:", whenStart);
 	if (whenStart < 0 || thenStart < 0) throw new Error(`missing branch.when for ${id}`);
-	return source.slice(whenStart + "when:".length, thenStart).trim();
+	const text = source.slice(whenStart + "when:".length, thenStart).trim();
+	return Function(`"use strict"; return (${text});`)() as string;
 }
 
 function makeBranchCtx(i: number) {

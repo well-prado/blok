@@ -1,4 +1,3 @@
-import { unwrapProxies } from "../proxy/$";
 import type { V2LoopStep, V2Step, V2StepUi } from "../types/StepOpts";
 import { conditionToExpr } from "./eq";
 
@@ -8,7 +7,7 @@ import { conditionToExpr } from "./eq";
  * `while` is a JS expression evaluated against `ctx` BEFORE each
  * iteration. Loop continues while truthy. The loop counter is exposed
  * as `ctx.state[<id>Index]` so the condition can reference it
- * (e.g. `$.state.pollIndex < 5`).
+ * (e.g. `ctx.state.pollIndex < 5`).
  *
  * `maxIterations` is a HARD cap that throws `LoopMaxIterationsError`
  * when exceeded — a safety net against infinite loops. Default 1000.
@@ -47,7 +46,7 @@ export interface LoopOpts {
  * @example
  *   loop({
  *     id: "poll-job",
- *     while: '$.state["check-status"].status !== "done"',
+ *     while: 'ctx.state["check-status"].status !== "done"',
  *     maxIterations: 60,
  *     do: [
  *       { id: "wait-tick", wait: { for: "2s" } },
@@ -63,15 +62,11 @@ export function loop(opts: LoopOpts): V2LoopStep {
 		throw new Error("loop() requires a non-empty `id` string.");
 	}
 	if (opts.while === undefined || opts.while === null) {
-		throw new Error(
-			`loop("${opts.id}") requires a non-empty \`while\` expression. Use a $ proxy path or a plain string expression.`,
-		);
+		throw new Error(`loop("${opts.id}") requires a non-empty \`while\` expression string.`);
 	}
 	const whileExpr = conditionToExpr(opts.while);
 	if (typeof whileExpr !== "string" || whileExpr.length === 0) {
-		throw new Error(
-			`loop("${opts.id}") requires a non-empty \`while\` expression. Use a $ proxy path or a plain string expression.`,
-		);
+		throw new Error(`loop("${opts.id}") requires a non-empty \`while\` expression string.`);
 	}
 	if (!Array.isArray(opts.do) || opts.do.length === 0) {
 		throw new Error(`loop("${opts.id}") requires \`do\` to be a non-empty array of steps.`);
@@ -82,7 +77,7 @@ export function loop(opts: LoopOpts): V2LoopStep {
 		}
 	}
 
-	const innerSteps = unwrapProxies(opts.do) as V2Step[];
+	const innerSteps = opts.do as V2Step[];
 
 	const result: V2LoopStep = {
 		id: opts.id,

@@ -21,8 +21,9 @@ blokctl dev
 ## Authoring
 
 New TypeScript workflows use the typed-handle DSL from `@blokjs/core`.
-Do not author workflow data flow with `$` proxies, `js/` strings, or raw
-`ctx` condition strings.
+Do not author workflow data flow with `js/` strings or raw `ctx` condition
+strings. (The `$` proxy that used to be a third way to do this is gone —
+see the migration guide's "$ removal" entry.)
 
 ```ts
 import { branch, gt, http, step, tpl, workflow } from "@blokjs/core";

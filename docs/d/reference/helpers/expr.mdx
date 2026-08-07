@@ -38,7 +38,7 @@ step("derived", ExprNode, {
 
 | Field | Type | Notes |
 |---|---|---|
-| `expression` | `string` | A JS expression. Evaluated against the live ctx. Required. **A raw `ctx.*` JS string** — it is itself mapper-resolved, so do NOT prefix it with `js/` (that double-evaluates) and do NOT pass a `$`/handle. Write plain `ctx.state.x.y`. |
+| `expression` | `string` | A JS expression. Evaluated against the live ctx. Required. **A raw `ctx.*` JS string** — it is itself mapper-resolved, so do NOT prefix it with `js/` (that double-evaluates) and do NOT pass a typed handle (e.g. from `step()`). Write plain `ctx.state.x.y`. |
 
 ## Output
 

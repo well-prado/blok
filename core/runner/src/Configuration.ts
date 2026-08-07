@@ -173,9 +173,8 @@ export default class Configuration implements Config {
 			// resolves `js/...` expressions in place) don't bleed across
 			// requests by baking the first request's resolved values into
 			// the shared route-table workflow object. JSON-clone is safe:
-			// workflow definitions are pure data, and helper proxies like
-			// `$.req.body` serialize to their `js/...` string form via
-			// `Symbol.toPrimitive` / `toJSON`.
+			// workflow definitions are pure data — every input is already a
+			// plain `js/...` string or literal by the time it reaches here.
 			const { normalizeWorkflow } = await import("./workflow/WorkflowNormalizer");
 			const fresh = JSON.parse(JSON.stringify(preloaded));
 			this.workflow = normalizeWorkflow(fresh, workflowNameInPath) as unknown as typeof this.workflow;

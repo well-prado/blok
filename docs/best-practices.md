@@ -61,9 +61,9 @@ Use the fan-in pattern to collect and aggregate results from multiple parallel o
       "use": "data-transformer",
       "inputs": {
         "sources": {
-          "emailResult": "$.state.send-email",
-          "smsResult": "$.state.send-sms",
-          "pushResult": "$.state.send-push"
+          "emailResult": "js/ctx.state.send-email",
+          "smsResult": "js/ctx.state.send-sms",
+          "pushResult": "js/ctx.state.send-push"
         },
         "aggregation": "merge"
       }
@@ -75,7 +75,7 @@ Use the fan-in pattern to collect and aggregate results from multiple parallel o
 **When to use:** After a fan-out when downstream logic depends on combined results.
 
 **Recommendations:**
-- v2 default-stores every step's output to `ctx.state[id]`; reference them as `$.state.<id>`. (The legacy `set_var` field was removed in v0.5 — drop it from any old workflows or run `blokctl migrate workflows`.)
+- v2 default-stores every step's output to `ctx.state[id]`; reference them via the step's handle in the typed-handle DSL, or as `"js/ctx.state.<id>"` in object-style / JSON workflows. (The legacy `set_var` field was removed in v0.5 — drop it from any old workflows or run `blokctl migrate workflows`.)
 - Define fallback values for branches that may fail to prevent the aggregation step from breaking.
 
 ### Saga Pattern
@@ -111,7 +111,7 @@ If `reserve-inventory` fails, the compensating actions would be:
 **When to use:** Multi-step transactions spanning multiple services where atomicity is required.
 
 **Recommendations:**
-- v2 default-stores every step's output at `ctx.state[<id>]`, so compensating actions can read prior results via `$.state.charge-payment.id`, `$.state.create-order.id`, etc.
+- v2 default-stores every step's output at `ctx.state[<id>]`, so compensating actions can read prior results via `"js/ctx.state.charge-payment.id"`, `"js/ctx.state.create-order.id"`, etc.
 - Use a v2 `branch` step after each critical write to detect failures and route to compensating steps.
 - Log every step and compensation for audit purposes.
 - Design compensating actions to be idempotent -- they may be executed more than once in retry scenarios.
@@ -543,7 +543,7 @@ Calling between runtimes incurs serialization and process communication overhead
 - Minimize runtime transitions. Group steps that use the same runtime together.
 - For data-intensive pipelines, do the heavy processing in a single runtime and only cross boundaries for specialized operations.
 - Profile the workflow to identify if serialization overhead is a bottleneck. If a Python step takes 5ms but serialization adds 20ms, consider rewriting it in the primary runtime.
-- Reference intermediate results via `$.state.<id>` — every step default-stores its output, so threading data between runtime boundaries doesn't need an explicit opt-in.
+- Reference intermediate results via `"js/ctx.state.<id>"` (or the step's typed handle in the `@blokjs/core` DSL) — every step default-stores its output, so threading data between runtime boundaries doesn't need an explicit opt-in.
 
 ### Error Handling Across Runtimes
 

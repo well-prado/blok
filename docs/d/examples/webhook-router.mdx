@@ -114,7 +114,7 @@ export default workflow(
         secretEnv: "STRIPE_WEBHOOK_SECRET",
         tolerance: 300,
         namespace: "stripe",
-        idempotencyKey: "$.req.body.id",
+        idempotencyKey: "js/ctx.request.body.id",
       },
     },
   },
@@ -147,7 +147,7 @@ dispatch time, after the namespace prefix is applied.
 | `secretEnv` | Name of the env var holding the signing secret. |
 | `tolerance` | Drift window in seconds. |
 | `namespace: "stripe"` | Prefix applied to the resolved sub-workflow name. |
-| `idempotencyKey: "$.req.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
+| `idempotencyKey: "js/ctx.request.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
 
 To handle a new event type, add a workflow with the matching name —
 no router update needed:
@@ -358,11 +358,11 @@ production.
 
 ### Replay protection
 
-The Stripe receiver sets `idempotencyKey: $.req.body.id` so retries on
+The Stripe receiver sets `idempotencyKey: "js/ctx.request.body.id"` so retries on
 the same `evt_*` id short-circuit with a `{"status": "duplicate"}`
 response. The cache lives for 5 minutes by default. GitHub doesn't
 need this because the trigger verifier dedups by `X-GitHub-Delivery`
-naturally — but you can add `idempotencyKey: $.req.headers["x-github-delivery"]`
+naturally — but you can add `idempotencyKey: "js/ctx.request.headers['x-github-delivery']"`
 for extra safety.
 
 ## Related

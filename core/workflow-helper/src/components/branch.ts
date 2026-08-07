@@ -1,4 +1,3 @@
-import { unwrapProxies } from "../proxy/$";
 import type { V2BranchStep, V2Step, V2StepUi } from "../types/StepOpts";
 import { conditionToExpr } from "./eq";
 
@@ -6,17 +5,16 @@ import { conditionToExpr } from "./eq";
  * Author-facing options for {@link branch}.
  *
  * `when` is evaluated at runtime as a raw JS expression against `ctx`
- * (`ctx.request`, `ctx.state.<id>`, `ctx.response`, …). A bare `$` proxy
- * compiles to a raw truthiness check; use {@link eq} / {@link gt} / friends for
- * comparisons.
+ * (`ctx.request`, `ctx.state.<id>`, `ctx.response`, …). Use {@link eq} /
+ * {@link gt} / friends for comparisons, or write the raw `ctx.*` expression
+ * directly.
  */
 export interface BranchOpts {
-	/** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+	/** Stable identifier — visible in traces, referenced as `ctx.state[id]`. */
 	id: string;
 	/**
 	 * JS condition evaluated against `ctx`. Truthy → run `then`; falsy →
-	 * run `else`. Use a bare `$` proxy for truthiness, a comparator helper, or a
-	 * raw `ctx.*` expression.
+	 * run `else`. Use a comparator helper or a raw `ctx.*` expression.
 	 */
 	when: string | unknown;
 	then: V2Step[];
@@ -39,17 +37,17 @@ export interface BranchOpts {
  * with the same shape as a regular step: `{ id, ... }`.
  *
  * @example
- *   import { branch, eq, $ } from "@blokjs/helper";
+ *   import { branch, eq } from "@blokjs/helper";
  *   branch({
  *     id: "route",
- *     when: eq($.req.method, "POST"),   // → 'ctx.request.method === "POST"'
+ *     when: eq("ctx.request.method", "POST"),   // → 'ctx.request.method === "POST"'
  *     then: [{ id: "create", use: "...", inputs: {...} }],
  *     else: [{ id: "read",   use: "...", inputs: {...} }]
  *   })
  *
  * @example
- *   // Truthiness check.
- *   branch({ id: "has-kind", when: $.req.query.kind, then: [...] })
+ *   // Truthiness check — a raw ctx expression.
+ *   branch({ id: "has-kind", when: "ctx.request.query.kind", then: [...] })
  */
 export function branch(opts: BranchOpts): V2BranchStep {
 	if (!opts || typeof opts !== "object") {
@@ -60,13 +58,13 @@ export function branch(opts: BranchOpts): V2BranchStep {
 	}
 	if (opts.when === undefined || opts.when === null) {
 		throw new Error(
-			`branch("${opts.id}") requires a non-empty \`when\` string. Use a $ proxy path (e.g. $.req.query.kind), a comparator helper, or a raw ctx expression.`,
+			`branch("${opts.id}") requires a non-empty \`when\` string. Use a comparator helper or a raw ctx expression.`,
 		);
 	}
 	const when = conditionToExpr(opts.when);
 	if (typeof when !== "string" || when.length === 0) {
 		throw new Error(
-			`branch("${opts.id}") requires a non-empty \`when\` string. Use a $ proxy path (e.g. $.req.query.kind), a comparator helper, or a raw ctx expression.`,
+			`branch("${opts.id}") requires a non-empty \`when\` string. Use a comparator helper or a raw ctx expression.`,
 		);
 	}
 	if (!Array.isArray(opts.then)) {
@@ -76,9 +74,8 @@ export function branch(opts: BranchOpts): V2BranchStep {
 		throw new Error(`branch("${opts.id}") \`else\` must be an array of steps when set.`);
 	}
 
-	// Walk the steps to convert any inline proxies in their inputs.
-	const thenSteps = unwrapProxies(opts.then) as V2Step[];
-	const elseSteps = opts.else ? (unwrapProxies(opts.else) as V2Step[]) : undefined;
+	const thenSteps = opts.then as V2Step[];
+	const elseSteps = opts.else as V2Step[] | undefined;
 
 	const result: V2BranchStep = {
 		id: opts.id,

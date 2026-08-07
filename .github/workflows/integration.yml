@@ -61,6 +61,12 @@ jobs:
       - name: Proto drift check
         run: bun run proto:check
 
+      # The `$` proxy is deleted (issue #689). Same check also runs on its own
+      # in no-dollar-proxy.yml, which — unlike this workflow — isn't skipped
+      # for docs-only PRs.
+      - name: No $ proxy check
+        run: bun run check:no-dollar-proxy
+
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
           postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator

@@ -1,7 +1,7 @@
 {
 	"name": "v05-order-fulfillment",
 	"version": "1.0.0",
-	"description": "v0.5 showcase — combines all five primitives in one workflow. Trigger-level middleware (auth-check + rate-limit) gates entry; switch routes by order type (physical/subscription do parallel forEach over inventory ops, digital generates a license); tryCatch wraps the payment step with a finally-arm audit; the final expr step shapes the response. External calls go to httpbin.org so the workflow runs without secrets — pass `paymentUrl: https://httpbin.org/status/500` to force the failure path. Demonstrates: middleware chain, switch with array `when`, forEach parallel + concurrency, tryCatch with all three arms, $.error proxy in catch.",
+	"description": "v0.5 showcase — combines all five primitives in one workflow. Trigger-level middleware (auth-check + rate-limit) gates entry; switch routes by order type (physical/subscription do parallel forEach over inventory ops, digital generates a license); tryCatch wraps the payment step with a finally-arm audit; the final expr step shapes the response. External calls go to httpbin.org so the workflow runs without secrets — pass `paymentUrl: https://httpbin.org/status/500` to force the failure path. Demonstrates: middleware chain, switch with array `when`, forEach parallel + concurrency, tryCatch with all three arms, ctx.error in catch.",
 	"trigger": {
 		"http": {
 			"method": "POST",

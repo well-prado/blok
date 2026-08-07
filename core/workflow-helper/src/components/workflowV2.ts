@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import { unwrapProxies } from "../proxy/$";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
 import { WORKFLOW_IR_VERSION, type WorkflowV2, WorkflowV2Schema } from "../types/WorkflowOpts";
@@ -158,10 +157,8 @@ function collectLiteralEmitEvents(node: unknown, out: string[]): void {
 }
 
 /**
- * Lowercase v2 workflow factory. Validates inputs against the v2 schema,
- * compiles any `$` proxy expressions inside step `inputs` into
- * `"js/ctx..."` strings at definition time, and returns a tagged object
- * the runner's normalizer recognizes.
+ * Lowercase v2 workflow factory. Validates inputs against the v2 schema
+ * and returns a tagged object the runner's normalizer recognizes.
  *
  * Differences from the legacy `Workflow()` (capital W):
  * - **No chaining.** The full workflow is a single object literal —
@@ -171,11 +168,9 @@ function collectLiteralEmitEvents(node: unknown, out: string[]): void {
  *   Opt out with `ephemeral: true`. Multi-output: `spread: true`. Rename:
  *   `as: "<name>"`.
  * - **`branch({when, then, else})`** replaces `addCondition + AddIf + AddElse`.
- * - **`$` proxy** replaces hand-written `js/ctx....` strings with typed
- *   property access.
  *
  * @example
- *   import { workflow, branch, $ } from "@blokjs/helper";
+ *   import { workflow, branch } from "@blokjs/helper";
  *
  *   export default workflow({
  *     name: "World Countries",
@@ -186,9 +181,9 @@ function collectLiteralEmitEvents(node: unknown, out: string[]): void {
  *         inputs: { url: "https://countriesnow.space/api/v0.1/countries" } },
  *       branch({
  *         id: "route",
- *         when: $.req.query.kind,
+ *         when: "ctx.request.query.kind",
  *         then: [{ id: "respond", use: "@blokjs/respond",
- *                  inputs: { body: $.state.fetch } }],
+ *                  inputs: { body: "js/ctx.state.fetch" } }],
  *         else: [{ id: "fallback", use: "@blokjs/api-call",
  *                  inputs: { url: "https://catfact.ninja/fact" } }]
  *       })
@@ -220,10 +215,8 @@ export function workflow<
 		throw new Error(`workflow("${opts.name}") failed validation: ${envelope.error.message}`);
 	}
 
-	// Compile $ proxy expressions into js/ strings BEFORE schema validation
-	// (the schema sees only strings; proxies would fail z.string().min(1)).
-	const compiledSteps = unwrapProxies(opts.steps) as V2Step[];
-	const compiledTrigger = unwrapProxies(opts.trigger ?? {}) as Record<string, unknown>;
+	const compiledSteps = opts.steps as V2Step[];
+	const compiledTrigger = (opts.trigger ?? {}) as Record<string, unknown>;
 
 	// A workflow with no steps does nothing. `WorkflowV2Schema.steps` declares
 	// `.min(1)`, but the factory validates steps per-element (a no-op on `[]`)

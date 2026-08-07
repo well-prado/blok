@@ -17,7 +17,7 @@
  *     - maxIterations cap throws LoopMaxIterationsError
  */
 
-import { $, lt } from "@blokjs/helper";
+import { lt } from "@blokjs/helper";
 import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -726,7 +726,7 @@ describe("v0.5 forEach + loop integration", () => {
 		});
 
 		it("terminates from a raw op expression over the loop counter handle", async () => {
-			const whileExpr = lt($.state["poll-loopIndex"], 3);
+			const whileExpr = lt('ctx.state["poll-loopIndex"]', 3);
 			expect(whileExpr).toBe('ctx.state["poll-loopIndex"] < 3');
 
 			const wfDef = {

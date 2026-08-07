@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineNode, step, workflow } from "@blokjs/core";
-import { $, workflow as helperWorkflow } from "@blokjs/helper";
-import { JS_EXPR_TAG, unwrapProxies } from "@blokjs/helper/internal";
+import { workflow as helperWorkflow } from "@blokjs/helper";
 import { RespondNode } from "@blokjs/helpers";
 import { applyStepOutput } from "@blokjs/runner/workflow/PersistenceHelper";
 import { normalizeWorkflow } from "@blokjs/runner/workflow/WorkflowNormalizer";
@@ -18,7 +17,6 @@ import { emitWorkflowResponse } from "../../../triggers/http/src/runner/response
 const require = createRequire(import.meta.url);
 
 type HelperPublic = typeof import("@blokjs/helper");
-type HelperInternal = typeof import("@blokjs/helper/internal");
 
 const EchoNode = defineNode({
 	name: "test-shim-echo",
@@ -36,11 +34,10 @@ const EchoNode = defineNode({
 
 async function importSecondHelperInstance(): Promise<{
 	helper: HelperPublic;
-	internal: HelperInternal;
 	dispose: () => Promise<void>;
 }> {
-	const internalPath = require.resolve("@blokjs/helper/internal");
-	const distDir = path.dirname(internalPath);
+	const indexPath = require.resolve("@blokjs/helper");
+	const distDir = path.dirname(indexPath);
 	const packageDir = path.dirname(distDir);
 	const tmp = await mkdtemp(path.join(tmpdir(), "blok-helper-skew-"));
 	const copyDir = path.join(tmp, "helper-dist");
@@ -49,11 +46,9 @@ async function importSecondHelperInstance(): Promise<{
 
 	const nonce = `?v=${Date.now()}-${Math.random()}`;
 	const helper = (await import(pathToFileURL(path.join(copyDir, "index.js")).href + nonce)) as HelperPublic;
-	const internal = (await import(pathToFileURL(path.join(copyDir, "internal.js")).href + nonce)) as HelperInternal;
 
 	return {
 		helper,
-		internal,
 		dispose: () => rm(tmp, { recursive: true, force: true }),
 	};
 }
@@ -100,25 +95,6 @@ async function emit(ctxResponse: unknown): Promise<Response> {
 }
 
 describe("shim identity across core/helper version skew", () => {
-	it("unwraps $ proxies across duplicate helper module instances in both directions", async () => {
-		const skew = await importSecondHelperInstance();
-		try {
-			expect(skew.internal.JS_EXPR_TAG).toBe(JS_EXPR_TAG);
-
-			const copyProxy = skew.helper.$.state.user.name as unknown as { [JS_EXPR_TAG]: string };
-			expect(copyProxy[JS_EXPR_TAG]).toBe("ctx.state.user.name");
-
-			expect(unwrapProxies({ value: skew.helper.$.state.user.name })).toEqual({
-				value: "js/ctx.state.user.name",
-			});
-			expect(skew.internal.unwrapProxies({ value: $.state.seed.value })).toEqual({
-				value: "js/ctx.state.seed.value",
-			});
-		} finally {
-			await skew.dispose();
-		}
-	});
-
 	it("keeps helper and core workflow envelopes structural across import boundaries", async () => {
 		const skew = await importSecondHelperInstance();
 		try {
@@ -126,7 +102,7 @@ describe("shim identity across core/helper version skew", () => {
 				name: "Shim Workflow",
 				version: "1.0.0",
 				trigger: { http: { method: "POST" } },
-				steps: [{ id: "out", use: "@blokjs/respond", inputs: { body: $.req.body } }],
+				steps: [{ id: "out", use: "@blokjs/respond", inputs: { body: "js/ctx.req.body" } }],
 			});
 			expect(shimWorkflow._blokV2).toBe(true);
 			expect(shimWorkflow._config.steps[0]?.inputs?.body).toBe("js/ctx.req.body");
@@ -137,8 +113,8 @@ describe("shim identity across core/helper version skew", () => {
 				{ version: "1.0.0", trigger: { http: { method: "POST" } } },
 				() => {
 					step("echo", EchoNode, {
-						body: skew.helper.$.req.body,
-						seed: skew.helper.$.state.seed.value,
+						body: "js/ctx.req.body",
+						seed: "js/ctx.state.seed.value",
 					});
 				},
 			);
@@ -162,8 +138,8 @@ describe("shim identity across core/helper version skew", () => {
 						"echo",
 						EchoNode,
 						{
-							body: skew.helper.$.req.body,
-							seed: skew.helper.$.state.seed.value,
+							body: "js/ctx.req.body",
+							seed: "js/ctx.state.seed.value",
 						},
 						{ as: "result" },
 					);
@@ -205,7 +181,7 @@ describe("shim identity across core/helper version skew", () => {
 			name: "Workspace Helper",
 			version: "1.0.0",
 			trigger: { http: { method: "GET" } },
-			steps: [{ id: "out", use: "@blokjs/respond", inputs: { body: $.state.seed } }],
+			steps: [{ id: "out", use: "@blokjs/respond", inputs: { body: "js/ctx.state.seed" } }],
 		});
 		expect(wf._blokV2).toBe(true);
 		expect(normalizeWorkflow(wf).steps[0]?.name).toBe("out");

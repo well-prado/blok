@@ -1,7 +1,7 @@
 {
 	"name": "v05-nested-control-flow",
 	"version": "1.0.0",
-	"description": "v0.5 deep nesting demo — primitives nested inside primitives. Each line item runs through forEach > tryCatch > switch (per-type handler) > regular steps; the catch arm uses a branch to decide whether one bad item should fail the whole order (required items rethrow) or be silently skipped (optional items log + continue). External calls go to httpbin.org so the workflow runs without secrets — pass `handlerUrl: https://httpbin.org/status/500` on a non-required item to exercise the optional-skip path. Demonstrates: forEach > tryCatch > switch > branch nesting, $.error proxy in catch, per-iteration summary so the parent can count successes vs swallowed failures.",
+	"description": "v0.5 deep nesting demo — primitives nested inside primitives. Each line item runs through forEach > tryCatch > switch (per-type handler) > regular steps; the catch arm uses a branch to decide whether one bad item should fail the whole order (required items rethrow) or be silently skipped (optional items log + continue). External calls go to httpbin.org so the workflow runs without secrets — pass `handlerUrl: https://httpbin.org/status/500` on a non-required item to exercise the optional-skip path. Demonstrates: forEach > tryCatch > switch > branch nesting, ctx.error in catch, per-iteration summary so the parent can count successes vs swallowed failures.",
 	"trigger": {
 		"http": {
 			"method": "POST",
