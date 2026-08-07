@@ -32,6 +32,7 @@ import "./commands/migrate/index.js";
 import "./commands/runtime/index.js";
 import "./commands/observability/index.js";
 import "./commands/graph/index.js";
+import "./commands/routes/index.js";
 import "./commands/profile/index.js";
 import "./commands/cost/index.js";
 import "./commands/trace/index.js";
