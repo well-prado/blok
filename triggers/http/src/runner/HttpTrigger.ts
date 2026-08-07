@@ -61,6 +61,7 @@ import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 import type WorkflowRequest from "./types/WorkflowRequest";
+import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from "./validateRefsAtBoot";
 
 /**
  * v0.7 — exported so sibling triggers (WebSocket / SSE / Webhook) can
@@ -929,6 +930,19 @@ export default class HttpTrigger extends TriggerBase {
 		const globalChain = registry.getGlobalMiddleware();
 		if (globalChain.length > 0) {
 			this.logger.log(`[blok] process-global middleware chain (applies to every workflow): ${globalChain.join(" → ")}`);
+		}
+
+		// #691 — schema-aware step-output reference validation. The registry is
+		// fully populated and the node catalog is reachable, so this is the one
+		// boot point where every workflow and every node schema are both in hand.
+		// Advisory by default; `BLOK_VALIDATE_REFS=strict` fails boot.
+		const refMode = readRefValidationMode(process.env.BLOK_VALIDATE_REFS);
+		if (refMode !== "off") {
+			const moduleNodes = this.nodeMap.nodes?.getNodes?.() as Map<string, unknown> | undefined;
+			const catalog = await buildNodeCatalog(moduleNodes, RuntimeRegistry.getInstance().getAll());
+			const refResult = collectBootRefErrors(registry.list(), catalog);
+			// Strict mode throws out of `listen()` — the operator asked for it.
+			reportRefsAtBoot(refResult, refMode, this.logger);
 		}
 
 		// v0.7 — fire pre-catch-all hooks. Sibling triggers (WebSocketTrigger,
