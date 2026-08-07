@@ -64,19 +64,23 @@ export interface WorkflowOpts<
 	 */
 	trigger?: Record<string, unknown>;
 	/**
-	 * When `true`, this workflow is registered as MIDDLEWARE and is NOT exposed
-	 * as a public HTTP route. It runs on the parent ctx when another workflow
-	 * lists this one's `name` in its `trigger.<kind>.middleware: [...]` array
-	 * (or via `setGlobalMiddleware([...])` / `BLOK_GLOBAL_MIDDLEWARE`). Mirrors
-	 * `WorkflowV2Schema.middleware`, which already makes `trigger` optional for
-	 * middleware. Only the literal `true` is the marker.
+	 * Overloaded by design, mirroring `WorkflowV2Schema.middleware` — the
+	 * value's TYPE picks the meaning, and the two are mutually exclusive:
 	 *
-	 * The JSON IR also accepts `middleware: string[]` on the root — the v0.5.2
-	 * workflow-level CHAIN, a different concept (see `WorkflowV2Schema`). This
-	 * factory deliberately exposes only the marker; TS authors declare a chain
-	 * per trigger via `trigger.<kind>.middleware: [...]`.
+	 * `true` — MARKER: this workflow IS middleware and is NOT exposed as a
+	 * public HTTP route. It runs on the parent ctx when another workflow
+	 * lists this one's `name` in its `trigger.<kind>.middleware: [...]` array
+	 * (or via `setGlobalMiddleware([...])` / `BLOK_GLOBAL_MIDDLEWARE`).
+	 * Middleware-only workflows may omit `trigger`.
+	 *
+	 * `string[]` — CHAIN (v0.5.2): the workflow-level middleware chain
+	 * applied TO this workflow, by name of `middleware: true` workflows.
+	 * Applies to ALL of this workflow's triggers and runs BEFORE any
+	 * trigger-level chain. Carried onto `_config.middleware` and `toJson()`;
+	 * the runner's `WorkflowNormalizer` reads it into `appliedMiddleware`,
+	 * merged by `TriggerBase.applyMiddlewareChain`.
 	 */
-	middleware?: true;
+	middleware?: true | readonly string[];
 	/** Pipeline of steps to execute in order. At least one required. */
 	steps: V2Step[];
 	/**
@@ -290,10 +294,18 @@ export function workflow<
 		description: opts.description,
 		trigger: validatedTrigger,
 		steps: compiledSteps,
-		// Carry the middleware marker so it survives onto `_config` and through
-		// `toJson()` — the HTTP layer's `readMiddlewareFlag` reads it to register
-		// the workflow as middleware (and exclude it from the route table).
-		...(opts.middleware === true ? { middleware: true as const } : {}),
+		// Carry the middleware marker/chain so it survives onto `_config` and
+		// through `toJson()`. `true` — the HTTP layer's `readMiddlewareFlag`
+		// reads it to register the workflow as middleware (and exclude it from
+		// the route table). `string[]` — the workflow-level chain; spread into a
+		// fresh mutable array since `WorkflowV2.middleware` (Zod-inferred) isn't
+		// `readonly`, and `WorkflowNormalizer.normalizeWorkflow` reads it off
+		// `_config.middleware` straight into `appliedMiddleware`.
+		...(opts.middleware === true
+			? { middleware: true as const }
+			: Array.isArray(opts.middleware)
+				? { middleware: [...opts.middleware] }
+				: {}),
 		// Carry the optional Zod input/output schemas + event vocabulary verbatim
 		// (authoring metadata for the `mcp` trigger + the typed `@blokjs/client`).
 		// Excluded from toJson() — Zod schemas aren't serializable.

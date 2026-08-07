@@ -53,9 +53,11 @@ main workflow.
 The `middleware: true` flag marks this workflow as middleware-only —
 it's never reachable as a direct HTTP route.
 
-The same middleware in the TypeScript DSL — `middleware: true` (the
-literal `true` is the only accepted value) marks it middleware-only, and
-`trigger` is optional **only** for middleware workflows:
+The same middleware in the TypeScript DSL — `middleware: true` marks it
+middleware-only, and `trigger` is optional **only** for middleware
+workflows. `middleware` is overloaded: the literal `true` is the
+is-middleware marker; a `string[]` is the workflow-level CHAIN (below) —
+the two are mutually exclusive on the same workflow.
 
 ```typescript triggers/http/src/workflows/auth-check.ts
 import { workflow } from "@blokjs/helper";
@@ -105,6 +107,49 @@ export default workflow({
 trigger returns 401 and the main workflow never runs. `rate-limit`
 runs after, also shares `ctx`. The main workflow sees
 `ctx.state.identity.userId` populated.
+
+### Workflow-level chain (v0.5.2)
+
+`trigger.<kind>.middleware` (above) repeats the same list on every
+trigger of a workflow. The workflow-level `middleware:` field — an
+array of middleware workflow names, not the `true` marker — applies
+the chain to ALL of the workflow's triggers once, and runs BEFORE any
+trigger-level chain:
+
+```json
+{
+  "name": "Protected Endpoint",
+  "middleware": ["tenant-resolve"],
+  "trigger": { "http": { "method": "GET", "path": "/protected" } },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": { "expression": "({ ok: true, tenant: ctx.state.identity.tenant })" }
+    }
+  ]
+}
+```
+
+Same in the TypeScript DSL:
+
+```typescript
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+  name: "Protected Endpoint",
+  version: "1.0.0",
+  middleware: ["tenant-resolve"], // workflow-level chain, not the `true` marker
+  trigger: { http: { method: "GET", path: "/protected" } },
+  steps: [
+    {
+      id: "respond",
+      use: "@blokjs/expr",
+      inputs: { expression: "({ ok: true, tenant: ctx.state.identity.tenant })" },
+    },
+  ],
+});
+```
 
 ## Resolution order
 

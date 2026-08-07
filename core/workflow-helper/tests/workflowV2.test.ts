@@ -79,6 +79,66 @@ describe("workflow() — middleware authoring (Bug 01 part A)", () => {
 	});
 });
 
+describe("workflow() — middleware CHAIN authoring (#712)", () => {
+	it("typechecks and carries `middleware: string[]` onto `_config`", () => {
+		const wf = workflow({
+			name: "protected",
+			version: "1.0.0",
+			middleware: ["auth-check", "rate-limit"],
+			trigger: { http: { method: "POST", path: "/orders" } },
+			steps: [minimalStep],
+		});
+		expect((wf._config as { middleware?: unknown }).middleware).toEqual(["auth-check", "rate-limit"]);
+	});
+
+	it("emits the array from toJson()", () => {
+		const wf = workflow({
+			name: "protected",
+			version: "1.0.0",
+			middleware: ["auth-check"],
+			trigger: { http: { method: "POST", path: "/orders" } },
+			steps: [minimalStep],
+		});
+		expect(JSON.parse(wf.toJson()).middleware).toEqual(["auth-check"]);
+	});
+
+	it("accepts a `readonly string[]` (e.g. `as const`) without a cast", () => {
+		const chain = ["auth-check", "rate-limit"] as const;
+		const wf = workflow({
+			name: "protected",
+			version: "1.0.0",
+			middleware: chain,
+			trigger: { http: { method: "POST", path: "/orders" } },
+			steps: [minimalStep],
+		});
+		expect((wf._config as { middleware?: unknown }).middleware).toEqual(["auth-check", "rate-limit"]);
+	});
+
+	it("copies the array — mutating the caller's array after the call does not affect `_config`", () => {
+		const chain = ["auth-check"];
+		const wf = workflow({
+			name: "protected",
+			version: "1.0.0",
+			middleware: chain,
+			trigger: { http: { method: "POST", path: "/orders" } },
+			steps: [minimalStep],
+		});
+		chain.push("rate-limit");
+		expect((wf._config as { middleware?: unknown }).middleware).toEqual(["auth-check"]);
+	});
+
+	it("a chain is still required to declare a trigger (only `middleware: true` may omit one)", () => {
+		expect(() =>
+			workflow({
+				name: "protected",
+				version: "1.0.0",
+				middleware: ["auth-check"],
+				steps: [minimalStep],
+			} as unknown as Parameters<typeof workflow>[0]),
+		).toThrow(/requires a trigger/);
+	});
+});
+
 describe("workflow() — envelope validation (F16)", () => {
 	it('defaults `schemaVersion` to "2" on `_config` and toJson()', () => {
 		const wf = workflow({
