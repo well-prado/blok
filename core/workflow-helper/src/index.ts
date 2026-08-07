@@ -51,6 +51,18 @@ import type {
 } from "./types/TriggerOpts";
 import { WORKFLOW_IR_VERSION, type WorkflowIR, WorkflowIRSchema } from "./types/WorkflowOpts";
 import { parseDuration, tryParseDuration } from "./utils/parseDuration";
+import {
+	type CatalogNodeLike,
+	type NodeSchemaLookup,
+	type RefDiagnostic,
+	type RefDiagnosticCode,
+	type RefSeverity,
+	type ValidateRefsOptions,
+	type ValidateRefsResult,
+	middlewareStateKeys,
+	nodeSchemaLookup,
+	validateRefs,
+} from "./validateRefs";
 import { type WorkflowValidationError, type WorkflowValidationResult, validateWorkflow } from "./validateWorkflow";
 
 export {
@@ -94,6 +106,17 @@ export {
 	validateWorkflow,
 	type WorkflowValidationResult,
 	type WorkflowValidationError,
+	// schema-aware step-output reference checking (#691)
+	validateRefs,
+	nodeSchemaLookup,
+	middlewareStateKeys,
+	type ValidateRefsOptions,
+	type ValidateRefsResult,
+	type RefDiagnostic,
+	type RefDiagnosticCode,
+	type RefSeverity,
+	type NodeSchemaLookup,
+	type CatalogNodeLike,
 	// per-trigger config TYPES (each trigger package re-exports its own)
 	type HttpTriggerOpts,
 	type TriggerOpts,

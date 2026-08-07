@@ -3,16 +3,18 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
 import { JsonViewer } from "@/components/shared/JsonViewer";
+import { RefDiagnosticsPanel } from "@/components/shared/RefDiagnosticsPanel";
 import { RoutingDiagnosticsBanner } from "@/components/shared/RoutingDiagnosticsBanner";
 import { WorkflowGraph } from "@/components/trace/WorkflowGraph";
 import { useWorkflowRuns } from "@/hooks/useRuns";
-import { useDeleteWorkflowSample, useWorkflowDetail } from "@/hooks/useWorkflows";
+import { useDeleteWorkflowSample, useNodeCatalog, useWorkflowDetail } from "@/hooks/useWorkflows";
 import { ApiError, exportRunsCsv, exportRunsJson } from "@/lib/api";
 import { formatDuration, formatPercent } from "@/lib/formatters";
+import { refDiagnostics } from "@/lib/refDiagnostics";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { ArrowLeft, GitBranch, Loader2, RefreshCw, Workflow } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 export const Route = createFileRoute("/workflows/$name")({
 	component: WorkflowDetailPage,
@@ -28,6 +30,12 @@ function WorkflowDetailPage() {
 	const limit = 25;
 
 	const { data: detail, isLoading: detailLoading } = useWorkflowDetail(name);
+	// #691 — the JSON twin runs the SAME ref validation the canvas does.
+	const catalog = useNodeCatalog(activeTab === "definition");
+	const definitionDiagnostics = useMemo(
+		() => refDiagnostics(detail?.definition, catalog.data?.nodes),
+		[detail?.definition, catalog.data?.nodes],
+	);
 	const deleteSample = useDeleteWorkflowSample(name);
 	const { data: runsData, isLoading: runsLoading } = useWorkflowRuns(name, {
 		status: statusFilter || undefined,
@@ -208,6 +216,7 @@ function WorkflowDetailPage() {
 
 			{activeTab === "definition" && (
 				<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
+					{detail.definition ? <RefDiagnosticsPanel diagnostics={definitionDiagnostics} /> : null}
 					<JsonViewer data={detail.definition || { nodeNames: detail.nodeNames, runtimes: detail.runtimes }} />
 				</div>
 			)}

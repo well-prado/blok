@@ -1,4 +1,5 @@
 import { WorkflowV2Schema } from "./types/WorkflowOpts";
+import { type RefDiagnostic, type ValidateRefsOptions, validateRefs } from "./validateRefs";
 
 /**
  * A single validation problem, located by a dot-joined path into the document.
@@ -25,6 +26,14 @@ export interface WorkflowValidationResult {
 	ok: boolean;
 	kind: "v2" | "v1" | "unknown";
 	errors: WorkflowValidationError[];
+	/**
+	 * Schema-aware step-output reference diagnostics (#691). Present only when
+	 * the caller passes `refs` — otherwise this validator knows nothing about
+	 * node output schemas and stays exactly as it was.
+	 */
+	refDiagnostics?: readonly RefDiagnostic[];
+	/** Step ids whose node advertised no output schema. See {@link validateRefs}. */
+	uncheckedSteps?: readonly string[];
 }
 
 /**
@@ -41,7 +50,7 @@ export interface WorkflowValidationResult {
  *   object).
  * @returns `{ ok, kind, errors }`. See {@link WorkflowValidationResult}.
  */
-export function validateWorkflow(json: unknown): WorkflowValidationResult {
+export function validateWorkflow(json: unknown, refs?: ValidateRefsOptions): WorkflowValidationResult {
 	if (typeof json !== "object" || json === null || Array.isArray(json)) {
 		return {
 			ok: false,
@@ -85,13 +94,24 @@ export function validateWorkflow(json: unknown): WorkflowValidationResult {
 	}
 
 	const r = WorkflowV2Schema.safeParse(doc);
-	if (r.success) {
-		return { ok: true, kind: "v2", errors: [] };
+	const errors = r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+
+	// #691 — schema-aware `{$ref}` / `ctx.state` checking, composed in rather
+	// than reimplemented. Opt-in: without a node-schema lookup there is nothing
+	// to check against, and the pre-#691 behaviour is preserved byte for byte.
+	if (!refs) {
+		return { ok: errors.length === 0, kind: "v2", errors };
+	}
+	const ref = validateRefs(doc, refs);
+	for (const d of ref.diagnostics) {
+		if (d.severity === "error") errors.push({ path: d.path, message: d.message });
 	}
 	return {
-		ok: false,
+		ok: errors.length === 0,
 		kind: "v2",
-		errors: r.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+		errors,
+		refDiagnostics: ref.diagnostics,
+		uncheckedSteps: ref.uncheckedSteps,
 	};
 }
 

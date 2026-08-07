@@ -47,6 +47,7 @@ See [the dev loop](/d/cli/dev) for the full change-type → behavior table.
 | `BLOK_DEV_WATCH_ALL` | unset | `=1` makes `blokctl dev` run every trigger under `bun --watch` — a full process restart on any source change, which preempts in-process hot reload. Escape hatch for the pre-0.8 behaviour; equivalent to `blokctl dev --watch-all`. |
 | `BLOK_DOTENV_DISABLED` | unset | `=1` skips the runner's `.env` / `.env.local` loading entirely. Loading never overwrites a variable already present in the environment, so this is only needed to opt out of file-based config completely. |
 | `BLOK_MAPPER_MODE` | `strict` | Input expression resolution failure mode. `strict` (default) throws `MapperResolutionError` on a failed expression, `warn` logs + passes the literal through (old v1 behavior), `silent` suppresses. See [debugging workflows](/d/introduction/workflows#debugging). |
+| `BLOK_VALIDATE_REFS` | `advisory` | Boot-time schema-aware step-output reference checking. Every workflow's `{$ref}` / `ctx.state.…` reads are validated against the declared output schema of the producing step's node (the same catalog `GET /__blok/nodes` serves). `advisory` (default) logs errors and boots anyway; `strict` refuses to boot; `off` skips the pass. A node with no advertised output schema is "unchecked" — its reads never error. Run the same check in CI with `blokctl check`. |
 
 ## Sub-workflows
 

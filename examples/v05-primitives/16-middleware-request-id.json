@@ -1,0 +1,30 @@
+{
+	"name": "request-id",
+	"version": "1.0.0",
+	"description": "Reusable middleware workflow. Ensures every request carries a correlation ID: reuses the caller's X-Request-Id header when present, otherwise mints a UUID, and publishes it at ctx.state.requestId for downstream steps (and response bodies) to reference. Apply via `trigger.http.middleware: [\"request-id\"]` — 04-multi-tenant-router does exactly that — or process-wide via BLOK_GLOBAL_MIDDLEWARE=request-id, which is the setup 15-hello-with-global-middleware demonstrates. Middleware runs on the parent ctx, so the published slot is visible to the main workflow's steps.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "make-id",
+			"use": "expr",
+			"type": "module",
+			"inputs": {
+				"expression": "ctx.request.headers['x-request-id'] || crypto.randomUUID()"
+			}
+		},
+		{
+			"id": "publish-id",
+			"use": "ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "requestId",
+				"value": {
+					"$ref": {
+						"step": "make-id",
+						"path": []
+					}
+				}
+			}
+		}
+	]
+}

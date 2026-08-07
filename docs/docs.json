@@ -189,6 +189,7 @@
 							"d/cli/nodes",
 							"d/cli/workflows",
 							"d/cli/gen",
+							"d/cli/check",
 							"d/cli/login",
 							"d/cli/build",
 							"d/cli/deploy",

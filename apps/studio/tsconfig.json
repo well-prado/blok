@@ -17,8 +17,9 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUncheckedIndexedAccess": true,
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"@blok/validate-refs": ["../../core/workflow-helper/src/validateRefs.ts"]
 		}
 	},
-	"include": ["src"]
+	"include": ["src", "../../core/workflow-helper/src/validateRefs.ts"]
 }
