@@ -74,7 +74,9 @@ export default workflow("greet.hello", { version: "1.0.0", trigger: http.get("/g
 last step's output becomes the HTTP response body.
 
 Register it in `src/Workflows.ts` (TypeScript workflows are registered here; the map key is the
-workflow name):
+workflow name). This is the one manual step left in the default setup — JSON workflows under
+`workflows/json/` route themselves from the filesystem, but a TypeScript file still needs this
+one-line entry:
 
 ```ts src/Workflows.ts {2,6}
 // ...existing imports
@@ -87,6 +89,12 @@ const workflows = {
 
 export default workflows;
 ```
+
+<Tip>
+Forgot this step? Run `blokctl routes` to print every registered route, or just hit the URL —
+in dev mode the 404 names the scan roots it checked and the closest registered match. See
+[debugging an unknown route](/d/triggers/http#debugging-an-unknown-route).
+</Tip>
 
 ## 4. Call it
 

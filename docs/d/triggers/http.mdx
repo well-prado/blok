@@ -68,6 +68,27 @@ derived path.
 When `BLOK_FILE_BASED_ROUTING=false`, the legacy `/<workflow-name>`
 catch-all dispatch handles requests.
 
+<Note>
+File-scan auto-routing covers **JSON workflows** under `workflows/json/`.
+TypeScript workflows (`src/workflows/*.ts`) still need one entry in
+`src/Workflows.ts` — see [Quickstart](/d/get-started/quickstart#3-compose-a-workflow).
+This is the one manual step left in the default setup; everything else
+(nodes, node registration, path derivation) is automatic.
+</Note>
+
+### Debugging an unknown route
+
+In dev mode (`NODE_ENV=development` or `BLOK_HMR=true`), a 404 from an
+unmatched route or an unknown `/__blok/rpc/:name` name comes back with the
+scan roots read this boot, how many routes each contributed, and the
+closest registered match ("did you mean `POST /orders`?"). Production keeps
+a terse response — the same diagnostic is always in the server log.
+
+Run `blokctl routes` to print the full boot-time route table
+(`METHOD PATH ← workflow-name (source-file)`) offline, without starting the
+server — useful in CI or for an AI agent checking "is my workflow actually
+registered?" before making a request. Exits `1` when no routes are found.
+
 ## The `req` handle
 
 The build callback's `req` argument reads the incoming request:
