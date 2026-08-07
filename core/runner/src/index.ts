@@ -194,26 +194,35 @@ import { WorkflowTestRunner } from "./testing/WorkflowTestRunner";
 // types
 
 import BlokService from "./Blok";
-import BlokResponse, { IBlokResponse } from "./BlokResponse";
+import BlokResponse, { type IBlokResponse } from "./BlokResponse";
 import NodeMap from "./NodeMap";
 import RunnerSteps from "./RunnerSteps";
 import { discoverNodes } from "./discoverNodes";
-import Average from "./types/Average";
-import Condition from "./types/Condition";
-import Conditions from "./types/Conditions";
-import Config from "./types/Config";
-import Flow from "./types/Flow";
-import GlobalOptions from "./types/GlobalOptions";
-import Inputs from "./types/Inputs";
-import JsonLikeObject from "./types/JsonLikeObject";
-import Node from "./types/Node";
-import ParamsDictionary from "./types/ParamsDictionary";
-import Properties from "./types/Properties";
-import Targets from "./types/Targets";
-import Trigger from "./types/Trigger";
-import TriggerHttp from "./types/TriggerHttp";
-import TriggerResponse from "./types/TriggerResponse";
-import Triggers from "./types/Triggers";
+// These `types/*` modules are `type X = {...}; export default X;` — a type
+// alias, not a runtime value. Bun's per-file source loader (used by `bun -e
+// import(...)`, in-monorepo scripts, and bundler source-aliasing) can't see
+// into the target file to know that, unlike a full bundler or tsc; a plain
+// value `import`/`export` of these names round-trips through a synthesized
+// re-export that Bun rejects with "export default cannot be used with
+// export *". `import type` here (and `type` on the corresponding `export {
+// }` entries below) makes the type-only-ness explicit so no runtime binding
+// is ever synthesized. See #702.
+import type Average from "./types/Average";
+import type Condition from "./types/Condition";
+import type Conditions from "./types/Conditions";
+import type Config from "./types/Config";
+import type Flow from "./types/Flow";
+import type GlobalOptions from "./types/GlobalOptions";
+import type Inputs from "./types/Inputs";
+import type JsonLikeObject from "./types/JsonLikeObject";
+import type Node from "./types/Node";
+import type ParamsDictionary from "./types/ParamsDictionary";
+import type Properties from "./types/Properties";
+import type Targets from "./types/Targets";
+import type Trigger from "./types/Trigger";
+import type TriggerHttp from "./types/TriggerHttp";
+import type TriggerResponse from "./types/TriggerResponse";
+import type Triggers from "./types/Triggers";
 
 export {
 	Configuration,
@@ -383,27 +392,27 @@ export {
 	WorkflowTestRunner,
 	TestLogger,
 	// Types
-	Condition,
-	Conditions,
-	Config,
-	Flow,
-	Inputs,
-	Node,
-	Properties,
-	Targets,
-	Trigger,
-	TriggerHttp,
-	Triggers,
-	ParamsDictionary,
-	GlobalOptions,
+	type Condition,
+	type Conditions,
+	type Config,
+	type Flow,
+	type Inputs,
+	type Node,
+	type Properties,
+	type Targets,
+	type Trigger,
+	type TriggerHttp,
+	type Triggers,
+	type ParamsDictionary,
+	type GlobalOptions,
 	NodeMap,
-	JsonLikeObject,
+	type JsonLikeObject,
 	BlokService,
 	BlokResponse,
-	IBlokResponse,
+	type IBlokResponse,
 	RunnerSteps,
-	Average,
-	TriggerResponse,
+	type Average,
+	type TriggerResponse,
 };
 
 // Export types

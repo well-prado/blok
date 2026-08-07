@@ -45,6 +45,11 @@ gates() {
   # `bun run build`, not bare `nx run-many -t build` — the root script appends
   # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
   step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build
+  # #702 — every publishable package's SOURCE entry must import cleanly under
+  # Bun's per-file loader. Runs AFTER the build: source files import sibling
+  # workspace PACKAGES, whose exports maps resolve to dist/ — untracked since
+  # the v2 packaging work, so a fresh checkout has none until a build runs.
+  step "Source-under-Bun import check"; bun run check:source-imports
 }
 
 run_fast() {

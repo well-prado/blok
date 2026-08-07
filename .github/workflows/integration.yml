@@ -67,6 +67,17 @@ jobs:
       - name: No $ proxy check
         run: bun run check:no-dollar-proxy
 
+      # Sibling of the packaging gate (#687/#696, dist-under-Node): proves
+      # every publishable package's SOURCE entry also imports cleanly under
+      # Bun's per-file loader. MUST run after a workspace build: source
+      # imports sibling workspace packages, whose exports maps point at
+      # dist/ — untracked, so a fresh CI checkout has none until built (#702).
+      - name: Build workspace packages (dist for source-import resolution)
+        run: bun run build
+
+      - name: Source-under-Bun import check
+        run: bun run check:source-imports
+
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
           postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator

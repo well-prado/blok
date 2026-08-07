@@ -21,21 +21,30 @@ import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
 import NodeBase from "./NodeBase";
 import Trigger from "./Trigger";
-import ConfigContext from "./types/ConfigContext";
+// These `types/*` modules are `type X = {...}; export default X;` — a type
+// alias, not a runtime value (unlike `Trigger` above, a real class). Bun's
+// per-file source loader (`bun -e import(...)`, in-monorepo scripts,
+// bundler source-aliasing) can't see into the target file to know that; a
+// plain value `import`/`export` of these names round-trips through a
+// synthesized re-export that Bun rejects with "export default cannot be
+// used with export *". `import type` here (and `type` on the corresponding
+// `export { }` entries below) makes the type-only-ness explicit so no
+// runtime binding is ever synthesized. See #702.
+import type ConfigContext from "./types/ConfigContext";
 import type ConnectionContext from "./types/ConnectionContext";
-import Context from "./types/Context";
-import EnvContext from "./types/EnvContext";
-import ErrorContext from "./types/ErrorContext";
-import FunctionContext from "./types/FunctionContext";
-import LoggerContext from "./types/LoggerContext";
-import NodeConfigContext from "./types/NodeConfigContext";
-import RequestContext from "./types/RequestContext";
+import type Context from "./types/Context";
+import type EnvContext from "./types/EnvContext";
+import type ErrorContext from "./types/ErrorContext";
+import type FunctionContext from "./types/FunctionContext";
+import type LoggerContext from "./types/LoggerContext";
+import type NodeConfigContext from "./types/NodeConfigContext";
+import type RequestContext from "./types/RequestContext";
 import { RESPOND_BRAND, type RespondEnvelope, isRespondEnvelope } from "./types/RespondEnvelope";
-import ResponseContext from "./types/ResponseContext";
-import StateContext from "./types/StateContext";
-import Step from "./types/Step";
+import type ResponseContext from "./types/ResponseContext";
+import type StateContext from "./types/StateContext";
+import type Step from "./types/Step";
 import type StreamContext from "./types/StreamContext";
-import VarsContext from "./types/VarsContext";
+import type VarsContext from "./types/VarsContext";
 import mapper from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
@@ -44,24 +53,24 @@ import { type StructuralRef, lowerRefs } from "./utils/lowerRefs";
 
 export {
 	NodeBase,
-	Context,
-	RequestContext,
-	ResponseContext,
+	type Context,
+	type RequestContext,
+	type ResponseContext,
 	RESPOND_BRAND,
 	type RespondEnvelope,
 	isRespondEnvelope,
-	EnvContext,
-	ErrorContext,
-	LoggerContext,
-	ConfigContext,
+	type EnvContext,
+	type ErrorContext,
+	type LoggerContext,
+	type ConfigContext,
 	type ConnectionContext,
 	type StreamContext,
 	Trigger,
-	NodeConfigContext,
-	FunctionContext,
-	StateContext,
-	VarsContext,
-	Step,
+	type NodeConfigContext,
+	type FunctionContext,
+	type StateContext,
+	type VarsContext,
+	type Step,
 	GlobalLogger,
 	GlobalError,
 	BlokError,
