@@ -662,9 +662,17 @@ export default class Configuration implements Config {
 		stub.type = node.type;
 		stub.active = node.active !== undefined ? node.active : true;
 		stub.stop = node.stop !== undefined ? node.stop : false;
-		const v2 = node as RunnerNode & { waitForMs?: number; waitUntil?: number | string };
+		const v2 = node as RunnerNode & {
+			waitForMs?: number;
+			waitUntil?: number | string;
+			waitForExpr?: string;
+			waitUntilExpr?: string;
+		};
 		if (v2.waitForMs !== undefined) stub.waitForMs = v2.waitForMs;
 		if (v2.waitUntil !== undefined) stub.waitUntil = v2.waitUntil;
+		// #704 — the resolved-at-dispatch half; RunnerSteps evaluates these.
+		if (v2.waitForExpr !== undefined) stub.waitForExpr = v2.waitForExpr;
+		if (v2.waitUntilExpr !== undefined) stub.waitUntilExpr = v2.waitUntilExpr;
 		return stub;
 	}
 

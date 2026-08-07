@@ -367,27 +367,38 @@ Notes that bite:
 
 ## 5. Fields that fail silently — read this before using them
 
-Two field families do **not** behave like step inputs. Getting the form wrong
-produces no error, no warning, and wrong behaviour that looks like success.
+Two field families do **not** behave like step inputs: they take a reference in
+their own form, or a deliberate literal, and nothing in between. Both now refuse
+the in-between rather than accepting it as a literal — which is what used to
+produce no error, no warning, and wrong behaviour that looked like success.
 
-### 5.1 Literal-only: `wait.for` / `wait.until`
+### 5.1 Literal or reference — never a half-form: `wait.for` / `wait.until`
 
-A `wait` step's duration is parsed at workflow **load** time, before any request
-context exists, and no Mapper pass ever runs over it. An expression there — a
-handle, a `{$ref}`, a `tpl`, a `"js/…"` string — is stored verbatim and then
-fails to parse (or waits for a nonsense deadline). **Dynamic delays are not
-expressible today** (issue #704).
+A `wait` step takes either a literal (parsed at workflow **load** time) or a
+structural `{"$ref"}` / `"js/…"` reference, resolved against the live context
+at the moment the wait step runs (issue #704). **Dynamic delays are
+expressible** — that is the point of the reference form.
 
 ```json
 { "id": "throttle", "wait": { "for": "500ms" } }
 { "id": "until-midnight", "wait": { "until": "2026-01-01T00:00:00Z" } }
+
+{ "id": "compute-delay", "use": "@blokjs/expr",
+  "inputs": { "expression": "Math.pow(2, ctx.state.attempt) * 1000" } },
+{ "id": "wait-backoff",
+  "wait": { "for": { "$ref": { "step": "compute-delay", "path": [] } } } }
 ```
 
-`for` takes a duration string (`"500ms"`, `"30s"`, `"5m"`, `"3h"`) or a number
-of milliseconds; `until` takes an ISO timestamp or epoch millis. Set exactly
-one. If you need a computed delay, split the workflow and put `delay` on the
-continuation's trigger, or sleep inside a node and accept that it burns a worker
-slot.
+`for` resolves to a duration string (`"500ms"`, `"30s"`, `"5m"`, `"3h"`) or a
+number of milliseconds; `until` resolves to an ISO timestamp or epoch millis.
+Set exactly one.
+
+What is refused — at **load** time, so it cannot reach production — is a value
+that only *looks* like an expression: a `$.`-proxy path, a bare `"ctx.state.x"`
+chain, or a `"${…}"` interpolation. Those are never evaluated in this position,
+and keeping one as a literal would produce a duration that can never parse.
+Write the `{"$ref"}` form, or `"js/…"` for a non-structural expression
+(`"js/ctx.state.retryAfter * 1000"`).
 
 ### 5.2 Expression-required: `idempotencyKey`, `concurrencyKey`, `debounce.key`
 
@@ -636,7 +647,8 @@ Routing is file-based — there is no `Nodes.ts` and no `Workflows.ts` to update
 - Do not read an ephemeral handle.
 - Do not reuse a step id anywhere in a workflow, including across arms.
 - Do not name a `forEach` `as` key after a step id or an outer loop key.
-- Do not put an expression in `wait.for` / `wait.until` (§5.1).
+- Do not put a half-form expression (`$.…`, bare `ctx.…`, `${…}`) in
+  `wait.for` / `wait.until` — write `{"$ref"}` or `js/…` (§5.1).
 - Do not put an unprefixed expression in `idempotencyKey` / `concurrencyKey` /
   `debounce.key` (§5.2).
 - Do not create class-based `BlokService` nodes.
@@ -662,6 +674,6 @@ Routing is file-based — there is no `Nodes.ts` and no `Workflows.ts` to update
 | Step input arrives as the literal expression text | A mapper expression failed to resolve. `BLOK_MAPPER_MODE=strict` (the default) throws instead; `warn` logs and passes it through. |
 | Every request gets the first request's response | Constant `idempotencyKey` — §5.2. |
 | A per-tenant limit behaves globally | Constant `concurrencyKey` — §5.2. |
-| A `wait` never fires, or fires immediately | An expression in `wait.for`/`until` — §5.1. |
+| A `wait` fails with "did not resolve" / "is not a duration" | The `wait.for`/`until` reference points at a step that did not run, or resolved to something that is not a duration/timestamp — §5.1. |
 | "set_var was removed in v0.5" | Drop `set_var: true`; `set_var: false` becomes `ephemeral: true`. Run `blokctl migrate workflows`. |
 | Runtime step fails to dispatch | The sidecar is not running, or `RUNTIME_<LANG>_*` env points elsewhere. |

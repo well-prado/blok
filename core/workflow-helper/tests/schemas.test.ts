@@ -1169,9 +1169,32 @@ describe("V2WaitStepSchema (PR 4 wait.for / wait.until)", () => {
 		expect(result.wait.until).toBe(1735741200000);
 	});
 
-	it("accepts { id, wait: { until } } with a string (ISO date or $-proxy expression)", () => {
+	it("accepts { id, wait: { until } } with an ISO date string", () => {
 		const result = V2WaitStepSchema.parse({ id: "wait-iso", wait: { until: "2026-12-31T00:00:00Z" } });
 		expect(result.wait.until).toBe("2026-12-31T00:00:00Z");
+	});
+
+	// #704 — the reference forms. `normalizeWaitStep` lowers these at the load
+	// boundary and the runner resolves them when the wait step executes, so the
+	// schema has to let them through in the first place.
+	it("accepts a structural {$ref} in `for` and in `until`", () => {
+		expect(
+			V2WaitStepSchema.parse({ id: "w", wait: { for: { $ref: { step: "compute-delay", path: [] } } } }).wait.for,
+		).toEqual({ $ref: { step: "compute-delay", path: [] } });
+		expect(
+			V2WaitStepSchema.parse({ id: "w", wait: { until: { $ref: { step: "@trigger", path: ["body", "at"] } } } }).wait
+				.until,
+		).toEqual({ $ref: { step: "@trigger", path: ["body", "at"] } });
+	});
+
+	it("accepts a `js/` escape-hatch expression in `for`", () => {
+		expect(V2WaitStepSchema.parse({ id: "w", wait: { for: "js/ctx.state.retryAfter * 1000" } }).wait.for).toBe(
+			"js/ctx.state.retryAfter * 1000",
+		);
+	});
+
+	it("still rejects a `for` string that is neither a duration nor an expression", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "w", wait: { for: "soonish" } })).toThrow();
 	});
 
 	it("rejects when both `for` and `until` are set", () => {

@@ -608,6 +608,26 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
 
 /**
+ * A structural handle reference in a `wait` position (#704). Mirrors what the
+ * typed-handle DSL and Studio mint for step `inputs`; `normalizeWaitStep`
+ * lowers it to the `js/` wire string at the load boundary.
+ */
+const WaitRefSchema = z.union([
+	z.object({
+		$ref: z.object({
+			step: z.string().min(1),
+			path: z.array(z.union([z.string(), z.number()])).optional(),
+		}),
+	}),
+	z.object({ $tpl: z.array(z.unknown()) }),
+]);
+
+/** A `js/…` escape-hatch expression, resolved against the live ctx (#704). */
+const WaitExpressionSchema = z
+	.string()
+	.regex(/^js\//, { message: 'A wait expression must be `js/`-prefixed, e.g. "js/ctx.state.backoff".' });
+
+/**
  * V2 wait step (PR 4 · `wait.for(duration)` / `wait.until(date)`).
  *
  * Pauses workflow execution mid-run for the specified duration (or until
@@ -617,10 +637,21 @@ export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
  * `last_completed_step_index` so the runner skips past completed
  * pre-wait steps on resume).
  *
+ * Both fields take a LITERAL (parsed at load time) **or** a reference
+ * resolved against the live ctx when the step executes (#704) — a structural
+ * `{$ref}` / `{$tpl}`, or a `js/…` escape hatch. That is what makes a
+ * computed delay (exponential backoff, an honored `Retry-After`, a per-tenant
+ * pause) expressible. A `for` reference must resolve to a duration (ms number
+ * or `"30s"`-style string); an `until` reference to ms-since-epoch or a
+ * `Date.parse`-able string. An expression-SHAPED value that is not one of
+ * those forms (`$.…`, bare `ctx.…`, `${…}`) is rejected at load time rather
+ * than taken as a literal that could never parse.
+ *
  * Author surface:
  * ```ts
  * { id: "wait-3d", wait: { for: "3d" } }
- * { id: "wait-deadline", wait: { until: "js/ctx.request.body.scheduledAt" } }
+ * { id: "wait-backoff", wait: { for: { $ref: { step: "compute-delay", path: [] } } } }
+ * { id: "wait-deadline", wait: { until: { $ref: { step: "@trigger", path: ["body", "scheduledAt"] } } } }
  * ```
  *
  * Cannot combine with `idempotencyKey` (the wait IS the checkpoint) or
@@ -631,16 +662,21 @@ export const V2WaitStepSchema = z
 		id: z.string().min(1).describe("Stable identifier."),
 		wait: z
 			.object({
-				for: DurationSchema.optional().describe(
-					"Wait this long. Mutually exclusive with `until`. " +
-						"Number (ms) or duration string (`500ms`, `30s`, `5m`, `2h`, `1d`).",
-				),
+				for: z
+					.union([DurationSchema, WaitExpressionSchema, WaitRefSchema])
+					.optional()
+					.describe(
+						"Wait this long. Mutually exclusive with `until`. " +
+							"Number (ms), duration string (`500ms`, `30s`, `5m`, `2h`, `1d`), or a reference " +
+							'({"$ref": {"step": …}} / `js/ctx....`) that resolves to one of those at run time.',
+					),
 				until: z
-					.union([z.number(), z.string()])
+					.union([z.number(), z.string(), WaitRefSchema])
 					.optional()
 					.describe(
 						"Wait until this absolute time. Number is ms-since-epoch; " +
-							"string is an ISO date or a `js/ctx....` expression. Mutually exclusive with `for`.",
+							"string is an ISO date or a `js/ctx....` expression; " +
+							'{"$ref": {"step": …}} resolves against the live ctx at run time. Mutually exclusive with `for`.',
 					),
 			})
 			.strict(),

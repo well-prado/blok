@@ -17,10 +17,14 @@ import type { Context, ResponseContext } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
 
 export class WaitNode extends RunnerNode {
-	/** Parsed milliseconds for `wait.for` (set by WorkflowNormalizer). */
+	/** Parsed milliseconds for a LITERAL `wait.for` (set by WorkflowNormalizer). */
 	public declare waitForMs?: number;
-	/** Raw `wait.until` value (number ms or string ISO date / $-proxy expression). */
+	/** Raw LITERAL `wait.until` value (number ms or ISO date string). */
 	public declare waitUntil?: number | string;
+	/** #704 — `js/…` wire expression for `wait.for`, resolved at dispatch time. */
+	public declare waitForExpr?: string;
+	/** #704 — `js/…` wire expression for `wait.until`, resolved at dispatch time. */
+	public declare waitUntilExpr?: string;
 
 	async run(_ctx: Context): Promise<ResponseContext> {
 		// Defensive no-op. Hit only if `RunnerSteps` somehow falls through

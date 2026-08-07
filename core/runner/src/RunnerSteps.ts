@@ -1,4 +1,5 @@
-import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
+import { parseDuration } from "@blokjs/helper";
+import { type Context, GlobalError, type NodeBase, type Step, mapper } from "@blokjs/shared";
 import { SpanKind, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
@@ -49,6 +50,75 @@ function computeBackoff(
 	const factor = config.factor ?? 2;
 	const raw = min * factor ** Math.max(0, attempt - 1);
 	return Math.min(max, Math.floor(raw));
+}
+
+/**
+ * #704 — resolve a `wait.for` / `wait.until` expression against the live ctx,
+ * at the moment the wait step executes.
+ *
+ * The wire string is whatever `normalizeWaitStep` carried through: a lowered
+ * structural `{$ref}` or a hand-written `js/…` escape hatch. Resolution is the
+ * same {@link mapper} the step-inputs path uses, so `BLOK_MAPPER_MODE` and the
+ * expression grammar are identical here — no second dialect.
+ *
+ * Both failure routes end at ONE error naming the step and the field:
+ * `strict` mode throws `MapperResolutionError`, while `warn` / `silent` hand
+ * back the literal expression string. Passing that string on to the duration
+ * parser would report a confusing "invalid duration" for what is really an
+ * unresolvable reference.
+ */
+function resolveWaitExpression(expr: string, ctx: Context, stepName: string, field: string): unknown {
+	let value: unknown;
+	try {
+		value = mapper.replaceString(expr, ctx, {});
+	} catch (cause) {
+		throw new Error(
+			`${field} on step "${stepName}": cannot resolve \`${expr}\` against the current context — ${cause instanceof Error ? cause.message : String(cause)}`,
+			{ cause },
+		);
+	}
+	if (value === expr) {
+		throw new Error(
+			`${field} on step "${stepName}": \`${expr}\` did not resolve against the current context. Check that the producing step ran and wrote the value before this wait.`,
+		);
+	}
+	return value;
+}
+
+/** Parse a resolved `wait.for` value into milliseconds, or say why it can't be. */
+function parseWaitDuration(value: unknown, stepName: string, expr: string): number {
+	if (typeof value === "number" || typeof value === "string") {
+		try {
+			return parseDuration(value);
+		} catch (cause) {
+			throw new Error(
+				`wait.for on step "${stepName}": \`${expr}\` resolved to ${JSON.stringify(value)}, which is not a duration — ${cause instanceof Error ? cause.message : String(cause)}`,
+				{ cause },
+			);
+		}
+	}
+	throw new Error(
+		`wait.for on step "${stepName}": \`${expr}\` resolved to ${JSON.stringify(value) ?? typeof value}, expected a millisecond number or a duration string like "30s".`,
+	);
+}
+
+/**
+ * Parse a `wait.until` value into an absolute ms-since-epoch deadline.
+ * ms-since-epoch (number or numeric string) first, then `Date.parse`.
+ */
+function parseWaitTimestamp(value: unknown, stepName: string, expr?: string): number {
+	if (typeof value === "number" && !Number.isNaN(value)) return value;
+	if (typeof value === "string") {
+		const asNum = Number(value);
+		if (!Number.isNaN(asNum)) return asNum;
+		const t = Date.parse(value);
+		if (!Number.isNaN(t)) return t;
+	}
+	// Fail-fast on unparseable values (the helpful path).
+	const origin = expr === undefined ? "" : ` (\`${expr}\` on step "${stepName}")`;
+	throw new Error(
+		`wait.until: cannot parse ${JSON.stringify(value) ?? String(value)} as a number or date${origin}. Use ms-since-epoch (number or numeric string) or a valid ISO date string.`,
+	);
 }
 
 /**
@@ -434,8 +504,14 @@ export default abstract class RunnerSteps {
 					if (stepType === "wait") {
 						const waitForMs = stepAny.waitForMs as number | undefined;
 						const waitUntil = stepAny.waitUntil as number | string | undefined;
+						// #704 — the resolved-at-dispatch half. Set by
+						// `normalizeWaitStep` when the author wrote a handle /
+						// `{$ref}` / `js/…` instead of a literal.
+						const waitForExpr = stepAny.waitForExpr as string | undefined;
+						const waitUntilExpr = stepAny.waitUntilExpr as string | undefined;
 
-						// Compute the deadline (resolves $-proxy and ISO strings).
+						// Compute the deadline (resolves ISO strings and, since
+						// #704, ctx references).
 						// Review fix-up · BUG-2. A malformed `until` string used to
 						// silently fall through to `Date.now()` (immediate no-op).
 						// Authors expecting "wait until tomorrow" with a typo got a
@@ -443,20 +519,17 @@ export default abstract class RunnerSteps {
 						// instead so the failure surfaces immediately, both in the
 						// run trace + Studio's error surface.
 						const computeDeadline = (): number => {
-							if (typeof waitForMs === "number") return Date.now() + waitForMs;
-							if (typeof waitUntil === "number") return waitUntil;
-							if (typeof waitUntil === "string") {
-								// Try parsing as a number first (ms-since-epoch as a string).
-								const asNum = Number(waitUntil);
-								if (!Number.isNaN(asNum)) return asNum;
-								// ISO-date string.
-								const t = Date.parse(waitUntil);
-								if (!Number.isNaN(t)) return t;
-								// Fail-fast on unparseable strings (the helpful path).
-								throw new Error(
-									`wait.until: cannot parse '${waitUntil}' as a number or date. Use ms-since-epoch (number or numeric string) or a valid ISO date string.`,
-								);
+							if (waitForExpr !== undefined) {
+								const resolved = resolveWaitExpression(waitForExpr, ctx, step.name, "wait.for");
+								return Date.now() + parseWaitDuration(resolved, step.name, waitForExpr);
 							}
+							if (typeof waitForMs === "number") return Date.now() + waitForMs;
+							if (waitUntilExpr !== undefined) {
+								const resolved = resolveWaitExpression(waitUntilExpr, ctx, step.name, "wait.until");
+								return parseWaitTimestamp(resolved, step.name, waitUntilExpr);
+							}
+							if (typeof waitUntil === "number") return waitUntil;
+							if (typeof waitUntil === "string") return parseWaitTimestamp(waitUntil, step.name);
 							// Schema rejects this combination, but defensive: treat
 							// unsupported input as immediate so the runner doesn't
 							// hang on a never-firing timer.
@@ -484,7 +557,17 @@ export default abstract class RunnerSteps {
 							i === resumeFromIndex &&
 							(!deep ? resumeFromIndex > 0 : innerResumeIndex !== undefined);
 
-						const deadline = computeDeadline();
+						// #704 — reload safety. On re-entry the wait is ALREADY
+						// satisfied and the deadline is only trace decoration, but
+						// re-resolving a ctx reference can now THROW: the state
+						// snapshot is best-effort (skipped when it exceeds
+						// BLOK_STATE_SNAPSHOT_MAX_BYTES or fails to serialize), so
+						// after a cross-process restore the producing step's slot
+						// may be gone. Killing a resumed run at a wait it already
+						// served would be the worst possible failure. Literals are
+						// cheap and total, so they keep computing — the recorded
+						// deadline stays byte-identical to pre-#704.
+						const deadline = isReentry && (waitForExpr ?? waitUntilExpr) !== undefined ? Date.now() : computeDeadline();
 						const now = Date.now();
 
 						if (isReentry || deadline <= now) {

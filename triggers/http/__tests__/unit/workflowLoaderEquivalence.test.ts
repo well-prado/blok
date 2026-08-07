@@ -224,6 +224,8 @@ function canonicalNode(node: Record<string, unknown>): Record<string, unknown> {
 		"wait",
 		"waitForMs",
 		"waitUntil",
+		"waitForExpr",
+		"waitUntilExpr",
 		"maxDurationMs",
 		"stream_logs",
 		"streamTo",

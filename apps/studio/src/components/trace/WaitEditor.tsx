@@ -3,38 +3,39 @@ import { useState } from "react";
 /**
  * Phase 5.3 — wait structural editor: `for` (relative duration) /
  * `until` (absolute deadline), mutually exclusive per
- * `V2WaitStepSchema.refine` (core/workflow-helper/src/types/StepOpts.ts:680-683)
+ * `V2WaitStepSchema.refine` (core/workflow-helper/src/types/StepOpts.ts)
  * AND enforced again at load time by `WorkflowNormalizer.normalizeWaitStep`
- * (core/runner/src/workflow/WorkflowNormalizer.ts:636-639, throws
+ * (core/runner/src/workflow/WorkflowNormalizer.ts, throws
  * "must set exactly one of `wait.for` or `wait.until`" if both or neither
  * are set) — so there is no "precedence" to document: setting both is a
  * hard validation error, not a soft tiebreak. The mode toggle below enforces
  * exactly-one-active by construction.
  *
- * CONVENTION (load-bearing, verified — do not add an UpstreamPicker here):
- * unlike `forEach.in`/`switch.on` (`js/` mapper prefix) or `branch.when`
- * (raw ctx JS), `wait.for`/`wait.until` accept NO runtime expression at
- * all. `normalizeWaitStep` runs once inside `normalizeWorkflow` at
- * WORKFLOW LOAD time — before any request `ctx` exists — and reads
- * `wait.for`/`wait.until` as literal number|string with no `lowerRefs`/
- * Mapper pass (contrast with subworkflow's `inputs`, which explicitly does
- * get `lowerRefs` — WorkflowNormalizer.ts:604-609). At RUN time,
- * `RunnerSteps.ts`'s `computeDeadline` (lines 445-464) only ever calls
- * `Number(waitUntil)` or `Date.parse(waitUntil)` on the stored value — no
- * ctx/Mapper resolution either. Any expression string written here — a
- * handle ref, a `tpl`, or a raw `js/ctx...` — is stored VERBATIM and fails
- * to parse as a number or date at run time (RunnerSteps.ts:456-458 throws a
- * clear "cannot parse" error). `wait` is LITERAL-ONLY, in both fields.
+ * CONVENTION (#704 — this editor writes LITERALS only, by choice):
+ * `wait.for`/`wait.until` accept a literal OR a reference resolved against
+ * the live ctx when the step runs. `normalizeWaitStep` (WorkflowNormalizer)
+ * lowers a structural `{$ref}`/`{$tpl}` written in those two positions to the
+ * `js/` wire form and hands it to `RunnerSteps`, whose `computeDeadline`
+ * resolves it through the same Mapper the step-inputs path uses, then parses
+ * the result as a duration (`for`) or a timestamp (`until`).
  *
- * `examples/v05-primitives/09-polling-with-backoff.json` used to encode a
- * computed backoff here and could never have worked; it now uses a literal
- * interval and documents the limitation. Dynamic delays belong inside a
- * node until `wait` grows a resolution pass.
+ * This form deliberately edits only the literal half — the two parsers below
+ * ARE the load-time grammar, and the live preview ("fires ≈ …") is the whole
+ * value of the form, which a ctx reference cannot have at edit time. An
+ * existing reference renders as its JSON and neither parser accepts it, so
+ * Save reports a format error rather than silently flattening the ref to a
+ * literal. Adding an UpstreamPicker here is now a sensible feature rather than
+ * a category error: it would emit `{$ref: {step, path}}` and swap the preview
+ * for the producing step's name.
+ *
+ * `examples/v05-primitives/09-polling-with-backoff.json` is the worked
+ * example — a `{$ref}` to the step that computed the backoff.
  *
  * `for` grammar mirrors `DurationSchema` (core/workflow-helper/src/types/
  * TriggerOpts.ts:167-175): a non-negative integer (ms) or `<int><unit>`
- * with unit in ms|s|m|h|d. `until` mirrors `computeDeadline`: ms-since-epoch
- * (number, or a numeric string) or an ISO/`Date.parse`-able date string.
+ * with unit in ms|s|m|h|d. `until` mirrors the runner's timestamp parse:
+ * ms-since-epoch (number, or a numeric string) or an ISO/`Date.parse`-able
+ * date string.
  */
 
 export interface RawWait {
@@ -70,7 +71,7 @@ function parseForText(text: string): { value: number | string; ms: number } | nu
 	return { value: trimmed, ms: n * (DURATION_UNIT_MS[match[2] as string] as number) };
 }
 
-/** Mirrors `RunnerSteps.ts`'s `computeDeadline` exactly — see the file header for the citation. */
+/** Mirrors `RunnerSteps.ts`'s literal timestamp parse — see the file header for the citation. */
 function parseUntilText(text: string): { value: number | string; deadline: number } | null {
 	const trimmed = text.trim();
 	if (trimmed === "") return null;
@@ -87,7 +88,12 @@ function initialMode(wait: RawWait): WaitMode {
 
 function initialText(value: unknown): string {
 	if (value === undefined) return "";
-	return typeof value === "string" ? value : String(value);
+	if (typeof value === "string") return value;
+	// #704 — a structural `{$ref}`/`{$tpl}` is legal here. Render it as JSON
+	// rather than "[object Object]"; neither parser accepts it, so Save stays
+	// disabled and the reference cannot be flattened to a literal by accident.
+	if (typeof value === "object" && value !== null) return JSON.stringify(value);
+	return String(value);
 }
 
 export function WaitEditor({ stepId, wait, pending, error, onSave, onClose }: WaitEditorProps) {
@@ -194,7 +200,10 @@ export function WaitEditor({ stepId, wait, pending, error, onSave, onClose }: Wa
 						spellCheck={false}
 						className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
 					/>
-					<p className="text-[10px] text-zinc-500">Not an expression — a literal ms number or duration string.</p>
+					<p className="text-[10px] text-zinc-500">
+						A literal ms number or duration string. For a computed delay, put a {'{"$ref"}'} to the producing step here
+						in the workflow JSON — it resolves when the wait runs.
+					</p>
 					<p className="truncate rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 font-mono text-[11px]">
 						{forParsed ? (
 							<>
@@ -221,7 +230,8 @@ export function WaitEditor({ stepId, wait, pending, error, onSave, onClose }: Wa
 						className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
 					/>
 					<p className="text-[10px] text-zinc-500">
-						Not an expression — ms-since-epoch or a date string, resolved once at run time.
+						ms-since-epoch or a date string. For a deadline carried in the payload, put a {'{"$ref"}'} here in the
+						workflow JSON — it resolves when the wait runs.
 					</p>
 					<p className="truncate rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 font-mono text-[11px]">
 						{untilParsed ? (

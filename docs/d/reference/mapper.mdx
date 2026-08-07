@@ -116,7 +116,6 @@ object-style TS API:
 | `branch.when`, `loop.while` | raw `ctx.*` — **no** `js/` prefix |
 | `switch.on`, `switch.cases[].when` | `js/ctx.*` |
 | `forEach.in` | `js/ctx.*` |
-| `wait.for`, `wait.until` | `js/ctx.*` |
 | `subworkflow` (polymorphic name) | `js/ctx.*` |
 | step `idempotencyKey` | `js/ctx.*` |
 | trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
@@ -125,6 +124,12 @@ The `@blokjs/core` callback DSL takes handles for `forEach`, `switchOn`,
 `subworkflow` and step-level `idempotencyKey` and lowers them itself. Trigger
 config (`concurrencyKey`, `debounce.key`) is resolved at run-entry, before any
 step handle exists, so it stays a path string in every authoring form.
+
+`wait.for` / `wait.until` are the one position OUTSIDE step `inputs` that the
+lowering pass does cover: `normalizeWaitStep` lowers a structural `{"$ref"}`
+there to the same wire string, and the runner resolves it through this mapper
+when the wait step executes (#704). A `js/` string works too, for the
+non-structural cases.
 
 ## Failure mode (`BLOK_MAPPER_MODE`)
 

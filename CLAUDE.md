@@ -115,10 +115,11 @@ naming the step and the path, instead of reaching the node as a raw object
 (#707). The three key positions (`idempotencyKey`, `concurrencyKey`,
 `debounce.key`) take a `js/` expression or a DELIBERATE literal — an
 expression-shaped value that is not `js/`-prefixed now throws instead of
-becoming a constant key (#706). `wait.for` / `wait.until` are the other
-exception: they are parsed at workflow LOAD time and never see a `ctx`, so
-they take a literal duration or timestamp only — an expression there never
-resolves (#704).
+becoming a constant key (#706). `wait.for` / `wait.until` take a literal
+duration/timestamp (parsed at LOAD time) OR a structural `{$ref}` / `js/`
+expression resolved against the live ctx when the wait step runs, so a
+computed delay is expressible (#704); an expression-shaped value that is
+neither is refused at load time.
 
 ## Do NOT
 

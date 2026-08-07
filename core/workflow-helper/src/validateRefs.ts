@@ -571,7 +571,12 @@ function pushStructural(
 
 // ─────────────────────────── resolved-key fields (#706) ─────────────────────
 
-/** One `idempotencyKey` / `concurrencyKey` / `debounce.key` site in a document. */
+/**
+ * One `idempotencyKey` / `concurrencyKey` / `debounce.key` / `wait.for` /
+ * `wait.until` site in a document — the positions where a `js/` expression, a
+ * structural ref and a deliberate literal are all legal, so an
+ * expression-SHAPED value that is none of those must be refused explicitly.
+ */
 interface KeySite {
 	readonly field: string;
 	readonly value: unknown;
@@ -580,14 +585,17 @@ interface KeySite {
 }
 
 /**
- * Collect every step `idempotencyKey`, including inside nested pipelines.
+ * Collect every step `idempotencyKey` and `wait.for` / `wait.until`, including
+ * inside nested pipelines.
  *
  * These fields are NOT resolved by the Mapper. The runner evaluates a `js/`
- * expression and takes any other string as a LITERAL key, so a mistyped
- * expression silently becomes a constant — one shared idempotency-cache entry
- * replayed to every caller for the full TTL, or one concurrency bucket for
- * every tenant (#706). The runner throws on these now; catching them here is
- * the point, because the runtime symptom is otherwise invisible.
+ * expression (and, for `wait`, a structural ref lowered at the load boundary)
+ * and takes any other string as a LITERAL, so a mistyped expression silently
+ * becomes a constant — one shared idempotency-cache entry replayed to every
+ * caller for the full TTL, one concurrency bucket for every tenant (#706), or a
+ * "duration" that can never parse (#704). The runner throws on these now;
+ * catching them here is the point, because the runtime symptom is otherwise
+ * invisible.
  */
 function collectKeySites(steps: readonly unknown[], docPath: string, out: KeySite[]): void {
 	steps.forEach((raw, index) => {
@@ -601,6 +609,18 @@ function collectKeySites(steps: readonly unknown[], docPath: string, out: KeySit
 				docPath: `${stepPath}.idempotencyKey`,
 				step: stepId,
 			});
+		}
+		if (isPlainObject(raw.wait)) {
+			for (const field of ["for", "until"] as const) {
+				const value = raw.wait[field];
+				// A structural `{$ref}`/`{$tpl}` IS resolvable here (#704) — it is
+				// lowered by `normalizeWaitStep` — so exempt it from the shape rule
+				// that (correctly) refuses it in the key positions.
+				if (value === undefined || (isPlainObject(value) && (isStructuralRef(value) || isStructuralTpl(value)))) {
+					continue;
+				}
+				out.push({ field: `wait.${field}`, value, docPath: `${stepPath}.wait.${field}`, step: stepId });
+			}
 		}
 		for (const arm of subPipelines(raw)) collectKeySites(arm.steps, stepPath, out);
 	});
@@ -770,13 +790,16 @@ export function validateRefs(doc: unknown, opts: ValidateRefsOptions = {}): Vali
 	};
 
 	// #706 — resolved-key fields, checked before the ref walk so a workflow whose
-	// only problem is a constant-by-accident key still fails the build.
+	// only problem is a constant-by-accident key still fails the build. #704 adds
+	// `wait.for` / `wait.until`: same rule (a `js/` expression, a structural ref,
+	// or a deliberate literal), different consequence.
 	const keySites: KeySite[] = [];
 	collectKeySites(steps, "steps", keySites);
 	collectTriggerKeySites(workflow.trigger, keySites);
 	for (const site of keySites) {
 		const shape = unresolvableKeyShape(site.value);
 		if (!shape) continue;
+		const isWait = site.field.startsWith("wait.");
 		emit({
 			severity: "error",
 			code: "unresolvable-key",
@@ -786,8 +809,12 @@ export function validateRefs(doc: unknown, opts: ValidateRefsOptions = {}): Vali
 			refPath: "",
 			message: [
 				`\`${site.field}\` in workflow "${workflowName}" is ${shape}, which the runner cannot resolve: ${JSON.stringify(site.value)}.`,
-				"  hint: this field takes a `js/` expression or a DELIBERATE literal — nothing else is evaluated. A literal key is a CONSTANT: one idempotency-cache entry replayed to every caller, or one concurrency bucket for every tenant.",
-				"  fix: write the `js/` form (e.g. `js/ctx.request.body.requestId`), or the typed handle in the @blokjs/core DSL. If you really meant a constant, drop the expression syntax.",
+				isWait
+					? '  hint: this field takes a duration/timestamp literal, a structural {"$ref": {"step", "path"}}, or a `js/` expression — nothing else is evaluated. Taken as a literal it would never parse as a duration or a date.'
+					: "  hint: this field takes a `js/` expression or a DELIBERATE literal — nothing else is evaluated. A literal key is a CONSTANT: one idempotency-cache entry replayed to every caller, or one concurrency bucket for every tenant.",
+				isWait
+					? '  fix: write the structural form ({"$ref": {"step": "compute-delay", "path": []}}) or the `js/` form (e.g. `js/ctx.state.backoff`).'
+					: "  fix: write the `js/` form (e.g. `js/ctx.request.body.requestId`), or the typed handle in the @blokjs/core DSL. If you really meant a constant, drop the expression syntax.",
 			].join("\n"),
 		});
 	}

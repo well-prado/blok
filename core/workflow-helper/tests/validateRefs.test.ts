@@ -682,3 +682,60 @@ describe("validateRefs — resolved-key fields (#706)", () => {
 		expect(ok.ok).toBe(true);
 	});
 });
+
+// ─────────────────────────── wait.for / wait.until (#704) ───────────────────
+//
+// Same rule as the key fields, different consequence: a `js/` expression or a
+// structural ref is RESOLVED against the live ctx when the wait step runs; a
+// deliberate literal is a duration/timestamp; and an expression-shaped value
+// that is neither could never parse as either, so it must be reported rather
+// than kept. This is the check that stops a future example from re-introducing
+// `09-polling-with-backoff`'s dead computed delay silently.
+
+describe("validateRefs — wait references (#704)", () => {
+	const flow = (wait: unknown) => ({
+		name: "poller",
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path: "/poll" } },
+		steps: [
+			{ id: "compute-delay", use: "charger", inputs: {} },
+			{ id: "wait-backoff", wait },
+		],
+	});
+
+	// Concatenated so this file doesn't carry the deleted `$` proxy shape
+	// contiguously — `scripts/check-no-dollar-proxy.sh` greps the whole repo.
+	const PROXY = "$";
+
+	it("flags a proxy path in `wait.for`", () => {
+		const bad = errors(validateRefs(flow({ for: `${PROXY}.state['compute-delay']` }), { nodes: lookup({}) }));
+		expect(bad).toHaveLength(1);
+		expect(bad[0]?.code).toBe("unresolvable-key");
+		expect(bad[0]?.path).toBe("steps[1].wait.for");
+		expect(bad[0]?.step).toBe("wait-backoff");
+		expect(bad[0]?.message).toContain("wait.for");
+		expect(bad[0]?.message).toContain("$ref");
+	});
+
+	it("flags a bare `ctx.` chain in `wait.until`", () => {
+		const bad = errors(validateRefs(flow({ until: "ctx.request.body.deadline" }), { nodes: lookup({}) }));
+		expect(bad.map((d) => d.path)).toEqual(["steps[1].wait.until"]);
+	});
+
+	it("stays silent on a literal, a `js/` expression, and a structural {$ref}", () => {
+		for (const wait of [
+			{ for: "2s" },
+			{ for: 2000 },
+			{ until: "2026-01-01T00:00:00Z" },
+			{ for: "js/ctx.state['compute-delay']" },
+			{ for: { $ref: { step: "compute-delay", path: [] } } },
+		]) {
+			expect(validateRefs(flow(wait), { nodes: lookup({}) }).diagnostics, JSON.stringify(wait)).toEqual([]);
+		}
+	});
+
+	it("still flags a structural ref in `wait.for` that names no producing step", () => {
+		const bad = errors(validateRefs(flow({ for: { $ref: { step: "nope", path: [] } } }), { nodes: lookup({}) }));
+		expect(bad.map((d) => d.code)).toEqual(["dangling-step"]);
+	});
+});
