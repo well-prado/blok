@@ -11,17 +11,23 @@ import { generateSharedWorkflowsFile } from "../../../src/commands/create/projec
  *
  * The HTTP scaffold now ships one handle-DSL example
  * (triggers/http/src/workflows/countries-handle-dsl.ts → copied to
- * src/workflows/http/) AND registers it in the generated src/Workflows.ts so
- * it's runnable, not dead disk weight.
+ * src/workflows/http/) so it's a runnable sample, not dead disk weight.
+ *
+ * #733 — it is deliberately NOT ALSO registered in the generated
+ * src/Workflows.ts. `src/workflows/**\/*.ts` is the TS auto-routing scan root
+ * (#695): the file already gets a route with zero manual entries, exactly
+ * like the JSON workflows. A redundant manual registration used to dedupe
+ * fine under `blokctl dev` (source, one module instance) but self-collided
+ * under a BUILT `npm run start` (Workflows.ts compiles to dist and imports
+ * the COMPILED module while the TS scanner imports the SOURCE file — two
+ * different module instances of the "same" workflow) — every fresh HTTP
+ * scaffold logged a route collision on its very first boot.
  */
 describe("HTTP scaffold ships a runnable @blokjs/core handle-DSL workflow", () => {
-	it("registers the handle-DSL example in the generated Workflows.ts", () => {
+	it("does NOT register the handle-DSL example manually — the TS scan root auto-routes it (#733)", () => {
 		const out = generateSharedWorkflowsFile(["http"], [], false);
-		// Imported from the copied src/workflows/http/ source.
-		expect(out).toContain('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl.js";');
-		// The callback DSL resolves async → registered via top-level await so the
-		// resolved builder lands in the synchronous Record<string, WorkflowV2Builder>.
-		expect(out).toContain('"countries-dsl": await CountriesHandleDsl,');
+		expect(out).not.toContain("CountriesHandleDsl");
+		expect(out).not.toContain("countries-dsl");
 	});
 
 	it("the shipped example actually uses the @blokjs/core handle DSL (workflow + step)", () => {
@@ -42,8 +48,8 @@ describe("HTTP scaffold ships a runnable @blokjs/core handle-DSL workflow", () =
 		expect(src).toContain('import { RespondNode } from "@blokjs/helpers";');
 	});
 
-	it("does not disturb the JSON file-based routing note", () => {
+	it("does not disturb the auto-discovery note", () => {
 		const out = generateSharedWorkflowsFile(["http"], [], false);
-		expect(out).toContain("// HTTP JSON workflows are auto-discovered from workflows/json/");
+		expect(out).toContain("HTTP JSON + TS workflows are auto-discovered from workflows/json/ and workflows/**/*.ts");
 	});
 });

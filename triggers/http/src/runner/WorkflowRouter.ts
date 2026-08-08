@@ -36,6 +36,21 @@ import type { ScannedWorkflow } from "./scanWorkflows.js";
  * (`===`), the manual entry replaces the scanned one in place — same route,
  * `Workflows.ts`'s key/label wins. Two DIFFERENT objects claiming the same
  * `(method, path)` still hit the collision path above, same as ever.
+ *
+ * **Dedup fallback across module instances (#733):** identity (`===`) is the
+ * fast path and covers the common case (`blokctl dev`, Bun — one module-cache
+ * entry for the file). It fails when the scan and the manual registration
+ * resolve DIFFERENT module instances of the "same" workflow — a BUILT Node
+ * run is the concrete case: `Workflows.ts` compiles to `dist/` and imports
+ * the compiled workflow module, while the TS scan (hard-coded to
+ * `<cwd>/src/workflows` SOURCE) dynamic-imports the `.ts` file directly. When
+ * identity fails, a second check compares the two workflows' author-declared
+ * `name` at the same route: if both sides declare the SAME explicit name,
+ * that is a same-workflow-loaded-twice, deduped exactly like the identity
+ * path (silent-OK plus one debug-level `onWarning` note, manual wins). Two
+ * workflows with no declared name, or different names, still hit the
+ * collision path — the fallback only fires on a positive name match, so it
+ * can't mask a genuine two-different-workflows-one-route mistake.
  */
 
 const LEGACY_FLAG_ENV = "BLOK_ROUTING_LEGACY";
@@ -267,11 +282,39 @@ export function buildRouteTable(
 		// on the next reload. Upgrade path: re-import `Workflows.ts` on HMR
 		// too; not worth it until someone hits it.
 		const existingAtKey = seen.get(routeKey(entry));
-		if (existingAtKey && existingAtKey.workflow === mr.workflow) {
-			const idx = out.indexOf(existingAtKey);
-			if (idx !== -1) out[idx] = entry;
-			seen.set(routeKey(entry), entry);
-			continue;
+		if (existingAtKey) {
+			if (existingAtKey.workflow === mr.workflow) {
+				const idx = out.indexOf(existingAtKey);
+				if (idx !== -1) out[idx] = entry;
+				seen.set(routeKey(entry), entry);
+				continue;
+			}
+			// #733 — identity fails when the scanned copy and the manual copy
+			// are loaded as DIFFERENT module instances of the same workflow. The
+			// case this actually happens: under a BUILT Node run, `Workflows.ts`
+			// compiles to `dist/` and imports the COMPILED workflow module, while
+			// the TS scanner (hard-coded to `<cwd>/src/workflows` SOURCE, see
+			// HttpTrigger's `buildFileBasedRoutes` doc comment) dynamic-imports
+			// the `.ts` SOURCE file directly (Node 22.6+ native TS stripping).
+			// Same workflow, two objects — `===` above never matches, so every
+			// dual-registered workflow hit the collision path on a fresh
+			// `npm run start` scaffold. Comparing normalized source file paths
+			// is fragile here (dist vs. src paths never textually match); the
+			// robust, cheap signal both copies of the "same" workflow reliably
+			// share is their author-declared `name` at the same route. Only
+			// fires when BOTH sides declare an explicit name (not a derived
+			// fallback key) — an anonymous workflow falls through to the normal
+			// collision check below, same as before this fix.
+			const sharedName = sameDeclaredName(existingAtKey.workflow, mr.workflow);
+			if (sharedName) {
+				options.onWarning?.(
+					`[blok][routing] ${existingAtKey.source} and ${entry.source} both claim ${routeKey(entry)} as workflow "${sharedName}" but loaded as different module instances (e.g. a built \`Workflows.ts\` importing compiled dist alongside the TS scanner importing source — see #733). Treating as one workflow, not a collision: ${entry.source} wins.`,
+				);
+				const idx = out.indexOf(existingAtKey);
+				if (idx !== -1) out[idx] = entry;
+				seen.set(routeKey(entry), entry);
+				continue;
+			}
 		}
 
 		const collision = detectCollision(seen, entry);
@@ -455,4 +498,32 @@ function warnAmbiguousLiterals(routes: readonly RouteEntry[], onWarning: ((msg: 
 function deriveKeyFromPath(filepath: string): string {
 	const filename = filepath.replace(/\\/g, "/").split("/").pop() ?? "";
 	return filename.replace(/\.(ts|js|json)$/i, "");
+}
+
+/**
+ * Read a workflow object's explicit `name`, covering both shapes: a JSON /
+ * raw object literal carries `name` on the root, while a v2 `workflow()`
+ * builder carries it on the nested `_config`. Returns `undefined` when
+ * neither is a (non-empty) string — a derived/fallback key is never read
+ * here, only an author-declared name.
+ */
+function readWorkflowName(wf: unknown): string | undefined {
+	if (!wf || typeof wf !== "object") return undefined;
+	const w = wf as { name?: unknown; _config?: { name?: unknown } };
+	if (typeof w.name === "string" && w.name.length > 0) return w.name;
+	if (typeof w._config?.name === "string" && w._config.name.length > 0) return w._config.name;
+	return undefined;
+}
+
+/**
+ * #733 — fallback for the manual-vs-scanned identity dedup above. Returns the
+ * shared `name` when BOTH workflow objects declare the SAME explicit name, or
+ * `undefined` when they don't (including when either side has no declared
+ * name at all — two anonymous workflows coincidentally sharing a route are
+ * NOT assumed to be the same workflow).
+ */
+function sameDeclaredName(a: unknown, b: unknown): string | undefined {
+	const nameA = readWorkflowName(a);
+	const nameB = readWorkflowName(b);
+	return nameA && nameA === nameB ? nameA : undefined;
 }

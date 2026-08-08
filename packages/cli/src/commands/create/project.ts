@@ -1458,37 +1458,46 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 	for (const trigger of triggers) {
 		if (trigger === "http") {
 			// HTTP JSON workflows come in via the file-based router under
-			// `workflows/json/` (auto-discovered, not listed here). But the HTTP
+			// `workflows/json/` (auto-discovered, not listed here). The HTTP
 			// scaffold ALSO ships one `@blokjs/core` typed-handle-DSL example
 			// (src/workflows/http/countries-handle-dsl.ts) so a fresh project has
 			// a runnable sample of Blok's lead TS authoring surface — every other
-			// shipped workflow is the object/JSON form. The callback DSL resolves
-			// async (`workflow(name, opts, build)` returns a Promise), so register
-			// the awaited builder; the generated file already uses top-level await
-			// in Nodes.ts, so this is consistent.
-			imports.push("// HTTP JSON workflows are auto-discovered from workflows/json/");
-			imports.push('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl.js";');
-			workflowEntries.push('\t"countries-dsl": await CountriesHandleDsl,');
+			// shipped workflow is the object/JSON form.
+			//
+			// #733 — it is NOT registered here. `src/workflows/**/*.ts` is ALSO
+			// the TS auto-routing scan root (#695): the file already gets a route
+			// with zero entries in this map, exactly like the JSON workflows
+			// above. A manual entry here used to be harmless (`buildRouteTable`
+			// deduped it against the scanned copy by object identity) — until a
+			// BUILT `npm run start` run, where this file compiles to
+			// `dist/Workflows.js` and imports the COMPILED workflow module while
+			// the scanner (hard-coded to `<cwd>/src/workflows` SOURCE) dynamic-
+			// imports the `.ts` file directly. Same workflow, two different
+			// module instances — identity dedup fails, and every fresh scaffold
+			// logged a route collision on first boot. Fixed at the root: don't
+			// register a workflow here that the scan root already owns.
+			// `WorkflowRouter.buildRouteTable` also grew a name+route fallback
+			// for the general case (a HAND-registered workflow that happens to
+			// also live in the scan root) — see WorkflowRouter.ts.
+			imports.push("// HTTP JSON + TS workflows are auto-discovered from workflows/json/ and workflows/**/*.ts");
 		} else if (trigger === "sse") {
 			// v0.6.7 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
 			// (copied via the scaffold to `src/workflows/sse/events/...`). The
-			// stream-demo workflow is the SSE subscriber; the publish-demo
-			// workflow is HTTP-triggered and only useful when an HTTP trigger
-			// is ALSO selected (otherwise its POST /v07-sse-publish endpoint
-			// has no listener). The CLI registers both in this Workflows
-			// record regardless — SSEServer filters to SSE-triggered only,
-			// and HTTP-only triggers ignore the SSE one. Keeps the file
-			// generation simple + lets a future http-only scaffold opt in
-			// to the publish workflow as a learning example.
-			// `await`: these are @blokjs/core callback-form workflows (async, like
+			// stream-demo workflow is SSE-triggered — not auto-routed by the HTTP
+			// scan (no `http` trigger to match), so SSEServer needs it registered
+			// here to find it.
+			//
+			// The paired publish-demo workflow IS http-triggered (`POST
+			// /v07-sse-publish`) and lives under the same scan root, so per #733
+			// (see the http branch's note above) it is NOT registered here when
+			// an HTTP trigger is also present — the scan auto-routes it. It's
+			// still shipped to disk regardless (the copy step doesn't consult
+			// this map), just inert without an HTTP trigger to serve it.
+			// `await`: this is a @blokjs/core callback-form workflow (async, like
 			// countries-dsl). Without it the unresolved Promise carries no readable
 			// `_config.trigger`, so SSEServer skips it and the /sse route never mounts.
 			imports.push('import SSEStreamDemo from "./workflows/sse/events/stream-demo.js";');
 			workflowEntries.push('\t"sse-stream-demo": await SSEStreamDemo,');
-			if (triggers.includes("http")) {
-				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo.js";');
-				workflowEntries.push('\t"sse-publish-demo": await SSEPublishDemo,');
-			}
 		} else if (trigger === "websocket") {
 			// v0.6.7 — WebSocket source ships `src/workflows/events/echo-demo.ts`
 			// (copied to `src/workflows/websocket/events/echo-demo.ts`). It
@@ -1507,12 +1516,11 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// with pub/sub triggers found" — the exact symptom this fixes.
 			workflowEntries.push('\t"on-pubsub-message": await OnPubSubMessage,');
 			// The paired HTTP producer (`POST /orders` → publish to the topic) is
-			// only useful when an HTTP trigger is also present to serve it, so a
-			// pubsub-only project skips it. Gives a curl-able produce→consume loop.
-			if (triggers.includes("http")) {
-				imports.push('import PublishOrder from "./workflows/pubsub/publish-order.js";');
-				workflowEntries.push('\t"publish-order": await PublishOrder,');
-			}
+			// only useful when an HTTP trigger is also present to serve it — gives
+			// a curl-able produce→consume loop. It's http-triggered and lives
+			// under the scan root, so per #733 (see the http branch's note above)
+			// it is NOT registered here: the HTTP TS auto-scan routes it on its
+			// own. Still shipped to disk regardless of trigger selection.
 		} else if (trigger === "queue" || trigger === "worker") {
 			// Worker template ships `workflows/jobs/process-job.ts`.
 			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job.js";`);
@@ -1850,9 +1858,12 @@ if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true")
 		// mountedOnHttp filter in createProject) — the HTTP entry mounts
 		// WS on its shared Hono app via the standard constructor
 		// integration (`WebSocketTrigger(app, httpTrigger)`).
-		return `import { DefaultLogger } from "@blokjs/runner";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import WSServer from "./runner/WSServer";
+import WSServer from "./runner/WSServer.js";
+
+${MAIN_MODULE_GUARD_FN}
 
 export default class App {
 	private wsServer: WSServer = <WSServer>{};
@@ -1888,115 +1899,35 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }
 `;
 	}
 
-	if (triggerKind === "pubsub") {
-		return `import { DefaultLogger } from "@blokjs/runner";
-import { type Span, metrics, trace } from "@opentelemetry/api";
-import PubSubServer from "./runner/PubSubServer";
-
-export default class App {
-	private pubsubServer: PubSubServer = <PubSubServer>{};
-	protected trigger_initializer = 0;
-	protected initializer = 0;
-	protected tracer = trace.getTracer(
-		process.env.PROJECT_NAME || "trigger-pubsub-server",
-		process.env.PROJECT_VERSION || "0.0.1",
-	);
-	private logger = new DefaultLogger();
-	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
-		description: "Application cold start",
-	});
-
-	constructor() {
-		this.initializer = performance.now();
-		this.pubsubServer = new PubSubServer();
-	}
-
-	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.pubsubServer.listen();
-			this.initializer = performance.now() - this.initializer;
-
-			this.logger.log(\`Pub/Sub trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
-			this.app_cold_start.record(this.initializer, {
-				pid: process.pid,
-				env: process.env.NODE_ENV,
-				app: process.env.APP_NAME,
-			});
-			span.end();
-		});
-	}
-}
-
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
-	new App().run();
-}
-`;
-	}
-
-	if (triggerKind === "queue") {
-		// The "queue" CLI flag scaffolds the trigger-worker template (the
-		// monorepo dir is `triggers/worker/`, and the npm package is
-		// `@blokjs/trigger-worker`). The scaffolded file is
-		// `runner/WorkerServer.ts`, exporting a class that extends
-		// `WorkerTrigger` from `@blokjs/trigger-worker`.
-		return `import { DefaultLogger } from "@blokjs/runner";
-import { type Span, metrics, trace } from "@opentelemetry/api";
-import WorkerServer from "./runner/WorkerServer";
-
-export default class App {
-	private workerServer: WorkerServer = <WorkerServer>{};
-	protected trigger_initializer = 0;
-	protected initializer = 0;
-	protected tracer = trace.getTracer(
-		process.env.PROJECT_NAME || "trigger-queue-server",
-		process.env.PROJECT_VERSION || "0.0.1",
-	);
-	private logger = new DefaultLogger();
-	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
-		description: "Application cold start",
-	});
-
-	constructor() {
-		this.initializer = performance.now();
-		this.workerServer = new WorkerServer();
-	}
-
-	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.workerServer.listen();
-			this.initializer = performance.now() - this.initializer;
-
-			this.logger.log(\`Queue trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
-			this.app_cold_start.record(this.initializer, {
-				pid: process.pid,
-				env: process.env.NODE_ENV,
-				app: process.env.APP_NAME,
-			});
-			span.end();
-		});
-	}
-}
-
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
-	new App().run();
-}
-`;
-	}
+	// NOTE: no "pubsub" / "queue" branches here (removed #733) — `createProject`'s
+	// `triggersWithRealTemplate` set (`new Set(["worker", "queue", "pubsub"])`,
+	// see the loop around `generateTriggerEntryFile(triggerKind, ...)` above)
+	// always `continue`s past these two kinds BEFORE calling this function: their
+	// entry file is the real `template/src/index.ts` copied verbatim from
+	// `triggers/pubsub/template` / `triggers/worker/template`, never this
+	// generator. The branches that used to live here were provably dead code
+	// (see the `generateTriggerEntryFile("pubsub"|"queue")` fallback-stub
+	// assertions in packages/cli/tests/commands/create/cron-trigger-scaffold.test.ts)
+	// — deleted rather than guarded, since #732's boot guard would have been
+	// unexercised dead code on top of already-dead code.
 
 	if (triggerKind === "cron") {
 		// Cron is a portless scheduler: CronServer.listen() reads the
 		// cron-triggered workflows, schedules a CronJob per workflow, and
 		// returns — the job timers keep the event loop alive. Mirrors the
 		// pubsub/worker entry shape (no HTTP listener to bind).
-		return `import { DefaultLogger } from "@blokjs/runner";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import CronServer from "./runner/CronServer.js";
+
+${MAIN_MODULE_GUARD_FN}
 
 export default class App {
 	private cronServer: CronServer = <CronServer>{};
@@ -2032,7 +1963,7 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }
 `;
