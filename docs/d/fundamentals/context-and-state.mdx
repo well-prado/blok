@@ -319,10 +319,10 @@ guide.
 
 Control and trigger-config positions are **not** step inputs and keep path
 strings in JSON: `branch.when` / `loop.while` (raw `ctx.*`, no prefix),
-`switch.on`, `forEach.in`, `subworkflow`, step `idempotencyKey`, and trigger
-`concurrencyKey` / `debounce.key`. The callback DSL takes handles for all of
-these except trigger config, which is resolved at run-entry before any handle
-exists.
+`switch.on`, `forEach.in`, `subworkflow`. The callback DSL takes handles for
+all of these except trigger config, which is resolved at run-entry before any
+handle exists. Step `idempotencyKey` and trigger `concurrencyKey` /
+`debounce.key` are a partial exception — see the **key** positions below.
 
 Writing a structural `{"$ref": …}` / `{"$tpl": […]}` in one of the **control**
 positions (`switch.on`, `forEach.in`, a `switch` case `when`) fails at load with
@@ -340,12 +340,15 @@ rather than kept as a duration that could never parse.
 
 The three **key** positions — step `idempotencyKey`, trigger `concurrencyKey`,
 trigger `debounce.key` — are stricter than the rest: they take a `js/…`
-expression or a **deliberate literal**, nothing else. An expression-shaped
-value that is not `js/`-prefixed (`$.…`, bare `ctx.…`, `${…}`, `{{…}}`, or a
-raw `{"$ref": …}`) fails the run with `UnresolvableKeyExpressionError` and is
-reported by `blokctl check` — a literal key is a CONSTANT, and silently turning
-a mistyped expression into one shared cache entry or one global concurrency
-bucket is the failure mode this guard exists to prevent.
+expression, a **deliberate literal**, or a structural `{"$ref": …}` /
+`{"$tpl": […]}` — the last of which lowers to the `js/` wire form at load
+time, the same treatment `wait.for` / `wait.until` get below. What is NOT
+accepted is an expression-SHAPED value that is none of those (`$.…`, bare
+`ctx.…`, `${…}`, `{{…}}`): it fails the run with
+`UnresolvableKeyExpressionError` and is reported by `blokctl check` — a
+literal key is a CONSTANT, and silently turning a mistyped expression into
+one shared cache entry or one global concurrency bucket is the failure mode
+this guard exists to prevent.
 
 ## Quick reference
 

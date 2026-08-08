@@ -156,9 +156,10 @@ steps then reference it with an ordinary `{"$ref"}`.
 
 ## Positions that keep path strings
 
-The lowering pass is scoped to step `inputs`. A `{"$ref"}` in any of these
-positions is walked into as plain data by the mapper and silently does the
-wrong thing — leave them as strings:
+The lowering pass is scoped to step `inputs` and the three RESOLVED-KEY
+positions (below). A `{"$ref"}` in any of these OTHER positions is walked
+into as plain data by the mapper and silently does the wrong thing — leave
+them as strings:
 
 | Position | Form |
 |---|---|
@@ -166,13 +167,18 @@ wrong thing — leave them as strings:
 | `switch.on`, `switch.cases[].when` | `js/ctx.*` |
 | `forEach.in` | `js/ctx.*` |
 | `subworkflow` (polymorphic name) | `js/ctx.*` |
-| step `idempotencyKey` | `js/ctx.*` |
-| trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
 
 `wait.for` / `wait.until` used to be on that list and no longer are: they take
 a `{"$ref"}` (lowered by the load boundary and resolved when the wait step
 runs), a `js/ctx.*` expression, or a literal duration/timestamp — see
 [`wait`](/d/primitives/wait).
+
+The three RESOLVED-KEY positions — step `idempotencyKey`, trigger
+`concurrencyKey`, trigger `debounce.key` — used to be on that list too and no
+longer are (#728): they take a `{"$ref"}` (lowered by the load boundary, then
+evaluated by the runner's `js/`-or-literal rule), a `js/ctx.*` expression, or
+a deliberate literal — see
+[context and state](/d/fundamentals/context-and-state).
 
 The `@blokjs/core` callback DSL takes handles for `branch` (via `eq`/`gt`/…),
 `forEach`, `switchOn`, `subworkflow` and step-level `idempotencyKey`, and

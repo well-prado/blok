@@ -117,19 +117,30 @@ object-style TS API:
 | `switch.on`, `switch.cases[].when` | `js/ctx.*` |
 | `forEach.in` | `js/ctx.*` |
 | `subworkflow` (polymorphic name) | `js/ctx.*` |
-| step `idempotencyKey` | `js/ctx.*` |
-| trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
 
-The `@blokjs/core` callback DSL takes handles for `forEach`, `switchOn`,
-`subworkflow` and step-level `idempotencyKey` and lowers them itself. Trigger
-config (`concurrencyKey`, `debounce.key`) is resolved at run-entry, before any
-step handle exists, so it stays a path string in every authoring form.
+The `@blokjs/core` callback DSL takes handles for `forEach`, `switchOn`, and
+`subworkflow` and lowers them itself.
 
-`wait.for` / `wait.until` are the one position OUTSIDE step `inputs` that the
-lowering pass does cover: `normalizeWaitStep` lowers a structural `{"$ref"}`
-there to the same wire string, and the runner resolves it through this mapper
-when the wait step executes (#704). A `js/` string works too, for the
-non-structural cases.
+## Positions OUTSIDE step `inputs` the lowering pass DOES cover
+
+Two more spots get a structural `{"$ref"}` / `{"$tpl"}` lowered to the same
+`js/…` wire string, even though neither is a step `inputs` field:
+
+- **`wait.for` / `wait.until`** — `normalizeWaitStep` lowers it, and the
+  runner resolves the result through this mapper when the wait step executes
+  (#704).
+- **The three RESOLVED-KEY positions** — step `idempotencyKey`, trigger
+  `concurrencyKey`, trigger `debounce.key` — `WorkflowNormalizer`'s
+  `pickResolvedKey` / `lowerTriggerKeys` lower it (#728). The runner then
+  evaluates the resulting `js/…` string with its own `js/`-or-literal rule
+  (`resolveIdempotencyKey.ts`), **not** through this mapper — a non-`js/`
+  string is taken as a deliberate literal key rather than mapper-interpolated.
+  A `js/` string works too, for the non-structural cases, and the
+  `@blokjs/core` callback DSL takes a typed handle for step-level
+  `idempotencyKey` and lowers it for you. Trigger config (`concurrencyKey`,
+  `debounce.key`) is resolved at run-entry, before any step handle exists, so
+  it stays a path string (or, in JSON, a structural `{"$ref"}`) in every
+  authoring form.
 
 ## Failure mode (`BLOK_MAPPER_MODE`)
 
