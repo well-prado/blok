@@ -13,7 +13,7 @@ import { z } from "zod";
 import { defineNode } from "../defineNode";
 import type { EphemeralHandle, Handle, InputOf, OutputOf, Refable } from "../handles";
 import { runtimeNode } from "../handles";
-import { gt, step, workflowCallback as workflow } from "../stepBuilder";
+import { gt, step, subworkflow, workflowCallback as workflow } from "../stepBuilder";
 
 // @ts-expect-error Workflow author imports intentionally do not expose runtime Context; use trigger/step handles instead.
 import type { Context as WorkflowAuthorContext } from "../dsl";
@@ -200,6 +200,27 @@ void opaqueIsUnknown;
 // @ts-expect-error OpaqueOutput is `unknown`, not `any`: cannot assign to a concrete type
 const opaqueNotAny: string = null as unknown as OpaqueOutput;
 void opaqueNotAny;
+
+// --- #718: subworkflow<T> typed-output parameter --------------------------------
+
+void workflow("Subworkflow Boundary", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+	// No explicit type parameter degrades to `Handle<unknown>` — same "no schema
+	// → unknown, never any" convention as runtimeNode<In, Out> above. A field
+	// read needs a cast without it (the pre-#718 shape docs used to show,
+	// `receipt.data`, which did not compile).
+	const untyped = subworkflow("untyped-child", "send-receipt-email", {});
+	consume<unknown>(untyped);
+
+	// @ts-expect-error `Handle<unknown>` (the default) exposes no readable fields
+	consume(untyped.data);
+
+	// An explicit type parameter types the read directly — no cast needed.
+	const receipt = subworkflow<{ data: string }>("receipt", "send-receipt-email", {});
+	consume<string>(receipt.data);
+
+	// @ts-expect-error field not declared on the asserted output type
+	consume(receipt.nope);
+});
 
 // Touch the recovered values so `noUnusedLocals` (if ever re-enabled) stays happy
 // and the assertions are observably exercised.

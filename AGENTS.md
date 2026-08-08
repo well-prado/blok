@@ -262,10 +262,13 @@ See `docs/d/primitives/handles-and-footguns.mdx`.
 
 ## Sub-workflows
 
-Use `subworkflow(id, name, inputs, opts?)` from `@blokjs/core`.
+Use `subworkflow(id, name, inputs, opts?)` from `@blokjs/core`. The child is
+looked up by name at dispatch time, so there is no node schema to type the
+response from — pass an explicit type parameter for a typed read (defaults to
+`unknown`, same convention as `runtimeNode<In, Out>`).
 
 ```ts
-const receipt = subworkflow("receipt", "send-receipt", { orderId: order.id });
+const receipt = subworkflow<{ data: string }>("receipt", "send-receipt", { orderId: order.id });
 step("respond", RespondNode, { body: receipt.data }, { ephemeral: true });
 ```
 
