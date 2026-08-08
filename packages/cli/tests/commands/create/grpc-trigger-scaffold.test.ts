@@ -16,7 +16,9 @@ describe("grpc trigger scaffold (#643)", () => {
 		expect(out).toContain('import nodes from "../../Nodes.js"');
 		expect(out).toContain('import workflows from "../../Workflows.js"');
 		expect(out).toContain("new GrpcServer({ host, port, nodes, workflows }).start()");
-		expect(out).toContain('if (process.env.DISABLE_TRIGGER_RUN !== "true")');
+		// #721 — boots only when this file is the process entry point (not on
+		// plain import), and DISABLE_TRIGGER_RUN still force-disables it.
+		expect(out).toContain('if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true")');
 	});
 
 	it("reads GRPC_PORT/GRPC_HOST, falling back through PORT", () => {

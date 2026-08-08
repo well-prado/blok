@@ -1569,6 +1569,29 @@ export default workflows;
 }
 
 /**
+ * #721 — boot guard emitted into every generated trigger entry file that
+ * self-executes. `import.meta.main` alone isn't enough: Bun always has it,
+ * but Node only unflagged it in v22.18.0 (nodejs/node#57804), and these
+ * files ship as scaffolded-project source with an `engines` floor of Node
+ * 18 (see triggers/http/package.json). Comparing realpath'd
+ * `process.argv[1]` against the module's own path works identically under
+ * Bun and every Node version, and realpath on both sides means a spawn
+ * through a different path (`blokctl dev`'s `bun run <path>`, a `bin`
+ * symlink) still resolves to the same file.
+ */
+const MAIN_MODULE_GUARD_IMPORTS = `import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";`;
+
+const MAIN_MODULE_GUARD_FN = `function isMainModule(moduleUrl: string): boolean {
+	if (!process.argv[1]) return false;
+	try {
+		return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(process.argv[1]);
+	} catch {
+		return false;
+	}
+}`;
+
+/**
  * Generate trigger entry point that imports shared nodes/workflows.
  * Matches the pattern of the original trigger index.ts files.
  */
@@ -1714,9 +1737,12 @@ export function generateTriggerEntryFile(triggerKind: string, selectedTriggers: 
 			await mcpTrigger.listen();`
 			: "";
 		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}${webhookBootstrap}${mcpBootstrap}`;
-		return `import { DefaultLogger } from "@blokjs/runner";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import HttpTrigger from "./runner/HttpTrigger.js";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}${mcpImports}
+
+${MAIN_MODULE_GUARD_FN}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
@@ -1756,7 +1782,7 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }
 `;
@@ -1771,9 +1797,12 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 		// crash on `this.app.get(...)` because `app` was undefined),
 		// registers nodes + workflows, and binds an HTTP listener so
 		// `/sse/<path>` requests actually reach the SSE handler.
-		return `import { DefaultLogger } from "@blokjs/runner";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import SSEServer from "./runner/SSEServer";
+
+${MAIN_MODULE_GUARD_FN}
 
 export default class App {
 	private sseServer: SSEServer = <SSEServer>{};
@@ -1809,7 +1838,7 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }
 `;
@@ -2017,14 +2046,17 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 		// GrpcServer defaults to the package's built-ins when none are injected.
 		// GrpcServer reads GRPC_PORT/GRPC_HOST; blokctl dev sets PORT to the
 		// trigger's configured port, so fall back through PORT.
-		return `import { GrpcServer } from "@blokjs/trigger-grpc";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { GrpcServer } from "@blokjs/trigger-grpc";
 import nodes from "../../Nodes.js";
 import workflows from "../../Workflows.js";
+
+${MAIN_MODULE_GUARD_FN}
 
 const host = process.env.GRPC_HOST || "0.0.0.0";
 const port = Number(process.env.GRPC_PORT || process.env.PORT || 4003);
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new GrpcServer({ host, port, nodes, workflows }).start();
 }
 `;
