@@ -233,3 +233,51 @@ describe("runWorkflow", () => {
 		expect(run.state("validate")).toEqual({ id: "o-7", total: 3 });
 	});
 });
+
+/**
+ * ADR 0015 (#678) — where the declared-`input` gate does and does not apply.
+ *
+ * The ADR scopes enforcement to the `TriggerBase.run()` chokepoint: a real
+ * request arriving over a real transport. `runWorkflow` is NOT that chokepoint —
+ * it drives `WorkflowTestRunner` directly, the same position `SubworkflowNode`
+ * occupies, which the ADR also leaves ungated. The ADR is silent on the testing
+ * path, so this pins the consequence as a DECISION rather than an accident:
+ * `runWorkflow(wf, input)` runs the payload the test author wrote, verbatim.
+ *
+ * Practical read: `runWorkflow` tests the workflow BODY. To test the input
+ * contract itself, `safeParse` with the schema in the test (it is a plain Zod
+ * object) or exercise the transport.
+ */
+describe("runWorkflow — declared `input` is NOT enforced (ADR 0015 scope)", () => {
+	const strictFlow = workflowCallback(
+		"order-strict",
+		{
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/strict" } },
+			input: z.object({ id: z.string(), total: z.number(), currency: z.string().default("usd") }),
+		},
+		(req) => {
+			const body = (req as unknown as { body: OrderBody }).body;
+			step("validate", validate, { body });
+		},
+	);
+
+	it("does not reject a payload the HTTP gate would 400", async () => {
+		// `total` is a string and `id` is missing — a 400 at the trigger boundary.
+		const run = await runWorkflow(strictFlow, { total: "not-a-number" });
+
+		// The gate never ran; the run failed (or not) purely on the node's own
+		// Zod, exactly as it did before ADR 0015. What matters is the ABSENCE of
+		// a workflow-input 400 short-circuit.
+		expect(String(run.error ?? "")).not.toMatch(/input validation failed/i);
+	});
+
+	it("does not apply declared `.default()` values to the entry payload", async () => {
+		const run = await runWorkflow(strictFlow, { id: "o-9", total: 5 });
+
+		expect(run.ok).toBe(true);
+		// `currency` would be defaulted to "usd" by the transport gate; here the
+		// node sees exactly what the test passed.
+		expect(run.step("validate")?.inputs).toEqual({ body: { id: "o-9", total: 5 } });
+	});
+});

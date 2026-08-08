@@ -95,6 +95,10 @@ export interface WorkflowOpts<
 	 * stripped), and a failure returns a 400 / MCP `isError` / gRPC error
 	 * status. Kill switch: `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Use
 	 * `z.object({...}).passthrough()` to keep undeclared body fields.
+	 *
+	 * Enforcement is transport-only. A `subworkflow:` child and the `runWorkflow`
+	 * test harness bypass `TriggerBase.run()`, so both run their caller's payload
+	 * verbatim — no rejection and no `.default()`s applied.
 	 */
 	input?: I;
 	/**

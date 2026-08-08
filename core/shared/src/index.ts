@@ -15,6 +15,9 @@ import BlokError, {
 	isNonRetryableValidationError,
 	type NodeErrorPayload,
 	WORKFLOW_INPUT_VALIDATION,
+	WorkflowInputValidationError,
+	type WorkflowInputValidationInfo,
+	type WorkflowInputValidationIssue,
 } from "./BlokError";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
@@ -82,6 +85,9 @@ export {
 	DEFAULT_RETRYABLE,
 	isNonRetryableValidationError,
 	WORKFLOW_INPUT_VALIDATION,
+	WorkflowInputValidationError,
+	type WorkflowInputValidationInfo,
+	type WorkflowInputValidationIssue,
 	Metrics,
 	MemoryUsage,
 	type MetricsType,

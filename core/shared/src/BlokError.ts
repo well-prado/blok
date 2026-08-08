@@ -446,7 +446,9 @@ export const WORKFLOW_INPUT_VALIDATION = "WORKFLOW_INPUT_VALIDATION";
 
 /**
  * True when `err` is the ADR-0015 **input-validation gate's** deterministic
- * failure — a `GlobalError` carrying the {@link WORKFLOW_INPUT_VALIDATION} tag.
+ * failure — a `GlobalError` carrying the {@link WORKFLOW_INPUT_VALIDATION} tag
+ * (in practice a {@link WorkflowInputValidationError}; the tag is what's matched
+ * so an error that crossed a serialization boundary still classifies).
  *
  * Triggers consult this to route the error to DLQ / drop / a 4xx response
  * instead of a poison-message loop (worker burning its retry budget, pub/sub
@@ -460,4 +462,52 @@ export const WORKFLOW_INPUT_VALIDATION = "WORKFLOW_INPUT_VALIDATION";
  */
 export function isNonRetryableValidationError(err: unknown): boolean {
 	return err instanceof GlobalError && err.context.name === WORKFLOW_INPUT_VALIDATION;
+}
+
+/** One Zod issue, flattened to plain data for the wire. */
+export interface WorkflowInputValidationIssue {
+	path: (string | number)[];
+	message: string;
+	code: string;
+}
+
+/** What the ADR-0015 gate knows about the rejection. */
+export interface WorkflowInputValidationInfo {
+	/** The workflow whose declared `input` schema rejected the payload. */
+	workflowName: string;
+	/** Every Zod issue, in schema order. */
+	issues: WorkflowInputValidationIssue[];
+}
+
+/**
+ * ADR 0015 — thrown by the input gate in `TriggerBase.run()` when the invoking
+ * trigger's payload fails the workflow's declared `input` Zod.
+ *
+ * Named + exported so callers can `instanceof` it, matching the vocabulary of
+ * the other gate errors (`ConcurrencyLimitError`, `QueueExpiredError`,
+ * `MapperResolutionError`). It extends `GlobalError` — carrying code 400, the
+ * {@link WORKFLOW_INPUT_VALIDATION} tag on `context.name`, and the structured
+ * `validation_errors` json — so every existing transport translation
+ * (HTTP 400, MCP `isError`, gRPC error status, worker/pubsub/webhook DLQ
+ * routing via {@link isNonRetryableValidationError}) keeps working untouched.
+ */
+export class WorkflowInputValidationError extends GlobalError {
+	public readonly info: WorkflowInputValidationInfo;
+
+	constructor(info: WorkflowInputValidationInfo) {
+		const summary = info.issues.map((i) => `${i.path.join(".") || "(root)"} (${i.message})`).join(", ");
+		super(`Input validation failed for workflow '${info.workflowName}': ${summary}`);
+		// `GlobalError`'s own constructor pins the prototype to GlobalError.prototype,
+		// so a subclass MUST re-pin or `instanceof WorkflowInputValidationError` is false.
+		Object.setPrototypeOf(this, WorkflowInputValidationError.prototype);
+		this.name = "WorkflowInputValidationError";
+		this.info = info;
+		this.setCode(400);
+		this.setName(WORKFLOW_INPUT_VALIDATION);
+		this.setJson({
+			error: "Input validation failed",
+			workflowName: info.workflowName,
+			validation_errors: info.issues,
+		});
+	}
 }

@@ -1,6 +1,6 @@
 # ADR 0015 — Enforce `workflow.input` at the trigger boundary (one gate in TriggerBase)
 
-- **Status:** Accepted — implemented (unit + MCP end-to-end tests green)
+- **Status:** Accepted — implemented (unit + HTTP/MCP end-to-end tests green)
 - **Date:** 2026-07-21
 - **Resolves:** [#678](https://github.com/well-prado/blok/issues/678)
 - **Origin:** tetrix-blok ADR-003 — MCP tool calls with malformed/missing args executed anyway and failed deep in nodes (or silently ran with `undefined` fields) instead of returning a validation error.
@@ -92,11 +92,24 @@ kill switch.
    debounce window or a concurrency slot), when `ctx.request` exists and the
    kill switch is off:
    - `schema.safeParse(ctx.request.body)`.
-   - Failure → throw a `GlobalError` with code 400 and the same structured
-     `validation_errors` body the node-level Zod gate produces. Rather than
-     extract the *private* `zodErrorToGlobalError` off `FunctionNode` across a
-     module boundary, the ~6-line builder is inlined in the helper (lazier,
-     same shape). The run traces as failed through the normal catch path.
+   - Failure → throw **`WorkflowInputValidationError`** (`@blokjs/shared`,
+     re-exported from `@blokjs/core/runtime` — where the sibling gate errors
+     already live), a `GlobalError` **subclass** carrying code
+     400, the `WORKFLOW_INPUT_VALIDATION` tag on `context.name`, and the same
+     structured `validation_errors` body the node-level Zod gate produces.
+     Rather than extract the *private* `zodErrorToGlobalError` off `FunctionNode`
+     across a module boundary, the builder lives on the class (lazier, same
+     shape). Naming it matches the vocabulary of the sibling gate errors
+     (`ConcurrencyLimitError`, `QueueExpiredError`, `MapperResolutionError`) and
+     gives callers an `instanceof` surface plus `err.info.workflowName` /
+     `err.info.issues`; subclassing `GlobalError` is what keeps every transport
+     translation byte-identical. The message and the 400 body **name the
+     workflow** (`Input validation failed for workflow 'search': query (Required)`),
+     which the anonymous first cut did not — a log line couldn't say which
+     workflow rejected. The run traces as failed through the normal catch path.
+     (Note for anyone subclassing `GlobalError`: its constructor pins
+     `Object.setPrototypeOf(this, GlobalError.prototype)`, so a subclass MUST
+     re-pin its own prototype or `instanceof` the subclass is false.)
    - Success → **`ctx.request.body = parsed.data`**. Defaults and coercions
      apply; runtime behavior finally matches both the advertised JSON Schema
      and the compile-time `z.infer` types.
@@ -110,8 +123,12 @@ kill switch.
 **Delivered:** `parseWorkflowInput` / `resolveDeclaredInputSchema` +
 `TriggerBase.run` wire-in; unit test (`validateWorkflowInput.test.ts`) and
 MCP end-to-end test (`McpTrigger.input-validation.test.ts`: malformed → `isError`,
-valid → defaults applied, kill switch → passthrough); doc-comment fix on
-`workflowV2.ts`, MCP trigger doc note, CHANGELOG `Unreleased` entry.
+valid → defaults applied, kill switch → passthrough) and the HTTP end-to-end
+equivalent (`triggers/http/__tests__/unit/HttpTrigger.inputValidation.test.ts`:
+valid → 200 + defaults + unknown-key stripping, invalid → 400 with
+`validation_errors` naming the workflow, schema-less → no-op, kill switch →
+passthrough); doc-comment fix on `workflowV2.ts`, MCP trigger doc note,
+gate-ordering section in `core/runner/CLAUDE.md`, CHANGELOG `Unreleased` entry.
 
 ### Scope (corrected after the ctx-integrity audit)
 
@@ -205,7 +222,22 @@ instead of looping/swallowing:
 - **No schema declared** → gate is a no-op; zero behavior change and zero cost.
 - **Sub-workflows** bypass `TriggerBase.run()` by design
   (`SubworkflowNode` direct dispatch); child inputs are author-mapped and
-  compile-time typed. Out of scope.
+  compile-time typed. Out of scope — a child's `inputs` come from the parent's
+  resolved mapper output, not from a caller. The one exception already routes
+  itself back through the gate: `dispatch: "http-self"` dispatches a real HTTP
+  request to the child's own route, so the child IS validated, on its http side,
+  like any other request.
+- **The `runWorkflow` testing path is NOT gated.** `runWorkflow` /
+  `WorkflowTestRunner` (#688) drive the runner directly and never construct a
+  trigger, so they sit in exactly the position `SubworkflowNode` does. A test
+  therefore runs the payload its author wrote, verbatim, with no declared
+  `.default()`s applied and no 400. This is a **decision**, not an oversight:
+  `runWorkflow` tests the workflow BODY, and gating it would mean the harness
+  silently rewriting the payload under the assertion. The schema is a plain Zod
+  object — `safeParse` it in the test to cover the input contract, or exercise
+  the transport. Pinned by
+  `core/runner/__tests__/unit/testing/run.test.ts` ("declared `input` is NOT
+  enforced (ADR 0015 scope)") so nobody has to re-derive it from absence.
 - **Unknown-key stripping:** Zod object schemas strip unknown keys on parse,
   so replacing the body drops undeclared fields. This is the security-correct
   trust-boundary behavior, but it is a behavior change for workflows that

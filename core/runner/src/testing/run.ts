@@ -121,6 +121,14 @@ type WorkflowOutputOf<W> = Awaited<W> extends { __blokTypes?: { output: infer O 
  * so `import wf from "./workflows/process-order"` needs no `await` of its own.
  * A JSON workflow still works: pass the path to the `.json` file, or its text.
  *
+ * **`input` is not enforced here (ADR 0015).** The declared-`input` gate lives at
+ * the `TriggerBase.run()` transport boundary; `runWorkflow` drives the runner
+ * directly, the same position a `subworkflow:` child occupies. So `input` runs
+ * verbatim — no 400, no `.default()`s applied, nothing stripped. That is
+ * deliberate: this tests the workflow BODY, and a harness that silently rewrote
+ * the payload would be testing something the assertion never named. To cover the
+ * input contract, `safeParse` the schema in the test.
+ *
  * @example
  * const run = await runWorkflow(orderFlow, { id: "o-1", total: 120 }, {
  *   mock: { "charge-card": async () => ({ receipt: "r-1" }) },

@@ -72,6 +72,26 @@ packages on npm version independently within each release line.
 
 ### Changed
 
+- **The workflow-`input` gate's rejection is now a named, exported error**
+  (#678, ADR 0015). The trigger-boundary gate threw an anonymous `GlobalError`;
+  it now throws `WorkflowInputValidationError` (exported from `@blokjs/core/runtime`
+  and `@blokjs/shared`, alongside `ConcurrencyLimitError` and friends), a
+  `GlobalError` **subclass** — same `400`, same
+  `WORKFLOW_INPUT_VALIDATION` tag on `context.name`, same structured
+  `validation_errors` — so every transport translation (HTTP 400, MCP `isError`,
+  gRPC status, worker DLQ, pub/sub dead-letter, webhook 4xx) is unchanged.
+  New: callers can `instanceof` it and read `err.info.workflowName` /
+  `err.info.issues`, and the rejection **names the workflow** —
+  `Input validation failed for workflow 'search': query (Required)`. The 400 body
+  gained `error` and `workflowName` alongside `validation_errors` (additive).
+
+  Scope that was implied is now documented and pinned by tests: the
+  `runWorkflow` testing path is **not** gated — it drives the runner directly,
+  the same position a `subworkflow:` child occupies, and neither passes through
+  `TriggerBase.run()`. A test therefore runs the payload its author wrote,
+  verbatim, with no declared `.default()`s applied. To test the input contract
+  itself, `safeParse` the schema in the test or exercise the transport.
+
 - **Packaging gate now covers every publishable-looking package; `blokctl`'s
   tarball no longer ships its own test suite** (#697). Follow-up to #687/#696:
   four `private: false` packages sat outside `PUBLISHABLE` (`scripts/release.ts`)

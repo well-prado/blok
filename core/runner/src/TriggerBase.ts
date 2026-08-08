@@ -1024,10 +1024,12 @@ export default abstract class TriggerBase extends Trigger {
 	/**
 	 * ADR 0015 — whether THIS trigger drives declared-`input` validation. The
 	 * gate keys on the invoking trigger (this method), not the workflow's
-	 * declared trigger config, so a multi-trigger workflow (`{ http, worker }`)
-	 * is validated on its http side but not when fired via worker. Overridden to
-	 * `true` only by the request-shaped triggers whose `ctx.request.body` is the
-	 * caller payload the schema describes: HTTP, MCP, gRPC. Default `false`.
+	 * declared trigger config, so a multi-trigger workflow (`{ http, cron }`) is
+	 * validated on its http side but not when fired by a tick. Overridden to
+	 * `true` only by the triggers whose `ctx.request.body` is the caller/producer
+	 * payload the schema describes: HTTP, MCP, gRPC, worker, pub/sub, webhook.
+	 * `cron` / `sse` / `websocket` stay `false` — their body is framework-
+	 * generated. Default `false`, so a new trigger opts in by name.
 	 */
 	protected validatesDeclaredInput(): boolean {
 		return false;
@@ -1074,13 +1076,14 @@ export default abstract class TriggerBase extends Trigger {
 			// request never consumes a debounce window or a concurrency slot.
 			// On success the body is REPLACED with the parsed value so Zod
 			// defaults + coercions apply (matching the advertised schema and the
-			// compile-time entry-handle types). Failure throws a GlobalError(400)
-			// the transports already render.
+			// compile-time entry-handle types). Failure throws a
+			// `WorkflowInputValidationError` (GlobalError subclass, code 400) the
+			// transports already render.
 			//
-			// `shouldRunInputGate` scopes this to the INVOKING trigger being
-			// http/mcp/grpc (via `validatesDeclaredInput()`, so a multi-trigger
-			// `{ http, worker }` workflow fired via its worker side is NOT
-			// validated against job.data) and SKIPS deferred re-entry (the body
+			// `shouldRunInputGate` scopes this to the INVOKING trigger opting in
+			// (via `validatesDeclaredInput()`, so a multi-trigger `{ http, cron }`
+			// workflow fired by a tick is NOT validated against the tick metadata)
+			// and SKIPS deferred re-entry (the body
 			// was already validated + normalized on the first pass; re-parsing
 			// would double-apply a `.transform()` or 400 a type-changing one after
 			// the client already got 202). Kill switch:
@@ -1093,9 +1096,10 @@ export default abstract class TriggerBase extends Trigger {
 					invokingTriggerValidates: this.validatesDeclaredInput(),
 				})
 			) {
-				const inputSchema = resolveDeclaredInputSchema(cfg.name || ctx.workflow_name);
+				const workflowName = cfg.name || ctx.workflow_name;
+				const inputSchema = resolveDeclaredInputSchema(workflowName);
 				if (inputSchema && ctx.request) {
-					ctx.request.body = parseWorkflowInput(inputSchema, ctx.request.body) as typeof ctx.request.body;
+					ctx.request.body = parseWorkflowInput(inputSchema, ctx.request.body, workflowName) as typeof ctx.request.body;
 				}
 			}
 

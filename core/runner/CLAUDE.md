@@ -398,6 +398,48 @@ Trade-offs vs. in-process:
   serialized as the body once; if the parent re-runs (replay),
   the body comes from the new run's inputs.
 
+## Workflow input gate (ADR 0015 / #678)
+
+A workflow's declared `input` Zod is ENFORCED, not just advertised.
+`TriggerBase.run()` runs the gate **first inside the `try`, before the
+scheduling (debounce → delay) and concurrency gates** — a malformed
+request must not consume a debounce window or a concurrency slot.
+
+```
+run(ctx)
+  → input gate (ADR 0015)        ← here
+  → scheduling gates (debounce → delay)
+  → concurrency gate
+  → runner.run()
+```
+
+- **Schema source**: the live `WorkflowRegistry` entry
+  (`entry.workflow._config.input ?? entry.workflow.input`), NOT
+  `Configuration` — `Configuration.init`'s `JSON.parse(JSON.stringify(...))`
+  clone destroys a Zod object. Unregistered / no `input` → no-op, zero cost.
+- **Success** replaces `ctx.request.body` with the parsed value, so
+  `.default()`s and coercions apply and unknown keys are stripped
+  (`.passthrough()` opts out per workflow).
+- **Failure** throws `WorkflowInputValidationError` — a `GlobalError`
+  subclass (code 400, `WORKFLOW_INPUT_VALIDATION` on `context.name`,
+  structured `validation_errors`), so every transport translation is the
+  existing one: HTTP/webhook 4xx, MCP `isError`, gRPC status, worker
+  `job.fail(err, false)` → DLQ without burning retries, pub/sub
+  dead-letter-then-ACK. `isNonRetryableValidationError` is the classifier.
+- **Scope is the INVOKING trigger**, via `TriggerBase.validatesDeclaredInput()`
+  (default `false`; `true` in http/mcp/grpc/worker/pubsub/webhook). Keying on
+  the workflow's *declared* trigger config would validate a tick/job payload
+  for a multi-trigger workflow. `cron` / `sse` / `websocket` stay out — their
+  body is framework-generated.
+- **Composition**: SKIPPED on deferred re-entry (`_blokDispatchReentry`) —
+  the body was parsed on the first pass, and re-parsing would double-apply a
+  `.transform()` or 400 a type-changing one after the client already got 202.
+  Replay re-dispatches a caller-supplied body, so it parses once, normally.
+  **Sub-workflows and `runWorkflow` are NOT gated** — neither passes through
+  `TriggerBase.run()` (the `dispatch: "http-self"` sub-workflow variant IS, on
+  the child's own http side).
+- **Kill switch**: `BLOK_VALIDATE_WORKFLOW_INPUT=0`.
+
 ## Concurrency keys (Tier 2 #6)
 
 Trigger authors opt in by adding `concurrencyKey` (with an optional

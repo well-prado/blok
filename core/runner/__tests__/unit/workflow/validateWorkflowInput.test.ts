@@ -1,4 +1,4 @@
-import { GlobalError } from "@blokjs/shared";
+import { GlobalError, WORKFLOW_INPUT_VALIDATION, WorkflowInputValidationError } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { parseWorkflowInput, shouldRunInputGate } from "../../../src/workflow/validateWorkflowInput";
@@ -24,15 +24,26 @@ describe("parseWorkflowInput (ADR 0015)", () => {
 		expect(parseWorkflowInput(coercing, { n: "42" })).toEqual({ n: 42 });
 	});
 
-	it("throws a GlobalError(400) with a structured validation_errors body on failure", () => {
+	it("throws a WorkflowInputValidationError(400) naming the workflow, with a structured body", () => {
 		try {
-			parseWorkflowInput(schema, { page: "not-a-number" });
+			parseWorkflowInput(schema, { page: "not-a-number" }, "search_tool");
 			throw new Error("expected parseWorkflowInput to throw");
 		} catch (err) {
+			// The named class is the author-facing `instanceof` surface…
+			expect(err).toBeInstanceOf(WorkflowInputValidationError);
+			// …and it stays a GlobalError so every transport translation is unchanged.
 			expect(err).toBeInstanceOf(GlobalError);
-			const ge = err as GlobalError;
+			const ge = err as WorkflowInputValidationError;
 			expect(ge.context.code).toBe(400);
-			const body = ge.context.json as { validation_errors: Array<{ path: unknown[]; code: string }> };
+			// The tag `isNonRetryableValidationError` matches (worker/pubsub/webhook routing).
+			expect(ge.context.name).toBe(WORKFLOW_INPUT_VALIDATION);
+			expect(ge.info.workflowName).toBe("search_tool");
+			expect(ge.message).toContain("search_tool");
+			const body = ge.context.json as {
+				workflowName: string;
+				validation_errors: Array<{ path: unknown[]; code: string }>;
+			};
+			expect(body.workflowName).toBe("search_tool");
 			const paths = body.validation_errors.map((e) => e.path.join("."));
 			expect(paths).toContain("query"); // missing required
 			expect(paths).toContain("page"); // wrong type

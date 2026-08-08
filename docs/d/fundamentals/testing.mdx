@@ -167,6 +167,29 @@ key like any other external dependency — `{ mock: { "score-model": async () =>
 the arm was skipped. `calls` counts iterations inside a `forEach` (`inputs` and
 `output` hold the last one).
 
+## `input` is not enforced in tests
+
+A workflow's declared `input` Zod is enforced at the **trigger boundary** — a
+real request over http / mcp / grpc / worker / pubsub / webhook gets a 400-class
+rejection, and the body it hands to the workflow is the *parsed* one, with
+`.default()`s applied and unknown keys stripped ([ADR 0015](https://github.com/well-prado/blok/blob/main/specs/blok-vision/adr/0015-workflow-input-enforcement.md)).
+
+`runWorkflow` is not that boundary. It drives the runner directly, so the payload
+you pass runs **verbatim** — no rejection, no defaults, nothing stripped. That is
+deliberate: this harness tests the workflow body, and one that silently rewrote
+your payload would be testing something your assertion never named.
+
+To cover the input contract itself, parse with the schema — it is a plain Zod
+object:
+
+```ts
+// OrderInput is the schema you passed to workflow({ input: OrderInput })
+expect(OrderInput.safeParse({ total: "12" }).success).toBe(false);
+
+// …and parse first when you want the test to see exactly what production sees.
+const run = await runWorkflow(orderFlow, OrderInput.parse({ id: "o-1", total: 12 }));
+```
+
 ## What not to do
 
 <AccordionGroup>
