@@ -37,6 +37,20 @@ const KEEP = process.argv.includes("--keep");
 /** Exports-map targets that are not JavaScript modules and cannot be `import`ed as one. */
 const NOT_A_MODULE = /\.(json|css|txt|md|proto)$/;
 
+/**
+ * A compiled test file in a packed tarball (#697/#716/#719 — `blokctl`,
+ * `@blokjs/api-call`, `@blokjs/if-else`, `@blokjs/trigger-grpc` all shipped
+ * these because their `tsconfig.json` had no `exclude` for test sources, so
+ * `tsc` compiled `test/*.ts` / `__tests__/*.ts` straight into `dist/`, and
+ * `"files": ["dist"]` allowlisted the whole directory into the tarball).
+ * Matches the same shapes across both test-dir conventions this repo uses.
+ */
+const TEST_ARTIFACT = /\.test\.|__tests__|\.spec\./;
+
+interface PackedFile {
+	path: string;
+}
+
 interface PackageJson {
 	name: string;
 	version: string;
@@ -181,17 +195,34 @@ function main(): void {
 
 	step(`npm pack ${PUBLISHABLE.length} publishable packages`);
 	const packed: Array<{ pkg: PackageJson; tarball: string }> = [];
+	const testArtifacts: string[] = [];
 	for (const { dir } of PUBLISHABLE) {
 		const pkgDir = join(ROOT, dir);
 		const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as PackageJson;
-		const r = run("npm", ["pack", "--pack-destination", tarballs, "--silent"], pkgDir);
+		// `--json` rides alongside `--silent` (confirmed: `--silent` only
+		// suppresses the human-readable listing, not `--json`'s stdout) so the
+		// packed file list — the exact contents `npm publish` would ship — comes
+		// for free off the same call instead of a second `npm pack --dry-run`.
+		const r = run("npm", ["pack", "--pack-destination", tarballs, "--json", "--silent"], pkgDir);
 		const tarball = join(tarballs, tarballName(pkg));
 		if (!r.ok || !existsSync(tarball)) {
 			console.error(`npm pack failed for ${pkg.name}:\n${r.out}`);
 			process.exit(1);
 		}
+		const [info] = JSON.parse(r.out) as Array<{ files: PackedFile[] }>;
+		for (const f of info?.files ?? []) {
+			if (TEST_ARTIFACT.test(f.path)) testArtifacts.push(`${pkg.name}: ${f.path}`);
+		}
 		packed.push({ pkg, tarball });
 		console.log(`  ${pkg.name}@${pkg.version}`);
+	}
+	if (testArtifacts.length > 0) {
+		console.error(`\n\x1b[1;31m${testArtifacts.length} packed file(s) look like compiled test artifacts:\x1b[0m`);
+		for (const v of testArtifacts) console.error(`  - ${v}`);
+		console.error(
+			"\nAdd a tsconfig `exclude` for test sources (see core/runner/tsconfig.json) so tsc never compiles them into dist/.",
+		);
+		process.exit(1);
 	}
 
 	step("npm install the tarballs into a throwaway consumer");
