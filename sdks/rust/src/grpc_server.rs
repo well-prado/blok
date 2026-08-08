@@ -171,6 +171,10 @@ impl NodeRuntime for BlokNodeRuntime {
             sdk_name: "blok-rust".to_string(),
             sdk_version: self.sdk_version.clone(),
             proto_version: "1.0.0".to_string(),
+            // ADR 0014 Phase 2 (#677): this SDK does not implement the
+            // claim-check blob store yet (#738 tracks the leg) — advertise
+            // nothing so the runner's capability gate keeps sending inline.
+            capabilities: Vec::new(),
         }))
     }
 }
