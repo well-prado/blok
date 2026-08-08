@@ -1251,6 +1251,13 @@ type EntryFor<T, Body = unknown> = T extends { http: unknown }
  *
  * The existing object-style `workflow({...})` is UNAFFECTED — this is purely an
  * additive overload, re-exported alongside it.
+ *
+ * `opts.middleware` (#712/#725) — the `true` is-middleware marker and the
+ * `string[]` workflow-level CHAIN — is NOT special-cased here: `Opts` is
+ * `Omit<WorkflowOpts<I,O,E>, "name"|"steps">`, the SAME `@blokjs/helper`
+ * interface the object factory widened, so the type is inherited, and the
+ * `...opts` spread below carries either form straight onto the delegated
+ * `objectWorkflow()` call, which already threads it onto `_config`/`toJson()`.
  */
 export async function workflowCallback<
 	I extends z.ZodTypeAny = z.ZodTypeAny,

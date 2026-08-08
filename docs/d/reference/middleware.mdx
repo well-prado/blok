@@ -81,6 +81,30 @@ export default workflow({
 });
 ```
 
+The `@blokjs/helper` object form above still works for migration; new code
+uses the typed-handle callback DSL from `@blokjs/core` instead — `middleware`
+is the same overloaded field:
+
+```typescript triggers/http/src/workflows/auth-check.ts
+import { node, step, workflow } from "@blokjs/core";
+
+export default workflow(
+  "auth-check",
+  {
+    version: "1.0.0",
+    middleware: true, // marks middleware-only; trigger is omitted entirely
+  },
+  () => {
+    step("verify", node("@blokjs/jwt-verify"), {
+      token: "js/ctx.request.headers['authorization']?.slice(7)",
+      secret: "js/process.env.JWT_SECRET",
+      issuer: "https://auth.example.com",
+      audience: "my-api",
+    });
+  },
+);
+```
+
 ### Use it from a trigger
 
 ```json
@@ -131,7 +155,7 @@ trigger-level chain:
 }
 ```
 
-Same in the TypeScript DSL:
+Same in the `@blokjs/helper` object-form TypeScript DSL:
 
 ```typescript
 import { workflow } from "@blokjs/helper";
@@ -149,6 +173,28 @@ export default workflow({
     },
   ],
 });
+```
+
+And in the callback-based typed-handle DSL from `@blokjs/core` (the mandated
+authoring surface for new code) — `opts.middleware` accepts the same `true |
+string[]` overload:
+
+```typescript
+import { node, step, workflow } from "@blokjs/core";
+
+export default workflow(
+  "Protected Endpoint",
+  {
+    version: "1.0.0",
+    middleware: ["tenant-resolve"], // workflow-level chain, not the `true` marker
+    trigger: { http: { method: "GET", path: "/protected" } },
+  },
+  () => {
+    step("respond", node("@blokjs/expr"), {
+      expression: "({ ok: true, tenant: ctx.state.identity.tenant })",
+    });
+  },
+);
 ```
 
 ## Resolution order
