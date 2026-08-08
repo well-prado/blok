@@ -202,9 +202,61 @@
 								"description": "If true, the workflow halts after this step completes."
 							},
 							"idempotencyKey": {
-								"type": "string",
-								"minLength": 1,
-								"description": "When set, the sub-workflow's parent step output is cached against the triple (parentWorkflow, step.id, key). Cache semantics depend on `wait`: with `wait: true` (default), cache HIT means the child workflow is NEVER invoked — including any side effects (use with care for sub-workflows that send emails, charge cards, etc.). With `wait: false`, cache HIT returns the SAME `{runId, workflowName, scheduledAt}` for the lifetime of the cache entry — at-most-once dispatch deduplication. To retry on child failure, use a new key."
+								"anyOf": [
+									{
+										"type": "string",
+										"minLength": 1
+									},
+									{
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"$ref": {
+														"type": "object",
+														"properties": {
+															"step": {
+																"type": "string",
+																"minLength": 1
+															},
+															"path": {
+																"type": "array",
+																"items": {
+																	"type": [
+																		"string",
+																		"number"
+																	]
+																}
+															}
+														},
+														"required": [
+															"step"
+														],
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"$ref"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"$tpl": {
+														"type": "array",
+														"items": {}
+													}
+												},
+												"required": [
+													"$tpl"
+												],
+												"additionalProperties": false
+											}
+										]
+									}
+								],
+								"description": "When set, the sub-workflow's parent step output is cached against the triple (parentWorkflow, step.id, key). Cache semantics depend on `wait`: with `wait: true` (default), cache HIT means the child workflow is NEVER invoked — including any side effects (use with care for sub-workflows that send emails, charge cards, etc.). With `wait: false`, cache HIT returns the SAME `{runId, workflowName, scheduledAt}` for the lifetime of the cache entry — at-most-once dispatch deduplication. To retry on child failure, use a new key. Accepts a structural {\"$ref\": {\"step\", \"path\"}} that lowers to the `js/` wire form at load (#728)."
 							},
 							"idempotencyKeyTTL": {
 								"type": "integer",
@@ -916,9 +968,61 @@
 								"description": "Shorthand for `streamTo: \"sse\"`. `stream: true` forwards runtime PartialResult frames to the SSE client."
 							},
 							"idempotencyKey": {
-								"type": "string",
-								"minLength": 1,
-								"description": "When set, the step's result is cached against the triple (workflowName, step.id, idempotencyKey). On a subsequent run with the same triple, execution is skipped and the cached result populates state through the same persistence rules (ephemeral / spread / as). Accepts a literal string or a `js/ctx....` expression (e.g. js/ctx.request.body.requestId), or a typed handle in the TS DSL."
+								"anyOf": [
+									{
+										"type": "string",
+										"minLength": 1
+									},
+									{
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"$ref": {
+														"type": "object",
+														"properties": {
+															"step": {
+																"type": "string",
+																"minLength": 1
+															},
+															"path": {
+																"type": "array",
+																"items": {
+																	"type": [
+																		"string",
+																		"number"
+																	]
+																}
+															}
+														},
+														"required": [
+															"step"
+														],
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"$ref"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"$tpl": {
+														"type": "array",
+														"items": {}
+													}
+												},
+												"required": [
+													"$tpl"
+												],
+												"additionalProperties": false
+											}
+										]
+									}
+								],
+								"description": "When set, the step's result is cached against the triple (workflowName, step.id, idempotencyKey). On a subsequent run with the same triple, execution is skipped and the cached result populates state through the same persistence rules (ephemeral / spread / as). Accepts a literal string, a `js/ctx....` expression (e.g. js/ctx.request.body.requestId), a structural {\"$ref\": {\"step\", \"path\"}} that lowers to the `js/` wire form at load (#728), or a typed handle in the TS DSL."
 							},
 							"idempotencyKeyTTL": {
 								"type": "integer",

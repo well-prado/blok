@@ -36,8 +36,11 @@
  * 3. **Resolved-key fields** — `idempotencyKey`, `concurrencyKey` and
  *    `debounce.key` are not Mapper-resolved: the runner evaluates a `js/`
  *    string and takes ANY other string as a LITERAL key. An expression-shaped
- *    value there is reported as `unresolvable-key` (#706), because a silent
- *    constant key is invisible at run time and unsafe by default.
+ *    STRING there is reported as `unresolvable-key` (#706), because a silent
+ *    constant key is invisible at run time and unsafe by default. A structural
+ *    `{$ref}` / `{$tpl}` is exempt (#728): `WorkflowNormalizer` lowers it to
+ *    the `js/` wire form at the load boundary, the same treatment `wait.for` /
+ *    `wait.until` already get (#704).
  *
  * ## Graceful degradation (hard requirement)
  *
@@ -584,6 +587,11 @@ interface KeySite {
 	readonly step: string;
 }
 
+/** True for a value that is a structural `{$ref}` / `{$tpl}` object. */
+function isStructuralHandle(value: unknown): boolean {
+	return isPlainObject(value) && (isStructuralRef(value) || isStructuralTpl(value));
+}
+
 /**
  * Collect every step `idempotencyKey` and `wait.for` / `wait.until`, including
  * inside nested pipelines.
@@ -602,7 +610,11 @@ function collectKeySites(steps: readonly unknown[], docPath: string, out: KeySit
 		if (!isPlainObject(raw)) return;
 		const stepPath = `${docPath}[${index}]`;
 		const stepId = asString(raw.id) ?? `<step ${index}>`;
-		if (raw.idempotencyKey !== undefined) {
+		// A structural `{$ref}`/`{$tpl}` IS resolvable here (#728) —
+		// `WorkflowNormalizer`'s `pickResolvedKey` lowers it to the `js/` wire
+		// string at the load boundary — so exempt it from the shape rule below,
+		// the same way `wait.for`/`wait.until` already are.
+		if (raw.idempotencyKey !== undefined && !isStructuralHandle(raw.idempotencyKey)) {
 			out.push({
 				field: "idempotencyKey",
 				value: raw.idempotencyKey,
@@ -616,7 +628,7 @@ function collectKeySites(steps: readonly unknown[], docPath: string, out: KeySit
 				// A structural `{$ref}`/`{$tpl}` IS resolvable here (#704) — it is
 				// lowered by `normalizeWaitStep` — so exempt it from the shape rule
 				// that (correctly) refuses it in the key positions.
-				if (value === undefined || (isPlainObject(value) && (isStructuralRef(value) || isStructuralTpl(value)))) {
+				if (value === undefined || isStructuralHandle(value)) {
 					continue;
 				}
 				out.push({ field: `wait.${field}`, value, docPath: `${stepPath}.wait.${field}`, step: stepId });
@@ -631,7 +643,9 @@ function collectTriggerKeySites(trigger: unknown, out: KeySite[]): void {
 	if (!isPlainObject(trigger)) return;
 	for (const [kind, cfg] of Object.entries(trigger)) {
 		if (!isPlainObject(cfg)) continue;
-		if (cfg.concurrencyKey !== undefined) {
+		// Structural refs lower via `WorkflowNormalizer.lowerTriggerKeys` (#728) —
+		// same exemption as step `idempotencyKey` above.
+		if (cfg.concurrencyKey !== undefined && !isStructuralHandle(cfg.concurrencyKey)) {
 			out.push({
 				field: "concurrencyKey",
 				value: cfg.concurrencyKey,
@@ -640,7 +654,7 @@ function collectTriggerKeySites(trigger: unknown, out: KeySite[]): void {
 			});
 		}
 		const debounce = cfg.debounce;
-		if (isPlainObject(debounce) && debounce.key !== undefined) {
+		if (isPlainObject(debounce) && debounce.key !== undefined && !isStructuralHandle(debounce.key)) {
 			out.push({
 				field: "debounce.key",
 				value: debounce.key,
