@@ -1037,16 +1037,22 @@ export interface SubworkflowOptions extends StepOptions {
  * `js/ctx…` expression the runner resolves against the live ctx at dispatch time —
  * pair it with `allowList` whenever it depends on caller-supplied data.
  *
+ * The child is looked up BY NAME at dispatch time (possibly a polymorphic
+ * expression), so there is no node schema to infer the response shape from —
+ * same situation as {@link runtimeNode}. Pass an explicit type parameter for a
+ * typed read; with none, `T` defaults to `unknown` (#718), matching
+ * `runtimeNode<In, Out>`'s "no schema → `unknown`, never `any`" convention.
+ *
  * @example
- *   const receipt = subworkflow("receipt", "send-receipt-email", { user: order.user }, { wait: true });
+ *   const receipt = subworkflow<{ data: string }>("receipt", "send-receipt-email", { user: order.user });
  *   subworkflow("dispatch", event.body.kind, { event: event.body }, { allowList: ["handler.a", "handler.b"] });
  */
-export function subworkflow(
+export function subworkflow<T = unknown>(
 	id: string,
 	name: string | Handle<unknown>,
 	inputs?: Record<string, unknown>,
 	opts?: SubworkflowOptions,
-): Handle<unknown> {
+): Handle<T> {
 	if (typeof id !== "string" || id.length === 0) {
 		throw new Error("subworkflow() requires a non-empty string id.");
 	}
@@ -1089,7 +1095,7 @@ export function subworkflow(
 	const ephemeral = opts?.ephemeral === true;
 	const spread = opts?.spread === true;
 	const root = typeof opts?.as === "string" ? opts.as : id;
-	return buildHandle(root, builder, [], ephemeral, spread) as Handle<unknown>;
+	return buildHandle(root, builder, [], ephemeral, spread) as Handle<T>;
 }
 
 /**
