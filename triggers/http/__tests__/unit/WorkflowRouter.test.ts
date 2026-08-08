@@ -317,6 +317,88 @@ describe("buildRouteTable", () => {
 	});
 
 	// =========================================================================
+	// #733 — identity dedup fails across DIFFERENT module instances of the
+	// SAME workflow (the concrete case: a BUILT Node run, where `Workflows.ts`
+	// compiles to `dist/` and imports the COMPILED module while the TS scanner
+	// dynamic-imports the SOURCE `.ts` file — two objects, one workflow). A
+	// name+route fallback dedupes this exactly like the identity path.
+	// =========================================================================
+
+	describe("scan + manual dedup across different module instances (#733)", () => {
+		it("dedupes to exactly one route when scanned and manual are DIFFERENT objects with the SAME declared name at the SAME route", () => {
+			// Two SEPARATE object literals — mirrors the dist-vs-src double load:
+			// `Workflows.ts` (compiled) and the TS scanner (source) each produce
+			// their OWN module instance of "the same" workflow.
+			const distInstance = {
+				name: "countries.dsl",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/countries-dsl" } },
+			};
+			const srcInstance = {
+				name: "countries.dsl",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/countries-dsl" } },
+			};
+			expect(distInstance).not.toBe(srcInstance); // pin the premise: identity really differs
+
+			const collisions: RouteCollision[] = [];
+			const warnings: string[] = [];
+			const out = buildRouteTable(
+				[
+					{
+						source: "/src/workflows/http/countries-handle-dsl.ts",
+						kind: "ts",
+						defaultPath: "/countries-dsl",
+						workflow: srcInstance,
+						name: srcInstance.name,
+					},
+				],
+				[
+					{
+						key: "countries-dsl",
+						workflow: distInstance,
+						sourcePath: "/dist/workflows/http/countries-handle-dsl.js",
+					},
+				],
+				{ onCollision: (c) => collisions.push(c), onWarning: (m) => warnings.push(m) },
+			);
+
+			expect(out).toHaveLength(1);
+			expect(out[0].workflowKey).toBe("countries-dsl");
+			expect(out[0].workflow).toBe(distInstance); // manual wins the slot, same as identity dedup
+			expect(collisions).toEqual([]);
+			// Debug-level note, not silence — this path is rarer/more surprising
+			// than the identity fast path, worth a breadcrumb for whoever reads
+			// the boot log.
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("countries.dsl");
+			expect(warnings[0]).toContain("different module instances");
+		});
+
+		it("does NOT dedupe two different objects at the same route when only ONE side declares a name", () => {
+			const named = { name: "A", version: "1.0.0", trigger: { http: { method: "GET", path: "/dup" } } };
+			const anonymous = { version: "1.0.0", trigger: { http: { method: "GET", path: "/dup" } } };
+			expect(() =>
+				buildRouteTable(
+					[{ source: "/scanned.ts", kind: "ts", defaultPath: "/dup", workflow: named, name: "A" }],
+					[{ key: "dup", workflow: anonymous }],
+				),
+			).toThrow(RouteCollisionError);
+		});
+
+		it("does NOT dedupe two different objects at the same route with DIFFERENT declared names — a real mistake still collides", () => {
+			const a = { name: "A", version: "1.0.0", trigger: { http: { method: "GET", path: "/dup" } } };
+			const b = { name: "B", version: "1.0.0", trigger: { http: { method: "GET", path: "/dup" } } };
+			expect(() =>
+				buildRouteTable(
+					[{ source: "/scanned.ts", kind: "ts", defaultPath: "/dup", workflow: a, name: "A" }],
+					[{ key: "dup", workflow: b }],
+				),
+			).toThrow(RouteCollisionError);
+		});
+	});
+
+	// =========================================================================
 	// v0.4+ explicit-path-only routing
 	// =========================================================================
 
