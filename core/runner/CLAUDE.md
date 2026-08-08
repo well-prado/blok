@@ -754,56 +754,78 @@ persisted rows survive for next-boot recovery) →
 errors caught + logged. Idempotent + opt-out via
 `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
 
-## On `wait.for("3 days")` and similar long-pause patterns
+## `wait.for(duration)` / `wait.until(date)` — durable mid-run pause (PR 4, dynamic since #704)
 
-Blok does NOT yet ship a built-in `wait.for(duration)` step
-primitive (Trigger.dev v3+ has one). The original ROADMAP framed
-this as "needs CRIU or full state-machine rewrite — out of scope".
-That framing was accurate when written but is no longer true after
-the Tier 2 follow-ups. The composable building blocks now exist:
-
-- **Durable scheduler** — `scheduled_dispatches` (migration v9) +
-  `DeferredRunScheduler.schedule(..., persist={...})` persists a
-  dispatch to sqlite BEFORE the timer fires. `recoverDispatches()`
-  re-registers timers on boot.
-- **Re-entry pattern** — `dispatchDeferred(ctx, traceRunId, expiresAt)`
-  flips `_blokDispatchReentry = true` and re-enters `run(ctx)` with
-  the same `traceRunId`. The re-entered run skips scheduling gates
-  and reuses the existing run record.
-- **Per-step checkpoint** — `idempotencyKey` per step caches the
-  result against `(workflowName, stepId, key)`. On hit, the cached
-  result replays through `applyStepOutput` and `step.process()` is
-  never called. This is the de-facto checkpoint mechanism — re-runs
-  from step 0 short-circuit completed steps.
-- **Step-output persistence** — every NodeRun's inputs+outputs are
-  persisted in `node_runs`.
-- **Cooperative cancellation** — `ctx.signal` flows through to nodes
-  that opt in.
-
-What's missing is just the **step shape**: a `wait: { for, until }`
-field that, on first invocation, schedules + throws
-`DeferredDispatchSignal`; on re-entry, recognizes "I've already
-waited" (via a sentinel idempotency cache hit OR a `lastCompletedStep`
-field on the run) and continues to the next step.
-
-Effort estimate: ~2-3 days. Matches the Tier 2 #4 (sub-workflow)
-plan structure. Tracked in [BACKLOG.md](../../BACKLOG.md).
-
-Until that ships, compose the same effect with sub-workflows:
+Blok ships a built-in `wait` step primitive — this used NOT to be
+true (the original ROADMAP framed a durable pause as "needs CRIU or
+full state-machine rewrite — out of scope") but the composable
+building blocks (durable scheduler, re-entry, per-step checkpoint,
+cooperative cancellation) landed in the Tier 2 follow-ups and PR 4
+built the `wait: { for, until }` step shape on top of them. Author
+surface:
 
 ```ts
-// Workflow A — pre-wait
-{ id: "queue-continuation", subworkflow: "post-wait-half",
-  inputs: { state: "js/ctx.state" }, wait: false }
-
-// Workflow B — has delay on its trigger
-{ name: "post-wait-half",
-  trigger: { http: { method: "POST", path: "/internal/...", delay: "3d" } },
-  steps: [ /* the post-wait steps */ ] }
+{ id: "wait-3d", wait: { for: "3d" } }
+{ id: "wait-deadline", wait: { until: "2026-12-31T00:00:00Z" } }
 ```
 
-Author has to manually split the workflow at the wait boundary.
-Less ergonomic than `wait.for()` but durable + crash-safe today.
+Both `for` and `until` take a LITERAL parsed at workflow **load**
+time (duration string / ms number for `for`; ISO string / ms-since-
+epoch for `until`) **or**, since #704, a value RESOLVED against the
+live ctx at the moment the wait step executes: a structural
+`{"$ref": {"step", "path"}}` (lowered to the `js/` wire form at load
+by `normalizeWaitStep`) or a `js/…` expression. That is what makes a
+*computed* delay expressible — exponential backoff, an honored
+`Retry-After` header, a per-tenant pause — not just a fixed literal.
+An expression-SHAPED value that is neither of those (`$.…`, bare
+`ctx.…`, `${…}`) is refused at load time instead of being kept as a
+duration that could never parse.
+
+**Mechanics** (`RunnerSteps.ts`'s `stepType === "wait"` branch,
+`WaitNode.ts`, `WaitDispatchRequest.ts`):
+
+- **First pass** — the runner resolves the deadline (literal or the
+  `js/…` expression evaluated now against the live ctx), snapshots
+  `ctx.state` (best-effort, capped at `BLOK_STATE_SNAPSHOT_MAX_BYTES`,
+  default 1 MB — needed so cross-process resume has state to rehydrate
+  even though the in-process fast path doesn't), persists the resume
+  cursor + a `scheduled_dispatches` row (migration v9) via
+  `DeferredRunScheduler`, marks the run `delayed`, and throws
+  `WaitDispatchRequest`. `TriggerBase` translates that into the same
+  202-Accepted contract as a trigger-level `delay`.
+- **Durable scheduler** — the persisted row survives process restart;
+  `recoverDispatches()` re-registers timers on boot (or fires
+  immediately if the deadline already passed while the process was
+  down).
+- **Re-entry** — when the timer fires, `dispatchDeferred` flips
+  `_blokDispatchReentry = true` and re-enters `run(ctx)` with the same
+  `traceRunId`. `RunnerSteps` skips every step up to
+  `lastCompletedStepIndex` and resumes at the wait step, which is now
+  detected as already-satisfied and advances immediately — no second
+  timer, no re-dispatch.
+- **Nested waits** (v0.6 Phase 2-4) — a wait inside a `forEach` /
+  `switch` / other primitive's sub-pipeline resumes correctly too: each
+  frame of the primitive stack persists its own cursor
+  (`iteration_context`) instead of the wait overwriting the workflow's
+  top-level `lastCompletedStepIndex`.
+- **Output** — a satisfied wait writes `{ __waited__: true, deadline }`
+  to its state slot (unless `ephemeral: true`); `as` / `stop` /
+  `active` behave like any other step.
+
+**Cannot combine** `wait` with `idempotencyKey` (the wait itself IS
+the checkpoint), `retry` (waits don't fail in a retryable way),
+`maxDuration`, `concurrencyKey`, or `spread` — `V2WaitStepSchema`
+rejects all five with a feature-specific message rather than the
+generic "unrecognized key".
+
+This composes with, rather than duplicates, everything else in this
+file: the durable scheduler, re-entry pattern, and per-step
+`idempotencyKey` checkpoint described above ARE the mechanism `wait`
+is built on.
+
+**Not yet shipped**: no UI/API to list or cancel a pending wait
+independent of cancelling the whole run — `POST
+/__blok/runs/:runId/cancel` cancels everything, wait included.
 
 ## Input resolution (Mapper)
 

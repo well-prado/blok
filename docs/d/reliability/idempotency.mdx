@@ -74,17 +74,19 @@ call and caches the response. The second request short-circuits the
 
 <ParamField path="idempotencyKey" type="string | handle">
   Cache key — a handle (`req.body.requestId`), a `js/ctx....` expression
-  in JSON, or a **deliberate** literal string. The runner caches the
-  step's result against the triple `(workflowName, step.id,
-  resolvedKey)`. On a subsequent run with the same triple, execution is
-  skipped and the cached result populates state through the same
-  persistence rules (`ephemeral`, `spread`, `as`).
+  in JSON, a structural `{"$ref": {"step", "path"}}` (lowered to the
+  `js/` wire form at load, same as the wait-step delay fields), or a
+  **deliberate** literal string. The runner caches the step's result
+  against the triple `(workflowName, step.id, resolvedKey)`. On a
+  subsequent run with the same triple, execution is skipped and the
+  cached result populates state through the same persistence rules
+  (`ephemeral`, `spread`, `as`).
 
   Anything else that *looks* like an expression — a leading `$.`, a bare
-  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
-  — now fails the step with `UnresolvableKeyExpressionError` instead of
-  being taken as a literal. A literal key is a CONSTANT: every caller
-  would share one cache entry for the full TTL.
+  `ctx.`, a `${…}` interpolation, or `{{…}}` — fails the step with
+  `UnresolvableKeyExpressionError` instead of being taken as a literal.
+  A literal key is a CONSTANT: every caller would share one cache entry
+  for the full TTL.
 </ParamField>
 
 <ParamField path="idempotencyKeyTTL" type="number" default="86400000">

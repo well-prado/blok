@@ -58,7 +58,7 @@ export default workflow("enqueue", { version: "1.0.0", trigger: http.post("/jobs
 | `concurrency` | `number` | `1` | Max concurrent jobs **per worker process**. |
 | `retries` | `number` | `3` | Per-job retry budget. After exhaustion the job moves to the broker's DLQ. |
 | `timeout` | `number` (ms) | — | Hard timeout per job attempt. |
-| `concurrencyKey` | `string` — literal, or `js/ctx....` resolved at run-entry | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so it's a path string, not a handle. Per-key in-flight cap **across all worker processes**. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `concurrencyKey` | `string` — literal, `js/ctx....`, or a structural `{"$ref"}` | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so in TypeScript it's a path string, not a handle (JSON also accepts a structural `{"$ref"}`, lowered at load). Per-key in-flight cap **across all worker processes**. See [concurrency keys](/d/reliability/concurrency-keys). |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 | `onLimit` | `"throw"` \| `"queue"` | `"throw"` | What happens when the limit is hit. `"throw"` NACKs with retry; `"queue"` defers. |
 | `delay` | `string` \| `number` | — | Defer the dispatch (job sits in the queue until). |

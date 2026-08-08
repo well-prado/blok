@@ -41,7 +41,7 @@ The `http.*` helper sets `method` + `path`; the rest go in its options object �
 | `accept` | `string` | `"application/json"` | Response content-type. Use `"text/html"` for UI nodes. |
 | `headers` | `Record<string, string>` | — | Required headers validated at trigger entry. A request missing any declared header is rejected before any step runs. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware chain. Resolved by name from the middleware registry. |
-| `concurrencyKey` | `string` — literal, or `js/ctx....` resolved at run-entry | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so it's a path string, not a handle. Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `concurrencyKey` | `string` — literal, `js/ctx....`, or a structural `{"$ref"}` | — | Trigger config resolved against the live `ctx` at run-entry, not a step input — so in TypeScript it's a path string, not a handle (JSON also accepts a structural `{"$ref"}`, lowered at load). Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 | `onLimit` | `"throw"` \| `"queue"` | `"throw"` | What happens when the limit is hit. |
 | `delay` | `string` \| `number` | — | Defer the run. See [delay & TTL](/d/scheduling/delay-and-ttl). |

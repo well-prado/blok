@@ -41,6 +41,35 @@ packages on npm version independently within each release line.
   Two silent-disable holes closed along the way: `readConcurrencyConfig` and
   `readSchedulingConfig` coerced a non-string key (an unlowered `{$ref}`) to `""`,
   which turned the concurrency gate and debounce off entirely with no signal.
+
+### Added
+
+- **`{"$ref"}` / `{"$tpl"}` in the three RESOLVED-KEY positions — step
+  `idempotencyKey`, trigger `concurrencyKey`, trigger `debounce.key` — is now
+  a first-class authoring form, not just a runtime backstop** (#728).
+  Earlier work taught `WorkflowNormalizer` to LOWER a structural ref in these
+  three positions to the `js/…` wire string at load, but the static layer
+  hadn't caught up: `V2RegularStepSchema.idempotencyKey` (and the
+  sub-workflow / trigger equivalents) were `z.string().min(1)` — Zod rejected
+  the object outright — and `validateRefs.collectKeySites` walked the raw
+  doc and reported a structural ref as `unresolvable-key` even though it
+  lowers cleanly. Both now accept it: the Zod schemas widen to `string |
+  {$ref}/{$tpl}` (`core/workflow-helper/src/types/{StepOpts,TriggerOpts}.ts`,
+  regenerating `schemas/workflow.v2.json` per the #304 anti-drift gate), and
+  `collectKeySites` / `collectTriggerKeySites` exempt a structural value from
+  the shape check — the same treatment `wait.for` / `wait.until` already got
+  in #704. The expression-shaped-but-unresolvable string class from #706
+  (`$.…`, bare `ctx.…`, `${…}`, `{{…}}`) is still rejected —
+  `unresolvableKeyShape` itself is unchanged, only its caller now skips a
+  value it already knows will lower.
+
+  **Severity note, for context**: before the lowering pass existed, a
+  structural `idempotencyKey` wasn't just unlowered — `WorkflowNormalizer`
+  type-checked the field BEFORE lowering it, so a `{$ref}` failed
+  `typeof === "string"` and was SILENTLY DROPPED (`WorkflowNormalizer.ts:421`
+  at the time), disabling the idempotency cache for that step with no error
+  and no warning.
+
 ### Changed
 
 - **Packaging gate now covers every publishable-looking package; `blokctl`'s

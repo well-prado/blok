@@ -106,18 +106,19 @@ trigger payload and `@error` for a caught error, and
 `{"$tpl": ["text", {"$ref": …}]}` for a string that embeds one. Hand-written
 `"js/ctx...."` inputs still load but warn once per workflow at boot
 (`BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` silences); `blokctl migrate refs`
-rewrites them. Control/trigger-config positions keep path strings:
-`branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
-`forEach.in`, `subworkflow`, step `idempotencyKey`, trigger `concurrencyKey` /
-`debounce.key`. A structural `{"$ref"}` / `{"$tpl"}` written in a CONTROL
+rewrites them. Control positions keep path strings: `branch.when` /
+`loop.while` (raw `ctx.*`, no prefix), `switch.on`, `forEach.in`,
+`subworkflow`. A structural `{"$ref"}` / `{"$tpl"}` written in a CONTROL
 position (`switch.on`, `forEach.in`, a `switch` case `when`) now fails at load
 naming the step and the path, instead of reaching the node as a raw object
-(#707). The three key positions (`idempotencyKey`, `concurrencyKey`,
-`debounce.key`) take a `js/` expression or a DELIBERATE literal — an
-expression-shaped value that is not `js/`-prefixed now throws instead of
-becoming a constant key (#706). `wait.for` / `wait.until` take a literal
-duration/timestamp (parsed at LOAD time) OR a structural `{$ref}` / `js/`
-expression resolved against the live ctx when the wait step runs, so a
+(#707). The three RESOLVED-KEY positions — step `idempotencyKey`, trigger
+`concurrencyKey`, trigger `debounce.key` — take a `js/` expression, a
+DELIBERATE literal, OR a structural `{$ref}` / `{$tpl}` that lowers to the
+`js/` wire form at load, same as `wait` below (#728); an expression-shaped
+value that is neither (`$.…`, bare `ctx.…`, `${…}`, `{{…}}`) still throws
+instead of becoming a constant key (#706). `wait.for` / `wait.until` take a
+literal duration/timestamp (parsed at LOAD time) OR a structural `{$ref}` /
+`js/` expression resolved against the live ctx when the wait step runs, so a
 computed delay is expressible (#704); an expression-shaped value that is
 neither is refused at load time.
 

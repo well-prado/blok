@@ -91,23 +91,24 @@ Content-Type: application/json
 ## Field reference
 
 The three fields are defined as a reusable mixin in
-[core/workflow-helper/src/types/TriggerOpts.ts:19-50](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L19-L50)
+[core/workflow-helper/src/types/TriggerOpts.ts:61-87](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L61-L87)
 and spread into both `HttpTriggerOptsSchema` and
 `WorkerTriggerOptsSchema`.
 
 <ParamField path="concurrencyKey" type="string">
   Per-key concurrency gate. A `js/ctx....` expression (e.g. `"js/ctx.request.body.tenantId"`)
-  the runner resolves against the live `ctx` at run-entry, or a
-  **deliberate** literal string. When set, runs sharing the resolved key
-  contend for at most `concurrencyLimit` concurrent slots. When unset, no
-  gating applies — zero overhead.
+  the runner resolves against the live `ctx` at run-entry, a structural
+  `{"$ref": {"step", "path"}}` (lowered to the `js/` wire form at load),
+  or a **deliberate** literal string. When set, runs sharing the
+  resolved key contend for at most `concurrencyLimit` concurrent slots.
+  When unset, no gating applies — zero overhead.
 
   Anything else that *looks* like an expression — a leading `$.`, a bare
-  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
-  — fails the run with `UnresolvableKeyExpressionError` instead of being
-  taken as a literal. A literal key here is a CONSTANT: every tenant
-  would collapse into one bucket, turning a per-tenant limit of N into a
-  global limit of N. `blokctl check` catches it statically.
+  `ctx.`, a `${…}` interpolation, or `{{…}}` — fails the run with
+  `UnresolvableKeyExpressionError` instead of being taken as a literal.
+  A literal key here is a CONSTANT: every tenant would collapse into one
+  bucket, turning a per-tenant limit of N into a global limit of N.
+  `blokctl check` catches it statically.
 </ParamField>
 
 <ParamField path="concurrencyLimit" type="integer (1-10000)" default="1">

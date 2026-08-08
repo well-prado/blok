@@ -1,3 +1,5 @@
+import { validateRefs } from "@blokjs/helper";
+import { HttpTriggerOptsSchema, V2RegularStepSchema } from "@blokjs/helper/internal";
 import { describe, expect, it } from "vitest";
 import { normalizeWorkflow } from "../../../src/workflow/WorkflowNormalizer";
 
@@ -170,6 +172,51 @@ describe("#707 — the three resolved-key positions lower", () => {
 		});
 		expect((out.trigger.http as { concurrencyKey: unknown }).concurrencyKey).toBe("global");
 		expect(out.steps[0].idempotencyKey).toBe("js/ctx.request.body.id");
+	});
+});
+
+/**
+ * #728 — a structural `{$ref}` in a resolved-key position is a first-class
+ * authoring form end to end, not just a runtime backstop: the Zod schema
+ * admits it, `validateRefs` (`blokctl check`) stays quiet on it, AND the
+ * normalizer lowers it (already proven above, #707). One document, three
+ * layers, so a future change to any single layer that reintroduces the
+ * pre-#728 rejection fails here.
+ */
+describe("#728 — round trip: schema admits, validateRefs is quiet, normalizer lowers", () => {
+	const step = {
+		id: "charge",
+		use: "@blokjs/api-call",
+		inputs: {},
+		idempotencyKey: { $ref: { step: "@trigger", path: ["body", "requestId"] } },
+	};
+	const httpTrigger = {
+		method: "POST" as const,
+		path: "/orders",
+		concurrencyKey: { $ref: { step: "@trigger", path: ["body", "tenant"] } },
+		debounce: { key: { $ref: { step: "@trigger", path: ["params", "docId"] } }, delay: "500ms" },
+	};
+	const doc = { name: "Round Trip", version: "1.0.0", trigger: { http: httpTrigger }, steps: [step] };
+
+	it("the step schema admits a structural idempotencyKey", () => {
+		expect(() => V2RegularStepSchema.parse(step)).not.toThrow();
+	});
+
+	it("the HTTP trigger schema admits a structural concurrencyKey and debounce.key", () => {
+		expect(() => HttpTriggerOptsSchema.parse(httpTrigger)).not.toThrow();
+	});
+
+	it("validateRefs reports no unresolvable-key diagnostic on the raw doc", () => {
+		const result = validateRefs(doc);
+		expect(result.diagnostics.filter((d) => d.code === "unresolvable-key")).toEqual([]);
+	});
+
+	it("normalizeWorkflow lowers all three positions to the `js/` wire form", () => {
+		const out = normalizeWorkflow(doc);
+		expect(out.steps[0].idempotencyKey).toBe("js/ctx.request.body.requestId");
+		const http = out.trigger.http as { concurrencyKey: unknown; debounce: Record<string, unknown> };
+		expect(http.concurrencyKey).toBe("js/ctx.request.body.tenant");
+		expect(http.debounce.key).toBe("js/ctx.request.params.docId");
 	});
 });
 

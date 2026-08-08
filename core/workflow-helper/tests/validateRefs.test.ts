@@ -635,17 +635,32 @@ describe("validateRefs — resolved-key fields (#706)", () => {
 		expect(errors(result).map((d) => d.path)).toEqual(["trigger.http.debounce.key"]);
 	});
 
-	it("flags `${…}` and `{{…}}` forms, and an unlowered {$ref} object", () => {
+	it("flags `${…}` and `{{…}}` forms", () => {
 		expect(codes(validateRefs(flow({ idem: "order-${ctx.request.body.id}" }), { nodes: lookup({}) }))).toContain(
 			"unresolvable-key",
 		);
 		expect(codes(validateRefs(flow({ idem: "{{requestId}}" }), { nodes: lookup({}) }))).toContain("unresolvable-key");
-		// `lowerRefs` runs over step `inputs` only — a structural ref here never
-		// becomes a `js/` string, so it reaches the runner raw.
-		const structural = validateRefs(flow({ idem: { $ref: { step: "@trigger", path: ["body", "requestId"] } } }), {
-			nodes: lookup({}),
-		});
-		expect(codes(structural)).toContain("unresolvable-key");
+	});
+
+	// #728 — a structural `{$ref}` in a resolved-key position is now a
+	// first-class authoring form: `WorkflowNormalizer.pickResolvedKey` /
+	// `lowerTriggerKeys` lower it to the `js/` wire string at the load
+	// boundary, so it is exempt from the unresolvable-key shape rule here —
+	// same treatment `wait.for` / `wait.until` already got in #704. Before
+	// #726/#728 this wasn't just unlowered — for step `idempotencyKey` the
+	// old normalizer type-checked BEFORE lowering, so the ref failed
+	// `typeof === "string"` and was silently DROPPED (cache disabled, no
+	// signal at all).
+	it("stays silent on a structural {$ref} in all three resolved-key positions", () => {
+		const ref = { $ref: { step: "@trigger", path: ["body", "requestId"] } };
+		expect(codes(validateRefs(flow({ idem: ref }), { nodes: lookup({}) }))).not.toContain("unresolvable-key");
+		expect(codes(validateRefs(flow({ conc: ref }), { nodes: lookup({}) }))).not.toContain("unresolvable-key");
+		expect(codes(validateRefs(flow({ debounceKey: ref }), { nodes: lookup({}) }))).not.toContain("unresolvable-key");
+	});
+
+	it("stays silent on a structural {$tpl} idempotencyKey", () => {
+		const tpl = { $tpl: ["order-", { $ref: { step: "@trigger", path: ["body", "requestId"] } }] };
+		expect(codes(validateRefs(flow({ idem: tpl }), { nodes: lookup({}) }))).not.toContain("unresolvable-key");
 	});
 
 	it("finds the field inside a nested control-flow arm", () => {

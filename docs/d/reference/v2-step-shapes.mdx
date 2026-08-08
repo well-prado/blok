@@ -89,10 +89,11 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
 ### Reliability (Tier 1)
 
 <ParamField path="idempotencyKey" type="string">
-  Cache key — a literal string or a `js/ctx....` expression. This
-  field is reliability config, not a step input, so it's a raw ctx
-  path string rather than a `$ref` handle — the runner resolves it
-  against the live `ctx` directly, outside the mapper. See
+  Cache key — a literal string, a `js/ctx....` expression, or a
+  structural `{"$ref": {"step", "path"}}`. This field is reliability
+  config, not a step input, so the runner resolves the (lowered) `js/…`
+  form against the live `ctx` directly, outside the mapper — not
+  through the same interpolation path as `inputs`. See
   [idempotent step caching](/d/reliability/idempotency).
 </ParamField>
 
@@ -222,8 +223,9 @@ Authoritative source: `V2SubworkflowStepSchema`. See
 </ParamField>
 
 <ParamField path="idempotencyKey" type="string">
-  Caches the **whole** sub-workflow's result — same raw ctx-path
-  string as the regular step field above, not a step input. Read the
+  Caches the **whole** sub-workflow's result — same key forms (literal,
+  `js/ctx....`, or structural `{"$ref"}`) as the regular step field
+  above, not a step input. Read the
   [composition warning](/d/composition/sub-workflows#composing-with-idempotency-caching)
   before using on side-effect-bearing children.
 </ParamField>

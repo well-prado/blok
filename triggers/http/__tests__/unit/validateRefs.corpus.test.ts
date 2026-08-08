@@ -25,6 +25,13 @@ const CORPUS_DIRS = [
 	"workflows/json",
 	"examples/workflows",
 	"examples/v05-primitives",
+	// #728 — these three were already in the boot-time load gate
+	// (`core/runner/__tests__/unit/workflow/corpusLoad.test.ts`, which scans
+	// the whole `examples` tree) but missing here, so a JSON workflow shipped
+	// under them would load fine yet never get the $ref-validity check.
+	"examples/runtimes",
+	"examples/templates",
+	"examples/ts-workflows",
 	"triggers/http/workflows",
 	"triggers/grpc/workflows",
 ];

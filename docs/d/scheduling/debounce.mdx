@@ -73,21 +73,22 @@ elapsed since the first ping (whichever comes first).
 
 ## Field reference
 
-Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L128-L163).
+Defined in [core/workflow-helper/src/types/TriggerOpts.ts:232-265](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L232-L265).
 
 <ParamField path="key" type="string" required>
   Debounce key — a `js/ctx....` expression the runner resolves against
-  the live `ctx`, or a **deliberate** literal string. Pings sharing the
-  resolved key collapse. Typically derived from the request payload
-  (`key: "js/ctx.request.params.docId"`, `key: "js/ctx.request.body.userId"`). It's a config string,
-  not a handle — the debounce gate runs at run-entry, before the
-  workflow body.
+  the live `ctx`, a structural `{"$ref": {"step", "path"}}` (lowered to
+  the `js/` wire form at load), or a **deliberate** literal string.
+  Pings sharing the resolved key collapse. Typically derived from the
+  request payload (`key: "js/ctx.request.params.docId"`, `key: "js/ctx.request.body.userId"`).
+  It's a config string, not a handle — the debounce gate runs at
+  run-entry, before the workflow body.
 
   Anything else that *looks* like an expression — a leading `$.`, a bare
-  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
-  — fails the run with `UnresolvableKeyExpressionError` instead of being
-  taken as a literal (which would coalesce every document into one
-  window). `blokctl check` catches it statically.
+  `ctx.`, a `${…}` interpolation, or `{{…}}` — fails the run with
+  `UnresolvableKeyExpressionError` instead of being taken as a literal
+  (which would coalesce every document into one window). `blokctl check`
+  catches it statically.
 </ParamField>
 
 <ParamField path="mode" type='"leading" | "trailing"' default='"trailing"'>

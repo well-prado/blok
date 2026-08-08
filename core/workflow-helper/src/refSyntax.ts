@@ -173,11 +173,14 @@ export function parseCtxExpression(value: string): ParsedRef[] {
  * rule rather than by the Mapper (#706): step `idempotencyKey`, trigger
  * `concurrencyKey`, trigger `debounce.key`.
  *
- * Unlike step `inputs`, these positions are not lowered and not mapped — the
- * runner evaluates a `js/` string and takes ANY other string as a LITERAL key.
- * That default is backwards for a correctness-sensitive field: a mistyped
- * expression silently becomes one constant cache/limit bucket shared by every
- * caller. {@link unresolvableKeyShape} names the forms that must be refused.
+ * Unlike step `inputs`, these positions are not Mapper-resolved — the runner
+ * evaluates a `js/` string directly and takes ANY other string as a LITERAL
+ * key. That default is backwards for a correctness-sensitive field: a
+ * mistyped expression silently becomes one constant cache/limit bucket shared
+ * by every caller. {@link unresolvableKeyShape} names the forms that must be
+ * refused. A structural `{$ref}` / `{$tpl}` IS lowered here, same as step
+ * `inputs` — `WorkflowNormalizer` compiles it to the `js/` wire form at the
+ * load boundary (#728) before the runner's `js/`-or-literal rule ever runs.
  */
 export const RESOLVED_KEY_FIELDS = ["idempotencyKey", "concurrencyKey", "debounce.key"] as const;
 
@@ -200,10 +203,17 @@ export const RESOLVED_KEY_FIELDS = ["idempotencyKey", "concurrencyKey", "debounc
  * `validateRefs` uses it for the static `blokctl check` diagnostic, so the two
  * can never disagree about what a legal key is.
  *
- * `wait.for` / `wait.until` reuse this classification (#704) with one
- * exemption applied by the caller: `normalizeWaitStep` DOES lower a structural
- * `{$ref}` / `{$tpl}` in those two positions, so only the string shapes are
- * refused there.
+ * `wait.for` / `wait.until` reuse this classification (#704), and since #728
+ * so do the three RESOLVED_KEY_FIELDS themselves, with the SAME exemption
+ * applied by the caller in both cases: `normalizeWaitStep` (wait) and
+ * `WorkflowNormalizer.pickResolvedKey` / `lowerTriggerKeys` (the three key
+ * fields) DO lower a structural `{$ref}` / `{$tpl}` at those positions, so
+ * `validateRefs.collectKeySites` / `collectTriggerKeySites` skip a structural
+ * value before it ever reaches this function — only the unresolvable STRING
+ * shapes are refused there. This function's own `{$ref}`/`{$tpl}` clause stays
+ * unweakened: it is still the correct verdict for a config assembled any other
+ * way (a hand-built trigger block, a future emitter that skips the lowering
+ * pass).
  */
 export function unresolvableKeyShape(value: unknown): string | null {
 	if (typeof value === "object" && value !== null && !Array.isArray(value)) {

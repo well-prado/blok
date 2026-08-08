@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DurationSchema } from "./TriggerOpts";
+import { DurationSchema, ResolvedKeySchema, type StructuralRefValue, StructuralRefValueSchema } from "./TriggerOpts";
 
 /**
  * RuntimeKind represents all supported runtime environments.
@@ -313,18 +313,15 @@ export const V2RegularStepSchema = z
 			.describe(
 				'Shorthand for `streamTo: "sse"`. `stream: true` forwards runtime PartialResult frames to the SSE client.',
 			),
-		idempotencyKey: z
-			.string()
-			.min(1)
-			.optional()
-			.describe(
-				"When set, the step's result is cached against the triple " +
-					"(workflowName, step.id, idempotencyKey). On a subsequent run with the " +
-					"same triple, execution is skipped and the cached result populates state " +
-					"through the same persistence rules (ephemeral / spread / as). " +
-					"Accepts a literal string or a `js/ctx....` expression " +
-					"(e.g. js/ctx.request.body.requestId), or a typed handle in the TS DSL.",
-			),
+		idempotencyKey: ResolvedKeySchema.optional().describe(
+			"When set, the step's result is cached against the triple " +
+				"(workflowName, step.id, idempotencyKey). On a subsequent run with the " +
+				"same triple, execution is skipped and the cached result populates state " +
+				"through the same persistence rules (ephemeral / spread / as). " +
+				"Accepts a literal string, a `js/ctx....` expression " +
+				'(e.g. js/ctx.request.body.requestId), a structural {"$ref": {"step", "path"}} ' +
+				"that lowers to the `js/` wire form at load (#728), or a typed handle in the TS DSL.",
+		),
 		idempotencyKeyTTL: z
 			.number()
 			.int()
@@ -463,7 +460,7 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 	ephemeral?: boolean;
 	active?: boolean;
 	stop?: boolean;
-	idempotencyKey?: string;
+	idempotencyKey?: string | StructuralRefValue;
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
 	allowList?: readonly string[];
@@ -537,20 +534,17 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.describe("If true, child output is NOT stored in state. Only ctx.prev carries it."),
 			active: z.boolean().optional().describe("If false, the step is skipped at runtime. Default true."),
 			stop: z.boolean().optional().describe("If true, the workflow halts after this step completes."),
-			idempotencyKey: z
-				.string()
-				.min(1)
-				.optional()
-				.describe(
-					"When set, the sub-workflow's parent step output is cached against " +
-						"the triple (parentWorkflow, step.id, key). Cache semantics depend " +
-						"on `wait`: with `wait: true` (default), cache HIT means the child " +
-						"workflow is NEVER invoked — including any side effects (use with " +
-						"care for sub-workflows that send emails, charge cards, etc.). With " +
-						"`wait: false`, cache HIT returns the SAME `{runId, workflowName, " +
-						"scheduledAt}` for the lifetime of the cache entry — at-most-once " +
-						"dispatch deduplication. To retry on child failure, use a new key.",
-				),
+			idempotencyKey: ResolvedKeySchema.optional().describe(
+				"When set, the sub-workflow's parent step output is cached against " +
+					"the triple (parentWorkflow, step.id, key). Cache semantics depend " +
+					"on `wait`: with `wait: true` (default), cache HIT means the child " +
+					"workflow is NEVER invoked — including any side effects (use with " +
+					"care for sub-workflows that send emails, charge cards, etc.). With " +
+					"`wait: false`, cache HIT returns the SAME `{runId, workflowName, " +
+					"scheduledAt}` for the lifetime of the cache entry — at-most-once " +
+					"dispatch deduplication. To retry on child failure, use a new key. Accepts a " +
+					'structural {"$ref": {"step", "path"}} that lowers to the `js/` wire form at load (#728).',
+			),
 			idempotencyKeyTTL: z
 				.number()
 				.int()
@@ -608,19 +602,12 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
 
 /**
- * A structural handle reference in a `wait` position (#704). Mirrors what the
- * typed-handle DSL and Studio mint for step `inputs`; `normalizeWaitStep`
- * lowers it to the `js/` wire string at the load boundary.
+ * A structural handle reference in a `wait` position (#704). Same shape
+ * {@link StructuralRefValueSchema} (`TriggerOpts.ts`) uses for the
+ * RESOLVED-KEY fields (#728) — both are lowered to the `js/` wire string at
+ * the load boundary, `wait.for`/`wait.until` by `normalizeWaitStep`.
  */
-const WaitRefSchema = z.union([
-	z.object({
-		$ref: z.object({
-			step: z.string().min(1),
-			path: z.array(z.union([z.string(), z.number()])).optional(),
-		}),
-	}),
-	z.object({ $tpl: z.array(z.unknown()) }),
-]);
+const WaitRefSchema = StructuralRefValueSchema;
 
 /** A `js/…` escape-hatch expression, resolved against the live ctx (#704). */
 const WaitExpressionSchema = z

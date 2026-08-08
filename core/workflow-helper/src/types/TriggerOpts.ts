@@ -1,6 +1,47 @@
 import { z } from "zod";
 
 // =============================================================================
+// RESOLVED-KEY positions — step `idempotencyKey`, trigger `concurrencyKey`,
+// trigger `debounce.key` (#706, #728)
+// =============================================================================
+
+/**
+ * A structural handle reference `{$ref}` / `{$tpl}` — what the typed-handle
+ * DSL and Studio mint, and what `WorkflowNormalizer` lowers to the `js/…`
+ * wire string at the load boundary before the runner ever evaluates a
+ * RESOLVED-KEY field. Same shape the `wait.for` / `wait.until` fields accept
+ * (#704) — those and the three key fields below are the only places a
+ * literal-string-or-expression value is NOT Mapper-resolved and instead
+ * lowered once, up front. `@blokjs/helper`'s `isStructuralRef` /
+ * `isStructuralTpl` (`refSyntax.ts`) recognize the identical shape at the
+ * raw-doc validation layer — kept in sync by hand (that module intentionally
+ * doesn't depend on this Zod graph; see its module doc).
+ */
+export const StructuralRefValueSchema = z.union([
+	z.object({
+		$ref: z.object({
+			step: z.string().min(1),
+			path: z.array(z.union([z.string(), z.number()])).optional(),
+		}),
+	}),
+	z.object({ $tpl: z.array(z.unknown()) }),
+]);
+
+/** Inferred type of a structural handle reference value. */
+export type StructuralRefValue = z.infer<typeof StructuralRefValueSchema>;
+
+/**
+ * A RESOLVED-KEY field value (#728): a non-empty literal string — a `js/…`
+ * expression or a deliberate constant key, `@blokjs/helper`'s
+ * `unresolvableKeyShape` polices the expression-shaped-but-unresolvable
+ * string forms (`$.…`, bare `ctx.…`, `${…}`, `{{…}}`) at validate time — OR a
+ * structural `{$ref}` / `{$tpl}` that lowers to the `js/` wire form at the
+ * load boundary. Shared by step `idempotencyKey` and trigger `concurrencyKey`
+ * / `debounce.key`.
+ */
+export const ResolvedKeySchema = z.union([z.string().min(1), StructuralRefValueSchema]);
+
+// =============================================================================
 // Concurrency keys (Tier 2 #6) — shared across HTTP & Worker triggers
 // =============================================================================
 
@@ -11,21 +52,19 @@ import { z } from "zod";
  * {@link concurrencyRefinement} cross-field check to add concurrency-key
  * support to a trigger schema.
  *
- * Authors set `concurrencyKey` (literal or `js/ctx....` expression) plus an
- * optional `concurrencyLimit` (defaults to 1, matching Trigger.dev's
- * "named mutex per key" pattern). When omitted, the trigger has no
- * concurrency gate (zero-overhead default).
+ * Authors set `concurrencyKey` (literal, `js/ctx....` expression, or a
+ * structural `{$ref}` that lowers to one, #728) plus an optional
+ * `concurrencyLimit` (defaults to 1, matching Trigger.dev's "named mutex per
+ * key" pattern). When omitted, the trigger has no concurrency gate
+ * (zero-overhead default).
  */
 export const ConcurrencyOptsFields = {
-	concurrencyKey: z
-		.string()
-		.min(1)
-		.optional()
-		.describe(
-			"OPTIONAL. Per-key concurrency gating. Literal string or `js/ctx.<path>` expression " +
-				"evaluated against the live ctx at run-entry time. When set, runs sharing the resolved " +
-				"key contend for at most `concurrencyLimit` concurrent slots. When unset, no gating applies.",
-		),
+	concurrencyKey: ResolvedKeySchema.optional().describe(
+		"OPTIONAL. Per-key concurrency gating. Literal string, `js/ctx.<path>` expression " +
+			'evaluated against the live ctx at run-entry time, or a structural {"$ref": {"step", "path"}} ' +
+			"that lowers to the `js/` wire form at load (#728). When set, runs sharing the resolved " +
+			"key contend for at most `concurrencyLimit` concurrent slots. When unset, no gating applies.",
+	),
 	concurrencyLimit: z
 		.number()
 		.int()
@@ -90,7 +129,7 @@ export const ConcurrencyOptsFields = {
  */
 export const concurrencyRefinement = (
 	val: {
-		concurrencyKey?: string;
+		concurrencyKey?: string | StructuralRefValue;
 		concurrencyLimit?: number;
 		concurrencyLeaseMs?: number;
 		onLimit?: "throw" | "queue";
@@ -192,12 +231,10 @@ export const DurationSchema = z.union([
  */
 export const DebounceOptsSchema = z
 	.object({
-		key: z
-			.string()
-			.min(1)
-			.describe(
-				"Debounce key — literal string or `js/ctx.<path>` expression. Pings sharing the resolved key collapse.",
-			),
+		key: ResolvedKeySchema.describe(
+			'Debounce key — literal string, `js/ctx.<path>` expression, or a structural {"$ref": {"step", "path"}} ' +
+				"that lowers to the `js/` wire form at load (#728). Pings sharing the resolved key collapse.",
+		),
 		mode: z
 			.enum(["leading", "trailing"])
 			.default("trailing")
