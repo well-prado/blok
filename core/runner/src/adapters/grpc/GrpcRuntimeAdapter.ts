@@ -13,6 +13,7 @@ import {
 } from "@opentelemetry/api";
 import type RunnerNode from "../../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind, RuntimeNodeDescriptor } from "../RuntimeAdapter";
+import { BLOB_CAPABILITY, type BlobRef, type BlobStore, blobStoreFromEnv, blobThresholdBytes } from "./BlobStore";
 import { GrpcClientPool } from "./GrpcClientPool";
 import {
 	type DecodedExecuteEvent,
@@ -23,6 +24,7 @@ import {
 	decodeExecuteEvent,
 	decodeExecuteResponse,
 	encodeExecuteRequest,
+	jsonToBuffer,
 } from "./GrpcCodec";
 import { type GrpcErrorContext, toBlokError } from "./GrpcErrors";
 import { GrpcHealthChecker } from "./GrpcHealthChecker";
@@ -102,6 +104,8 @@ interface ListNodesResponseShape {
 	sdkName?: string;
 	sdkVersion?: string;
 	protoVersion?: string;
+	/** ADR 0014 — additive capability advertisement, e.g. `["blob-v1"]`. */
+	capabilities?: string[];
 }
 
 export class GrpcRuntimeAdapter implements RuntimeAdapter {
@@ -112,6 +116,10 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	private readonly ownsPool: boolean;
 	private readonly healthChecker: GrpcHealthChecker | null;
 	private readonly tracer: Tracer;
+	/** ADR 0014 — memoized `blob-v1` support. `null` until first probed. */
+	private blobsSupported: boolean | null = null;
+	/** In-flight capability probe, so concurrent calls share one `ListNodes`. */
+	private blobProbe: Promise<boolean> | null = null;
 
 	constructor(config: GrpcAdapterConfig, pool?: GrpcClientPool) {
 		this.kind = config.kind;
@@ -192,6 +200,76 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		});
 	}
 
+	// =========================================================================
+	// ADR 0014 Phase 2 — claim-check offload
+	// =========================================================================
+
+	/**
+	 * The blob store to use for THIS request, or `null` when the claim-check
+	 * path doesn't apply: `BLOK_BLOB_DIR` unset, or `inputs` under the
+	 * offload threshold (the overwhelming majority of calls — this check is
+	 * two cheap reads and short-circuits before any I/O or RPC).
+	 */
+	private blobCandidate(request: ExecuteRequestProto): BlobStore | null {
+		const store = blobStoreFromEnv();
+		if (store === null) return null;
+		return request.inputs.length > blobThresholdBytes() ? store : null;
+	}
+
+	/**
+	 * Does this runtime advertise `blob-v1` on `ListNodes`? Memoized on first
+	 * success — the probe only ever runs when a payload is already big enough
+	 * to be worth offloading, so small calls never pay for it. A failed probe
+	 * is NOT memoized (a sidecar that was still booting gets another chance)
+	 * and degrades to inline, where Phase 1's guard produces the actionable
+	 * `GRPC_REQUEST_TOO_LARGE` if the payload really is over the limit.
+	 */
+	private probeBlobSupport(): Promise<boolean> {
+		if (this.blobsSupported !== null) return Promise.resolve(this.blobsSupported);
+		if (this.blobProbe === null) {
+			this.blobProbe = this.unaryListNodes(this.pool.get(this.config))
+				.then((response) => {
+					this.blobsSupported = (response.capabilities ?? []).includes(BLOB_CAPABILITY);
+					return this.blobsSupported;
+				})
+				.catch(() => false)
+				.finally(() => {
+					this.blobProbe = null;
+				});
+		}
+		return this.blobProbe;
+	}
+
+	/**
+	 * Synchronous view of the capability, for `executeStream` — which builds
+	 * and dispatches its request without an `await` anywhere. An unprobed
+	 * runtime kicks off the probe and this call falls back to inline; the next
+	 * streaming call to the same adapter sees the answer.
+	 */
+	private blobSupportSync(): boolean {
+		if (this.blobsSupported === null) void this.probeBlobSupport();
+		return this.blobsSupported === true;
+	}
+
+	/**
+	 * Swap the oversized `inputs` buffer for a claim-check sentinel, mutating
+	 * `request` in place. Returns the written ref so the caller can delete it
+	 * once the RPC settles, or `null` when the write failed — in which case the
+	 * request goes out inline exactly as it would have before.
+	 */
+	private writeInputsBlob(store: BlobStore, request: ExecuteRequestProto, ctx: Context): BlobRef | null {
+		try {
+			const ref = store.put(ctx.id, request.inputs);
+			request.inputs = jsonToBuffer(ref);
+			return ref;
+		} catch (err) {
+			console.warn(
+				`[blok][grpc] blob offload failed for runtime.${this.kind} (${store.dir}); sending inline: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return null;
+		}
+	}
+
 	/** Build a typed `BlokError(category=DEPENDENCY)` for short-circuited calls. */
 	private circuitOpenError(node: RunnerNode): BlokError {
 		return BlokError.dependency({
@@ -230,11 +308,23 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		const deadlineMs = readPerCallDeadline(ctx) ?? this.config.defaultDeadlineMs;
 
 		const request = encodeExecuteRequest(node, ctx, stepInfo.index, stepInfo.total, stepInfo.depth, deadlineMs);
+
+		// ADR 0014 Phase 2 — claim-check. An oversized `inputs` blob is written
+		// to the shared blob dir and replaced by a small sentinel BEFORE the
+		// Phase 1 guard measures the request, so a payload that would have been
+		// refused now goes through. Only for runtimes advertising `blob-v1`;
+		// everything else falls through to the guard's actionable error.
+		const blobStore = this.blobCandidate(request);
+		const offloaded =
+			blobStore !== null && (await this.probeBlobSupport()) ? this.writeInputsBlob(blobStore, request, ctx) : null;
 		const requestBytes = approximateRequestBytes(request);
 
 		// ADR 0014 Phase 1 — fail fast before dispatch on an oversized request.
 		const tooBig = this.oversizedRequestError(node, request, requestBytes);
 		if (tooBig) {
+			// Still over the limit even after any offload (e.g. a huge trigger
+			// body) — drop the blob we just wrote rather than orphaning it.
+			if (offloaded) blobStore?.delete(offloaded);
 			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, true, "request_too_large");
 			return {
 				success: false,
@@ -302,6 +392,11 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 				} as ExecutionResult["metrics"],
 			};
 		} finally {
+			// The claim-check blob exists only for the duration of this RPC —
+			// the sidecar has read it by the time the call settles. Deleting
+			// here keeps disk bounded by in-flight calls, not by run history;
+			// the Janitor sweep only ever sees debris from a crashed runner.
+			if (offloaded) blobStore?.delete(offloaded);
 			span.end();
 		}
 	}
@@ -394,6 +489,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		const request = encodeExecuteRequest(node, ctx, stepInfo.index, stepInfo.total, stepInfo.depth, deadlineMs);
 		// Opt the SDK into emitting log frames (proto ExecuteOptions.stream_logs).
 		request.options = { ...request.options, streamLogs: true };
+
+		// ADR 0014 Phase 2 — claim-check, same as the unary path but reading the
+		// capability from the memoized cache (this method has no `await`).
+		const blobStore = this.blobCandidate(request);
+		const offloaded =
+			blobStore !== null && this.blobSupportSync() ? this.writeInputsBlob(blobStore, request, ctx) : null;
 		const requestBytes = approximateRequestBytes(request);
 
 		// ADR 0014 Phase 1 — fail fast before dispatch on an oversized request.
@@ -401,6 +502,7 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		// failure so `for await` and `await result` both terminate at once.
 		const tooBig = this.oversizedRequestError(node, request, requestBytes);
 		if (tooBig) {
+			if (offloaded) blobStore?.delete(offloaded);
 			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, true, "request_too_large");
 			const empty: AsyncIterable<DecodedExecuteEvent> = {
 				[Symbol.asyncIterator]: async function* () {
@@ -471,6 +573,9 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			const settle = (value: ExecutionResult): void => {
 				if (settled) return;
 				settled = true;
+				// The sidecar has read the claim-check blob by now — see the
+				// matching cleanup in `execute()`'s finally block.
+				if (offloaded) blobStore?.delete(offloaded);
 				if (value.success) {
 					span.setAttribute("blok.response.bytes", value.metrics?.response_bytes ?? 0);
 					span.setStatus({ code: SpanStatusCode.OK });

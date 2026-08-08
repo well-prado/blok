@@ -103,11 +103,19 @@ spec:
             - name: BLOK_PYTHON3_RUNTIME_PORT
               value: {{ .Values.runtimes.python3.port | quote }}
             {{- end }}
+            {{- if .Values.blobStore.enabled }}
+            - name: BLOK_BLOB_DIR
+              value: {{ .Values.blobStore.path | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.blobStore.enabled }}
+            - name: blob-store
+              mountPath: {{ .Values.blobStore.path | quote }}
+            {{- end }}
             {{- if and (eq .Values.traceStore.backend "sqlite") .Values.traceStore.writableData.enabled }}
             - name: trace-data
               mountPath: {{ dir .Values.traceStore.sqlite.path | quote }}
@@ -124,11 +132,23 @@ spec:
             - name: python3-grpc
               containerPort: {{ .Values.runtimes.python3.port }}
               protocol: TCP
+          {{- if .Values.blobStore.enabled }}
+          env:
+            # ADR 0014 — the sidecar advertises `blob-v1` on ListNodes only
+            # when this is set, so the runner's claim-check offload engages
+            # exactly when both ends can see the same directory.
+            - name: BLOK_BLOB_DIR
+              value: {{ .Values.blobStore.path | quote }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.blobStore.enabled }}
+            - name: blob-store
+              mountPath: {{ .Values.blobStore.path | quote }}
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: workflows
               mountPath: /app/workflows
@@ -137,6 +157,17 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.blobStore.enabled }}
+        # ADR 0014 — one shared scratch volume so a claim-check blob written by
+        # the runner is readable by every runtime sidecar in this pod.
+        - name: blob-store
+          {{- if .Values.blobStore.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.blobStore.sizeLimit }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
         {{- if and (eq .Values.traceStore.backend "sqlite") .Values.traceStore.writableData.enabled }}
         - name: trace-data
           emptyDir: {}

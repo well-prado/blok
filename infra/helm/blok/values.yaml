@@ -87,6 +87,23 @@ traceStore:
   writableData:
     enabled: true
 
+## Claim-check blob store (ADR 0014)
+## Data crossing the runtime boundary is inlined in one gRPC message under a
+## symmetric size limit. With this on, the runner spills an oversized step input
+## to a shared scratch volume and sends a small reference instead, so bulk data
+## reaches a sidecar node that would otherwise be refused. Sidecars only receive
+## a reference when they advertise `blob-v1` on ListNodes, which they do exactly
+## when BLOK_BLOB_DIR is set — so this stanza is the whole switch.
+blobStore:
+  # -- Mount a shared emptyDir into the runner + every runtime sidecar and point
+  #    BLOK_BLOB_DIR at it. Off by default; nothing changes until you enable it.
+  enabled: false
+  # -- Mount path, set as BLOK_BLOB_DIR on every container in the pod.
+  path: /blok-blobs
+  # -- Optional emptyDir sizeLimit (e.g. "2Gi"). A blob is deleted as soon as its
+  #    call finishes, so peak usage tracks concurrent oversized calls, not history.
+  sizeLimit: ""
+
 ## Environment variables
 # -- Extra environment variables to inject into the Blok container
 env: {}

@@ -1,8 +1,44 @@
 # ADR 0014 — Bulk data across the runtime boundary: payload diet, fail-fast guard, claim-check blob store
 
-- **Status:** Accepted — Phase 0 + Phase 1 implemented; Phase 2 pending founder sign-off
+- **Status:** Accepted — Phases 0, 1 and the Phase 2 core implemented
 - **Date:** 2026-07-21
 - **Resolves:** [#677](https://github.com/well-prado/blok/issues/677)
+
+> **Progress (2026-08-08): Phase 2 core shipped — request-direction claim-check.**
+>
+> The runner now owns a filesystem `BlobStore`
+> (`core/runner/src/adapters/grpc/BlobStore.ts`) rooted at `BLOK_BLOB_DIR`, and
+> `GrpcRuntimeAdapter` offloads an oversized `inputs` payload to it — on BOTH the
+> unary and streaming dispatch paths — sending the `{"$blokBlob"}` sentinel in
+> its place. The offload runs BEFORE Phase 1's guard, so a payload that used to
+> be refused now goes through. Capability gating landed as designed: an additive
+> `ListNodesResponse.capabilities` proto field (5), probed lazily and memoized on
+> the adapter; the runner sends a ref only to a runtime advertising `blob-v1`.
+> `sdks/python3` is the reference implementation of the SDK half. Janitor gained
+> a blob sweep (`BLOK_BLOB_RETENTION_MS`, default 1 h); the Helm chart gained a
+> `blobStore.enabled` shared `emptyDir`; `dev-full.ts` defaults `BLOK_BLOB_DIR`
+> to `.blok/blobs`. Docs: `docs/d/reliability/large-payloads.mdx`.
+>
+> **Three deliberate deviations from the Phase 2 text below, all narrowing:**
+>
+> 1. *Request direction only.* The response direction (an SDK writing its own
+>    oversized output to a blob) and the Mapper hydration that would make
+>    refs-in-`ctx.state` readable are **not** implemented. Nothing can produce a
+>    response-direction ref yet, so shipping the hydration half would be code with
+>    no producer — and the tetrix-class failure this ADR exists for is entirely
+>    request-direction. Consequence: a node's *return value* is still bounded by
+>    the message limit, and the "trace snapshots shrink for free" benefit is not
+>    realised. Revisit together, as one slice, when a real pipeline needs it.
+> 2. *Blobs are deleted when their RPC settles*, not kept for the run's lifetime.
+>    A request-direction blob is consumed within one call, so run-scoped retention
+>    would only grow disk for no reader. `deleteForRun` still exists on the store,
+>    and the Janitor sweep is now purely a crash-safety net — which is why its
+>    default retention is 1 h rather than matching trace retention. Response-
+>    direction refs (deviation 1) would need that default raised.
+> 3. *One SDK, not seven.* `runtime.python3` implements resolve-on-read plus the
+>    capability advertisement. The other six advertise nothing, so they transparently
+>    keep the pre-Phase-2 behaviour (inline + the Phase 1 guard). The remaining six
+>    are a mechanical follow-up: ~30 lines each plus a stub regeneration.
 
 > **Progress (2026-07-23):** **Phase 1 (fail-fast guard + docs) and Phase 0
 > (payload diet) shipped.**
@@ -24,8 +60,8 @@
 >   Revisit the default-flip in a major release once the SDKs stop surfacing these
 >   to v2 nodes. Tests: `GrpcCodec.test.ts` "state diet".
 >
-> **Phase 2** (claim-check blob store — runner + 7 SDKs + Helm) is not started,
-> pending a scope decision.
+> **Phase 2** (claim-check blob store — runner + 7 SDKs + Helm) — core shipped;
+> see the 2026-08-08 note at the top for what landed and the three deviations.
 - **Origin:** tetrix-blok indexing failure (its #138/#140) — an aggregate of every symbol *with full code bodies* was passed inline to a `runtime.*` node and blew the gRPC message ceiling. The app was at fault for not designing around the constraint, but the framework makes the failure easy to fall into and offers zero primitives to avoid it.
 
 ## Context

@@ -179,6 +179,16 @@ def test_list_nodes_returns_registered_descriptors(client):
     assert {"echo", "greet"}.issubset(names)
 
 
+# ADR 0014 — the runner sends a claim-check ref ONLY to a runtime that says it
+# can resolve one, so this advertisement is the whole capability gate.
+def test_list_nodes_advertises_blob_capability_only_when_configured(client, monkeypatch):
+    monkeypatch.delenv("BLOK_BLOB_DIR", raising=False)
+    assert list(client.ListNodes(pb.ListNodesRequest()).capabilities) == []
+
+    monkeypatch.setenv("BLOK_BLOB_DIR", "/tmp/blok-blobs")
+    assert list(client.ListNodes(pb.ListNodesRequest()).capabilities) == ["blob-v1"]
+
+
 def test_execute_stream_emits_started_then_final(client):
     events = list(client.ExecuteStream(_make_request("echo", {"shape": "round"})))
 

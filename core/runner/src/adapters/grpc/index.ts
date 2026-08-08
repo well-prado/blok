@@ -46,6 +46,18 @@ export {
 } from "./GrpcCodec";
 export { buildChannelOptions, DEFAULT_HEALTH_SERVICE_CONFIG } from "./GrpcChannelOptions";
 export {
+	BLOB_CAPABILITY,
+	BlobStore,
+	DEFAULT_BLOB_RETENTION_MS,
+	DEFAULT_BLOB_THRESHOLD_BYTES,
+	blobRetentionMs,
+	blobStoreFromEnv,
+	blobThresholdBytes,
+	isBlobRef,
+	type BlobRef,
+	_resetBlobStoreForTests,
+} from "./BlobStore";
+export {
 	DEFAULT_GRPC_PORTS,
 	GRPC_DEFAULTS,
 	type GrpcAdapterConfig,

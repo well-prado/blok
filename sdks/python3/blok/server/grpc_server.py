@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
+import re
 import threading
 import time
 from concurrent import futures
@@ -57,6 +59,74 @@ logger = logging.getLogger("blok.grpc")
 # convention: only events on this named logger are captured, so the handler
 # doesn't have to filter out unrelated noise from third-party libraries.
 NODE_LOGGER_NAME = "blok.node"
+
+# =============================================================================
+# ADR 0014 — claim-check ("blob") support
+# =============================================================================
+#
+# When ``BLOK_BLOB_DIR`` names a directory this process shares with the runner
+# (same host in dev; a shared ``emptyDir`` in the Helm chart), the runner may
+# replace an oversized ``inputs`` payload with a small JSON sentinel:
+#
+#     {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+#                    "codec": "json"}}
+#
+# and we read the real payload from ``<BLOK_BLOB_DIR>/<id>``. That is the only
+# way data larger than ``BLOK_GRPC_MAX_MESSAGE_BYTES`` can reach a node, since
+# a unary gRPC message is fully buffered on both ends. We advertise the
+# capability on ``ListNodes`` so the runner only ever sends a sentinel to a
+# process that can resolve it.
+
+BLOB_CAPABILITY = "blob-v1"
+
+# Two path segments, neither starting with a dot. The dot rule is what rejects
+# ``..`` — without it a wire-supplied id turns this into an arbitrary-file read.
+_BLOB_ID = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$")
+
+
+def _blob_dir() -> Optional[str]:
+    """The shared claim-check directory, or ``None`` when the feature is off."""
+    return os.environ.get("BLOK_BLOB_DIR") or None
+
+
+def _resolve_input_blob(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Swap a claim-check sentinel for the payload it references.
+
+    Anything that is not a sentinel passes through untouched, so this is a
+    no-op for every ordinary call.
+    """
+    ref = inputs.get("$blokBlob") if len(inputs) == 1 else None
+    if not isinstance(ref, dict):
+        return inputs
+
+    root = _blob_dir()
+    if root is None:
+        raise _DecodeError(
+            "received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set "
+            "on this runtime — set it to the same shared directory as the runner"
+        )
+
+    blob_id = ref.get("id")
+    if not isinstance(blob_id, str) or not _BLOB_ID.match(blob_id):
+        raise _DecodeError(f"invalid $blokBlob id: {blob_id!r}")
+
+    try:
+        with open(os.path.join(root, blob_id), "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        raise _DecodeError(f"cannot read blob `{blob_id}` under BLOK_BLOB_DIR: {exc}") from exc
+
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _DecodeError(f"invalid JSON in blob `{blob_id}`: {exc}") from exc
+
+    if isinstance(value, dict):
+        return value
+    # Mirror _decode_json_object's non-object handling so node code sees the
+    # same shape whether or not the payload took the claim-check path.
+    return {"_value": value}
+
 
 # =============================================================================
 # Servicer
@@ -292,6 +362,11 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
             sdk_name="blok-python3",
             sdk_version=self._sdk_version,
             proto_version="1.0.0",
+            # ADR 0014 — only claim `blob-v1` when we can actually reach the
+            # shared directory. The runner sends refs solely to runtimes that
+            # advertise it, and falls back to inlining (plus its fail-fast
+            # GRPC_REQUEST_TOO_LARGE guard) for everyone else.
+            capabilities=[BLOB_CAPABILITY] if _blob_dir() else [],
         )
 
 
@@ -378,7 +453,9 @@ def _decode_execute_request(req: pb.ExecuteRequest) -> ExecutionRequest:
     if req.node is None or not req.node.name:
         raise _DecodeError("ExecuteRequest.node is required")
 
-    inputs_map = _decode_json_object(req.inputs, "inputs")
+    # ADR 0014 — resolve a claim-check ref before anything downstream (schema
+    # validation, the node body) ever sees it. Non-sentinel inputs pass through.
+    inputs_map = _resolve_input_blob(_decode_json_object(req.inputs, "inputs"))
     previous_output = _decode_json_value(req.state.previous_output, "previous_output")
     vars_map = _decode_json_object(req.state.vars, "vars")
     body = _decode_request_body(req.trigger.body, dict(req.trigger.headers))
