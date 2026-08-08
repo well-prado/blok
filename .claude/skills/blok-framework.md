@@ -289,7 +289,7 @@ a state key no node's output declares — a `ctx.publish` key, a cross-runtime
 ## 4. Control flow
 
 ```ts
-import { type Handle, branch, forEach, http, step, subworkflow, switchOn, tpl, tryCatch, workflow } from "@blokjs/core";
+import { branch, forEach, http, step, subworkflow, switchOn, tpl, tryCatch, workflow } from "@blokjs/core";
 import { chargeCard, notify, refundOrder, reserveInventory, summarizeReservations, validateOrder } from "./nodes";
 
 export default workflow("control-flow-tour", { version: "1.0.0", trigger: http.post("/tour") }, (req) => {
@@ -340,9 +340,10 @@ export default workflow("control-flow-tour", { version: "1.0.0", trigger: http.p
   });
 
   // Another named workflow as a step. Inputs become the child's request body.
-  // `subworkflow()` returns an UNTYPED `Handle<unknown>` (no node schema to
-  // infer from), so passing it whole is fine but a field read needs a cast.
-  const receipt = subworkflow("receipt", "send-receipt", { orderId: order.id }) as Handle<{ data: string }>;
+  // The child is looked up by name at dispatch time, so there's no node
+  // schema to infer from — pass an explicit type parameter for a typed read
+  // (defaults to `unknown`, same convention as `runtimeNode<In, Out>`).
+  const receipt = subworkflow<{ data: string }>("receipt", "send-receipt", { orderId: order.id });
   step("respond", notify, { message: tpl`receipt ${receipt.data}` }, { ephemeral: true });
 });
 ```
