@@ -8,6 +8,8 @@
  * - `idempotency_cache` — entries past `expires_at`
  * - `concurrency_locks` — leases past `expires_at`
  * - `scheduled_dispatches` — rows past `expires_at` (Tier 2 #5+#7 follow-up)
+ * - claim-check blobs — run directories under `BLOK_BLOB_DIR` untouched for
+ *   `BLOK_BLOB_RETENTION_MS` (ADR 0014). No-op when the var is unset.
  *
  * Each store's per-call lazy-purge handles the hot path (e.g.,
  * `acquireConcurrencySlot` purges the bucket it touches). The janitor
@@ -21,6 +23,7 @@
  * Kill-switch: `BLOK_JANITOR_DISABLED=1`.
  */
 
+import { blobRetentionMs, blobStoreFromEnv } from "../adapters/grpc/BlobStore";
 import { JanitorMetrics } from "../monitoring/JanitorMetrics";
 import type { RunStore } from "./RunStore";
 
@@ -33,6 +36,8 @@ export interface JanitorStats {
 	idempotencyCachePurged: number;
 	concurrencySlotsPurged: number;
 	scheduledDispatchesPurged: number;
+	/** ADR 0014 — run directories removed from `BLOK_BLOB_DIR`. Always 0 when unset. */
+	blobRunsPurged: number;
 	durationMs: number;
 }
 
@@ -114,12 +119,24 @@ export class Janitor {
 	 */
 	async runOnce(): Promise<JanitorStats> {
 		if (this.stopped) {
-			return { idempotencyCachePurged: 0, concurrencySlotsPurged: 0, scheduledDispatchesPurged: 0, durationMs: 0 };
+			return {
+				idempotencyCachePurged: 0,
+				concurrencySlotsPurged: 0,
+				scheduledDispatchesPurged: 0,
+				blobRunsPurged: 0,
+				durationMs: 0,
+			};
 		}
 		if (this.inFlight) {
 			// Skip overlapping invocations — return zero stats so callers
 			// don't wait on a sweep that's already running.
-			return { idempotencyCachePurged: 0, concurrencySlotsPurged: 0, scheduledDispatchesPurged: 0, durationMs: 0 };
+			return {
+				idempotencyCachePurged: 0,
+				concurrencySlotsPurged: 0,
+				scheduledDispatchesPurged: 0,
+				blobRunsPurged: 0,
+				durationMs: 0,
+			};
 		}
 		this.inFlight = true;
 
@@ -128,6 +145,7 @@ export class Janitor {
 			idempotencyCachePurged: 0,
 			concurrencySlotsPurged: 0,
 			scheduledDispatchesPurged: 0,
+			blobRunsPurged: 0,
 			durationMs: 0,
 		};
 
@@ -178,12 +196,32 @@ export class Janitor {
 				stats.scheduledDispatchesPurged,
 			);
 
+			// ADR 0014 Phase 2 — claim-check blobs. A request-direction blob is
+			// deleted the moment its RPC settles, so anything the sweep finds is
+			// debris from a runner that died mid-call. No-op unless BLOK_BLOB_DIR
+			// is configured.
+			const blobStart = Date.now();
+			try {
+				const blobs = blobStoreFromEnv();
+				stats.blobRunsPurged = blobs ? blobs.purgeExpired(start - blobRetentionMs()) : 0;
+			} catch (err) {
+				JanitorMetrics.getInstance().recordSweepError({ table: "blobs" });
+				this.logger?.error?.(
+					`[blok][janitor] purgeExpiredBlobs failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			JanitorMetrics.getInstance().recordSweep({ table: "blobs" }, Date.now() - blobStart, stats.blobRunsPurged);
+
 			stats.durationMs = Date.now() - start;
 
-			const totalPurged = stats.idempotencyCachePurged + stats.concurrencySlotsPurged + stats.scheduledDispatchesPurged;
+			const totalPurged =
+				stats.idempotencyCachePurged +
+				stats.concurrencySlotsPurged +
+				stats.scheduledDispatchesPurged +
+				stats.blobRunsPurged;
 			if (totalPurged > 0) {
 				this.logger?.log?.(
-					`[blok][janitor] sweep done — idem=${stats.idempotencyCachePurged} locks=${stats.concurrencySlotsPurged} dispatches=${stats.scheduledDispatchesPurged} (${stats.durationMs}ms)`,
+					`[blok][janitor] sweep done — idem=${stats.idempotencyCachePurged} locks=${stats.concurrencySlotsPurged} dispatches=${stats.scheduledDispatchesPurged} blobs=${stats.blobRunsPurged} (${stats.durationMs}ms)`,
 				);
 			}
 		} finally {

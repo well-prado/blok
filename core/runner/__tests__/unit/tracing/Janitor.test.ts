@@ -1,4 +1,8 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { _resetBlobStoreForTests } from "../../../src/adapters/grpc/BlobStore";
 import { JanitorMetrics } from "../../../src/monitoring/JanitorMetrics";
 import { InMemoryRunStore } from "../../../src/tracing/InMemoryRunStore";
 import { Janitor } from "../../../src/tracing/Janitor";
@@ -152,6 +156,42 @@ describe("Janitor (Tier 2 follow-up · periodic storage cleanup)", () => {
 		// One should report the purge (1 row); the other returns 0 stats.
 		const purgedTotals = [a, b].map((s) => s.scheduledDispatchesPurged);
 		expect(purgedTotals.sort()).toEqual([0, 1]);
+	});
+
+	// ADR 0014 Phase 2 — orphaned claim-check blobs (a runner that died between
+	// writing one and settling its RPC) are the janitor's problem.
+	it("sweeps stale claim-check blob directories, and is a no-op without BLOK_BLOB_DIR", async () => {
+		const blobDir = mkdtempSync(path.join(tmpdir(), "blok-janitor-blob-"));
+		try {
+			const stale = path.join(blobDir, "run_dead");
+			mkdirSync(stale, { recursive: true });
+			writeFileSync(path.join(stale, "a.json"), "{}");
+			const longAgo = new Date(Date.now() - 10 * 60 * 60 * 1000);
+			utimesSync(stale, longAgo, longAgo);
+
+			const fresh = path.join(blobDir, "run_live");
+			mkdirSync(fresh, { recursive: true });
+			writeFileSync(path.join(fresh, "b.json"), "{}");
+
+			// Unset → the sweep must not even look at the directory.
+			_resetBlobStoreForTests();
+			const off = await Janitor.getInstance(new InMemoryRunStore()).runOnce();
+			expect(off.blobRunsPurged).toBe(0);
+			expect(existsSync(stale)).toBe(true);
+
+			Janitor.resetInstance();
+			vi.stubEnv("BLOK_BLOB_DIR", blobDir);
+			vi.stubEnv("BLOK_BLOB_RETENTION_MS", String(60 * 60 * 1000));
+			_resetBlobStoreForTests();
+
+			const on = await Janitor.getInstance(new InMemoryRunStore()).runOnce();
+			expect(on.blobRunsPurged).toBe(1);
+			expect(existsSync(stale)).toBe(false);
+			expect(existsSync(fresh)).toBe(true);
+		} finally {
+			_resetBlobStoreForTests();
+			rmSync(blobDir, { recursive: true, force: true });
+		}
 	});
 
 	it("a failing purge method does not abort the others (and records a sweep-error metric)", async () => {

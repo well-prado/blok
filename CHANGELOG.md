@@ -44,6 +44,38 @@ packages on npm version independently within each release line.
 
 ### Added
 
+- **Bulk data can now cross the runtime boundary: automatic claim-check offload
+  for oversized step inputs** (#677, ADR 0014 Phase 2). Everything a workflow
+  hands a `runtime.*` node was inlined into one unary gRPC message, fully
+  buffered on both ends under a symmetric 16 MiB limit; the only tools were the
+  Phase 1 fail-fast error and "restructure your pipeline". Set `BLOK_BLOB_DIR`
+  to a directory the runner and its sidecars share and inputs over
+  `BLOK_BLOB_THRESHOLD_BYTES` (default 1 MiB) are written there instead, with a
+  small `{"$blokBlob": {"id", "bytes", "codec"}}` reference on the wire in their
+  place. The sidecar reads the file and the node receives its real inputs —
+  no app-level claim-check code, no node changes.
+
+  The offload runs **before** the `GRPC_REQUEST_TOO_LARGE` guard, so a payload
+  that used to be refused now goes through; a blob is deleted the moment its
+  call settles, so disk tracks concurrent oversized calls rather than run
+  history (the Janitor sweeps only what a crashed runner orphaned, after
+  `BLOK_BLOB_RETENTION_MS`, default 1 h).
+
+  **Negotiated, not assumed.** `ListNodesResponse` gains an additive
+  `capabilities` field (proto field 5), and the runner sends a reference only to
+  a runtime advertising `blob-v1` — which an SDK does exactly when its own
+  `BLOK_BLOB_DIR` is set. A half-configured deployment therefore keeps the old
+  inline behaviour and the loud Phase 1 error, instead of handing a node a
+  reference it cannot read. Blob ids are validated on both ends so a wire-supplied
+  id can never escape the blob directory.
+
+  Off unless configured. `runtime.python3` implements the SDK half today; the
+  other six advertise nothing and are unchanged. Kubernetes: set
+  `blobStore.enabled=true` for a shared `emptyDir` across the runner and every
+  sidecar. Dev (`scripts/dev-full.ts`) defaults it to `.blok/blobs`. Only the
+  request direction is offloaded — a node's return value is still bounded by the
+  message limit. Docs: `docs/d/reliability/large-payloads.mdx`.
+
 - **`{"$ref"}` / `{"$tpl"}` in the three RESOLVED-KEY positions — step
   `idempotencyKey`, trigger `concurrencyKey`, trigger `debounce.key` — is now
   a first-class authoring form, not just a runtime backstop** (#728).

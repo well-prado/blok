@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { BlokError, type Context, ErrorCategory, type NodeErrorPayload } from "@blokjs/shared";
 import {
 	status as GrpcStatus,
@@ -17,8 +20,9 @@ import {
 	PeriodicExportingMetricReader,
 } from "@opentelemetry/sdk-metrics";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
+import { _resetBlobStoreForTests } from "../../../../src/adapters/grpc/BlobStore";
 import {
 	type DecodedExecuteEvent,
 	type ExecuteEventProto,
@@ -914,5 +918,196 @@ describe("GrpcRuntimeAdapter — OBS-02 B2.2 traceparent injection", () => {
 		}
 		// No recording span → propagation.inject writes nothing.
 		expect(captured?.get("traceparent")?.length ?? 0).toBe(0);
+	});
+});
+
+// =============================================================================
+// ADR 0014 Phase 2 — claim-check blob offload
+// =============================================================================
+//
+// The mock server here plays the SDK side of the contract: it advertises
+// `blob-v1` on ListNodes and resolves a `{"$blokBlob"}` sentinel by reading the
+// file out of BLOK_BLOB_DIR — exactly what `sdks/python3` now does. So these are
+// real round-trip assertions over a real gRPC channel, not shape checks.
+describe("GrpcRuntimeAdapter — claim-check blob offload (ADR 0014 Phase 2)", () => {
+	/** ~64 KiB of inputs — a real fixture, well over every threshold used below. */
+	const BIG_INPUTS = {
+		symbols: Array.from({ length: 800 }, (_, i) => ({ name: `symbol_${i}`, body: "x".repeat(64) })),
+	};
+
+	let blobMock: Awaited<ReturnType<typeof startMockServer>>;
+	let blobDir: string;
+	let capabilities: string[];
+	let adapters: GrpcRuntimeAdapter[];
+	let seen: ExecuteRequestProto | null;
+	/**
+	 * `"echo"` returns the resolved payload (proves fidelity); `"digest"`
+	 * returns only its byte count, for tests whose channel limit is smaller
+	 * than the payload — the limit is symmetric, so echoing would trip the
+	 * RECEIVE side and mask what the test is actually about.
+	 */
+	let replyMode: "echo" | "digest";
+
+	/** Resolve a sentinel the way the SDK does; pass anything else through. */
+	function sidecarResolve(inputs: Buffer): unknown {
+		const decoded = bufferToJson(inputs) as { $blokBlob?: { id: string } } | null;
+		if (decoded && typeof decoded === "object" && decoded.$blokBlob) {
+			return JSON.parse(readFileSync(path.join(blobDir, decoded.$blokBlob.id), "utf8"));
+		}
+		return decoded;
+	}
+
+	function okResponse(resolved: unknown): ExecuteResponseProto {
+		const data = replyMode === "echo" ? resolved : { resolvedBytes: JSON.stringify(resolved).length };
+		return {
+			success: true,
+			data: jsonToBuffer(data),
+			contentType: "application/json",
+			error: null,
+			varsDelta: Buffer.alloc(0),
+			logs: [],
+			metrics: { durationMs: 1, cpuMs: 0, memoryBytes: "0", requestBytes: "0", responseBytes: "0" },
+		};
+	}
+
+	function newAdapter(overrides: Partial<GrpcAdapterConfig> = {}): GrpcRuntimeAdapter {
+		const created = new GrpcRuntimeAdapter(makeAdapterConfig(blobMock.port, overrides));
+		adapters.push(created);
+		return created;
+	}
+
+	function bigCtx(): Context {
+		return makeCtx({ config: { echo: { inputs: BIG_INPUTS } } as unknown as Context["config"] });
+	}
+
+	beforeAll(async () => {
+		blobMock = await startMockServer({
+			executeImpl: (req) => {
+				seen = req;
+				return okResponse(sidecarResolve(req.inputs));
+			},
+			executeStreamImpl: (req) => {
+				seen = req;
+				return [{ event: "final", final: okResponse(sidecarResolve(req.inputs)) }];
+			},
+			listNodesImpl: () => ({
+				nodes: [],
+				sdkName: "blok-test",
+				sdkVersion: "1.0.0",
+				protoVersion: "1.0.0",
+				capabilities,
+			}),
+		});
+	});
+
+	afterAll(async () => {
+		await blobMock.stop();
+	});
+
+	beforeEach(() => {
+		seen = null;
+		adapters = [];
+		capabilities = ["blob-v1"];
+		replyMode = "echo";
+		blobDir = mkdtempSync(path.join(tmpdir(), "blok-blob-adapter-"));
+		vi.stubEnv("BLOK_BLOB_DIR", blobDir);
+		vi.stubEnv("BLOK_BLOB_THRESHOLD_BYTES", "512");
+		_resetBlobStoreForTests();
+	});
+
+	afterEach(() => {
+		for (const a of adapters) a.close();
+		vi.unstubAllEnvs();
+		_resetBlobStoreForTests();
+		rmSync(blobDir, { recursive: true, force: true });
+	});
+
+	it("replaces oversized inputs with a sentinel and the node still receives the full payload", async () => {
+		const result = await newAdapter().execute(makeNode(), bigCtx());
+
+		expect(result.success).toBe(true);
+		// Full fidelity across the claim-check — the node saw the real inputs.
+		expect(result.data).toEqual(BIG_INPUTS);
+
+		const onWire = bufferToJson(seen?.inputs) as { $blokBlob?: { id: string; bytes: number; codec: string } };
+		expect(onWire.$blokBlob).toBeDefined();
+		expect(onWire.$blokBlob?.codec).toBe("json");
+		expect(onWire.$blokBlob?.bytes).toBe(JSON.stringify(BIG_INPUTS).length);
+		// The whole point: what actually crossed the wire is now tiny.
+		expect(seen?.inputs.length).toBeLessThan(200);
+	});
+
+	it("carries a payload the Phase 1 guard would otherwise refuse", async () => {
+		// 4 KiB channel limit vs a ~64 KiB payload. Capable runtime → it goes
+		// through and the node sees every byte; the identical call to a runtime
+		// that does NOT advertise `blob-v1` still fails fast with the named error.
+		replyMode = "digest";
+		const capable = await newAdapter({ maxMessageBytes: 4096 }).execute(makeNode(), bigCtx());
+		expect(capable.success).toBe(true);
+		expect(capable.data).toEqual({ resolvedBytes: JSON.stringify(BIG_INPUTS).length });
+
+		capabilities = [];
+		const incapable = await newAdapter({ maxMessageBytes: 4096 }).execute(makeNode(), bigCtx());
+		expect(incapable.success).toBe(false);
+		expect((incapable.errors as BlokError).errorCode).toBe("GRPC_REQUEST_TOO_LARGE");
+	});
+
+	it("sends inline when the runtime does not advertise blob-v1", async () => {
+		capabilities = ["something-else"];
+		const result = await newAdapter().execute(makeNode(), bigCtx());
+
+		expect(result.success).toBe(true);
+		expect(bufferToJson(seen?.inputs)).toEqual(BIG_INPUTS);
+	});
+
+	it("sends inline when BLOK_BLOB_DIR is unset — the path is opt-in", async () => {
+		vi.stubEnv("BLOK_BLOB_DIR", undefined);
+		_resetBlobStoreForTests();
+
+		const result = await newAdapter().execute(makeNode(), bigCtx());
+
+		expect(result.success).toBe(true);
+		expect(bufferToJson(seen?.inputs)).toEqual(BIG_INPUTS);
+	});
+
+	it("sends inline when inputs are under the threshold", async () => {
+		const result = await newAdapter().execute(makeNode(), makeCtx());
+
+		expect(result.success).toBe(true);
+		expect(bufferToJson(seen?.inputs)).toEqual({ msg: "ping" });
+		expect(existsSync(path.join(blobDir, "run_xyz"))).toBe(false);
+	});
+
+	it("deletes the blob once the RPC settles, so disk is bounded by in-flight calls", async () => {
+		await newAdapter().execute(makeNode(), bigCtx());
+
+		const onWire = bufferToJson(seen?.inputs) as { $blokBlob: { id: string } };
+		expect(existsSync(path.join(blobDir, onWire.$blokBlob.id))).toBe(false);
+	});
+
+	it("offloads on the streaming path too, once the capability is known", async () => {
+		const streaming = newAdapter();
+		const drain = async (ctx: Context) => {
+			const { events, result } = streaming.executeStream(makeNode(), ctx);
+			for await (const _event of events) {
+				/* drain */
+			}
+			return result;
+		};
+
+		// `executeStream()` has no `await` to probe on, so it reads the memoized
+		// answer. The first oversized streaming call therefore goes inline and
+		// kicks the probe off — documented behaviour, asserted here so a change
+		// to it is deliberate.
+		const first = await drain(bigCtx());
+		expect(first.success).toBe(true);
+		expect(bufferToJson(seen?.inputs)).toEqual(BIG_INPUTS);
+
+		const second = await drain(bigCtx());
+		expect(second.success).toBe(true);
+		expect(second.data).toEqual(BIG_INPUTS);
+		const onWire = bufferToJson(seen?.inputs) as { $blokBlob: { id: string } };
+		expect(onWire.$blokBlob).toBeDefined();
+		expect(existsSync(path.join(blobDir, onWire.$blokBlob.id))).toBe(false);
 	});
 });

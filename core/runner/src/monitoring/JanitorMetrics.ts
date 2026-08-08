@@ -15,7 +15,8 @@
 import { metrics } from "@opentelemetry/api";
 
 interface JanitorAttributes {
-	table: "idempotency_cache" | "concurrency_locks" | "scheduled_dispatches";
+	/** `blobs` is the filesystem claim-check store (ADR 0014), not a SQL table. */
+	table: "idempotency_cache" | "concurrency_locks" | "scheduled_dispatches" | "blobs";
 }
 
 export class JanitorMetrics {

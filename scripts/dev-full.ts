@@ -452,6 +452,11 @@ async function main() {
 	console.log(`${TRIGGER_COLOR} Blok dev orchestrator — gRPC by default (Phase 6)${COLOR_RESET}`);
 	console.log(`${TRIGGER_COLOR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}`);
 
+	// ADR 0014 — the claim-check directory the runner and every sidecar share.
+	// Every child below inherits `process.env`, so setting it here is all the
+	// wiring dev needs; in K8s the Helm chart mounts one emptyDir instead.
+	process.env.BLOK_BLOB_DIR ||= path.join(REPO_ROOT, ".blok/blobs");
+
 	// Pick which profiles to run.
 	const selected = ALL_PROFILES.filter((p) => {
 		if (ONLY_KINDS && !ONLY_KINDS.has(p.id)) return false;

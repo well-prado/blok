@@ -267,6 +267,18 @@ message ListNodesResponse {
   string sdk_name      = 2;          // "blok-python3"
   string sdk_version   = 3;
   string proto_version = 4;          // "1.0.0"
+
+  // Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+  // an SDK that leaves it empty is assumed to support only the base contract,
+  // and the runner degrades accordingly — never a hard failure.
+  //
+  // Known values:
+  //   "blob-v1" — the SDK resolves a claim-check sentinel
+  //               {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+  //               `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+  //               Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+  //               the runner sends refs solely to runtimes that claim it.
+  repeated string capabilities = 5;
 }
 
 message NodeDescriptor {

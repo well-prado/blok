@@ -20,6 +20,7 @@ from blok.server.grpc_server import (
     _encode_execute_response,
     _encode_json_bytes,
     _internal_error_to_proto,
+    _resolve_input_blob,
 )
 from blok.types.execution_result import ExecutionMetrics, ExecutionResult
 
@@ -258,3 +259,83 @@ class TestInternalErrorToProto:
     def test_unknown_type_falls_back_to_str(self):
         err = _internal_error_to_proto(42, node_name="n", sdk_version="v")
         assert err.message == "42"
+
+
+# =============================================================================
+# ADR 0014 — claim-check ($blokBlob) resolution
+# =============================================================================
+
+
+class TestResolveInputBlob:
+    """The runner replaces oversized ``inputs`` with a sentinel; we read it back.
+
+    These cover the trust boundary: the id arrives over the wire, so anything
+    that could escape ``BLOK_BLOB_DIR`` must be refused before we open a file.
+    """
+
+    def _write(self, root, run_id, payload):
+        run_dir = root / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "blob.json").write_text(json.dumps(payload))
+        return {
+            "$blokBlob": {
+                "id": f"{run_id}/blob.json",
+                "bytes": len(json.dumps(payload)),
+                "codec": "json",
+            }
+        }
+
+    def test_resolves_sentinel_to_the_referenced_payload(self, tmp_path, monkeypatch):
+        payload = {"symbols": [{"name": f"s{i}"} for i in range(500)]}
+        ref = self._write(tmp_path, "run_1", payload)
+        monkeypatch.setenv("BLOK_BLOB_DIR", str(tmp_path))
+
+        assert _resolve_input_blob(ref) == payload
+
+    def test_end_to_end_through_decode_execute_request(self, tmp_path, monkeypatch):
+        payload = {"big": "x" * 4096}
+        ref = self._write(tmp_path, "run_2", payload)
+        monkeypatch.setenv("BLOK_BLOB_DIR", str(tmp_path))
+
+        req = pb.ExecuteRequest(
+            node=pb.NodeRef(name="n", type="runtime.python3", version=""),
+            inputs=_encode_json_bytes(ref),
+            step=pb.StepInfo(name="n", index=0, total=1, depth=0),
+            trigger=pb.TriggerInfo(),
+            state=pb.RuntimeState(),
+            workflow=pb.WorkflowInfo(run_id="run_2"),
+            options=pb.ExecuteOptions(),
+        )
+
+        decoded = _decode_execute_request(req)
+        assert decoded.node.config == payload
+
+    def test_ordinary_inputs_pass_through_untouched(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("BLOK_BLOB_DIR", str(tmp_path))
+        assert _resolve_input_blob({"msg": "ping"}) == {"msg": "ping"}
+        # A sentinel-shaped key alongside real fields is NOT a claim-check.
+        mixed = {"$blokBlob": {"id": "a/b"}, "other": 1}
+        assert _resolve_input_blob(mixed) == mixed
+
+    def test_refuses_a_ref_when_blob_dir_is_not_configured(self, tmp_path, monkeypatch):
+        ref = self._write(tmp_path, "run_3", {"a": 1})
+        monkeypatch.delenv("BLOK_BLOB_DIR", raising=False)
+
+        with pytest.raises(_DecodeError, match="BLOK_BLOB_DIR"):
+            _resolve_input_blob(ref)
+
+    @pytest.mark.parametrize(
+        "blob_id",
+        ["../../etc/passwd", "run_1/../../etc/passwd", "/etc/passwd", "passwd", ".ssh/id_rsa", 42, None],
+    )
+    def test_refuses_ids_that_could_escape_the_blob_dir(self, blob_id, tmp_path, monkeypatch):
+        monkeypatch.setenv("BLOK_BLOB_DIR", str(tmp_path))
+
+        with pytest.raises(_DecodeError, match="invalid \\$blokBlob id"):
+            _resolve_input_blob({"$blokBlob": {"id": blob_id, "bytes": 1, "codec": "json"}})
+
+    def test_reports_a_missing_blob_instead_of_crashing(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("BLOK_BLOB_DIR", str(tmp_path))
+
+        with pytest.raises(_DecodeError, match="cannot read blob"):
+            _resolve_input_blob({"$blokBlob": {"id": "run_x/gone.json", "bytes": 1, "codec": "json"}})

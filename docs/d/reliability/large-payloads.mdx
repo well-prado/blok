@@ -50,12 +50,58 @@ a per-blob byte breakdown — instead of the opaque `RESOURCE_EXHAUSTED` the
 sidecar would otherwise raise mid-flight. Read the breakdown to see which of
 the four blobs is the offender.
 
+This guard runs **after** the claim-check offload below, so it only fires on
+data that really is crossing the wire inline.
+
+## Automatic claim-check (`BLOK_BLOB_DIR`)
+
+Rather than restructure a pipeline around the limit, you can let the runner do
+the claim-check for you. Point `BLOK_BLOB_DIR` at a directory the runner **and
+the sidecar both see** and oversized step inputs stop travelling inline:
+
+- Inputs larger than `BLOK_BLOB_THRESHOLD_BYTES` (default 1 MiB) are written to
+  that directory, and the message carries a small reference instead —
+  `{"$blokBlob": {"id": …, "bytes": …, "codec": "json"}}`.
+- The sidecar reads the file and hands the node its **real** inputs. Node code
+  is unchanged; it never sees a reference.
+- The blob is deleted as soon as the call finishes, so disk use tracks
+  concurrent oversized calls, not run history. The janitor sweeps anything a
+  crashed runner left behind after `BLOK_BLOB_RETENTION_MS` (default 1 h).
+
+<Note>
+The runner sends a reference **only** to a runtime that advertises the
+`blob-v1` capability on `ListNodes`, which an SDK does exactly when its own
+`BLOK_BLOB_DIR` is set. A runtime that doesn't advertise it keeps receiving
+inline data and the fail-fast error above — so a half-configured deployment
+degrades loudly instead of handing a node a reference it can't read.
+</Note>
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BLOK_BLOB_DIR` | *(unset — feature off)* | Shared directory. Set it on the runner **and** every sidecar. |
+| `BLOK_BLOB_THRESHOLD_BYTES` | 1 MiB | Inputs above this are offloaded. |
+| `BLOK_BLOB_RETENTION_MS` | 1 hour | How long the janitor keeps orphaned blobs. |
+
+**Where the directory comes from.** Same host in dev (`bun scripts/dev-full.ts`
+sets `.blok/blobs` for every process it spawns). In Kubernetes, set
+`blobStore.enabled=true` in the Helm chart — it mounts one shared `emptyDir`
+into the runner and every runtime sidecar in the pod and sets `BLOK_BLOB_DIR`
+on all of them. A runtime on a **different host** has no shared filesystem, so
+it simply won't advertise the capability; use the manual mitigations below.
+
+<Warning>
+Support is per SDK. `runtime.python3` resolves `$blokBlob` references today;
+the other six SDKs advertise nothing yet and keep receiving inline data.
+Only the **request** direction is offloaded — a node's *return value* still
+travels inline and is still bounded by the message limit.
+</Warning>
+
 ## Staying under the limit
 
 1. **Don't inline bulk data.** Pass a **reference** (an id, an object-store
    key, a file path both sides can reach) and have the node fetch the bytes
-   itself — the claim-check pattern. This is the structural fix for genuinely
-   large data.
+   itself — the claim-check pattern. `BLOK_BLOB_DIR` above automates this for
+   step inputs; do it by hand when your runtime can't use it.
 2. **Keep bulk values out of accumulated state.** Mark steps whose large
    output isn't needed downstream as `ephemeral: true` so they never enter
    `ctx.state` and stop re-shipping on later calls. To drop the accumulated
