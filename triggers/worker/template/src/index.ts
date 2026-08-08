@@ -1,6 +1,20 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import WorkerServer from "./runner/WorkerServer.js";
+
+// #721 — see triggers/http/src/index.ts for why this compares realpath'd
+// paths instead of `import.meta.main` (Node only unflagged it in v22.18.0;
+// this template ships to scaffolded projects with engines >=18).
+function isMainModule(moduleUrl: string): boolean {
+	if (!process.argv[1]) return false;
+	try {
+		return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(process.argv[1]);
+	} catch {
+		return false;
+	}
+}
 
 export default class App {
 	private workerServer: WorkerServer = <WorkerServer>{};
@@ -36,6 +50,6 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }

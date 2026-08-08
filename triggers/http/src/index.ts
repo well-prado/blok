@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { DefaultLogger } from "@blokjs/runner";
 import McpTrigger from "@blokjs/trigger-mcp";
 import SSETrigger from "@blokjs/trigger-sse";
@@ -6,6 +8,24 @@ import WebSocketTrigger from "@blokjs/trigger-websocket";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import HttpTrigger, { type AppBindings } from "./runner/HttpTrigger.js";
+
+// #721 — `import.meta.main` alone isn't enough: Bun always has it, but Node
+// only unflagged it in v22.18.0 (see nodejs/node#57804), and this package's
+// own `engines` floor is Node >=18 (it ships as scaffolded-project source,
+// compiled and run under whatever Node the end user has). So the guard
+// compares realpath'd `process.argv[1]` against this module's own path
+// instead — works identically under Bun and every Node version, and
+// realpath on both sides means a `bin` symlink or a spawn through a
+// different path (e.g. `blokctl dev`'s `bun run <path>`) still resolves to
+// the same file.
+function isMainModule(moduleUrl: string): boolean {
+	if (!process.argv[1]) return false;
+	try {
+		return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(process.argv[1]);
+	} catch {
+		return false;
+	}
+}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
@@ -81,6 +101,6 @@ export default class App {
 	}
 }
 
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }

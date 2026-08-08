@@ -29,9 +29,20 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PUBLISHABLE } from "./release";
+import { PUBLISHABLE, type Publishable } from "./release";
 
 const ROOT = join(import.meta.dir, "..");
+
+/**
+ * Non-published packages that still need source-import safety. `trigger-http`
+ * is `private: true` (its `src/index.ts` is the scaffold's app entry, not an
+ * npm library export) so it's deliberately absent from PUBLISHABLE — adding
+ * it there would make release.ts try to `npm publish` a private package.
+ * #721 fixed its import-time side effect (it booted a real HTTP server as a
+ * side effect of being imported, which is why PR #720 had to exclude it from
+ * this gate); this list is what proves the fix and guards the regression.
+ */
+const EXTRA_SOURCE_CHECKS: readonly Publishable[] = [{ dir: "triggers/http", name: "@blokjs/trigger-http" }];
 
 interface PackageJson {
 	bin?: string | Record<string, string>;
@@ -59,7 +70,7 @@ async function main(): Promise<void> {
 	let checked = 0;
 	let skipped = 0;
 
-	for (const { dir, name } of PUBLISHABLE) {
+	for (const { dir, name } of [...PUBLISHABLE, ...EXTRA_SOURCE_CHECKS]) {
 		// A bin package's entry RUNS on import (commander parses argv, may
 		// call process.exit) — same reasoning as check-packed-exports.ts's
 		// bin handling. Importing it proves nothing about the export shapes
