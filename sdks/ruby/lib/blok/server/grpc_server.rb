@@ -27,6 +27,28 @@ module Blok
     # The proto sends +inputs+, +previous_output+, +vars+, and the request
     # +body+ as raw JSON-encoded +bytes+. The SDK JSON-decodes them lazily.
     class BlokNodeRuntimeService < ::Blok::Runtime::V1::NodeRuntime::Service
+      # ===== ADR 0014 — claim-check ("blob") support =====
+      #
+      # When +BLOK_BLOB_DIR+ names a directory this process shares with the
+      # runner (same host in dev; a shared +emptyDir+ in the Helm chart), the
+      # runner may replace an oversized +inputs+ payload with a small JSON
+      # sentinel:
+      #
+      #   {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+      #                  "codec": "json"}}
+      #
+      # and we read the real payload from <tt><BLOK_BLOB_DIR>/<id></tt>. That is
+      # the only way data larger than the gRPC max message size can reach a
+      # node, since a unary message is fully buffered on both ends. We advertise
+      # the capability on +ListNodes+ so the runner only ever sends a sentinel to
+      # a process that can resolve it.
+      BLOB_CAPABILITY = "blob-v1"
+
+      # Two path segments, neither starting with a dot. The dot rule is what
+      # rejects +..+ — without it a wire-supplied id turns the read below into an
+      # arbitrary-file read.
+      BLOB_ID = %r{\A[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*\z}
+
       def initialize(registry, sdk_version: "1.0.0")
         super()
         @registry = registry
@@ -95,11 +117,61 @@ module Blok
           nodes: descriptors,
           sdk_name: "blok-ruby",
           sdk_version: @sdk_version,
-          proto_version: "1.0.0"
+          proto_version: "1.0.0",
+          # ADR 0014 — only claim `blob-v1` when BLOK_BLOB_DIR is set, so the
+          # runner's capability gate keeps sending inline to a half-configured
+          # deployment.
+          capabilities: blob_capabilities
         )
       end
 
       private
+
+      # The shared claim-check directory, or nil when the feature is off.
+      def blob_dir
+        dir = ENV["BLOK_BLOB_DIR"]
+        dir.nil? || dir.empty? ? nil : dir
+      end
+
+      # What ListNodes advertises. The runner sends refs solely to runtimes that
+      # advertise +blob-v1+, and falls back to inlining (plus its fail-fast
+      # GRPC_REQUEST_TOO_LARGE guard) for everyone else.
+      def blob_capabilities
+        blob_dir.nil? ? [] : [BLOB_CAPABILITY]
+      end
+
+      # Swap a claim-check sentinel for the payload it references. Anything that
+      # is not a sentinel passes through untouched, so this is a no-op for every
+      # ordinary call.
+      def resolve_input_blob(inputs)
+        ref = inputs.size == 1 ? inputs["$blokBlob"] : nil
+        return inputs unless ref.is_a?(Hash)
+
+        root = blob_dir
+        if root.nil?
+          raise DecodeError, "received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set " \
+                             "on this runtime — set it to the same shared directory as the runner"
+        end
+
+        id = ref["id"]
+        raise DecodeError, "invalid $blokBlob id: #{id.inspect}" unless id.is_a?(String) && BLOB_ID.match?(id)
+
+        begin
+          raw = File.binread(File.join(root, id))
+        rescue SystemCallError => e
+          raise DecodeError, "cannot read blob `#{id}` under BLOK_BLOB_DIR: #{e.message}"
+        end
+
+        begin
+          value = JSON.parse(raw)
+        rescue JSON::ParserError => e
+          raise DecodeError, "invalid JSON in blob `#{id}`: #{e.message}"
+        end
+
+        # Mirror decode_json_object's non-object handling so node code sees the
+        # same shape whether or not the payload took the claim-check path.
+        value.is_a?(Hash) ? value : { "_value" => value }
+      end
 
       # Build a +Google::Protobuf::Timestamp+ for "now". Used by streaming
       # frames to mark call acceptance.
@@ -115,7 +187,9 @@ module Blok
       def decode_execute_request(req)
         raise DecodeError, "ExecuteRequest.node is required" if req.node.nil? || req.node.name.empty?
 
-        inputs = decode_json_object(req.inputs, "inputs")
+        # ADR 0014 — resolve a claim-check ref before anything downstream (schema
+        # validation, the node body) ever sees it. Non-sentinel inputs pass through.
+        inputs = resolve_input_blob(decode_json_object(req.inputs, "inputs"))
         state = req.state || ::Blok::Runtime::V1::RuntimeState.new
         trigger = req.trigger || ::Blok::Runtime::V1::TriggerInfo.new
         workflow = req.workflow || ::Blok::Runtime::V1::WorkflowInfo.new

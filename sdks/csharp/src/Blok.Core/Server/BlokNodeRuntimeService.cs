@@ -122,6 +122,10 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
             SdkVersion = _sdkVersion,
             ProtoVersion = "1.0.0",
         };
+        // ADR 0014 — only claim `blob-v1` when BLOK_BLOB_DIR is set, so the
+        // runner's capability gate keeps sending inline to a half-configured
+        // deployment.
+        response.Capabilities.AddRange(BlobCapabilities());
         foreach (var name in _registry.NodeNames())
         {
             var descriptor = new NodeDescriptor { Name = name, Description = "" };
@@ -141,10 +145,109 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
     }
 
     // =========================================================================
+    // ADR 0014 — claim-check ("blob") support
+    // =========================================================================
+    //
+    // When BLOK_BLOB_DIR names a directory this process shares with the runner
+    // (same host in dev; a shared emptyDir in the Helm chart), the runner may
+    // replace an oversized `inputs` payload with a small JSON sentinel:
+    //
+    //   {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+    //                  "codec": "json"}}
+    //
+    // and we read the real payload from <BLOK_BLOB_DIR>/<id>. That is the only
+    // way data larger than the gRPC max message size can reach a node, since a
+    // unary message is fully buffered on both ends. We advertise the capability
+    // on ListNodes so the runner only ever sends a sentinel to a process that
+    // can resolve it.
+
+    public const string BlobCapability = "blob-v1";
+
+    /// <summary>
+    /// Two path segments, neither starting with a dot. The dot rule is what
+    /// rejects <c>..</c> — without it a wire-supplied id turns the read below
+    /// into an arbitrary-file read.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex BlobId =
+        new(@"^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The shared claim-check directory, or <c>null</c> when the feature is off.</summary>
+    public static string? BlobDir()
+    {
+        var dir = Environment.GetEnvironmentVariable("BLOK_BLOB_DIR");
+        return string.IsNullOrEmpty(dir) ? null : dir;
+    }
+
+    /// <summary>
+    /// What ListNodes advertises: <c>blob-v1</c> only when we can actually reach
+    /// the shared directory. The runner sends refs solely to runtimes that
+    /// advertise it, and falls back to inlining (plus its fail-fast
+    /// GRPC_REQUEST_TOO_LARGE guard) for everyone else.
+    /// </summary>
+    public static string[] BlobCapabilities()
+        => BlobDir() is null ? Array.Empty<string>() : new[] { BlobCapability };
+
+    /// <summary>
+    /// Swap a claim-check sentinel for the payload it references. Anything that
+    /// is not a sentinel passes through untouched, so this is a no-op for every
+    /// ordinary call.
+    /// </summary>
+    public static Dictionary<string, JsonElement> ResolveInputBlob(Dictionary<string, JsonElement> inputs)
+    {
+        if (inputs.Count != 1) return inputs;
+        if (!inputs.TryGetValue("$blokBlob", out var refElement) || refElement.ValueKind != JsonValueKind.Object)
+        {
+            return inputs;
+        }
+
+        var root = BlobDir()
+            ?? throw new DecodeException(
+                "received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set "
+                + "on this runtime — set it to the same shared directory as the runner");
+
+        var hasId = refElement.TryGetProperty("id", out var idElement);
+        var id = hasId && idElement.ValueKind == JsonValueKind.String ? idElement.GetString() : null;
+        if (id is null || !BlobId.IsMatch(id))
+        {
+            throw new DecodeException($"invalid $blokBlob id: {(hasId ? idElement.ToString() : "null")}");
+        }
+
+        string raw;
+        try
+        {
+            raw = File.ReadAllText(Path.Combine(root, id));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            throw new DecodeException($"cannot read blob `{id}` under BLOK_BLOB_DIR: {ex.Message}");
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var payload = doc.RootElement;
+            if (payload.ValueKind == JsonValueKind.Object)
+            {
+                var map = new Dictionary<string, JsonElement>();
+                foreach (var prop in payload.EnumerateObject()) map[prop.Name] = prop.Value.Clone();
+                return map;
+            }
+            // Mirror DecodeJsonObject's non-object handling so node code sees the
+            // same shape whether or not the payload took the claim-check path.
+            return new Dictionary<string, JsonElement> { ["_value"] = payload.Clone() };
+        }
+        catch (JsonException ex)
+        {
+            throw new DecodeException($"invalid JSON in blob `{id}`: {ex.Message}");
+        }
+    }
+
+    // =========================================================================
     // Codec — proto ↔ internal types
     // =========================================================================
 
-    private sealed class DecodeException : Exception
+    public sealed class DecodeException : Exception
     {
         public DecodeException(string message) : base(message) { }
     }
@@ -156,7 +259,9 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
             throw new DecodeException("ExecuteRequest.node is required");
         }
 
-        var inputsConfig = DecodeJsonObject(req.Inputs, "inputs");
+        // ADR 0014 — resolve a claim-check ref before anything downstream (schema
+        // validation, the node body) ever sees it. Non-sentinel inputs pass through.
+        var inputsConfig = ResolveInputBlob(DecodeJsonObject(req.Inputs, "inputs"));
         var previousOutput = DecodeJsonValue(req.State?.PreviousOutput ?? ByteString.Empty, "previous_output");
         var vars = DecodeJsonValueObject(req.State?.Vars ?? ByteString.Empty, "vars");
         var bodyElement = DecodeRequestBody(req.Trigger?.Body ?? ByteString.Empty, req.Trigger?.Headers);

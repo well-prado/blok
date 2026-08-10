@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -470,5 +472,146 @@ func TestExecuteStreamRealTimeEmitsLogBeforeFinal(t *testing.T) {
 	// would yield logLag ≥ 300 ms (handler sleep duration).
 	if logLag > 200*time.Millisecond {
 		t.Fatalf("first log arrived %v after start (expected <200ms; buffered model would be ≥300ms)", logLag)
+	}
+}
+
+// =============================================================================
+// ADR 0014 — claim-check ($blokBlob) resolution
+// =============================================================================
+//
+// The runner replaces oversized `inputs` with a sentinel; we read it back.
+// These cover the trust boundary: the id arrives over the wire, so anything
+// that could escape BLOK_BLOB_DIR must be refused before we open a file.
+
+func writeTestBlob(t *testing.T, root, runID string, payload interface{}) map[string]interface{} {
+	t.Helper()
+	runDir := filepath.Join(root, runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	blob := encodeJSONBytes(payload)
+	if err := os.WriteFile(filepath.Join(runDir, "blob.json"), blob, 0o644); err != nil {
+		t.Fatalf("write blob: %v", err)
+	}
+	return map[string]interface{}{
+		"$blokBlob": map[string]interface{}{
+			"id":    runID + "/blob.json",
+			"bytes": float64(len(blob)),
+			"codec": "json",
+		},
+	}
+}
+
+func TestResolveInputBlobResolvesSentinelToPayload(t *testing.T) {
+	dir := t.TempDir()
+	payload := map[string]interface{}{"symbols": []interface{}{"a", "b"}}
+	ref := writeTestBlob(t, dir, "run_1", payload)
+	t.Setenv("BLOK_BLOB_DIR", dir)
+
+	got, err := resolveInputBlob(ref)
+	if err != nil {
+		t.Fatalf("resolveInputBlob: %v", err)
+	}
+	want, _ := json.Marshal(payload)
+	gotJSON, _ := json.Marshal(got)
+	if string(gotJSON) != string(want) {
+		t.Errorf("expected %s, got %s", want, gotJSON)
+	}
+}
+
+func TestResolveInputBlobEndToEndThroughDecodeExecuteRequest(t *testing.T) {
+	dir := t.TempDir()
+	payload := map[string]interface{}{"big": strings.Repeat("x", 4096)}
+	ref := writeTestBlob(t, dir, "run_2", payload)
+	t.Setenv("BLOK_BLOB_DIR", dir)
+
+	exec, err := decodeExecuteRequest(makeRequest("echo", ref, nil))
+	if err != nil {
+		t.Fatalf("decodeExecuteRequest: %v", err)
+	}
+	if exec.Node.Config["big"] != payload["big"] {
+		t.Errorf("expected the blob payload to reach node config, got %v", exec.Node.Config)
+	}
+}
+
+func TestResolveInputBlobPassesOrdinaryInputsThrough(t *testing.T) {
+	t.Setenv("BLOK_BLOB_DIR", t.TempDir())
+
+	plain := map[string]interface{}{"msg": "ping"}
+	got, err := resolveInputBlob(plain)
+	if err != nil || got["msg"] != "ping" {
+		t.Errorf("expected passthrough, got %v (%v)", got, err)
+	}
+
+	// A sentinel-shaped key alongside real fields is NOT a claim-check.
+	mixed := map[string]interface{}{"$blokBlob": map[string]interface{}{"id": "a/b"}, "other": float64(1)}
+	got, err = resolveInputBlob(mixed)
+	if err != nil || len(got) != 2 {
+		t.Errorf("expected mixed inputs untouched, got %v (%v)", got, err)
+	}
+}
+
+func TestResolveInputBlobRefusesRefWhenBlobDirUnset(t *testing.T) {
+	dir := t.TempDir()
+	ref := writeTestBlob(t, dir, "run_3", map[string]interface{}{"a": float64(1)})
+	t.Setenv("BLOK_BLOB_DIR", "")
+
+	_, err := resolveInputBlob(ref)
+	if err == nil || !strings.Contains(err.Error(), "BLOK_BLOB_DIR") {
+		t.Errorf("expected a BLOK_BLOB_DIR error, got %v", err)
+	}
+}
+
+func TestResolveInputBlobRefusesIdsThatCouldEscapeTheBlobDir(t *testing.T) {
+	t.Setenv("BLOK_BLOB_DIR", t.TempDir())
+
+	for _, id := range []interface{}{
+		"../../etc/passwd", "run_1/../../etc/passwd", "/etc/passwd", "passwd",
+		".ssh/id_rsa", float64(42), nil,
+	} {
+		_, err := resolveInputBlob(map[string]interface{}{
+			"$blokBlob": map[string]interface{}{"id": id, "bytes": float64(1), "codec": "json"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid $blokBlob id") {
+			t.Errorf("id %v: expected rejection, got %v", id, err)
+		}
+	}
+}
+
+func TestResolveInputBlobReportsMissingBlob(t *testing.T) {
+	t.Setenv("BLOK_BLOB_DIR", t.TempDir())
+
+	_, err := resolveInputBlob(map[string]interface{}{
+		"$blokBlob": map[string]interface{}{"id": "run_x/gone.json", "bytes": float64(1), "codec": "json"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot read blob") {
+		t.Errorf("expected a missing-blob error, got %v", err)
+	}
+}
+
+// The runner sends a claim-check ref ONLY to a runtime that says it can resolve
+// one, so this advertisement is the whole capability gate.
+func TestListNodesAdvertisesBlobCapabilityOnlyWhenConfigured(t *testing.T) {
+	_, addr, stop := startTestServer(t)
+	defer stop()
+	client, closeClient := dialTestClient(t, addr)
+	defer closeClient()
+
+	t.Setenv("BLOK_BLOB_DIR", "")
+	resp, err := client.ListNodes(context.Background(), &pb.ListNodesRequest{})
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(resp.Capabilities) != 0 {
+		t.Errorf("expected no capabilities without BLOK_BLOB_DIR, got %v", resp.Capabilities)
+	}
+
+	t.Setenv("BLOK_BLOB_DIR", "/tmp/blok-blobs")
+	resp, err = client.ListNodes(context.Background(), &pb.ListNodesRequest{})
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(resp.Capabilities) != 1 || resp.Capabilities[0] != "blob-v1" {
+		t.Errorf("expected [blob-v1], got %v", resp.Capabilities)
 	}
 }

@@ -635,6 +635,30 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 		});
 	});
 
+	describe("listCapabilities()", () => {
+		it("reports the advertised capabilities, and [] when absent or unreachable", async () => {
+			listNodesOverride = () => ({
+				nodes: [],
+				sdkName: "blok-test",
+				sdkVersion: "1.0.0",
+				protoVersion: "1.0.0",
+				capabilities: ["blob-v1"],
+			});
+			await expect(adapter.listCapabilities()).resolves.toEqual(["blob-v1"]);
+
+			listNodesOverride = () => ({ nodes: [], sdkName: "blok-test", sdkVersion: "1.0.0", protoVersion: "1.0.0" });
+			await expect(adapter.listCapabilities()).resolves.toEqual([]);
+
+			listNodesOverride = () =>
+				Object.assign(new Error("unreachable"), {
+					code: GrpcStatus.UNAVAILABLE,
+					details: "runtime down",
+					metadata: new Metadata(),
+				}) as unknown as Error;
+			await expect(adapter.listCapabilities()).resolves.toEqual([]);
+		});
+	});
+
 	describe("misconfigured adapter", () => {
 		it("execute() returns a DEPENDENCY error when the host is unreachable", async () => {
 			const isolated = new GrpcRuntimeAdapter(makeAdapterConfig(1, { defaultDeadlineMs: 500 }));

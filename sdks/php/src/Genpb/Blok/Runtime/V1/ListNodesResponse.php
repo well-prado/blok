@@ -34,6 +34,20 @@ class ListNodesResponse extends \Google\Protobuf\Internal\Message
      * Generated from protobuf field <code>string proto_version = 4;</code>
      */
     protected $proto_version = '';
+    /**
+     * Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+     * an SDK that leaves it empty is assumed to support only the base contract,
+     * and the runner degrades accordingly — never a hard failure.
+     * Known values:
+     *   "blob-v1" — the SDK resolves a claim-check sentinel
+     *               {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+     *               `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+     *               Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+     *               the runner sends refs solely to runtimes that claim it.
+     *
+     * Generated from protobuf field <code>repeated string capabilities = 5;</code>
+     */
+    private $capabilities;
 
     /**
      * Constructor.
@@ -47,6 +61,16 @@ class ListNodesResponse extends \Google\Protobuf\Internal\Message
      *     @type string $sdk_version
      *     @type string $proto_version
      *           "1.0.0"
+     *     @type string[] $capabilities
+     *           Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+     *           an SDK that leaves it empty is assumed to support only the base contract,
+     *           and the runner degrades accordingly — never a hard failure.
+     *           Known values:
+     *             "blob-v1" — the SDK resolves a claim-check sentinel
+     *                         {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+     *                         `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+     *                         Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+     *                         the runner sends refs solely to runtimes that claim it.
      * }
      */
     public function __construct($data = NULL) {
@@ -146,6 +170,48 @@ class ListNodesResponse extends \Google\Protobuf\Internal\Message
     {
         GPBUtil::checkString($var, true);
         $this->proto_version = $var;
+
+        return $this;
+    }
+
+    /**
+     * Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+     * an SDK that leaves it empty is assumed to support only the base contract,
+     * and the runner degrades accordingly — never a hard failure.
+     * Known values:
+     *   "blob-v1" — the SDK resolves a claim-check sentinel
+     *               {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+     *               `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+     *               Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+     *               the runner sends refs solely to runtimes that claim it.
+     *
+     * Generated from protobuf field <code>repeated string capabilities = 5;</code>
+     * @return RepeatedField<string>
+     */
+    public function getCapabilities()
+    {
+        return $this->capabilities;
+    }
+
+    /**
+     * Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+     * an SDK that leaves it empty is assumed to support only the base contract,
+     * and the runner degrades accordingly — never a hard failure.
+     * Known values:
+     *   "blob-v1" — the SDK resolves a claim-check sentinel
+     *               {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+     *               `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+     *               Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+     *               the runner sends refs solely to runtimes that claim it.
+     *
+     * Generated from protobuf field <code>repeated string capabilities = 5;</code>
+     * @param string[] $var
+     * @return $this
+     */
+    public function setCapabilities(array|RepeatedField $var)
+    {
+        $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::STRING);
+        $this->capabilities = $arr;
 
         return $this;
     }

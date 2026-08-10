@@ -35,10 +35,16 @@
 >    and the Janitor sweep is now purely a crash-safety net — which is why its
 >    default retention is 1 h rather than matching trace retention. Response-
 >    direction refs (deviation 1) would need that default raised.
-> 3. *One SDK, not seven.* `runtime.python3` implements resolve-on-read plus the
->    capability advertisement. The other six advertise nothing, so they transparently
->    keep the pre-Phase-2 behaviour (inline + the Phase 1 guard). The remaining six
->    are a mechanical follow-up: ~30 lines each plus a stub regeneration.
+> 3. ~~*One SDK, not seven.*~~ **Closed 2026-08-10 ([#738](https://github.com/well-prado/blok/issues/738)).**
+>    All seven SDKs now implement resolve-on-read plus the capability
+>    advertisement, each mirroring the `sdks/python3` reference: read the
+>    `{"$blokBlob"}` sentinel out of `inputs` at the proto boundary, re-validate
+>    the wire-supplied id (two segments, neither leading with a dot) before
+>    touching the filesystem, load `<BLOK_BLOB_DIR>/<id>`, and advertise
+>    `blob-v1` on `ListNodes` exactly when `BLOK_BLOB_DIR` is set. Committed
+>    generated stubs were regenerated for the `capabilities` field (go, ruby,
+>    php); rust/java/csharp regenerate at build. Each SDK carries the reference's
+>    six trust-boundary cases in its own test suite.
 
 > **Progress (2026-07-23):** **Phase 1 (fail-fast guard + docs) and Phase 0
 > (payload diet) shipped.**

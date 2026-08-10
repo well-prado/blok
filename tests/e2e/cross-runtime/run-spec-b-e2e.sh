@@ -17,6 +17,14 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+
+# ADR 0014 — everything here runs on one host, so the runner and every SDK
+# process share this directory verbatim. Exporting it before booting means each
+# SDK inherits it, advertises `blob-v1`, and the harness exercises the
+# claim-check leg (it self-skips when BLOK_BLOB_DIR is unset).
+export BLOK_BLOB_DIR="${BLOK_BLOB_DIR:-$ROOT/tests/e2e/cross-runtime/.blobs}"
+mkdir -p "$BLOK_BLOB_DIR"
+
 PIDS=()
 cleanup() {
   echo "--- tearing down servers ---"

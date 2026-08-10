@@ -1432,11 +1432,23 @@ func (*ListNodesRequest) Descriptor() ([]byte, []int) {
 }
 
 type ListNodesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Nodes         []*NodeDescriptor      `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
-	SdkName       string                 `protobuf:"bytes,2,opt,name=sdk_name,json=sdkName,proto3" json:"sdk_name,omitempty"` // "blok-python3"
-	SdkVersion    string                 `protobuf:"bytes,3,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
-	ProtoVersion  string                 `protobuf:"bytes,4,opt,name=proto_version,json=protoVersion,proto3" json:"proto_version,omitempty"` // "1.0.0"
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Nodes        []*NodeDescriptor      `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	SdkName      string                 `protobuf:"bytes,2,opt,name=sdk_name,json=sdkName,proto3" json:"sdk_name,omitempty"` // "blok-python3"
+	SdkVersion   string                 `protobuf:"bytes,3,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
+	ProtoVersion string                 `protobuf:"bytes,4,opt,name=proto_version,json=protoVersion,proto3" json:"proto_version,omitempty"` // "1.0.0"
+	// Optional runtime capabilities this SDK advertises (ADR 0014). Additive:
+	// an SDK that leaves it empty is assumed to support only the base contract,
+	// and the runner degrades accordingly — never a hard failure.
+	//
+	// Known values:
+	//
+	//	"blob-v1" — the SDK resolves a claim-check sentinel
+	//	            {"$blokBlob":{"id","bytes","codec"}} appearing in place of
+	//	            `ExecuteRequest.inputs` by reading `<BLOK_BLOB_DIR>/<id>`.
+	//	            Advertise it ONLY when BLOK_BLOB_DIR is set and readable —
+	//	            the runner sends refs solely to runtimes that claim it.
+	Capabilities  []string `protobuf:"bytes,5,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1497,6 +1509,13 @@ func (x *ListNodesResponse) GetProtoVersion() string {
 		return x.ProtoVersion
 	}
 	return ""
+}
+
+func (x *ListNodesResponse) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
 }
 
 type NodeDescriptor struct {
@@ -1881,13 +1900,14 @@ const file_blok_runtime_v1_runtime_proto_rawDesc = "" +
 	"\tretryable\x18\x11 \x01(\bR\tretryable\x12$\n" +
 	"\x0eretry_after_ms\x18\x12 \x01(\x03R\fretryAfterMs\x12!\n" +
 	"\fdetails_json\x18\x13 \x01(\fR\vdetailsJson\"\x12\n" +
-	"\x10ListNodesRequest\"\xab\x01\n" +
+	"\x10ListNodesRequest\"\xcf\x01\n" +
 	"\x11ListNodesResponse\x125\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x1f.blok.runtime.v1.NodeDescriptorR\x05nodes\x12\x19\n" +
 	"\bsdk_name\x18\x02 \x01(\tR\asdkName\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
 	"sdkVersion\x12#\n" +
-	"\rproto_version\x18\x04 \x01(\tR\fprotoVersion\"\xb4\x01\n" +
+	"\rproto_version\x18\x04 \x01(\tR\fprotoVersion\x12\"\n" +
+	"\fcapabilities\x18\x05 \x03(\tR\fcapabilities\"\xb4\x01\n" +
 	"\x0eNodeDescriptor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12*\n" +

@@ -57,6 +57,17 @@ const WAIT_MS = Number(process.env.BLOK_E2E_WAIT_MS ?? 90_000);
 // flag the docker/CI path sets.
 const CHECK_USERNODES = /^(1|true)$/i.test(process.env.BLOK_E2E_USERNODES ?? "");
 
+// ADR 0014 — the claim-check lane. Self-skipping: it runs only when the caller
+// has pointed BLOK_BLOB_DIR at a directory THIS process and every SDK process
+// share (docker-compose bind-mounts `.blobs` into each container at
+// /blok-blobs; run-spec-b-e2e.sh exports the same host path). With it set, the
+// adapter offloads an oversized `inputs` payload and sends a `{"$blokBlob"}`
+// reference instead — which only a runtime advertising `blob-v1` ever receives.
+const BLOB_DIR = process.env.BLOK_BLOB_DIR ?? "";
+// Comfortably over the 1 MiB default offload threshold, comfortably under the
+// 16 MiB message limit the echoed response still travels inline under.
+const OVERSIZED_BYTES = 2 * 1024 * 1024;
+
 // Poll listNodes until every required runtime is reachable or the deadline hits
 // (containers take a few seconds to boot under `docker compose up`).
 async function waitForLive(): Promise<{ kind: string; port: number }[]> {
@@ -172,7 +183,23 @@ async function main(): Promise<void> {
 			`${kind}: invalid input → structured validation error (${errStr.slice(0, 100)})`,
 		);
 
-		// 2c. User-authored node (E05-T007): a scaffolded `e2e-user` node, baked
+		// 2c. ADR 0014 — claim-check over the wire. The SDK must advertise
+		//     `blob-v1` (that advertisement is the runner's whole gate) AND
+		//     resolve the sentinel it then receives. If resolution were broken
+		//     the node would see `{"$blokBlob": …}` instead of its inputs and
+		//     fail validation, so the round-trip — not the advertisement — is
+		//     what actually proves the SDK leg.
+		if (BLOB_DIR) {
+			const caps = await adapter.listCapabilities();
+			check(caps.includes("blob-v1"), `${kind}: advertises blob-v1 (${JSON.stringify(caps)})`);
+
+			const big = "z".repeat(OVERSIZED_BYTES);
+			const offloaded = await run(adapter, "typed-greet", kind, { name: big, repeat: 1 });
+			check(offloaded.success === true, `${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check`);
+			check(offloaded.data?.length === big.length, `${kind}: node received the real inputs, not the reference`);
+		}
+
+		// 2d. User-authored node (E05-T007): a scaffolded `e2e-user` node, baked
 		//    into the image by prepare-usernodes.ts, must be discovered (compiled:
 		//    codegen shim; dynamic: BLOK_NODES_DIR scan) AND executable — proving
 		//    the create-node + codegen/discovery on-ramp works in this SDK.

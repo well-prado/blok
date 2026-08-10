@@ -27,6 +27,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,6 +40,82 @@ import (
 
 	pb "github.com/nickincloud/blok-go/genpb/blok/runtime/v1"
 )
+
+// =============================================================================
+// ADR 0014 — claim-check ("blob") support
+// =============================================================================
+//
+// When BLOK_BLOB_DIR names a directory this process shares with the runner
+// (same host in dev; a shared emptyDir in the Helm chart), the runner may
+// replace an oversized `inputs` payload with a small JSON sentinel:
+//
+//	{"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+//	               "codec": "json"}}
+//
+// and we read the real payload from <BLOK_BLOB_DIR>/<id>. That is the only way
+// data larger than the gRPC max message size can reach a node, since a unary
+// message is fully buffered on both ends. We advertise the capability on
+// ListNodes so the runner only ever sends a sentinel to a process that can
+// resolve it.
+
+const blobCapability = "blob-v1"
+
+// Two path segments, neither starting with a dot. The dot rule is what rejects
+// `..` — without it a wire-supplied id turns this into an arbitrary-file read.
+var blobIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
+
+// blobDir returns the shared claim-check directory, or "" when the feature is off.
+func blobDir() string { return os.Getenv("BLOK_BLOB_DIR") }
+
+// blobCapabilities is what ListNodes advertises: `blob-v1` only when we can
+// actually reach the shared directory, since the runner sends refs solely to
+// runtimes that claim it.
+func blobCapabilities() []string {
+	if blobDir() == "" {
+		return nil
+	}
+	return []string{blobCapability}
+}
+
+// resolveInputBlob swaps a claim-check sentinel for the payload it references.
+// Anything that is not a sentinel passes through untouched, so this is a no-op
+// for every ordinary call.
+func resolveInputBlob(inputs map[string]interface{}) (map[string]interface{}, error) {
+	if len(inputs) != 1 {
+		return inputs, nil
+	}
+	ref, ok := inputs["$blokBlob"].(map[string]interface{})
+	if !ok {
+		return inputs, nil
+	}
+
+	root := blobDir()
+	if root == "" {
+		return nil, &decodeError{msg: "received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set " +
+			"on this runtime — set it to the same shared directory as the runner"}
+	}
+
+	id, ok := ref["id"].(string)
+	if !ok || !blobIDPattern.MatchString(id) {
+		return nil, &decodeError{msg: fmt.Sprintf("invalid $blokBlob id: %#v", ref["id"])}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, id))
+	if err != nil {
+		return nil, &decodeError{msg: fmt.Sprintf("cannot read blob `%s` under BLOK_BLOB_DIR: %v", id, err)}
+	}
+
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, &decodeError{msg: fmt.Sprintf("invalid JSON in blob `%s`: %v", id, err)}
+	}
+	if m, ok := value.(map[string]interface{}); ok {
+		return m, nil
+	}
+	// Mirror decodeJSONObject's non-object handling so node code sees the same
+	// shape whether or not the payload took the claim-check path.
+	return map[string]interface{}{"_value": value}, nil
+}
 
 // =============================================================================
 // Service implementation
@@ -232,6 +311,11 @@ func (s *BlokNodeRuntime) ListNodes(ctx context.Context, req *pb.ListNodesReques
 		SdkName:      "blok-go",
 		SdkVersion:   s.sdkVersion,
 		ProtoVersion: "1.0.0",
+		// ADR 0014 — only claim `blob-v1` when we can actually reach the shared
+		// directory. The runner sends refs solely to runtimes that advertise it,
+		// and falls back to inlining (plus its fail-fast GRPC_REQUEST_TOO_LARGE
+		// guard) for everyone else.
+		Capabilities: blobCapabilities(),
 	}, nil
 }
 
@@ -324,6 +408,13 @@ func decodeExecuteRequest(req *pb.ExecuteRequest) (*ExecutionRequest, error) {
 	}
 
 	inputs, err := decodeJSONObject(req.Inputs, "inputs")
+	if err != nil {
+		return nil, err
+	}
+
+	// ADR 0014 — resolve a claim-check ref before anything downstream (schema
+	// validation, the node body) ever sees it. Non-sentinel inputs pass through.
+	inputs, err = resolveInputBlob(inputs)
 	if err != nil {
 		return nil, err
 	}
