@@ -21,6 +21,16 @@ cli-dev:
 PROTO_DIR := proto
 PROTO_FILE := $(PROTO_DIR)/blok/runtime/v1/runtime.proto
 
+# `buf breaking` clones the git input, and inside a git worktree `.git` is a
+# FILE (a `gitdir:` pointer), not a repository — buf then fails with
+# "could not clone file://…/.git". `--git-common-dir` resolves to the real
+# repository directory in both a normal checkout and a worktree.
+BUF_GIT_DIR := $(shell git rev-parse --git-common-dir)
+# Compare against the last release tag by default (that is the contract every
+# published SDK was generated from). Override in CI or locally, e.g.
+#   make proto-breaking BUF_AGAINST_REF=branch=main
+BUF_AGAINST_REF ?= $(shell t=$$(git describe --tags --abbrev=0 2>/dev/null); if [ -n "$$t" ]; then echo "tag=$$t"; else echo "ref=HEAD~1"; fi)
+
 .PHONY: proto proto-lint proto-breaking proto-rust proto-go proto-python proto-java proto-csharp proto-php proto-ruby proto-clean
 
 proto: proto-lint proto-rust proto-go proto-python proto-java proto-csharp proto-php proto-ruby  ## Regenerate gRPC stubs for all SDKs
@@ -28,8 +38,8 @@ proto: proto-lint proto-rust proto-go proto-python proto-java proto-csharp proto
 proto-lint:  ## Lint proto files with buf
 	buf lint
 
-proto-breaking:  ## Check for breaking changes against the previous git tag
-	buf breaking --against '.git#tag=$(shell git describe --tags --abbrev=0 2>/dev/null || echo HEAD~1)'
+proto-breaking:  ## Check for breaking changes against the last release tag (worktree-safe)
+	buf breaking --against '$(BUF_GIT_DIR)#$(BUF_AGAINST_REF)'
 
 proto-rust:  ## Sync proto into the Rust SDK; tonic-build generates stubs at compile time
 	@mkdir -p sdks/rust/proto/blok/runtime/v1
