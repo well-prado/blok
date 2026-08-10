@@ -18,7 +18,11 @@
 			"**/routeTree.gen.ts",
 			"sdks/*/vendor/**",
 			"sdks/*/.venv/**",
-			"sdks/python3/**/__pycache__/**"
+			"sdks/python3/**/__pycache__/**",
+			"sdks/rust/target/**",
+			"sdks/java/target/**",
+			"sdks/csharp/**/bin/**",
+			"sdks/csharp/**/obj/**"
 		]
 	},
 	"formatter": {
