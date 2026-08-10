@@ -1334,7 +1334,7 @@ export default class HttpTrigger extends TriggerBase {
 			}
 		}
 
-		return new Promise((done) => {
+		return new Promise((done, fail) => {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
 
@@ -1597,7 +1597,7 @@ export default class HttpTrigger extends TriggerBase {
 			this.app.all("/:workflow{.+}/*", workflowHandler);
 			this.app.all("/:workflow{.+}", workflowHandler);
 
-			this.server = serve({ fetch: this.app.fetch, port: Number(this.port) }, async () => {
+			const server = serve({ fetch: this.app.fetch, port: Number(this.port) }, async () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
 
 				// v0.7 — run server hooks (sibling triggers like
@@ -1680,8 +1680,30 @@ export default class HttpTrigger extends TriggerBase {
 					);
 				});
 
-				done(this.endCounter(this.initializer));
+				try {
+					done(this.endCounter(this.initializer));
+				} catch (err) {
+					fail(err);
+				}
 			}) as Server;
+
+			// #752 — `done()` above is reachable ONLY from the listening callback,
+			// and that callback never fires when the socket can't be bound
+			// (EADDRINUSE, EACCES). Nothing observed the server's `error` event, so
+			// the promise settled NEITHER way: a Blok app whose port was taken hung
+			// at boot forever — no error, no exit — and every boot-path test that
+			// awaited `listen()` died on its testTimeout reporting nothing but
+			// "Test timed out". Boot must be able to FAIL, not just hang.
+			server.on("error", (err: NodeJS.ErrnoException) => {
+				fail(
+					err.code === "EADDRINUSE"
+						? new Error(
+								`[blok] port ${this.port} is already in use — stop the process holding it, or set PORT to a free port.`,
+							)
+						: err,
+				);
+			});
+			this.server = server;
 		});
 	}
 
