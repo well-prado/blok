@@ -10,7 +10,7 @@ packages on npm version independently within each release line.
 
 _Nothing yet._
 
-## [2.1.0] — 2026-08-08
+## [2.1.0] — 2026-08-10
 
 > **Upgrade promptly if you use `idempotencyKey`, `concurrencyKey` or
 > `debounce.key`.** On 2.0.x an expression-shaped value that was not
@@ -56,6 +56,39 @@ _Nothing yet._
   `readSchedulingConfig` coerced a non-string key (an unlowered `{$ref}`) to `""`,
   which turned the concurrency gate and debounce off entirely with no signal.
 
+- **`http+sse` and `http+websocket` scaffolds could not be installed with npm**
+  (#741). The generator injected `@hono/node-server@^1.19.9` while
+  `triggers/http` pins `overrides: {"@hono/node-server": "^2.0.11"}` — npm
+  refuses an override that contradicts a direct dependency and failed the install
+  with `EOVERRIDE`; bun accepts it, which is how it shipped. Both sites now read
+  one exported `HONO_NODE_SERVER_RANGE`, and the generator emits the
+  `overrides`/`resolutions` pin itself, since sse- and websocket-only scaffolds
+  inherit none.
+
+  Four more defects in the same blind spot went with it: cron-, mcp- and
+  webhook-only `blokctl create` threw `ENOENT` on `.env.example` (those trigger
+  packages ship none, so those three combos had **never** scaffolded); the three
+  abstract trigger bases declared `BlokService<unknown>` where `NodeMap.addNode`
+  takes `NodeBase`, so generated projects failed their own typecheck; the
+  inherited `build` script was `bun run tsc`, unusable for npm-only users; and
+  the `chat-ui` example node used `__dirname`, which Bun defines and Node does
+  not — so every built `--examples` scaffold crashed on boot under plain Node.
+
+  A new combo matrix (`tests/e2e/scaffold-smoke/combos.sh`, wired into CI)
+  creates, `npm install`s, builds and boots seven trigger combinations on plain
+  npm/Node, asserting each step's exit code. The previous smoke built one
+  maximal scaffold under bun and never checked a build exit code, which is
+  exactly why all five of these were invisible.
+
+- **`GlobalError` broke `instanceof` for its own subclasses** (#736). The
+  constructor called `Object.setPrototypeOf(this, GlobalError.prototype)`
+  unconditionally, clobbering the prototype of any subclass that did not re-pin
+  its own after `super()` — defeating the named-error checks
+  (`UnresolvableKeyExpressionError`, `WorkflowInputValidationError`, …) that the
+  error vocabulary exists to enable. It now pins `new.target.prototype`, the
+  standard Error-subclass pattern, so every subclass inherits correct identity
+  without ceremony.
+
 ### Added
 
 - **Bulk data can now cross the runtime boundary: automatic claim-check offload
@@ -83,8 +116,12 @@ _Nothing yet._
   reference it cannot read. Blob ids are validated on both ends so a wire-supplied
   id can never escape the blob directory.
 
-  Off unless configured. `runtime.python3` implements the SDK half today; the
-  other six advertise nothing and are unchanged. Kubernetes: set
+  Off unless configured. **All seven runtime SDKs implement the SDK half**
+  (#738) — go, rust, java, csharp, php and ruby joined python3, each resolving
+  the sentinel from its own `BLOK_BLOB_DIR` and advertising `blob-v1` exactly
+  when that variable is set. The cross-runtime CI lane drives a real 2 MiB
+  payload through all seven containers and asserts each node receives its true
+  inputs, not the reference. Kubernetes: set
   `blobStore.enabled=true` for a shared `emptyDir` across the runner and every
   sidecar. Dev (`scripts/dev-full.ts`) defaults it to `.blok/blobs`. Only the
   request direction is offloaded — a node's return value is still bounded by the
@@ -116,7 +153,24 @@ _Nothing yet._
   at the time), disabling the idempotency cache for that step with no error
   and no warning.
 
+- **`buf breaking` now runs in CI** (#739). The Makefile targets existed but no
+  workflow ever invoked buf, so the wire contract had no breaking-change gate —
+  `proto:check` only catches copy drift between the canonical proto and the SDK
+  copies, never a renumbered or deleted field. The check now runs in the
+  integration workflow against the last release tag (proven red against a
+  deliberate field renumber), and the target resolves the repository through
+  `git rev-parse --git-common-dir` so it also works from a git worktree.
+
 ### Changed
+
+- **The `@blokjs/trigger-sse` EventSource integration tests no longer race the
+  server** (#739). They waited a fixed 100 ms for the handler to subscribe, and a
+  subscriber created after a publish sees nothing without a `lastEventId` — so
+  under parallel load the events were dropped and the client blocked until the
+  suite timed out 15 s later, with nothing in the output to say why. They now
+  handshake on the bus's subscriber count, bind an ephemeral port instead of one
+  shared with the webhook suite, and bound the read with an assertion rather than
+  a framework timeout.
 
 - **The workflow-`input` gate's rejection is now a named, exported error**
   (#678, ADR 0015). The trigger-boundary gate threw an anonymous `GlobalError`;
