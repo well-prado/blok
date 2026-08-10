@@ -230,3 +230,6 @@ tests/e2e/cross-runtime/.build/
 # HMR dev-loop e2e scratch project (hmr-dev-loop.test.ts; removed on teardown,
 # ignored so a crashed run can't leave it staged)
 triggers/http/.hmr-e2e-tmp/
+
+# cross-runtime e2e shared claim-check directory (ADR 0014)
+tests/e2e/cross-runtime/.blobs/

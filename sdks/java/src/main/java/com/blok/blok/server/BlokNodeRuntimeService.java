@@ -41,10 +41,15 @@ import com.google.protobuf.ByteString;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 
+import java.io.IOException;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * gRPC implementation of the canonical Blok {@code NodeRuntime} v1 service.
@@ -148,7 +153,9 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
         ListNodesResponse.Builder builder = ListNodesResponse.newBuilder()
                 .setSdkName("blok-java")
                 .setSdkVersion(sdkVersion)
-                .setProtoVersion("1.0.0");
+                .setProtoVersion("1.0.0")
+                // ADR 0014 — only claim `blob-v1` when BLOK_BLOB_DIR is set.
+                .addAllCapabilities(blobCapabilities(blobDir()));
         for (String name : registry.nodeNames()) {
             NodeDescriptor.Builder descriptor = NodeDescriptor.newBuilder().setName(name);
             // SPEC-B P4 — TypedNode handlers expose a description + JSON Schema
@@ -172,10 +179,103 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
     }
 
     // =========================================================================
+    // ADR 0014 — claim-check ("blob") support
+    // =========================================================================
+    //
+    // When BLOK_BLOB_DIR names a directory this process shares with the runner
+    // (same host in dev; a shared emptyDir in the Helm chart), the runner may
+    // replace an oversized `inputs` payload with a small JSON sentinel:
+    //
+    //   {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+    //                  "codec": "json"}}
+    //
+    // and we read the real payload from <BLOK_BLOB_DIR>/<id>. That is the only
+    // way data larger than the gRPC max message size can reach a node, since a
+    // unary message is fully buffered on both ends. We advertise the capability
+    // on ListNodes so the runner only ever sends a sentinel to a process that
+    // can resolve it.
+
+    static final String BLOB_CAPABILITY = "blob-v1";
+
+    /**
+     * Two path segments, neither starting with a dot. The dot rule is what
+     * rejects {@code ..} — without it a wire-supplied id turns the read below
+     * into an arbitrary-file read.
+     */
+    private static final Pattern BLOB_ID =
+            Pattern.compile("^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$");
+
+    /** The shared claim-check directory, or {@code null} when the feature is off. */
+    static String blobDir() {
+        String dir = System.getenv("BLOK_BLOB_DIR");
+        return (dir == null || dir.isEmpty()) ? null : dir;
+    }
+
+    /**
+     * What ListNodes advertises: {@code blob-v1} only when we can actually reach
+     * the shared directory. The runner sends refs solely to runtimes that
+     * advertise it, and falls back to inlining (plus its fail-fast
+     * GRPC_REQUEST_TOO_LARGE guard) for everyone else.
+     */
+    static List<String> blobCapabilities(String root) {
+        return root == null ? List.of() : List.of(BLOB_CAPABILITY);
+    }
+
+    private static Map<String, Object> resolveInputBlob(Map<String, Object> inputs) throws DecodeException {
+        return resolveInputBlob(inputs, blobDir());
+    }
+
+    /**
+     * Swap a claim-check sentinel for the payload it references. Anything that
+     * is not a sentinel passes through untouched, so this is a no-op for every
+     * ordinary call. {@code root} is a parameter rather than an env read so the
+     * trust-boundary cases stay unit-testable (Java cannot set its own env).
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> resolveInputBlob(Map<String, Object> inputs, String root) throws DecodeException {
+        if (inputs.size() != 1) return inputs;
+        Object candidate = inputs.get("$blokBlob");
+        if (!(candidate instanceof Map)) return inputs;
+        Map<String, Object> ref = (Map<String, Object>) candidate;
+
+        if (root == null) {
+            throw new DecodeException("received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set "
+                    + "on this runtime — set it to the same shared directory as the runner");
+        }
+
+        Object rawId = ref.get("id");
+        if (!(rawId instanceof String id) || !BLOB_ID.matcher(id).matches()) {
+            throw new DecodeException("invalid $blokBlob id: " + rawId);
+        }
+
+        byte[] raw;
+        try {
+            raw = Files.readAllBytes(Path.of(root, id));
+        } catch (IOException | RuntimeException ex) {
+            throw new DecodeException("cannot read blob `" + id + "` under BLOK_BLOB_DIR: " + ex.getMessage());
+        }
+
+        try {
+            JsonElement element = JsonParser.parseString(new String(raw, StandardCharsets.UTF_8));
+            if (element.isJsonObject()) {
+                Map<String, Object> map = GSON.fromJson(element, MAP_TYPE);
+                return map != null ? map : new HashMap<>();
+            }
+            // Mirror decodeJsonObject's non-object handling so node code sees the
+            // same shape whether or not the payload took the claim-check path.
+            Map<String, Object> wrapped = new HashMap<>();
+            wrapped.put("_value", GSON.fromJson(element, Object.class));
+            return wrapped;
+        } catch (JsonSyntaxException ex) {
+            throw new DecodeException("invalid JSON in blob `" + id + "`: " + ex.getMessage());
+        }
+    }
+
+    // =========================================================================
     // Codec — proto ↔ internal types
     // =========================================================================
 
-    private static final class DecodeException extends Exception {
+    static final class DecodeException extends Exception {
         DecodeException(String message) { super(message); }
     }
 
@@ -184,7 +284,9 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
             throw new DecodeException("ExecuteRequest.node is required");
         }
 
-        Map<String, Object> inputs = decodeJsonObject(req.getInputs(), "inputs");
+        // ADR 0014 — resolve a claim-check ref before anything downstream (schema
+        // validation, the node body) ever sees it. Non-sentinel inputs pass through.
+        Map<String, Object> inputs = resolveInputBlob(decodeJsonObject(req.getInputs(), "inputs"));
 
         RuntimeState state = req.getState();
         Object previousOutput = decodeJsonValue(state.getPreviousOutput(), "previous_output");

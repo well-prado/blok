@@ -67,13 +67,22 @@ jobs:
       - name: Prepare user-node build contexts
         run: bun tests/e2e/cross-runtime/prepare-usernodes.ts
 
+      # ADR 0014 — the directory docker-compose bind-mounts into every container
+      # at /blok-blobs. Created before `up` so the daemon binds a directory, not
+      # a root-owned one it would create itself.
+      - name: Create the shared claim-check directory
+        run: mkdir -p tests/e2e/cross-runtime/.blobs
+
       - name: Build + start the 7 SDK gRPC runtimes
         run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
 
-      - name: Run cross-runtime gRPC harness (all 7 required, user nodes asserted)
+      - name: Run cross-runtime gRPC harness (all 7 required, user nodes + claim-check asserted)
         env:
           BLOK_E2E_REQUIRE_ALL: "1"
           BLOK_E2E_USERNODES: "1"
+          # Host side of the shared mount — turns on the harness's claim-check
+          # lane (oversized inputs offloaded to a blob, resolved by each SDK).
+          BLOK_BLOB_DIR: ${{ github.workspace }}/tests/e2e/cross-runtime/.blobs
         run: bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
 
       - name: Print runtime logs on failure

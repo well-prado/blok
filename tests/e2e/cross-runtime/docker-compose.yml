@@ -20,13 +20,26 @@
 #   bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts    # BLOK_E2E_REQUIRE_ALL=1 in CI
 #   docker compose down -v
 
+# ADR 0014 — one shared claim-check directory for the whole harness. The runner
+# (running on the HOST, via GrpcRuntimeAdapter) writes an oversized `inputs`
+# payload to ./.blobs and sends a `{"$blokBlob"}` reference; every SDK container
+# sees the same bytes at /blok-blobs and resolves it. Setting BLOK_BLOB_DIR is
+# also what makes each SDK advertise `blob-v1` on ListNodes, which is what the
+# harness asserts.
+x-blob-volume: &blob-volume
+  - ./.blobs:/blok-blobs
+x-blob-env: &blob-env
+  BLOK_BLOB_DIR: /blok-blobs
+
 services:
   sdk-go:
     build:
       context: .build/go/.blok/runtimes/go
     ports:
       - "10001:10001"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10001"
 
@@ -35,7 +48,9 @@ services:
       context: .build/rust/.blok/runtimes/rust
     ports:
       - "10002:10002"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       ENABLE_GRPC: "true"
       GRPC_PORT: "10002"
       RUST_LOG: info
@@ -45,7 +60,9 @@ services:
       context: .build/java/.blok/runtimes/java
     ports:
       - "10003:10003"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10003"
 
@@ -54,7 +71,9 @@ services:
       context: .build/csharp/.blok/runtimes/csharp
     ports:
       - "10004:10004"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10004"
 
@@ -64,7 +83,9 @@ services:
       context: .build/php
     ports:
       - "10005:10005"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       GRPC_PORT: "10005"
       BLOK_NODES_DIR: /app/e2e_usernodes
 
@@ -73,7 +94,9 @@ services:
       context: .build/ruby
     ports:
       - "10006:10006"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10006"
       BLOK_NODES_DIR: /app/e2e_usernodes
@@ -85,7 +108,9 @@ services:
       target: runtime
     ports:
       - "10007:10007"
+    volumes: *blob-volume
     environment:
+      <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10007"
       BLOK_NODES_DIR: /app/e2e_usernodes

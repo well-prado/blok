@@ -52,6 +52,30 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
     private const RUNTIME_KIND = 'runtime.php';
     private const PROTO_VERSION = '1.0.0';
 
+    // ===== ADR 0014 — claim-check ("blob") support =====
+    //
+    // When BLOK_BLOB_DIR names a directory this process shares with the runner
+    // (same host in dev; a shared emptyDir in the Helm chart), the runner may
+    // replace an oversized `inputs` payload with a small JSON sentinel:
+    //
+    //   {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344,
+    //                  "codec": "json"}}
+    //
+    // and we read the real payload from <BLOK_BLOB_DIR>/<id>. That is the only
+    // way data larger than the gRPC max message size can reach a node, since a
+    // unary message is fully buffered on both ends. We advertise the capability
+    // on ListNodes so the runner only ever sends a sentinel to a process that
+    // can resolve it.
+
+    public const BLOB_CAPABILITY = 'blob-v1';
+
+    /**
+     * Two path segments, neither starting with a dot. The dot rule is what
+     * rejects `..` — without it a wire-supplied id turns the read below into an
+     * arbitrary-file read.
+     */
+    private const BLOB_ID = '#^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$#';
+
     public function __construct(
         private readonly NodeRegistry $registry,
         private readonly string $sdkVersion = '1.0.0',
@@ -105,7 +129,76 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
             ->setNodes($descriptors)
             ->setSdkName(self::SDK_NAME)
             ->setSdkVersion($this->sdkVersion)
-            ->setProtoVersion(self::PROTO_VERSION);
+            ->setProtoVersion(self::PROTO_VERSION)
+            // ADR 0014 — only claim `blob-v1` when BLOK_BLOB_DIR is set, so the
+            // runner's capability gate keeps sending inline to a
+            // half-configured deployment.
+            ->setCapabilities(self::blobCapabilities());
+    }
+
+    /** The shared claim-check directory, or null when the feature is off. */
+    public static function blobDir(): ?string
+    {
+        $dir = getenv('BLOK_BLOB_DIR');
+
+        return is_string($dir) && $dir !== '' ? $dir : null;
+    }
+
+    /**
+     * What ListNodes advertises: `blob-v1` only when we can actually reach the
+     * shared directory. The runner sends refs solely to runtimes that advertise
+     * it, and falls back to inlining (plus its fail-fast GRPC_REQUEST_TOO_LARGE
+     * guard) for everyone else.
+     *
+     * @return list<string>
+     */
+    public static function blobCapabilities(): array
+    {
+        return self::blobDir() === null ? [] : [self::BLOB_CAPABILITY];
+    }
+
+    /**
+     * Swap a claim-check sentinel for the payload it references. Anything that
+     * is not a sentinel passes through untouched, so this is a no-op for every
+     * ordinary call.
+     *
+     * @param  array<string, mixed> $inputs
+     * @return array<string, mixed>
+     * @throws DecodeException
+     */
+    public static function resolveInputBlob(array $inputs): array
+    {
+        if (count($inputs) !== 1 || !is_array($inputs['$blokBlob'] ?? null)) {
+            return $inputs;
+        }
+        $ref = $inputs['$blokBlob'];
+
+        $root = self::blobDir();
+        if ($root === null) {
+            throw new DecodeException(
+                'received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set '
+                . 'on this runtime — set it to the same shared directory as the runner'
+            );
+        }
+
+        $id = $ref['id'] ?? null;
+        if (!is_string($id) || preg_match(self::BLOB_ID, $id) !== 1) {
+            throw new DecodeException(sprintf('invalid $blokBlob id: %s', json_encode($id)));
+        }
+
+        $raw = @file_get_contents($root . DIRECTORY_SEPARATOR . $id);
+        if ($raw === false) {
+            throw new DecodeException(sprintf('cannot read blob `%s` under BLOK_BLOB_DIR', $id));
+        }
+
+        $value = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new DecodeException(sprintf('invalid JSON in blob `%s`: %s', $id, json_last_error_msg()));
+        }
+
+        // Mirror decodeJsonObject's non-object handling so node code sees the
+        // same shape whether or not the payload took the claim-check path.
+        return (ltrim($raw)[0] ?? '') === '{' && is_array($value) ? $value : ['_value' => $value];
     }
 
     // ===== Codec — proto <-> internal types =====
@@ -120,7 +213,9 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
             throw new DecodeException('ExecuteRequest.node is required');
         }
 
-        $inputs = self::decodeJsonObject($req->getInputs(), 'inputs');
+        // ADR 0014 — resolve a claim-check ref before anything downstream (schema
+        // validation, the node body) ever sees it. Non-sentinel inputs pass through.
+        $inputs = self::resolveInputBlob(self::decodeJsonObject($req->getInputs(), 'inputs'));
         $state = $req->getState() ?? new RuntimeState();
         $trigger = $req->getTrigger() ?? new TriggerInfo();
         $workflow = $req->getWorkflow() ?? new WorkflowInfo();

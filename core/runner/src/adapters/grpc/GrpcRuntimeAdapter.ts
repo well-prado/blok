@@ -677,6 +677,22 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		}
 	}
 
+	/**
+	 * ADR 0014 — the capability strings this runtime advertises on `ListNodes`
+	 * (e.g. `["blob-v1"]`). Unlike {@link probeBlobSupport} this is not
+	 * memoized: it is a diagnostic read for tooling and the cross-runtime E2E,
+	 * not a hot path. An unreachable runtime reports `[]`, same as
+	 * {@link listNodes}.
+	 */
+	async listCapabilities(): Promise<string[]> {
+		try {
+			const response = await this.unaryListNodes(this.pool.get(this.config));
+			return response.capabilities ?? [];
+		} catch {
+			return [];
+		}
+	}
+
 	private unaryListNodes(client: Client): Promise<ListNodesResponseShape> {
 		return new Promise((resolve, reject) => {
 			const callable = (

@@ -43,6 +43,109 @@ use proto::{
     health_response::Status as HealthStatusEnum,
 };
 
+// =============================================================================
+// ADR 0014 — claim-check ("blob") support
+// =============================================================================
+//
+// When `BLOK_BLOB_DIR` names a directory this process shares with the runner
+// (same host in dev; a shared `emptyDir` in the Helm chart), the runner may
+// replace an oversized `inputs` payload with a small JSON sentinel:
+//
+// ```json
+// {"$blokBlob": {"id": "<runId>/<uuid>.json", "bytes": 297812344, "codec": "json"}}
+// ```
+//
+// and we read the real payload from `<BLOK_BLOB_DIR>/<id>`. That is the only
+// way data larger than the gRPC max message size can reach a node, since a
+// unary message is fully buffered on both ends. We advertise the capability on
+// `ListNodes` so the runner only ever sends a sentinel to a process that can
+// resolve it.
+
+/// Capability advertised on `ListNodes` when this process can resolve sentinels.
+pub const BLOB_CAPABILITY: &str = "blob-v1";
+
+/// The shared claim-check directory, or `None` when the feature is off.
+fn blob_dir() -> Option<String> {
+    std::env::var("BLOK_BLOB_DIR").ok().filter(|d| !d.is_empty())
+}
+
+/// What `ListNodes` advertises: `blob-v1` only when we can actually reach the
+/// shared directory. The runner sends refs solely to runtimes that advertise
+/// it, and falls back to inlining (plus its fail-fast `GRPC_REQUEST_TOO_LARGE`
+/// guard) for everyone else.
+fn blob_capabilities() -> Vec<String> {
+    match blob_dir() {
+        Some(_) => vec![BLOB_CAPABILITY.to_string()],
+        None => Vec::new(),
+    }
+}
+
+/// One path segment of `[A-Za-z0-9._-]` that does NOT start with a dot. The dot
+/// rule is what rejects `..` — without it a wire-supplied id turns the read
+/// below into an arbitrary-file read.
+fn is_blob_segment(segment: &str) -> bool {
+    let mut chars = segment.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphanumeric() || c == '_' || c == '-' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+/// A blob id is exactly two such segments joined by `/`.
+fn is_valid_blob_id(id: &str) -> bool {
+    let mut parts = id.split('/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(run), Some(name), None) => is_blob_segment(run) && is_blob_segment(name),
+        _ => false,
+    }
+}
+
+/// Swap a claim-check sentinel for the payload it references. Anything that is
+/// not a sentinel passes through untouched, so this is a no-op for every
+/// ordinary call.
+fn resolve_input_blob(
+    inputs: HashMap<String, serde_json::Value>,
+) -> Result<HashMap<String, serde_json::Value>, String> {
+    if inputs.len() != 1 {
+        return Ok(inputs);
+    }
+    let blob_ref = match inputs.get("$blokBlob") {
+        Some(serde_json::Value::Object(obj)) => obj.clone(),
+        _ => return Ok(inputs),
+    };
+
+    let root = blob_dir().ok_or_else(|| {
+        "received a $blokBlob claim-check ref but BLOK_BLOB_DIR is not set on this runtime \
+         — set it to the same shared directory as the runner"
+            .to_string()
+    })?;
+
+    let id = blob_ref
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| is_valid_blob_id(s))
+        .ok_or_else(|| {
+            format!(
+                "invalid $blokBlob id: {}",
+                blob_ref.get("id").unwrap_or(&serde_json::Value::Null)
+            )
+        })?;
+
+    let raw = std::fs::read(std::path::Path::new(&root).join(id))
+        .map_err(|e| format!("cannot read blob `{}` under BLOK_BLOB_DIR: {}", id, e))?;
+
+    let value: serde_json::Value = serde_json::from_slice(&raw)
+        .map_err(|e| format!("invalid JSON in blob `{}`: {}", id, e))?;
+
+    Ok(match value {
+        serde_json::Value::Object(map) => map.into_iter().collect(),
+        // Mirror decode_json_object's non-object handling so node code sees the
+        // same shape whether or not the payload took the claim-check path.
+        other => HashMap::from([("_value".to_string(), other)]),
+    })
+}
+
 /// gRPC implementation of the Blok `NodeRuntime` v1 service.
 ///
 /// Single Responsibility: translate proto messages into the SDK's internal
@@ -171,10 +274,10 @@ impl NodeRuntime for BlokNodeRuntime {
             sdk_name: "blok-rust".to_string(),
             sdk_version: self.sdk_version.clone(),
             proto_version: "1.0.0".to_string(),
-            // ADR 0014 Phase 2 (#677): this SDK does not implement the
-            // claim-check blob store yet (#738 tracks the leg) — advertise
-            // nothing so the runner's capability gate keeps sending inline.
-            capabilities: Vec::new(),
+            // ADR 0014 — only claim `blob-v1` when BLOK_BLOB_DIR is set, so the
+            // runner's capability gate keeps sending inline to a
+            // half-configured deployment.
+            capabilities: blob_capabilities(),
         }))
     }
 }
@@ -243,6 +346,10 @@ fn decode_execute_request(req: ProtoExecuteRequest) -> Result<ExecutionRequest, 
 
     let inputs_map: HashMap<String, serde_json::Value> = decode_json_object(&req.inputs)
         .map_err(|e| Status::invalid_argument(format!("invalid `inputs` JSON: {}", e)))?;
+
+    // ADR 0014 — resolve a claim-check ref before anything downstream (schema
+    // validation, the node body) ever sees it. Non-sentinel inputs pass through.
+    let inputs_map = resolve_input_blob(inputs_map).map_err(Status::invalid_argument)?;
 
     let previous_output: serde_json::Value = decode_json_value(&state.previous_output)
         .map_err(|e| Status::invalid_argument(format!("invalid `previous_output` JSON: {}", e)))?;
@@ -635,5 +742,180 @@ mod tests {
         let bytes = encode_json_bytes(&value);
         let restored: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(restored, value);
+    }
+
+    // =========================================================================
+    // ADR 0014 — claim-check ($blokBlob) resolution
+    // =========================================================================
+    //
+    // The runner replaces oversized `inputs` with a sentinel; we read it back.
+    // These cover the trust boundary: the id arrives over the wire, so anything
+    // that could escape BLOK_BLOB_DIR must be refused before we open a file.
+
+    /// `BLOK_BLOB_DIR` is process-global, so every test that touches it takes
+    /// this lock. ponytail: a mutex, not a per-test process — `cargo test`
+    /// threads the whole module through one process either way.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Unique scratch directory. ponytail: no `tempfile` dev-dep for one path
+    /// join — the OS temp dir plus a counter is the whole requirement.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "blok-blob-{}-{}-{}",
+            tag,
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_blob(
+        root: &std::path::Path,
+        run_id: &str,
+        payload: &serde_json::Value,
+    ) -> HashMap<String, serde_json::Value> {
+        let run_dir = root.join(run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let bytes = serde_json::to_vec(payload).unwrap();
+        std::fs::write(run_dir.join("blob.json"), &bytes).unwrap();
+        HashMap::from([(
+            "$blokBlob".to_string(),
+            serde_json::json!({
+                "id": format!("{}/blob.json", run_id),
+                "bytes": bytes.len(),
+                "codec": "json",
+            }),
+        )])
+    }
+
+    #[test]
+    fn resolves_sentinel_to_the_referenced_payload() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch_dir("resolve");
+        let payload = serde_json::json!({"symbols": ["a", "b"]});
+        let ref_map = write_blob(&dir, "run_1", &payload);
+        std::env::set_var("BLOK_BLOB_DIR", &dir);
+
+        let resolved = resolve_input_blob(ref_map).unwrap();
+        assert_eq!(resolved.get("symbols"), Some(&serde_json::json!(["a", "b"])));
+    }
+
+    #[test]
+    fn end_to_end_through_decode_execute_request() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch_dir("e2e");
+        let payload = serde_json::json!({"big": "x".repeat(4096)});
+        let ref_map = write_blob(&dir, "run_2", &payload);
+        std::env::set_var("BLOK_BLOB_DIR", &dir);
+
+        let req = ProtoExecuteRequest {
+            node: Some(proto::NodeRef {
+                name: "echo".to_string(),
+                r#type: "runtime.rust".to_string(),
+                version: String::new(),
+            }),
+            inputs: serde_json::to_vec(&serde_json::json!(ref_map)).unwrap(),
+            ..Default::default()
+        };
+
+        let decoded = decode_execute_request(req).unwrap();
+        assert_eq!(decoded.node.config.get("big"), payload.get("big"));
+    }
+
+    #[test]
+    fn ordinary_inputs_pass_through_untouched() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("BLOK_BLOB_DIR", scratch_dir("passthrough"));
+
+        let plain = HashMap::from([("msg".to_string(), serde_json::json!("ping"))]);
+        assert_eq!(resolve_input_blob(plain.clone()).unwrap(), plain);
+
+        // A sentinel-shaped key alongside real fields is NOT a claim-check.
+        let mixed = HashMap::from([
+            ("$blokBlob".to_string(), serde_json::json!({"id": "a/b"})),
+            ("other".to_string(), serde_json::json!(1)),
+        ]);
+        assert_eq!(resolve_input_blob(mixed.clone()).unwrap(), mixed);
+    }
+
+    #[test]
+    fn refuses_a_ref_when_blob_dir_is_not_configured() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch_dir("unset");
+        let ref_map = write_blob(&dir, "run_3", &serde_json::json!({"a": 1}));
+        std::env::remove_var("BLOK_BLOB_DIR");
+
+        let err = resolve_input_blob(ref_map).unwrap_err();
+        assert!(err.contains("BLOK_BLOB_DIR"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_ids_that_could_escape_the_blob_dir() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("BLOK_BLOB_DIR", scratch_dir("escape"));
+
+        for id in [
+            serde_json::json!("../../etc/passwd"),
+            serde_json::json!("run_1/../../etc/passwd"),
+            serde_json::json!("/etc/passwd"),
+            serde_json::json!("passwd"),
+            serde_json::json!(".ssh/id_rsa"),
+            serde_json::json!(42),
+            serde_json::Value::Null,
+        ] {
+            let inputs = HashMap::from([(
+                "$blokBlob".to_string(),
+                serde_json::json!({"id": id, "bytes": 1, "codec": "json"}),
+            )]);
+            let err = resolve_input_blob(inputs).unwrap_err();
+            assert!(
+                err.contains("invalid $blokBlob id"),
+                "id {} was not rejected: {}",
+                id,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn reports_a_missing_blob_instead_of_crashing() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("BLOK_BLOB_DIR", scratch_dir("missing"));
+
+        let inputs = HashMap::from([(
+            "$blokBlob".to_string(),
+            serde_json::json!({"id": "run_x/gone.json", "bytes": 1, "codec": "json"}),
+        )]);
+        let err = resolve_input_blob(inputs).unwrap_err();
+        assert!(err.contains("cannot read blob"), "unexpected error: {}", err);
+    }
+
+    // The runner sends a claim-check ref ONLY to a runtime that says it can
+    // resolve one, so this advertisement is the whole capability gate.
+    #[tokio::test]
+    async fn list_nodes_advertises_blob_capability_only_when_configured() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let service = BlokNodeRuntime::new(
+            Arc::new(Mutex::new(NodeRegistry::new("1.0.0-test"))),
+            "1.0.0-test",
+        );
+
+        std::env::remove_var("BLOK_BLOB_DIR");
+        let resp = service
+            .list_nodes(Request::new(ProtoListNodesRequest {}))
+            .await
+            .unwrap();
+        assert!(resp.get_ref().capabilities.is_empty());
+
+        std::env::set_var("BLOK_BLOB_DIR", "/tmp/blok-blobs");
+        let resp = service
+            .list_nodes(Request::new(ProtoListNodesRequest {}))
+            .await
+            .unwrap();
+        assert_eq!(resp.get_ref().capabilities, vec!["blob-v1".to_string()]);
+        std::env::remove_var("BLOK_BLOB_DIR");
     }
 }
