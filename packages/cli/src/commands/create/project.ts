@@ -872,6 +872,28 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 		packageJsonContent.private = true;
 
+		// #751 — same inheritance problem as `start` above (#709): `main` /
+		// `types` point at the trigger PACKAGE's own entry (`dist/index.js`),
+		// but a generated project's build lays the primary trigger's entry at
+		// `dist/triggers/<kind>/index.js`. Point them at the real entry instead
+		// of leaving them to dangle.
+		if (packageJsonContent.main) {
+			packageJsonContent.main = `dist/triggers/${primaryTrigger}/index.js`;
+		}
+		if (packageJsonContent.types) {
+			packageJsonContent.types = `dist/triggers/${primaryTrigger}/index.d.ts`;
+		}
+
+		// `description` was still the TRIGGER's own description ("Cron/scheduled
+		// trigger for Blok workflows...") on every scaffold — generate one from
+		// the project instead of inheriting it.
+		packageJsonContent.description = `${projectName} - a Blok application`;
+
+		// `license: Apache-2.0` is inherited from the framework's own trigger
+		// package. Left alone deliberately: dropping it silently would make the
+		// generated project UNLICENSED, which is a product decision, not a bug
+		// fix. See PR description for the recommendation.
+
 		// Replace workspace:* references that only work inside the monorepo
 		// v0.6.7: expanded to include EVERY publishable @blokjs/* package so
 		// the `--local` install path doesn't fall back to npm for any of

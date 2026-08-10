@@ -99,12 +99,26 @@ for row in "${ROWS[@]}"; do
   #     drag `files`, `publishConfig` and `private: false` into the user's app:
   #     `npm publish` in a scaffold would have gone PUBLIC (#747). Only a real
   #     `create` shows this, and only for the kinds that are ever primary.
+  #
+  #     #751 — same root cause, harmless-but-wrong leftovers: `main`/`types`
+  #     dangled at the trigger PACKAGE's own entry (`dist/index.js`) instead of
+  #     the generated project's real entry (`dist/triggers/<kind>/index.js`),
+  #     and `description` was still the trigger's own blurb ("Cron/scheduled
+  #     trigger for Blok workflows..."). `license` is deliberately NOT asserted
+  #     here — still inherited from the primary trigger's package on purpose.
   if ! node -e '
     const pkg = require(process.argv[1] + "/package.json");
+    const primary = process.argv[2];
+    const proj = process.argv[3];
     const leaked = ["files", "publishConfig", "repository", "homepage", "bugs"].filter((k) => k in pkg);
     if (leaked.length) { console.error("publish-only keys leaked from the trigger package: " + leaked.join(", ")); process.exit(1); }
     if (pkg.private !== true) { console.error("generated app is not private: private=" + JSON.stringify(pkg.private)); process.exit(1); }
-  ' "$dir" >"$logf.pkg" 2>&1; then
+    const wantMain = "dist/triggers/" + primary + "/index.js";
+    if (pkg.main && pkg.main !== wantMain) { console.error("main dangles at the trigger package entry: " + pkg.main + " (want " + wantMain + ")"); process.exit(1); }
+    const wantTypes = "dist/triggers/" + primary + "/index.d.ts";
+    if (pkg.types && pkg.types !== wantTypes) { console.error("types dangles at the trigger package entry: " + pkg.types + " (want " + wantTypes + ")"); process.exit(1); }
+    if (!pkg.description || !pkg.description.startsWith(proj)) { console.error("description still inherited from the trigger package: " + JSON.stringify(pkg.description)); process.exit(1); }
+  ' "$dir" "$primary" "$proj" >"$logf.pkg" 2>&1; then
     log "FAIL $name: package.json —"; cat "$logf.pkg"; FAILED+=("$name:manifest"); continue
   fi
 
