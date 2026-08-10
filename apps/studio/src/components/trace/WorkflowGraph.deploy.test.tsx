@@ -171,17 +171,32 @@ describe("WorkflowGraph — Deploy guard (feat/studio-deploy-ux)", () => {
 	});
 
 	it("disables Deploy while the dry run is pending, then enables it once valid", async () => {
-		mocks.dryRunWorkflowDefinition.mockResolvedValue({ valid: true, etag: "etag-1" });
+		// #744: the old version let `dryRunWorkflowDefinition` resolve
+		// immediately and bet that the assertion below would run inside the
+		// 500ms debounce window. Under load (or just a slow tick) the debounce
+		// timer + instant-resolving mock can both fire before the assertion
+		// runs, so the button is already enabled — a race asserted with timing.
+		// Hold the dry run open explicitly instead: Deploy can only leave
+		// "pending" once THIS test lets it, so the disabled check is a state
+		// handshake, not a bet on scheduling.
+		let resolveDryRun!: (value: { valid: true; etag: string }) => void;
+		mocks.dryRunWorkflowDefinition.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveDryRun = resolve;
+				}),
+		);
 		const user = userEvent.setup();
 		renderGraph();
 
 		await createDraft(user);
 
 		const deployButton = await screen.findByRole("button", { name: /^deploy$/i });
+		await waitFor(() => expect(mocks.dryRunWorkflowDefinition).toHaveBeenCalled(), { timeout: 2000 });
 		expect(deployButton).toBeDisabled();
 
+		resolveDryRun({ valid: true, etag: "etag-1" });
 		await waitFor(() => expect(deployButton).toBeEnabled(), { timeout: 2000 });
-		expect(mocks.dryRunWorkflowDefinition).toHaveBeenCalled();
 	});
 
 	it("an invalid dry run disables Deploy and surfaces the server's error message", async () => {
