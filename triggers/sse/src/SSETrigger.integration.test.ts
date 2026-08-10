@@ -52,7 +52,20 @@ vi.mock("@opentelemetry/api", () => {
 import SSETriggerClass, { _setActiveSSETrigger } from "./SSETrigger.js";
 import { _resetBusForTests, getBus } from "./bus.js";
 
-const TEST_PORT = 4902;
+/**
+ * Wait until the SSE handler has actually subscribed to the bus.
+ * Publishing before that point silently drops the events (a subscriber
+ * without a lastEventId only gets live events), which used to make this
+ * suite flake under parallel nx load.
+ */
+async function waitForSubscriber(timeoutMs = 5000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (getBus().stats().subscribers > 0) return;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	throw new Error(`no bus subscriber after ${timeoutMs}ms — SSE handler never subscribed`);
+}
 
 /**
  * Inline "subscribe + stream" node — keeps the test independent of
@@ -90,6 +103,13 @@ describe("SSETrigger — v0.7 PR 3 integration (real HTTP/SSE)", () => {
 	let app: Hono;
 	let trigger: InstanceType<typeof SSETriggerClass>;
 	let httpServer: Server | null = null;
+
+	// Ephemeral port: a hardcoded one collides with sibling trigger suites
+	// that nx runs in parallel.
+	const listen = (a: Hono) =>
+		new Promise<number>((resolve) => {
+			httpServer = serve({ fetch: a.fetch, port: 0 }, (info) => resolve(info.port)) as Server;
+		});
 
 	beforeEach(() => {
 		WorkflowRegistry.resetInstance();
@@ -145,21 +165,22 @@ describe("SSETrigger — v0.7 PR 3 integration (real HTTP/SSE)", () => {
 		trigger.setNodeMap({ nodes });
 		await trigger.listen();
 
-		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
-		});
+		const port = await listen(app);
 
 		// Publish events BEFORE the client connects so they land in the
 		// channel buffer — without a lastEventId the subscriber still
 		// gets only live events, so we publish after the client opens.
 		const controller = new AbortController();
-		const responsePromise = fetch(`http://localhost:${TEST_PORT}/sse/ticks`, {
+		const responsePromise = fetch(`http://localhost:${port}/sse/ticks`, {
 			headers: { Accept: "text/event-stream" },
 			signal: controller.signal,
 		});
 
-		// Give the server a tick to mount the stream + subscribe.
-		await new Promise((r) => setTimeout(r, 100));
+		// Wait for the server to actually mount the stream + subscribe.
+		// A fixed sleep here raced the server under parallel load: events
+		// published before the subscriber exists are dropped (no
+		// lastEventId => live-only), and the client then waits forever.
+		await waitForSubscriber();
 		const bus = getBus();
 		bus.publish("ticks", { event: "tick", data: { n: 1 } });
 		bus.publish("ticks", { event: "tick", data: { n: 2 } });
@@ -176,9 +197,15 @@ describe("SSETrigger — v0.7 PR 3 integration (real HTTP/SSE)", () => {
 		let buf = "";
 		const deadline = Date.now() + 5000;
 		while (Date.now() < deadline) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			buf += decoder.decode(value, { stream: true });
+			// Race the read: `reader.read()` never settles if the server
+			// stops writing, so a bare await here turned any stall into an
+			// opaque vitest timeout instead of this loop's deadline.
+			const chunk = await Promise.race([
+				reader.read(),
+				new Promise<null>((r) => setTimeout(() => r(null), deadline - Date.now())),
+			]);
+			if (!chunk || chunk.done) break;
+			buf += decoder.decode(chunk.value, { stream: true });
 			// Server closes after writing 3 frames + the initial retry; we
 			// know we've got everything when the body ends.
 		}
@@ -196,5 +223,8 @@ describe("SSETrigger — v0.7 PR 3 integration (real HTTP/SSE)", () => {
 		expect(dataLines).toHaveLength(3);
 		const parsed = dataLines.map((s) => JSON.parse(s) as { n: number });
 		expect(parsed.map((p) => p.n)).toEqual([1, 2, 3]);
-	}, 15_000);
+		// ponytail: no per-test timeout override — the subscriber handshake plus
+		// the 5s read deadline bound this well under the config's 10s default.
+		// The old 15s override only existed to paper over the publish race.
+	});
 });

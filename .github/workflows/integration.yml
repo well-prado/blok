@@ -39,7 +39,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Full history + tags: `buf breaking` compares the proto against the last
+      # release tag, which a shallow checkout doesn't have.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Pinned: bun.lock + bunfig linker are generated/validated with this
       # version; "latest" drifted the linker default mid-flight (1.3.14).
@@ -60,6 +64,19 @@ jobs:
       # A drifted copy silently breaks one runtime — fail the PR instead.
       - name: Proto drift check
         run: bun run proto:check
+
+      # Drift check above only proves the SDK copies are byte-identical to the
+      # canonical proto — it says nothing about the wire contract itself. This
+      # is the semantic gate: renumbering, deleting or retyping a field breaks
+      # every already-published SDK, so fail the PR instead (#739).
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.72.0
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Proto breaking-change check
+        run: make proto-breaking
 
       # The `$` proxy is deleted (issue #689). Same check also runs on its own
       # in no-dollar-proxy.yml, which — unlike this workflow — isn't skipped

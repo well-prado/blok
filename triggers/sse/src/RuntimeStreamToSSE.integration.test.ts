@@ -58,8 +58,6 @@ vi.mock("@opentelemetry/api", () => {
 import SSETriggerClass, { _setActiveSSETrigger } from "./SSETrigger.js";
 import { _resetBusForTests } from "./bus.js";
 
-const TEST_PORT = 4903;
-
 /** A decoded streamed event, shaped like the runner's DecodedExecuteEvent. */
 type FakeEvent = { type: "partial"; snapshot: unknown } | { type: "final"; response: unknown };
 
@@ -121,6 +119,13 @@ describe("runtime → SSE live streaming (G3 / Route A1, real HTTP/SSE)", () => 
 	let app: Hono;
 	let trigger: InstanceType<typeof SSETriggerClass>;
 	let httpServer: Server | null = null;
+
+	// Ephemeral port: a hardcoded one collides with sibling trigger suites
+	// that nx runs in parallel.
+	const listen = (a: Hono) =>
+		new Promise<number>((resolve) => {
+			httpServer = serve({ fetch: a.fetch, port: 0 }, (info) => resolve(info.port)) as Server;
+		});
 
 	beforeEach(() => {
 		WorkflowRegistry.resetInstance();
@@ -190,12 +195,10 @@ describe("runtime → SSE live streaming (G3 / Route A1, real HTTP/SSE)", () => 
 		trigger.setNodeMap({ nodes });
 		await trigger.listen();
 
-		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
-		});
+		const port = await listen(app);
 
 		const controller = new AbortController();
-		const response = await fetch(`http://localhost:${TEST_PORT}/sse/chat`, {
+		const response = await fetch(`http://localhost:${port}/sse/chat`, {
 			headers: { Accept: "text/event-stream" },
 			signal: controller.signal,
 		});
@@ -282,12 +285,10 @@ describe("runtime → SSE live streaming (G3 / Route A1, real HTTP/SSE)", () => 
 		trigger = new SSETriggerClass(app);
 		trigger.setNodeMap({ nodes });
 		await trigger.listen();
-		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
-		});
+		const port = await listen(app);
 
 		const controller = new AbortController();
-		const response = await fetch(`http://localhost:${TEST_PORT}/sse/chat-live`, {
+		const response = await fetch(`http://localhost:${port}/sse/chat-live`, {
 			headers: { Accept: "text/event-stream" },
 			signal: controller.signal,
 		});
@@ -382,12 +383,10 @@ describe("runtime → SSE live streaming (G3 / Route A1, real HTTP/SSE)", () => 
 		trigger = new SSETriggerClass(app);
 		trigger.setNodeMap({ nodes });
 		await trigger.listen();
-		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
-		});
+		const port = await listen(app);
 
 		const controller = new AbortController();
-		const response = await fetch(`http://localhost:${TEST_PORT}/sse/chat2`, {
+		const response = await fetch(`http://localhost:${port}/sse/chat2`, {
 			headers: { Accept: "text/event-stream" },
 			signal: controller.signal,
 		});
