@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/if-else",
-	"version": "2.0.1",
+	"version": "2.1.0",
 	"files": ["dist"],
 	"description": "blok if-else",
 	"type": "module",
@@ -26,9 +26,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/helper": "^2.0.1",
-		"@blokjs/runner": "^2.0.1",
-		"@blokjs/shared": "^2.0.1",
+		"@blokjs/helper": "^2.1.0",
+		"@blokjs/runner": "^2.1.0",
+		"@blokjs/shared": "^2.1.0",
 		"lodash": "^4.17.21",
 		"zod": "^3.24.2"
 	},

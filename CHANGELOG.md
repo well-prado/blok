@@ -8,6 +8,20 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.1.0] — 2026-08-08
+
+> **Upgrade promptly if you use `idempotencyKey`, `concurrencyKey` or
+> `debounce.key`.** On 2.0.x an expression-shaped value that was not
+> `js/`-prefixed resolved to a **literal constant** instead of failing — so
+> every request shared one cache entry and the first response was replayed to
+> every caller for the 24h TTL (and per-tenant concurrency limits collapsed
+> into one global bucket). A structural `{$ref}` in those fields was silently
+> **dropped**, disabling the cache with no signal. Both are fixed here, and a
+> bad key now throws a named error instead of corrupting results.
+
+
 ### Fixed
 
 - **`idempotencyKey` / `concurrencyKey` / `debounce.key` no longer degrade to
