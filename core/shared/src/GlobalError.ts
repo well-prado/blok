@@ -6,7 +6,11 @@ export default class GlobalError extends Error {
 
 	constructor(msg: string | undefined) {
 		super(msg);
-		Object.setPrototypeOf(this, GlobalError.prototype);
+		// Standard Error-subclass pattern: pin to new.target's prototype (the
+		// class actually being constructed), not GlobalError's own — otherwise
+		// this clobbers a subclass's correct prototype and `instanceof Subclass`
+		// silently fails for any subclass that doesn't re-pin itself (#736).
+		Object.setPrototypeOf(this, new.target.prototype);
 
 		this.context.message = msg as string;
 	}

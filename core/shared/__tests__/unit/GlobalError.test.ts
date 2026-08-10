@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import BlokError, { WorkflowInputValidationError } from "../../src/BlokError";
 import GlobalError from "../../src/GlobalError";
 
 describe("GlobalError", () => {
@@ -88,6 +89,34 @@ describe("GlobalError", () => {
 		it("should return message string when no json", () => {
 			const error = new GlobalError("test error");
 			expect(error.toString()).toBe("test error");
+		});
+	});
+
+	describe("subclassing (issue #736 — new.target prototype pinning)", () => {
+		it("a fresh anonymous subclass with NO re-pin still passes instanceof its own class", () => {
+			// Regression test for #736: GlobalError's constructor used to
+			// unconditionally run `Object.setPrototypeOf(this, GlobalError.prototype)`,
+			// clobbering any subclass prototype set up by `new Foo()` and silently
+			// breaking `instanceof Foo` for every subclass that forgot to re-pin.
+			class AnonymousSubclass extends GlobalError {}
+			const error = new AnonymousSubclass("boom");
+			expect(error).toBeInstanceOf(AnonymousSubclass);
+			expect(error).toBeInstanceOf(GlobalError);
+			expect(error).toBeInstanceOf(Error);
+		});
+
+		it("BlokError (existing named subclass) remains instanceof-correct", () => {
+			const error = BlokError.validation({ code: "X", message: "m" });
+			expect(error).toBeInstanceOf(BlokError);
+			expect(error).toBeInstanceOf(GlobalError);
+			expect(error).toBeInstanceOf(Error);
+		});
+
+		it("WorkflowInputValidationError (existing named subclass) remains instanceof-correct", () => {
+			const error = new WorkflowInputValidationError({ workflowName: "wf", issues: [] });
+			expect(error).toBeInstanceOf(WorkflowInputValidationError);
+			expect(error).toBeInstanceOf(GlobalError);
+			expect(error).toBeInstanceOf(Error);
 		});
 	});
 });
