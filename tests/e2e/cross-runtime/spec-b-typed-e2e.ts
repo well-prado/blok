@@ -101,11 +101,19 @@ function makeAdapter(kind: string, port: number): GrpcRuntimeAdapter {
 // The runner's RunnerNode shape: `node` = node name to run, `name` = step id
 // (used to look up `ctx.config[stepId].inputs`), `type` = runtime kind.
 const STEP_ID = "s1";
+const E2E_RUN_ID = "spec-b-e2e";
 function runnerNode(nodeName: string, kind: string): unknown {
 	return { node: nodeName, name: STEP_ID, type: `runtime.${kind}` };
 }
 function ctxWith(inputs: unknown): unknown {
 	return {
+		// `Context.id` is the run id, and the claim-check store keys its
+		// directory on it (`BlobStore.put(ctx.id, …)`). Omitting it made every
+		// offload throw `runId.replace is not a function`, log
+		// "blob offload failed … sending inline" and fall back — so the lane
+		// asserted the claim-check path while never once exercising it.
+		// The `as never` cast at the call site is why tsc stayed quiet.
+		id: E2E_RUN_ID,
 		request: { body: {}, headers: {}, params: {}, query: {}, method: "POST", url: "/", cookies: {}, baseUrl: "" },
 		response: { data: null, contentType: "application/json", success: true, error: null },
 		state: {},
@@ -196,7 +204,15 @@ async function main(): Promise<void> {
 			const big = "z".repeat(OVERSIZED_BYTES);
 			const offloaded = await run(adapter, "typed-greet", kind, { name: big, repeat: 1 });
 			check(offloaded.success === true, `${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check`);
-			check(offloaded.data?.length === big.length, `${kind}: node received the real inputs, not the reference`);
+			// typed-greet returns `("Hello, " + name) * repeat`, so at repeat=1 the
+			// echoed length is the payload PLUS the prefix. Comparing against
+			// `big.length` alone was off by exactly "Hello, " and failed even when
+			// the round-trip worked.
+			const expected = "Hello, ".length + big.length;
+			check(
+				offloaded.data?.length === expected,
+				`${kind}: node received the real inputs, not the reference (length ${offloaded.data?.length}, expected ${expected})`,
+			);
 		}
 
 		// 2d. User-authored node (E05-T007): a scaffolded `e2e-user` node, baked
