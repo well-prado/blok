@@ -192,9 +192,9 @@ func makeRequest(nodeName string, inputs map[string]interface{}, body interface{
 		headers["content-type"] = "application/json"
 	}
 	return &pb.ExecuteRequest{
-		Node: &pb.NodeRef{Name: nodeName, Type: "runtime.go"},
+		Node:   &pb.NodeRef{Name: nodeName, Type: "runtime.go"},
 		Inputs: encodeJSONBytes(inputs),
-		Step: &pb.StepInfo{Name: nodeName, Index: 0, Total: 1, Depth: 0},
+		Step:   &pb.StepInfo{Name: nodeName, Index: 0, Total: 1, Depth: 0},
 		Trigger: &pb.TriggerInfo{
 			Body:        bodyBytes,
 			Headers:     headers,

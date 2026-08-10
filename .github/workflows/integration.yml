@@ -84,6 +84,16 @@ jobs:
       - name: No $ proxy check
         run: bun run check:no-dollar-proxy
 
+      # sdks/go had no formatting gate, so drift accumulated silently on main
+      # (#749). Own toolchain setup, same pattern as the buf step above.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Go fmt check (sdks/go)
+        run: bun run check:go-fmt
+
       # Sibling of the packaging gate (#687/#696, dist-under-Node): proves
       # every publishable package's SOURCE entry also imports cleanly under
       # Bun's per-file loader. MUST run after a workspace build: source

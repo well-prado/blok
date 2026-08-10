@@ -349,10 +349,10 @@ final class BlokError extends \Exception
         $current = $cause;
         $depth = 0;
         while ($current !== null && $depth < 32) {
-            if ($visited->contains($current)) {
+            if (isset($visited[$current])) {
                 break;
             }
-            $visited->attach($current);
+            $visited[$current] = true;
             $depth++;
             if ($current instanceof self) {
                 $payload = $current->toArray();
