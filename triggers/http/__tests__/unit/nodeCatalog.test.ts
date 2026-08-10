@@ -1,5 +1,5 @@
 import { Configuration, NodeMap } from "@blokjs/runner";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type NodeCatalogEntry, buildNodeCatalog, reflectModuleNode } from "../../src/runner/nodeCatalog.js";
 
 /** A defineNode-style node exposing real reflection schemas. */
@@ -135,6 +135,52 @@ describe("buildNodeCatalog (SPEC-B P1.3)", () => {
 	it("handles no module nodes + no runtimes", async () => {
 		expect(await buildNodeCatalog(undefined, [])).toEqual([]);
 	});
+
+	/**
+	 * #868 — sibling of #752: `await adapter.listNodes()` had NO timeout, so a
+	 * configured runtime sidecar that's unreachable or wedged (connection
+	 * opens, RPC callback never fires) never lets the promise settle — boot
+	 * (and `GET /__blok/nodes`) hangs forever with no error, no exit, no
+	 * diagnostic. Real-wall-clock `it(..., timeout)` below is the proof: a
+	 * fix that isn't actually bounded fails this test by hitting THAT
+	 * timeout, not by producing a wrong answer quickly.
+	 */
+	it("bounds a wedged adapter's listNodes(), warns naming the runtime + endpoint, and still returns other runtimes' nodes (#868)", async () => {
+		vi.useFakeTimers();
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const runtimes = [
+				{
+					kind: "wedged",
+					adapter: {
+						endpoint: "localhost:9999",
+						// Never resolves/rejects — simulates a connected-but-unresponsive sidecar.
+						listNodes: () => new Promise<never>(() => {}),
+					},
+				},
+				{
+					kind: "go",
+					adapter: { listNodes: async () => [{ name: "@go/x", inputSchema: null, outputSchema: null }] },
+				},
+			];
+
+			const pending = buildNodeCatalog(new Map(), runtimes);
+			// Advance past the per-adapter bound. Pre-fix, nothing schedules a
+			// timer here, so this can't unblock `pending` — the test times out
+			// on the real-wall-clock budget below instead of on this line.
+			await vi.advanceTimersByTimeAsync(6_000);
+			const catalog = await pending;
+
+			expect(catalog.map((n) => n.name)).toEqual(["@go/x"]); // wedged skipped, go present
+			expect(warnSpy).toHaveBeenCalledTimes(1);
+			const [warning] = warnSpy.mock.calls[0] as [string];
+			expect(warning).toContain("wedged"); // names the runtime
+			expect(warning).toContain("localhost:9999"); // names the endpoint
+		} finally {
+			warnSpy.mockRestore();
+			vi.useRealTimers();
+		}
+	}, 2_000); // real ms — well below an actual hang, comfortably above a correctly-bounded run
 });
 
 /**
