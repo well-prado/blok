@@ -860,6 +860,18 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.version = "1.0.0";
 		packageJsonContent.author = "";
 
+		// #747 — the base manifest is copied from the PRIMARY trigger's own
+		// package, which is a published npm library: `files: ["dist"]`,
+		// `private: false`, `publishConfig: { access: "public" }`. Inherited
+		// verbatim, an `npm publish` inside a scaffolded app would push the
+		// user's service to the PUBLIC registry with nothing to stop it.
+		// A generated project is an application: strip the publishing intent
+		// and lock it private. Users who really want to publish delete the flag.
+		for (const key of ["files", "publishConfig", "repository", "homepage", "bugs"]) {
+			delete packageJsonContent[key];
+		}
+		packageJsonContent.private = true;
+
 		// Replace workspace:* references that only work inside the monorepo
 		// v0.6.7: expanded to include EVERY publishable @blokjs/* package so
 		// the `--local` install path doesn't fall back to npm for any of
