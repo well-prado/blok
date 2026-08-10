@@ -94,6 +94,20 @@ for row in "${ROWS[@]}"; do
     log "FAIL $name: create (npm install) — tail:"; tail -20 "$logf"; FAILED+=("$name:create"); continue
   fi
 
+  # 1b. manifest hygiene — the base package.json is copied from the PRIMARY
+  #     trigger's published package, so a cron/websocket/mcp primary used to
+  #     drag `files`, `publishConfig` and `private: false` into the user's app:
+  #     `npm publish` in a scaffold would have gone PUBLIC (#747). Only a real
+  #     `create` shows this, and only for the kinds that are ever primary.
+  if ! node -e '
+    const pkg = require(process.argv[1] + "/package.json");
+    const leaked = ["files", "publishConfig", "repository", "homepage", "bugs"].filter((k) => k in pkg);
+    if (leaked.length) { console.error("publish-only keys leaked from the trigger package: " + leaked.join(", ")); process.exit(1); }
+    if (pkg.private !== true) { console.error("generated app is not private: private=" + JSON.stringify(pkg.private)); process.exit(1); }
+  ' "$dir" >"$logf.pkg" 2>&1; then
+    log "FAIL $name: package.json —"; cat "$logf.pkg"; FAILED+=("$name:manifest"); continue
+  fi
+
   # 2. build — `tsc` exits non-zero on a type error even though it still
   #    emits dist/. A generated project must typecheck with its OWN tsc.
   if ! (cd "$dir" && npm run build) >"$logf.build" 2>&1; then
