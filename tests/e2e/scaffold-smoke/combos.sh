@@ -41,13 +41,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# name | triggers | primary trigger (its dist entry is booted) | boot? | port | extra create args
+# name | triggers | primary trigger (its dist entry is booted) | boot mode | port | extra create args
 #
-# `boot=0` for mcp/webhook: `generateTriggerEntryFile` still emits a
-# "not yet implemented" stub for those two standalone (they're designed to
-# mount on HTTP), so there is nothing to boot — but they DO share the
-# missing-`.env.example` primary-trigger path with cron, so they're pinned at
-# the create+build level.
+# boot modes:
+#   0  create + build only (nothing standalone to boot)
+#   1  boot the compiled entry, require the process to survive
+#   2  as 1, plus require the entry to have BOUND the port — `/health-check`
+#      must answer. #748: mcp/webhook used to emit a "<kind> trigger not yet
+#      implemented" stub standalone, so the project installed, compiled and
+#      then exited doing nothing. "Process still alive" would NOT have caught
+#      that on its own for a trigger that legitimately binds nothing (cron), so
+#      the port-bound kinds assert the listener.
 #
 # The last row is the maximal scaffold — same trigger set `run.sh` builds, but
 # under npm and with the BUILD exit code asserted, which is how the
@@ -57,8 +61,8 @@ ROWS=(
   "http-sse|http,sse|http|1|4410|"
   "http-pubsub|http,pubsub|http|1|4411|"
   "websocket|websocket|websocket|1|4412|"
-  "mcp|mcp|mcp|0|4413|"
-  "webhook|webhook|webhook|0|4414|"
+  "mcp|mcp|mcp|2|4413|"
+  "webhook|webhook|webhook|2|4414|"
   "all-examples|http,sse,websocket,webhook,mcp,worker,cron,grpc,pubsub|http|1|4415|--examples"
 )
 
@@ -114,7 +118,7 @@ for row in "${ROWS[@]}"; do
     log "FAIL $name: npm run build — tail:"; tail -25 "$logf.build"; FAILED+=("$name:build"); continue
   fi
 
-  if [ "$boot" != "1" ]; then
+  if [ "$boot" = "0" ]; then
     log "PASS $name (create + build; no standalone entry to boot)"; PASSED+=("$name"); continue
   fi
 
@@ -129,9 +133,24 @@ for row in "${ROWS[@]}"; do
   if ! kill -0 "$pid" 2>/dev/null; then
     log "FAIL $name: entry exited during boot — tail:"; tail -25 "$logf.boot"; FAILED+=("$name:boot"); continue
   fi
+
+  # 4. boot=2 — the entry must also be SERVING. A stub entry that logs and
+  #    exits fails step 3; a stub that merely idles would not, so assert the
+  #    socket. `/health-check` is the one route every port-binding trigger
+  #    entry mounts.
+  if [ "$boot" = "2" ]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$port/health-check" || true)"
+    if [ "$code" != "200" ]; then
+      log "FAIL $name: /health-check on port $port returned '$code' (entry never bound) — tail:"
+      tail -25 "$logf.boot"; FAILED+=("$name:serve")
+      kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+      continue
+    fi
+  fi
+
   kill "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
-  log "PASS $name (create + build + boot)"
+  log "PASS $name (create + build + boot$([ "$boot" = "2" ] && echo " + serve"))"
   PASSED+=("$name")
 done
 
