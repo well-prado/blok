@@ -54,6 +54,8 @@ describe("examples node_file template registers HELPER_NODES (#640)", () => {
 	it("still registers api-call, if-else, and the example bundle", () => {
 		expect(node_file).toContain('import ApiCall from "@blokjs/api-call";');
 		expect(node_file).toContain('import IfElse from "@blokjs/if-else";');
-		expect(node_file).toContain('import ExampleNodes from "./nodes/examples/index";');
+		// Explicit `.js` — the scaffold tsconfig is nodenext, where an
+		// extensionless relative import is a compile error (#741).
+		expect(node_file).toContain('import ExampleNodes from "./nodes/examples/index.js";');
 	});
 });

@@ -5,7 +5,10 @@ import { HELPER_NODES } from "@blokjs/helpers";
 import IfElse from "@blokjs/if-else";
 import { discoverNodes } from "@blokjs/runner";
 import type { NodeBase } from "@blokjs/shared";
-import ExampleNodes from "./nodes/examples/index";
+// Explicit .js — the scaffold's tsconfig is \`moduleResolution: nodenext\`
+// (#709), under which an extensionless relative import is a COMPILE error, so
+// every \`--examples\` scaffold failed its own \`npm run build\` (#741).
+import ExampleNodes from "./nodes/examples/index.js";
 
 // Published nodes (npm) + the example bundle are registered explicitly below.
 // Your OWN nodes under 'nodes/<name>/index.ts' are AUTO-DISCOVERED and registered

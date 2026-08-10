@@ -19,14 +19,7 @@
  */
 
 import type { PubSubProvider, PubSubTriggerOpts, WorkflowV2Builder } from "@blokjs/helper";
-import {
-	type BlokService,
-	DefaultLogger,
-	type GlobalOptions,
-	NodeMap,
-	TriggerBase,
-	type TriggerResponse,
-} from "@blokjs/runner";
+import { DefaultLogger, type GlobalOptions, NodeMap, TriggerBase, type TriggerResponse } from "@blokjs/runner";
 import { type Context, type NodeBase, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
@@ -147,8 +140,12 @@ export abstract class PubSubTrigger extends TriggerBase {
 	 */
 	protected adapterPool: Map<string, PubSubAdapter> = new Map();
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
+	// Subclasses provide these. `NodeBase` (not `BlokService<unknown>`) is the
+	// registry contract: `NodeMap.addNode` takes `NodeBase`, and the Nodes.ts a
+	// scaffold generates is typed `Record<string, NodeBase>`. Declaring the
+	// narrower `BlokService<unknown>` made every generated project fail its own
+	// `tsc` on `protected nodes = nodes` (#741).
+	protected abstract nodes: Record<string, NodeBase>;
 	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	/**
@@ -158,7 +155,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 		this.nodeMap.nodes = new NodeMap();
 		// Register each node under its own node.name (the canonical use: ref, ADR
 		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
-		this.nodeMap.nodes.addNodes(Object.values(this.nodes) as unknown as NodeBase[]);
+		this.nodeMap.nodes.addNodes(Object.values(this.nodes));
 	}
 
 	/**

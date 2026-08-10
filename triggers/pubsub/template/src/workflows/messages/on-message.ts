@@ -1,4 +1,4 @@
-import { type Handle, node, step, tpl, workflow } from "@blokjs/core";
+import { node, step, tpl, workflow } from "@blokjs/core";
 
 /**
  * Example Pub/Sub CONSUMER — fires when a message arrives on the topic.
@@ -25,7 +25,6 @@ export default workflow(
 		trigger: { pubsub: { provider: "nats", topic: "orders.placed" } },
 	},
 	(msg) => {
-		const m = msg as Handle<{ body: unknown; params: { topic: string; messageId: string } }>;
 		// @blokjs/log surfaces the run directly in `blokctl dev` output — no
 		// network — so a live `curl produce → broker → consumer` is observable.
 		step(
@@ -33,8 +32,8 @@ export default workflow(
 			node("@blokjs/log"),
 			{
 				level: "info",
-				message: tpl`pubsub consumed a message on ${m.params.topic}`,
-				attrs: { messageId: m.params.messageId, body: m.body },
+				message: tpl`pubsub consumed a message on ${msg.params.topic}`,
+				attrs: { messageId: msg.params.messageId, body: msg.body },
 			},
 			{ ephemeral: true },
 		);

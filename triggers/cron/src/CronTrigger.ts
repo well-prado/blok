@@ -12,7 +12,6 @@
 
 import type { CronTriggerOpts, WorkflowV2Builder } from "@blokjs/helper";
 import {
-	type BlokService,
 	DefaultLogger,
 	DeferredDispatchSignal,
 	type GlobalOptions,
@@ -100,8 +99,12 @@ export abstract class CronTrigger extends TriggerBase {
 	/** OBS-02 T4 — graceful shutdown for the OTel tracer provider, if tracing was enabled. */
 	private tracingShutdown: (() => Promise<void>) | null = null;
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
+	// Subclasses provide these. `NodeBase` (not `BlokService<unknown>`) is the
+	// registry contract: `NodeMap.addNode` takes `NodeBase`, and the Nodes.ts a
+	// scaffold generates is typed `Record<string, NodeBase>`. Declaring the
+	// narrower `BlokService<unknown>` made every generated project fail its own
+	// `tsc` on `protected nodes = nodes` (#741).
+	protected abstract nodes: Record<string, NodeBase>;
 	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	// Constructor removed (mirrors WorkerTrigger's v0.6.3 fix) — pre-fix it
@@ -120,7 +123,7 @@ export abstract class CronTrigger extends TriggerBase {
 		this.nodeMap.nodes = new NodeMap();
 		// Register each node under its own node.name (the canonical use: ref, ADR
 		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
-		this.nodeMap.nodes.addNodes(Object.values(this.nodes) as unknown as NodeBase[]);
+		this.nodeMap.nodes.addNodes(Object.values(this.nodes));
 	}
 
 	/**

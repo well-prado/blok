@@ -23,6 +23,7 @@ import {
 	generateSupervisordConfig,
 	generateTriggerEnvVars,
 	generateTriggerSupervisordConfig,
+	getTriggerPort,
 	setupRuntime,
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
@@ -53,6 +54,26 @@ const GITHUB_REPO_RELEASE_TAG = "v2.1.0";
 // repo checkout. Compiled location: dist/commands/create/project.js →
 // dist/scaffold-repo.
 const BUNDLED_SCAFFOLD_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../scaffold-repo");
+
+/**
+ * The ONE `@hono/node-server` range a generated project may carry — as a direct
+ * dependency AND as the `overrides`/`resolutions` pin.
+ *
+ * Both halves are load-bearing (#741):
+ *  - `@hono/node-ws@1.x` (no 2.x exists) peer-ranges `@hono/node-server@^1.19.11`,
+ *    so without the override npm refuses the websocket scaffold with ERESOLVE.
+ *  - npm refuses an override that contradicts a direct dependency with
+ *    EOVERRIDE. The sse/websocket injections below used to hardcode a stale
+ *    `^1.19.9` while `triggers/http/package.json` shipped the `^2.0.11`
+ *    override, so `npm install` died on every `http+sse` / `http+websocket`
+ *    scaffold ("Override for @hono/node-server@^1.19.9 conflicts with direct
+ *    dependency"). bun tolerated the mismatch, which is why it went unseen.
+ *
+ * Keep in lockstep with `@hono/node-server` in `triggers/{http,sse,mcp,webhook}/
+ * package.json`; `packages/cli/tests/commands/create/hono-node-server-pin.test.ts`
+ * fails if they drift.
+ */
+export const HONO_NODE_SERVER_RANGE = "^2.0.11";
 
 /**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
@@ -799,10 +820,34 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		// Create .env.local file
-
+		// Create .env.local file.
+		//
+		// The base copy above takes `.env.example` from the PRIMARY trigger's
+		// package dir, and cron / mcp / webhook ship none — so this read blew up
+		// with ENOENT and a cron-only `blokctl create` had never once succeeded
+		// (#741). Synthesize the same key set for those instead of shipping three
+		// near-identical files: the generated project (and `blokctl
+		// observability add`, which appends to `.env.local`) only needs the file
+		// to exist with the standard keys.
 		const envExample = `${dirPath}/.env.example`;
 		const envLocal = `${dirPath}/.env.local`;
+
+		if (!fsExtra.existsSync(envExample)) {
+			fsExtra.writeFileSync(
+				envExample,
+				[
+					`PROJECT_NAME=trigger-${primaryTrigger}-server`,
+					"PROJECT_VERSION=0.0.1",
+					`PORT=${getTriggerPort(primaryTrigger)}`,
+					"WORKFLOWS_PATH=PROJECT_PATH/workflows",
+					"NODES_PATH=PROJECT_PATH/src/nodes",
+					"CONSOLE_LOG_ACTIVE=true",
+					`APP_NAME=blok-${primaryTrigger}`,
+					"DISABLE_TRIGGER_RUN=false # Set to true to disable trigger run and use this project as a module",
+					"",
+				].join("\n"),
+			);
+		}
 
 		const envContent = fsExtra.readFileSync(envExample, "utf8");
 		const result = envContent.replaceAll("PROJECT_PATH", dirPath);
@@ -941,6 +986,14 @@ export async function createProject(opts: OptionValues, version: string, current
 			...triggerScripts,
 		};
 
+		// Same inheritance problem as `start` above: the cron/sse/websocket/mcp
+		// packages build with `bun run tsc`, so a generated project whose primary
+		// trigger is one of them couldn't `npm run build` without bun installed
+		// (#741). `typescript` is already a devDependency — drop the bun hop.
+		if (typeof packageJsonContent.scripts.build === "string") {
+			packageJsonContent.scripts.build = packageJsonContent.scripts.build.replaceAll("bun run tsc", "tsc");
+		}
+
 		// Add blokctl as devDependency for multi-trigger dev server
 		const blokctlRef = localRepoPath ? `file:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
 		packageJsonContent.devDependencies = {
@@ -948,13 +1001,24 @@ export async function createProject(opts: OptionValues, version: string, current
 			blokctl: blokctlRef,
 		};
 
-		// @blokjs/core — the published typed-handle authoring surface
-		// (workflow/step/branch/forEach/switchOn/tryCatch/tpl/http + comparators).
-		// Scaffolded TypeScript workflows import from here, so every new project
-		// ships with it as a runtime dependency.
+		// Deps EVERY generated project needs, whatever the trigger set:
+		//  - @blokjs/core     — the typed-handle authoring surface every scaffolded
+		//                       workflow imports.
+		//  - @blokjs/api-call
+		//  - @blokjs/if-else
+		//  - @blokjs/helpers  — all three are imported by the generated src/Nodes.ts
+		//                       (see generateSharedNodesFile / Examples.ts node_file).
+		// These used to be injected only in the sse/websocket branches, so a
+		// cron-only / pubsub-only scaffold generated a Nodes.ts importing packages
+		// its package.json never declared (#741). Inject once, unconditionally —
+		// a no-op when the primary trigger's manifest already lists them (http).
+		const localDep = (rel: string) => `file:${path.resolve(repoSource, rel)}`;
 		packageJsonContent.dependencies = {
 			...packageJsonContent.dependencies,
-			"@blokjs/core": localRepoPath ? `file:${path.resolve(repoSource, "core/core")}` : BLOKJS_DEP_RANGE,
+			"@blokjs/core": localRepoPath ? localDep("core/core") : BLOKJS_DEP_RANGE,
+			"@blokjs/api-call": localRepoPath ? localDep("nodes/web/api-call@1.0.0") : BLOKJS_DEP_RANGE,
+			"@blokjs/if-else": localRepoPath ? localDep("nodes/control-flow/if-else@1.0.0") : BLOKJS_DEP_RANGE,
+			"@blokjs/helpers": localRepoPath ? localDep("nodes/utility/helpers@1.0.0") : BLOKJS_DEP_RANGE,
 		};
 
 		// #709 — the base tsconfig is copied from the primary trigger package,
@@ -1041,63 +1105,47 @@ export async function createProject(opts: OptionValues, version: string, current
 		// doesn't list in its production dependencies because the
 		// package itself only needs them at dev/test time. When SSE is
 		// scaffolded alone (primary trigger), the project inherits
-		// trigger-sse/package.json and is missing:
-		//   - @hono/node-server  (used by the generated SSEServer to serve())
-		//   - @blokjs/helpers    (provides @blokjs/sse-{subscribe,stream,publish})
-		//   - @blokjs/api-call   (referenced by generated Nodes.ts)
-		//   - @blokjs/if-else    (same)
-		//   - @blokjs/trigger-sse (the trigger package itself)
-		// HTTP scaffolds already include all of these via trigger-http's
-		// own dependencies (HTTP package.json declares them), so the
-		// HTTP-as-primary path inherits them naturally. The injection
-		// below is a no-op when those deps are already present.
+		// trigger-sse/package.json and is missing @hono/node-server (used by the
+		// generated SSEServer to serve()) plus the trigger package itself.
+		// HTTP scaffolds already include these via trigger-http's own
+		// dependencies, so the HTTP-as-primary path inherits them naturally; the
+		// injection below is a no-op when they're already present.
 		if (selectedTriggers.includes("sse")) {
-			const sseDeps: Record<string, string> = {
-				"@blokjs/api-call": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/web/api-call@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/if-else": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/control-flow/if-else@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/helpers": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/utility/helpers@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/trigger-sse": localRepoPath ? `file:${path.resolve(repoSource, "triggers/sse")}` : BLOKJS_DEP_RANGE,
-				"@hono/node-server": "^1.19.9",
-				hono: "^4.11.7",
-				uuid: "^11.1.0",
-			};
 			packageJsonContent.dependencies = {
 				...packageJsonContent.dependencies,
-				...sseDeps,
+				"@blokjs/trigger-sse": localRepoPath ? localDep("triggers/sse") : BLOKJS_DEP_RANGE,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
+				hono: "^4.11.7",
+				uuid: "^11.1.0",
 			};
 		}
 		// Same rationale for WebSocket — when WS is selected, inject the
 		// deps required for the scaffolded WSServer + workflow runtime.
-		// @blokjs/helpers provides @blokjs/ws-{broadcast,reply,close}.
 		if (selectedTriggers.includes("websocket")) {
-			const wsDeps: Record<string, string> = {
-				"@blokjs/api-call": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/web/api-call@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/if-else": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/control-flow/if-else@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/helpers": localRepoPath
-					? `file:${path.resolve(repoSource, "nodes/utility/helpers@1.0.0")}`
-					: BLOKJS_DEP_RANGE,
-				"@blokjs/trigger-websocket": localRepoPath
-					? `file:${path.resolve(repoSource, "triggers/websocket")}`
-					: BLOKJS_DEP_RANGE,
-				"@hono/node-server": "^1.19.9",
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				"@blokjs/trigger-websocket": localRepoPath ? localDep("triggers/websocket") : BLOKJS_DEP_RANGE,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
 				"@hono/node-ws": "^1.3.1",
 				hono: "^4.11.7",
 				uuid: "^11.1.0",
 				ws: "^8.19.0",
 			};
-			packageJsonContent.dependencies = {
-				...packageJsonContent.dependencies,
-				...wsDeps,
+		}
+		// Whoever pulls @hono/node-server in — the http template's manifest, or
+		// the sse/websocket injection above — the generated project must ALSO
+		// carry the matching pin, or npm's resolver refuses to install it
+		// (@hono/node-ws@1.x peer-ranges node-server 1.x; see
+		// HONO_NODE_SERVER_RANGE). Written for both key names so npm/pnpm
+		// (`overrides`) and yarn (`resolutions`) agree; bun reads either.
+		if (packageJsonContent.dependencies?.["@hono/node-server"]) {
+			packageJsonContent.overrides = {
+				...packageJsonContent.overrides,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
+			};
+			packageJsonContent.resolutions = {
+				...packageJsonContent.resolutions,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
 			};
 		}
 		// MCP mounts on the HTTP process (like SSE/WS). Inject the trigger
@@ -2071,7 +2119,7 @@ import workflows from "../../../Workflows.js";
  * Workflows.ts are ignored by the scheduler (they run under their own trigger).
  */
 export default class CronServer extends CronTrigger {
-	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected nodes: Record<string, import("@blokjs/shared").NodeBase> = nodes;
 	protected workflows: Record<string, import("@blokjs/helper").WorkflowV2Builder> = workflows;
 }
 `;
