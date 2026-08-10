@@ -1186,14 +1186,30 @@ export async function createProject(opts: OptionValues, version: string, current
 		// package so the generated HTTP entry's `import McpTrigger from
 		// "@blokjs/trigger-mcp"` resolves. The trigger package pulls its own
 		// SDK deps (@modelcontextprotocol/sdk, zod-to-json-schema) transitively.
+		// #748 — @hono/node-server too: an mcp-ONLY scaffold generates a
+		// standalone entry that serve()s its own Hono app, and the base manifest
+		// inherited from triggers/mcp lists node-server as a devDependency only.
 		if (selectedTriggers.includes("mcp")) {
 			const mcpDeps: Record<string, string> = {
 				"@blokjs/trigger-mcp": localRepoPath ? `file:${path.resolve(repoSource, "triggers/mcp")}` : BLOKJS_DEP_RANGE,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
 				hono: "^4.11.7",
 			};
 			packageJsonContent.dependencies = {
 				...packageJsonContent.dependencies,
 				...mcpDeps,
+			};
+		}
+		// #748 — same for Webhook. Standalone (no `http` in the trigger set) the
+		// generated entry imports the trigger package itself plus Hono and
+		// @hono/node-server; the base manifest copied from triggers/webhook has
+		// hono but neither of the other two as production dependencies.
+		if (selectedTriggers.includes("webhook")) {
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				"@blokjs/trigger-webhook": localRepoPath ? localDep("triggers/webhook") : BLOKJS_DEP_RANGE,
+				"@hono/node-server": HONO_NODE_SERVER_RANGE,
+				hono: "^4.11.7",
 			};
 		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
@@ -2071,6 +2087,99 @@ const port = Number(process.env.GRPC_PORT || process.env.PORT || 4003);
 
 if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new GrpcServer({ host, port, nodes, workflows }).start();
+}
+`;
+	}
+
+	if (triggerKind === "mcp" || triggerKind === "webhook") {
+		// #748 — standalone MCP / Webhook. When `http` is also selected these two
+		// mount on the HTTP process and this branch is never reached (see
+		// `mountedOnHttp` in createProject, which skips generating the entry
+		// entirely). Selected ALONE they used to fall through to the generic
+		// stub below, so the project installed, compiled, and exited doing
+		// nothing.
+		//
+		// Nothing had to be invented to fix that: both triggers already support
+		// standalone operation — `constructor(app: Hono, httpTrigger?)` takes the
+		// HttpTrigger as OPTIONAL, and `listen()` has an explicit
+		// `else { this.registerRoutesFromRegistry(); }` branch for when there
+		// isn't one. What neither does standalone is (1) own a Hono app,
+		// (2) fill the WorkflowRegistry that `registerRoutesFromRegistry()`
+		// walks (HttpTrigger's job in the mounted layout), and (3) bind a
+		// listener. All three live in scaffolded user code — exactly the split
+		// the generated SSEServer already uses for the same-shaped SSE trigger.
+		// Inlined in the entry (rather than a `runner/<X>Server.ts` wrapper)
+		// because neither package ships a `template/` or `src/runner/` for the
+		// scaffold to extend, same as the grpc entry above.
+		const cls = triggerKind === "mcp" ? "McpTrigger" : "WebhookTrigger";
+		const pkg = triggerKind === "mcp" ? "@blokjs/trigger-mcp" : "@blokjs/trigger-webhook";
+		const label = triggerKind === "mcp" ? "MCP" : "Webhook";
+		return `${MAIN_MODULE_GUARD_IMPORTS}
+import { serve } from "@hono/node-server";
+import { DefaultLogger, NodeMap, WorkflowRegistry } from "@blokjs/runner";
+import { Hono } from "hono";
+import ${cls} from "${pkg}";
+import nodes from "../../Nodes.js";
+import workflows from "../../Workflows.js";
+
+${MAIN_MODULE_GUARD_FN}
+
+const logger = new DefaultLogger();
+
+async function start(): Promise<void> {
+	const startedAt = performance.now();
+	const app = new Hono();
+
+	// Mirrors HttpTrigger's health route so the URL \`blokctl create\` prints for
+	// a standalone ${triggerKind} project actually answers.
+	app.all("/health-check", (c) => c.text("Online and ready for action", 200));
+
+	const trigger = new ${cls}(app);
+
+	// ${triggerKind} workflows run their steps through the same runner machinery
+	// as HTTP, so the trigger needs every node they reference.
+	const nodeMap = new NodeMap();
+	for (const [key, node] of Object.entries(nodes)) {
+		nodeMap.addNode(key, node);
+	}
+	trigger.setNodeMap({
+		nodes: nodeMap,
+		workflows: workflows as unknown as Parameters<${cls}["setNodeMap"]>[0]["workflows"],
+	});
+
+	// \`${cls}.listen()\` mounts routes for whatever the WorkflowRegistry holds.
+	// In an http+${triggerKind} project HttpTrigger fills it; standalone nothing
+	// else does, so register the ${triggerKind}-triggered workflows here.
+	// \`workflow({…})\` returns a frozen builder whose config lives at
+	// \`_config\`; the top-level shape is the v1 helper response. Accept both.
+	const registry = WorkflowRegistry.getInstance();
+	for (const [name, wf] of Object.entries(workflows)) {
+		const w = wf as unknown as {
+			name?: string;
+			trigger?: { ${triggerKind}?: unknown };
+			_config?: { name?: string; trigger?: { ${triggerKind}?: unknown } };
+		};
+		const triggerCfg = w._config?.trigger ?? w.trigger;
+		if (!triggerCfg?.${triggerKind}) continue;
+		registry.register({
+			name: w._config?.name ?? w.name ?? name,
+			source: \`${triggerKind}:\${name}\`,
+			workflow: (w._config ?? w) as unknown as Parameters<typeof registry.register>[0]["workflow"],
+		});
+	}
+
+	await trigger.listen();
+
+	const port = Number(process.env.PORT || ${getTriggerPort(triggerKind)});
+	serve({ fetch: app.fetch, port }, () => {
+		logger.log(
+			\`${label} trigger listening on http://localhost:\${port} (\${(performance.now() - startedAt).toFixed(2)}ms)\`,
+		);
+	});
+}
+
+if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true") {
+	start();
 }
 `;
 	}
