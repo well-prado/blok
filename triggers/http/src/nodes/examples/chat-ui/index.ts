@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineNode } from "@blokjs/runner";
 import type { Context } from "@blokjs/shared";
 import ejs from "ejs";
@@ -24,7 +25,11 @@ import { z } from "zod";
  *     ships only the latest user message — server reconstructs history
  *     from its own store.
  */
-const rootDir = path.resolve(__dirname, ".");
+// `__dirname` does not exist in ESM. Bun defines it anyway, so this only ever
+// blew up where nobody looked: a built `--examples` scaffold run under plain
+// Node died with `ReferenceError: __dirname is not defined in ES module scope`
+// before the trigger could listen (#741).
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const root = (relPath: string) => path.resolve(rootDir, relPath);
 
 export default defineNode({

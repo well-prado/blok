@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# Scaffold COMBO matrix — create → npm install → npm run build → boot, per
+# trigger combination, on plain npm/Node.
+#
+# The big `run.sh` smoke builds ONE maximal scaffold with `--package-manager
+# bun`. That leaves two whole classes of defect invisible, and #741 shipped
+# three of them:
+#
+#   1. npm (unlike bun) REFUSES an `overrides` entry that contradicts a direct
+#      dependency — every `http+sse` / `http+websocket` scaffold died with
+#      `EOVERRIDE ... @hono/node-server`. Only an npm install catches it.
+#   2. Trigger kinds that are never the PRIMARY trigger in the maximal scaffold
+#      (cron/mcp/webhook are always preceded by http) never exercise the
+#      "base files come from the primary trigger's package dir" path — a
+#      cron-only create had crashed on a missing `.env.example` since forever.
+#   3. `dist/` still emits on a tsc type error (`noEmitOnError` is off), so a
+#      scaffold whose own `npm run build` reports real type errors still boots.
+#      Only the build EXIT CODE catches that.
+#
+# So: one row per combination, and the exit code of each step is the assertion.
+#
+# Usage:
+#   bash tests/e2e/scaffold-smoke/combos.sh
+#
+# Env:
+#   SMOKE_SKIP_BUILD=1   skip the monorepo `bun run build` (assume dist current)
+#   SMOKE_COMBOS=a,b     limit to these row names
+#   SMOKE_KEEP=1         keep the scaffolded projects for inspection
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+CLI="$ROOT/packages/cli/dist/index.js"
+WORKDIR=""
+
+log() { echo "[combos] $*"; }
+
+cleanup() {
+  pkill -f "blok-combo-.*/dist/triggers/" 2>/dev/null || true
+  [ -n "$WORKDIR" ] && [ -z "${SMOKE_KEEP:-}" ] && rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
+
+# name | triggers | primary trigger (its dist entry is booted) | boot? | port | extra create args
+#
+# `boot=0` for mcp/webhook: `generateTriggerEntryFile` still emits a
+# "not yet implemented" stub for those two standalone (they're designed to
+# mount on HTTP), so there is nothing to boot — but they DO share the
+# missing-`.env.example` primary-trigger path with cron, so they're pinned at
+# the create+build level.
+#
+# The last row is the maximal scaffold — same trigger set `run.sh` builds, but
+# under npm and with the BUILD exit code asserted, which is how the
+# `--examples` Nodes.ts extensionless-import type error stayed invisible.
+ROWS=(
+  "cron|cron|cron|1|4404|"
+  "http-sse|http,sse|http|1|4410|"
+  "http-pubsub|http,pubsub|http|1|4411|"
+  "websocket|websocket|websocket|1|4412|"
+  "mcp|mcp|mcp|0|4413|"
+  "webhook|webhook|webhook|0|4414|"
+  "all-examples|http,sse,websocket,webhook,mcp,worker,cron,grpc,pubsub|http|1|4415|--examples"
+)
+
+if [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
+  log "building the monorepo (SMOKE_SKIP_BUILD=1 to skip)…"
+  (cd "$ROOT" && bun run build) >/tmp/blok-combos-build.log 2>&1 || {
+    log "build failed — tail of /tmp/blok-combos-build.log:"; tail -60 /tmp/blok-combos-build.log; exit 1;
+  }
+fi
+[ -f "$CLI" ] || { log "blokctl dist not found at $CLI (run a build first)"; exit 1; }
+
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/blok-combos.XXXXXX")"
+FAILED=()
+PASSED=()
+
+for row in "${ROWS[@]}"; do
+  IFS='|' read -r name triggers primary boot port extra <<<"$row"
+  if [ -n "${SMOKE_COMBOS:-}" ] && [[ ",${SMOKE_COMBOS}," != *",${name},"* ]]; then
+    log "SKIP $name (not in SMOKE_COMBOS)"; continue
+  fi
+
+  proj="blok-combo-$name"
+  dir="$WORKDIR/$proj"
+  logf="$WORKDIR/$name.log"
+  log "── $name ($triggers) ────────────────────────────────"
+
+  # 1. create — runs the package manager's install as its last step, so this
+  #    exit code covers both the generator (ENOENT) and npm's resolver
+  #    (EOVERRIDE / ERESOLVE).
+  if ! (cd "$WORKDIR" && bun "$CLI" create project \
+        --name "$proj" --local "$ROOT" --triggers "$triggers" ${extra:+$extra} \
+        --package-manager npm --non-interactive </dev/null) >"$logf" 2>&1; then
+    log "FAIL $name: create (npm install) — tail:"; tail -20 "$logf"; FAILED+=("$name:create"); continue
+  fi
+
+  # 2. build — `tsc` exits non-zero on a type error even though it still
+  #    emits dist/. A generated project must typecheck with its OWN tsc.
+  if ! (cd "$dir" && npm run build) >"$logf.build" 2>&1; then
+    log "FAIL $name: npm run build — tail:"; tail -25 "$logf.build"; FAILED+=("$name:build"); continue
+  fi
+
+  if [ "$boot" != "1" ]; then
+    log "PASS $name (create + build; no standalone entry to boot)"; PASSED+=("$name"); continue
+  fi
+
+  # 3. boot the COMPILED entry under plain node and require it to survive.
+  entry="$dir/dist/triggers/$primary/index.js"
+  if [ ! -f "$entry" ]; then
+    log "FAIL $name: no compiled entry at $entry"; FAILED+=("$name:entry"); continue
+  fi
+  (cd "$dir" && PORT="$port" BLOK_TRACING_DISABLED=1 DISABLE_TRIGGER_RUN=false node "$entry") >"$logf.boot" 2>&1 &
+  pid=$!
+  sleep 8
+  if ! kill -0 "$pid" 2>/dev/null; then
+    log "FAIL $name: entry exited during boot — tail:"; tail -25 "$logf.boot"; FAILED+=("$name:boot"); continue
+  fi
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  log "PASS $name (create + build + boot)"
+  PASSED+=("$name")
+done
+
+echo
+log "passed: ${PASSED[*]:-(none)}"
+if [ ${#FAILED[@]} -gt 0 ]; then
+  log "FAILED: ${FAILED[*]}"
+  exit 1
+fi
+log "all combos green"

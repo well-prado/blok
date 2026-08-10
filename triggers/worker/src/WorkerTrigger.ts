@@ -21,7 +21,6 @@
 
 import { type WorkerTriggerOpts, type WorkflowV2Builder, tryParseDuration } from "@blokjs/helper";
 import {
-	type BlokService,
 	ConcurrencyLimitError,
 	ConcurrencyMetrics,
 	Configuration,
@@ -237,8 +236,12 @@ export abstract class WorkerTrigger extends TriggerBase {
 	 */
 	protected adapterPool: Map<string, WorkerAdapter> = new Map();
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
+	// Subclasses provide these. `NodeBase` (not `BlokService<unknown>`) is the
+	// registry contract: `NodeMap.addNode` takes `NodeBase`, and the Nodes.ts a
+	// scaffold generates is typed `Record<string, NodeBase>`. Declaring the
+	// narrower `BlokService<unknown>` made every generated project fail its own
+	// `tsc` on `protected nodes = nodes` (#741).
+	protected abstract nodes: Record<string, NodeBase>;
 	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	// Constructor removed in v0.6.3 — pre-fix it called `loadNodes()` +
@@ -257,7 +260,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 		this.nodeMap.nodes = new NodeMap();
 		// Register each node under its own node.name (the canonical use: ref, ADR
 		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
-		this.nodeMap.nodes.addNodes(Object.values(this.nodes) as unknown as NodeBase[]);
+		this.nodeMap.nodes.addNodes(Object.values(this.nodes));
 	}
 
 	/**

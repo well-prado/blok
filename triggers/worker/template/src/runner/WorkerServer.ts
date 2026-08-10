@@ -29,6 +29,6 @@ import workflows from "../Workflows.js";
  *   });
  */
 export default class WorkerServer extends WorkerTrigger {
-	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected nodes: Record<string, import("@blokjs/shared").NodeBase> = nodes;
 	protected workflows: Record<string, import("@blokjs/helper").WorkflowV2Builder> = workflows;
 }
