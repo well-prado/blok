@@ -58,6 +58,7 @@ trap cleanup EXIT
 # `--examples` Nodes.ts extensionless-import type error stayed invisible.
 ROWS=(
   "cron|cron|cron|1|4404|"
+  "sse|sse|sse|1|4409|"
   "http-sse|http,sse|http|1|4410|"
   "http-pubsub|http,pubsub|http|1|4411|"
   "websocket|websocket|websocket|1|4412|"

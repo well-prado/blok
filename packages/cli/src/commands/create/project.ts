@@ -1906,7 +1906,7 @@ if (isMainModule(import.meta.url) && process.env.DISABLE_TRIGGER_RUN !== "true")
 		return `${MAIN_MODULE_GUARD_IMPORTS}
 import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import SSEServer from "./runner/SSEServer";
+import SSEServer from "./runner/SSEServer.js";
 
 ${MAIN_MODULE_GUARD_FN}
 
