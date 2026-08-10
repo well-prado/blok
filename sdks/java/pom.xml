@@ -120,6 +120,17 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.2</version>
+                <configuration>
+                    <!-- ADR 0014 claim-check: Java has no per-test way to set an env
+                         var (unlike Go's t.Setenv), so the shared directory is fixed
+                         for the whole forked test JVM here. Safe for every other test:
+                         BlobClaimCheckTest exercises resolveInputBlob's (inputs, root)
+                         overload directly with an explicit root/null, never reading
+                         this env var. Only GrpcClaimCheckTest reads it. -->
+                    <environmentVariables>
+                        <BLOK_BLOB_DIR>${project.build.directory}/test-blobs</BLOK_BLOB_DIR>
+                    </environmentVariables>
+                </configuration>
             </plugin>
 
             <plugin>

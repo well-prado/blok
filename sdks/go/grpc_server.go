@@ -688,7 +688,6 @@ func severityToProto(s ErrorSeverity) pb.ErrorSeverity {
 	}
 }
 
-
 // decodeJSONObject decodes a JSON-bytes field as a map. Empty bytes → empty map.
 // Non-object payloads are wrapped under a "_value" key.
 func decodeJSONObject(blob []byte, field string) (map[string]interface{}, error) {

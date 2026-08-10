@@ -315,7 +315,7 @@ func (w *Worker) startQueue(ctx context.Context, queue string, handler JobHandle
 	_, err := w.js.CreateOrUpdateConsumer(ctx, streamName, jetstream.ConsumerConfig{
 		Durable:       durableName,
 		AckPolicy:     jetstream.AckExplicitPolicy,
-		MaxDeliver:    w.config.MaxRetries + 1, // +1 for initial delivery
+		MaxDeliver:    w.config.MaxRetries + 1,          // +1 for initial delivery
 		AckWait:       w.config.AckWait + 5*time.Second, // Buffer for processing
 		FilterSubject: subject,
 	})
