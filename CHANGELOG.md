@@ -80,6 +80,16 @@ _Nothing yet._
   maximal scaffold under bun and never checked a build exit code, which is
   exactly why all five of these were invisible.
 
+- **Generated projects could be published to npm by accident** (#747). A
+  scaffold's `package.json` is seeded from the primary trigger's own package —
+  a published library — so it inherited `"private": false`, `"files": ["dist"]`
+  and `"publishConfig": {"access": "public"}` verbatim. An `npm publish` run
+  inside a generated application would have pushed that service to the **public**
+  registry with nothing to stop it. Generated manifests now drop the publishing
+  keys and are `"private": true`; publishing stays an explicit opt-out. The
+  scaffold combo matrix asserts manifest hygiene per trigger so it cannot creep
+  back.
+
 - **`GlobalError` broke `instanceof` for its own subclasses** (#736). The
   constructor called `Object.setPrototypeOf(this, GlobalError.prototype)`
   unconditionally, clobbering the prototype of any subclass that did not re-pin
