@@ -39,6 +39,11 @@ describe("classifyChange — docs/d/cli/dev.mdx contract table", () => {
 		["test directory", "/app/src/nodes/__tests__/charge.ts", "ignore"],
 		["unrelated file", "/app/README.md", "ignore"],
 		["unwatched source", "/app/scripts/seed.ts", "ignore"],
+		// Sidecar build output lives UNDER a runtime root, so without an explicit
+		// ignore one `cargo build` fires hundreds of regens at the dev server.
+		["rust build output", "/app/runtimes/rust/target/debug/deps/server-1a2b.o", "ignore"],
+		["python venv", "/app/runtimes/python3/.venv/lib/site-packages/x.py", "ignore"],
+		["python bytecode cache", "/app/runtimes/python3/nodes/__pycache__/score.cpython-311.pyc", "ignore"],
 	];
 
 	for (const [label, file, expected] of table) {

@@ -38,6 +38,7 @@ for the hot rows, `packages/cli/tests/dev-watch.test.ts` for the restart rows.
 | Edit `runtimes/<lang>/**` | **regen** | — | Cross-runtime stubs regenerated (`blokctl nodes sync`), no restart. |
 | `nodes-gen/**`, `.blok/runtimes/**` | **ignored** | — | Generated output — the watcher writes these itself. |
 | `**/dist/**`, `node_modules`, `*.d.ts`, `*.test.ts`, `__tests__/**` | **ignored** | — | Never a source of truth. |
+| `**/target/**`, `**/.venv/**`, `**/__pycache__/**` | **ignored** | — | Sidecar build output. Inside a runtime root, so it would otherwise regen once per artifact. |
 
 <Note>
 Hot reload swaps what the **next** run resolves. Runs already in flight finish
