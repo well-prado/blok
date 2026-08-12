@@ -81,6 +81,44 @@ describe("sanitize", () => {
 		expect(result._originalSize).toBeGreaterThan(1024);
 	});
 
+	it("does not copy an oversized payload just to preview it", () => {
+		// The freeze: an oversized payload was structurally copied in full before
+		// anyone checked its size, so a big step aggregate cost millions of
+		// throwaway allocations — and all but 500 chars of it was discarded.
+		//
+		// `toJSON` separates the two walks: JSON.stringify calls it and never sees
+		// the getter, while the redaction copy enumerates properties and does. So
+		// `copied` counts ONLY elements the redaction walk touched, which must now
+		// stop at the preview budget instead of running to 5000.
+		process.env.BLOK_TRACE_PAYLOAD_MAX_KB = "1";
+		let copied = 0;
+		const big = Array.from({ length: 5000 }, (_, i) => ({
+			get body() {
+				copied++;
+				return "x".repeat(20);
+			},
+			toJSON() {
+				return { i, body: "x".repeat(20) };
+			},
+		}));
+
+		const result = sanitize(big) as Record<string, unknown>;
+		expect(result._truncated).toBe(true);
+		expect(result._originalSize).toBeGreaterThan(1024);
+		expect(copied).toBeLessThan(1000);
+	});
+
+	it("redacts the preview of an oversized payload", () => {
+		// The preview is the one part of an oversized payload that survives into
+		// storage, so it must never carry a raw secret.
+		process.env.BLOK_TRACE_PAYLOAD_MAX_KB = "1";
+		const result = sanitize({ password: "hunter2", data: "x".repeat(4000) }) as Record<string, unknown>;
+
+		expect(result._truncated).toBe(true);
+		expect(result._preview).toContain("[REDACTED]");
+		expect(result._preview).not.toContain("hunter2");
+	});
+
 	it("should add custom sensitive fields from env", () => {
 		process.env.BLOK_TRACE_SANITIZE_FIELDS = "ssn,credit_card";
 		const input = { ssn: "123-45-6789", credit_card: "4111", name: "John" };
