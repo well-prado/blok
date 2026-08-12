@@ -36,8 +36,25 @@ export interface ClassifyRoots {
 
 const HOT_EXTENSIONS = [".ts", ".js", ".mjs", ".json"];
 
-/** Paths that never reach either watcher — build output, VCS, deps, editor turds. */
-const IGNORED_SEGMENTS = ["/node_modules/", "/dist/", "/.git/", "/coverage/", "/.nx/"];
+/**
+ * Paths that never reach either watcher — build output, VCS, deps, editor turds.
+ *
+ * `/target/`, `/.venv/` and `/__pycache__/` are the sidecar-runtime equivalents
+ * of `/dist/`: they live UNDER a `runtimePaths` root, so without them one
+ * `cargo build` classifies hundreds of artifacts as `regen` and each one fetches
+ * the node catalog from the dev server — enough to stop it serving, which takes
+ * in-flight requests down with it.
+ */
+const IGNORED_SEGMENTS = [
+	"/node_modules/",
+	"/dist/",
+	"/.git/",
+	"/coverage/",
+	"/.nx/",
+	"/target/",
+	"/.venv/",
+	"/__pycache__/",
+];
 
 function isUnder(file: string, dir: string): boolean {
 	if (dir.length === 0) return false;
