@@ -17,7 +17,15 @@ import { setNonInteractive } from "../../../src/services/non-interactive.js";
  * is distinguishable from "it worked". Asserting `resolves` here (as this file
  * used to) passed no matter what the function did with the error.
  */
-const NOT_A_PROJECT = /haven't created a project yet/;
+/**
+ * `createNode` has TWO "you are not in a project" guards, and WHICH one fires
+ * depends on the machine: `node.ts` throws "blok repository was not found" when
+ * ~/.blok/blok is absent (a clean CI runner), and the `ops1` → "haven't created
+ * a project yet" message when that clone exists but the cwd has no `src/` (a
+ * developer's box). Both mean the same thing here, so match either — pinning
+ * one message made this suite pass locally and fail in CI.
+ */
+const NOT_A_PROJECT = /haven't created a project yet|blok repository was not found/;
 
 describe("create node (non-interactive)", () => {
 	beforeEach(() => {
