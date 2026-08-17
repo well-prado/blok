@@ -1,7 +1,9 @@
 import { type Context, GlobalError, type ResponseContext, isNonRetryableStepError } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
+import { defineNode } from "../../src/defineNode";
 import { RunTracker } from "../../src/tracing/RunTracker";
 
 class FlakyNode extends RunnerNode {
@@ -425,5 +427,77 @@ describe("RunnerSteps — non-retryable verdict propagation (#679)", () => {
 		const err = await rejection(node);
 		expect(node.attempts).toBe(3);
 		expect(isNonRetryableStepError(err)).toBe(false);
+	});
+});
+
+/**
+ * #893 — the same classification through `defineNode()`, the RECOMMENDED
+ * authoring path. Every case above throws from a hand-rolled `RunnerNode`,
+ * whose error reaches the matcher untouched. A `defineNode` node's throw does
+ * not: `FunctionNode.mapErrorToGlobalError` rebuilds it as a fresh
+ * `GlobalError` carrying the NODE's name on `context.name`. Unless the
+ * original rides along on `cause`, two of the three documented matching
+ * semantics — `Error.name` and a wrapped `cause` — are unreachable, and a
+ * failure declared deterministic burns the whole retry budget anyway.
+ */
+describe("RunnerSteps — selective retry through defineNode (#893)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		vi.useFakeTimers({ toFake: ["setTimeout"] });
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+		RunTracker.resetInstance();
+	});
+
+	class Boom extends Error {
+		constructor(message: string) {
+			super(message);
+			this.name = "Boom";
+		}
+	}
+
+	const RETRY_UNLESS_BOOM = { maxAttempts: 3, minTimeoutInMs: 1, factor: 1, nonRetryableErrorNames: ["Boom"] };
+
+	async function runFnNode(name: string, buildError: () => unknown): Promise<{ attempts: number; error: unknown }> {
+		let attempts = 0;
+		const node = defineNode({
+			name,
+			description: "test fixture — always throws",
+			input: z.object({}),
+			output: z.object({}),
+			async execute() {
+				attempts += 1;
+				throw buildError();
+			},
+		});
+		node.retry = RETRY_UNLESS_BOOM;
+
+		const { ctx } = ctxWithTracing(`wf-${name}`);
+		(ctx.config as unknown as Record<string, unknown>)[name] = { inputs: {} };
+		const caught = new Runner([node]).run(ctx).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		await vi.runAllTimersAsync();
+		return { attempts, error: await caught };
+	}
+
+	it("a plain Error subclass thrown from execute() gets exactly one attempt", async () => {
+		const { attempts, error } = await runFnNode("fn-boom", () => new Boom("boom"));
+		expect(attempts).toBe(1);
+		expect(isNonRetryableStepError(error)).toBe(true);
+	});
+
+	it("a wrapped cause thrown from execute() gets exactly one attempt", async () => {
+		const { attempts, error } = await runFnNode("fn-wrapped", () => new Error("outer", { cause: new Boom("inner") }));
+		expect(attempts).toBe(1);
+		expect(isNonRetryableStepError(error)).toBe(true);
+	});
+
+	it("an UNLISTED error name still exhausts the normal retry budget", async () => {
+		const { attempts, error } = await runFnNode("fn-transient", () => new Error("dependency down"));
+		expect(attempts).toBe(3);
+		expect(isNonRetryableStepError(error)).toBe(false);
 	});
 });

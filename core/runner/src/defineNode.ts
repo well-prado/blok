@@ -12,6 +12,37 @@ import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 
 /**
+ * Keep the thing the author actually threw reachable from the `GlobalError`
+ * the runner sees (#893).
+ *
+ * `mapErrorToGlobalError` rebuilds a plain throw as a fresh `GlobalError` whose
+ * `context.name` is the NODE's name — which is what the HTTP trigger reports as
+ * `origin` and what `BlokError.fromUnknown` reads as `node`, so it must keep
+ * meaning that. But it also means the original `Error.name` and any `cause`
+ * chain were dropped on the floor, and `retry.nonRetryableErrorNames` matches on
+ * exactly those (`isNonRetryableError` in `@blokjs/shared`). Two of its three
+ * documented semantics were therefore unreachable from a `defineNode` node —
+ * only a hand-thrown `GlobalError` + `setName(...)` ever matched.
+ *
+ * Hanging the original off `cause` restores both: the matcher's bounded
+ * cause-walk finds the real name one hop down, and `TryCatchNode`'s
+ * `toErrorEnvelope` walk (which already peels `cause` to the bottom) surfaces
+ * the author's `ctx.error.name` / `stack` instead of a flat `"Error"`.
+ *
+ * Written with the exact property descriptor `new Error(msg, { cause })`
+ * produces — non-enumerable — so no serializer that walks own enumerable keys
+ * starts emitting the chain.
+ */
+function attachOriginalCause(globalError: GlobalError, original: unknown): void {
+	Object.defineProperty(globalError, "cause", {
+		value: original,
+		writable: true,
+		configurable: true,
+		enumerable: false,
+	});
+}
+
+/**
  * Function-first node definition with Zod schema validation
  *
  * @example
@@ -215,6 +246,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			globalError.setStack(error.stack);
 			globalError.setName(this.name);
 			globalError.setCode(500);
+			attachOriginalCause(globalError, error);
 			return globalError;
 		}
 
@@ -222,6 +254,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		const globalError = new GlobalError(String(error));
 		globalError.setName(this.name);
 		globalError.setCode(500);
+		attachOriginalCause(globalError, error);
 		return globalError;
 	}
 
