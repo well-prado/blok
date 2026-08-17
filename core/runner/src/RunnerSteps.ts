@@ -1,5 +1,14 @@
 import { parseDuration } from "@blokjs/helper";
-import { type Context, GlobalError, type NodeBase, type Step, mapper } from "@blokjs/shared";
+import {
+	type Context,
+	GlobalError,
+	type NodeBase,
+	type Step,
+	isNonRetryableError,
+	isNonRetryableStepError,
+	mapper,
+	markNonRetryableStepError,
+} from "@blokjs/shared";
 import { SpanKind, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
@@ -119,32 +128,6 @@ function parseWaitTimestamp(value: unknown, stepName: string, expr?: string): nu
 	throw new Error(
 		`wait.until: cannot parse ${JSON.stringify(value) ?? String(value)} as a number or date${origin}. Use ms-since-epoch (number or numeric string) or a valid ISO date string.`,
 	);
-}
-
-/**
- * Selective retry — decide whether an error is declared non-retryable by the
- * step's `retry.nonRetryableErrorNames`. Inspects the original error name
- * through wrapped causes: both plain `Error.name` and `GlobalError.context.name`
- * count, and `cause` chains are walked to a bounded depth so an enriched or
- * re-thrown error cannot hide a non-retryable classification.
- */
-function isNonRetryableError(error: unknown, names: string[] | undefined): boolean {
-	if (!names || names.length === 0) return false;
-	let current: unknown = error;
-	for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
-		const candidate = current as { name?: unknown; context?: { name?: unknown }; cause?: unknown };
-		if (typeof candidate.name === "string" && names.includes(candidate.name)) return true;
-		if (
-			candidate.context &&
-			typeof candidate.context === "object" &&
-			typeof candidate.context.name === "string" &&
-			names.includes(candidate.context.name)
-		) {
-			return true;
-		}
-		current = candidate.cause;
-	}
-	return false;
 }
 
 /**
@@ -874,11 +857,14 @@ export default abstract class RunnerSteps {
 								if (nodeErr instanceof WaitDispatchRequest || nodeErr instanceof RunCancelledError) {
 									throw nodeErr;
 								}
-								if (
-									attempt < maxAttempts &&
-									retryConfig &&
-									!isNonRetryableError(nodeErr, retryConfig.nonRetryableErrorNames)
-								) {
+								// #679 — classify ONCE. The same verdict decides whether
+								// this step retries AND (once stamped on the propagating
+								// error below) whether the transport's job-level retry
+								// fires, so the two can never disagree. Evaluated even on
+								// the final attempt, which the retry branch short-circuits
+								// past.
+								const nonRetryable = isNonRetryableError(nodeErr, retryConfig?.nonRetryableErrorNames);
+								if (attempt < maxAttempts && retryConfig && !nonRetryable) {
 									// More attempts remain — record this as a soft
 									// failure and back off before retrying. The node
 									// stays in `running` status; failNode is the
@@ -939,6 +925,11 @@ export default abstract class RunnerSteps {
 								};
 								enrichedAny.cause = nodeErr;
 								enrichedAny._blokStepId = step.name;
+								// #679 — carry the step-level verdict outward so the worker
+								// trigger's catch can make the JOB terminal too (BullMQ
+								// `discard`, other adapters' DLQ) instead of replaying a
+								// failure that is deterministic by declaration.
+								if (nonRetryable) markNonRetryableStepError(enrichedError);
 								stepSpan.recordException(nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
 								stepSpan.setStatus({ code: SpanStatusCode.ERROR, message: originalMsg });
 								throw enrichedError;
@@ -1094,6 +1085,12 @@ export default abstract class RunnerSteps {
 		if (typeof wrapStepId === "string" && wrapStepId.length > 0) {
 			(error_context as Error & { _blokStepId?: string })._blokStepId = wrapStepId;
 		}
+
+		// #679 — same rationale for the non-retryable verdict: when the
+		// unwrap above swaps the outer wrap (which carries the stamp) for an
+		// inner GlobalError, the stamp would be dropped and the transport
+		// would replay a failure the step already declared deterministic.
+		if (isNonRetryableStepError(e)) markNonRetryableStepError(error_context);
 
 		return error_context as GlobalError;
 	}

@@ -449,16 +449,8 @@ function normalizeRegularStep(
 	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
 		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
 	}
-	if (isPlainObject(step.retry)) {
-		const r = step.retry as Record<string, unknown>;
-		if (typeof r.maxAttempts === "number" && Number.isInteger(r.maxAttempts)) {
-			const retry: RetryConfig = { maxAttempts: r.maxAttempts };
-			if (typeof r.minTimeoutInMs === "number") retry.minTimeoutInMs = r.minTimeoutInMs;
-			if (typeof r.maxTimeoutInMs === "number") retry.maxTimeoutInMs = r.maxTimeoutInMs;
-			if (typeof r.factor === "number") retry.factor = r.factor;
-			internalStep.retry = retry;
-		}
-	}
+	const retry = pickRetryConfig(step.retry);
+	if (retry) internalStep.retry = retry;
 	if (typeof step.maxDuration === "number" || typeof step.maxDuration === "string") {
 		internalStep.maxDuration = step.maxDuration;
 	}
@@ -606,16 +598,8 @@ function normalizeSubworkflowStep(
 	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
 		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
 	}
-	if (isPlainObject(step.retry)) {
-		const r = step.retry as Record<string, unknown>;
-		if (typeof r.maxAttempts === "number" && Number.isInteger(r.maxAttempts)) {
-			const retry: RetryConfig = { maxAttempts: r.maxAttempts };
-			if (typeof r.minTimeoutInMs === "number") retry.minTimeoutInMs = r.minTimeoutInMs;
-			if (typeof r.maxTimeoutInMs === "number") retry.maxTimeoutInMs = r.maxTimeoutInMs;
-			if (typeof r.factor === "number") retry.factor = r.factor;
-			internalStep.retry = retry;
-		}
-	}
+	const retry = pickRetryConfig(step.retry);
+	if (retry) internalStep.retry = retry;
 	if (typeof step.maxDuration === "number" || typeof step.maxDuration === "string") {
 		internalStep.maxDuration = step.maxDuration;
 	}
@@ -1230,6 +1214,29 @@ function copyStepMeta(step: Record<string, unknown>): { ui?: Record<string, unkn
  * here was not merely unlowered — it failed `typeof === "string"` and was
  * DROPPED, silently disabling the idempotency cache for that step.
  */
+/**
+ * Copy a step's `retry` block onto the internal step. Shared by the regular and
+ * subworkflow paths — they used to hold byte-identical copies, which is how
+ * `nonRetryableErrorNames` came to be validated by the v2 schema and honoured by
+ * `RunnerSteps` yet dropped by BOTH copies, leaving selective retry dead end to
+ * end (#679). One reader now, so a new field can only be forgotten once.
+ *
+ * `maxAttempts` is required: a block without an integer one is ignored entirely.
+ */
+function pickRetryConfig(raw: unknown): RetryConfig | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	if (typeof raw.maxAttempts !== "number" || !Number.isInteger(raw.maxAttempts)) return undefined;
+	const retry: RetryConfig = { maxAttempts: raw.maxAttempts };
+	if (typeof raw.minTimeoutInMs === "number") retry.minTimeoutInMs = raw.minTimeoutInMs;
+	if (typeof raw.maxTimeoutInMs === "number") retry.maxTimeoutInMs = raw.maxTimeoutInMs;
+	if (typeof raw.factor === "number") retry.factor = raw.factor;
+	if (Array.isArray(raw.nonRetryableErrorNames)) {
+		const names = raw.nonRetryableErrorNames.filter((n): n is string => typeof n === "string" && n.length > 0);
+		if (names.length > 0) retry.nonRetryableErrorNames = names;
+	}
+	return retry;
+}
+
 function pickResolvedKey(value: unknown): string | undefined {
 	return pickString(lowerRefs(value));
 }

@@ -82,6 +82,11 @@ export default workflow("fetch-with-retry", { version: "1.0.0", trigger: http.ge
   Exponential growth factor.
 </ParamField>
 
+<ParamField path="nonRetryableErrorNames" type="string[] (max 32)">
+  Error names that never retry. See [Declaring a failure
+  non-retryable](#declaring-a-failure-non-retryable).
+</ParamField>
+
 A `retry` block is rejected at workflow load time when `minTimeoutInMs >
 maxTimeoutInMs`.
 
@@ -118,6 +123,32 @@ throw and nodes that report errors via the response envelope.
 Failed attempts never cache. When a step has both `idempotencyKey` and
 `retry`, the cache is written only after a successful attempt. A step
 that recovers on attempt 3 caches the success.
+
+## Declaring a failure non-retryable
+
+Some failures are deterministic: a pre-flight guard whose precondition
+cannot change between attempts fails identically every time. Retrying it
+burns the budget and turns one honest failure into N noisy ones.
+
+List the error's name in `nonRetryableErrorNames` and the step fails on the
+current attempt, no matter how many remain:
+
+```ts
+step("guard", enrichGuard, { id: order.id }, {
+  retry: { maxAttempts: 5, nonRetryableErrorNames: ["GRAPH_STILL_A_TREE"] },
+});
+```
+
+A name matches when it appears as `Error.name` **or** as a `GlobalError`'s
+`context.name`, on the error itself or on anything in its `cause` chain — so
+an adapter that re-throws a wrapped error cannot hide the classification.
+
+On a **worker** trigger this also stops the **job**. Without it the step
+would stop retrying but the broker would still redeliver the job `retries`
+more times, replaying the whole workflow and re-failing the same guard. The
+job lands failed after one attempt instead (BullMQ discards the remaining
+attempts, exactly as `UnrecoverableError` does; the other adapters route to
+their dead-letter queue). Retryable errors honour `retries` as before.
 
 ## Per-attempt observability
 

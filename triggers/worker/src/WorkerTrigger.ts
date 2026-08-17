@@ -38,7 +38,13 @@ import {
 	WorkflowRegistry,
 	bootstrapTracing,
 } from "@blokjs/runner";
-import { type Context, type NodeBase, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
+import {
+	type Context,
+	type NodeBase,
+	type RequestContext,
+	isNonRetryableStepError,
+	isNonRetryableValidationError,
+} from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -844,17 +850,33 @@ export abstract class WorkerTrigger extends TriggerBase {
 				// 400 N times). `job.fail(error, false)` is the terminal contract every
 				// adapter implements (BullMQ moveToFailed, NATS/Kafka/Redis/Rabbit
 				// deadLetterQueue, SQS/pg-boss native DLQ).
-				if (isNonRetryableValidationError(error)) {
+				//
+				// #679 — a step's `retry.nonRetryableErrorNames` is the author's own
+				// declaration that a failure is deterministic. It already stops STEP
+				// retries in RunnerSteps; without this branch the JOB still re-ran the
+				// whole workflow `retries` more times, re-failing the same guard. The
+				// verdict is not re-derived here — RunnerSteps stamps the result of the
+				// one shared matcher on the propagating error and we read it back, so
+				// step-level and job-level can never classify the same error differently.
+				const validationFailure = isNonRetryableValidationError(error);
+				if (validationFailure || isNonRetryableStepError(error)) {
 					span.setAttribute("success", false);
 					span.setAttribute("non_retryable", true);
-					span.setStatus({ code: SpanStatusCode.ERROR, message: "validation_failed" });
+					span.setStatus({
+						code: SpanStatusCode.ERROR,
+						message: validationFailure ? "validation_failed" : "non_retryable_error",
+					});
 					workerErrors.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,
 						workflow_name: configuration?.name || "unknown",
-						reason: "validation",
+						reason: validationFailure ? "validation" : "non_retryable",
 					});
-					this.logger.error(`Job ${jobId} failed input validation (400) → DLQ, no retry: ${errorMessage}`);
+					this.logger.error(
+						validationFailure
+							? `Job ${jobId} failed input validation (400) → DLQ, no retry: ${errorMessage}`
+							: `Job ${jobId} failed with a declared non-retryable error (step retry.nonRetryableErrorNames) → DLQ, no retry: ${errorMessage}`,
+					);
 					await job.fail(error as Error, false);
 					return;
 				}
