@@ -635,11 +635,13 @@ trigger: { websocket: {
 \`\`\`
 
 \`\`\`ts
-import { js, node, step, workflow } from "@blokjs/core";
+import { node, step, workflow } from "@blokjs/core";
 
 export default workflow("WS Echo", { version: "1.0.0", trigger: { websocket: { path: "/ws/echo", events: ["message", "open", "close"] } } }, (conn) => {
-  // \`js\` is the escape hatch for a non-structural expression (Date.now()).
-  step("reply", node("@blokjs/ws-reply"), { message: js\`({ echo: \${conn.body}, at: Date.now() })\` });
+  // \`@blokjs/ws-reply\`'s schema is \`{event?, payload, raw?}\` — NOT \`message\`.
+  // A \`message\` key is silently stripped by zod, JSON.stringify(undefined)
+  // sends no body, and the step throws "nothing to send — set payload" (#650).
+  step("reply", node("@blokjs/ws-reply"), { event: "echo", payload: conn.body });
 });
 \`\`\`
 
