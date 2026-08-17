@@ -867,7 +867,20 @@ export async function createProject(opts: OptionValues, version: string, current
 		// user's service to the PUBLIC registry with nothing to stop it.
 		// A generated project is an application: strip the publishing intent
 		// and lock it private. Users who really want to publish delete the flag.
-		for (const key of ["files", "publishConfig", "repository", "homepage", "bugs"]) {
+		//
+		// #864 — `license` goes with them. It was inherited from the PRIMARY
+		// trigger's own package, and WHICH license depended on which trigger the
+		// scaffold happened to read from: Apache-2.0 for most trigger packages,
+		// but MIT for the pubsub/worker `template/package.json` (never caught by
+		// combos.sh because pubsub/worker are never PRIMARY there). Neither is a
+		// statement about the user's own code, and a user's app silently
+		// claiming the framework's license is a licensing footgun, not a
+		// cosmetic default. A generated project is a private application, not a
+		// redistributed library (create-react-app / create-next-app both omit
+		// `license` too), and it already ships `private: true` — nothing is
+		// being published, so nothing needs a license declaration. A user who
+		// wants to publish adds their own choice deliberately.
+		for (const key of ["files", "publishConfig", "repository", "homepage", "bugs", "license"]) {
 			delete packageJsonContent[key];
 		}
 		packageJsonContent.private = true;
@@ -888,11 +901,6 @@ export async function createProject(opts: OptionValues, version: string, current
 		// trigger for Blok workflows...") on every scaffold — generate one from
 		// the project instead of inheriting it.
 		packageJsonContent.description = `${projectName} - a Blok application`;
-
-		// `license: Apache-2.0` is inherited from the framework's own trigger
-		// package. Left alone deliberately: dropping it silently would make the
-		// generated project UNLICENSED, which is a product decision, not a bug
-		// fix. See PR description for the recommendation.
 
 		// Replace workspace:* references that only work inside the monorepo
 		// v0.6.7: expanded to include EVERY publishable @blokjs/* package so

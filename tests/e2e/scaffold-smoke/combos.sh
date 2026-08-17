@@ -65,6 +65,17 @@ ROWS=(
   "mcp|mcp|mcp|2|4413|"
   "webhook|webhook|webhook|2|4414|"
   "all-examples|http,sse,websocket,webhook,mcp,worker,cron,grpc,pubsub|http|1|4415|--examples"
+  # #864 — pubsub/worker as PRIMARY: the only rows that exercise the
+  # `triggers/{pubsub,worker}/template/package.json` base-manifest source
+  # (every other row above reads a trigger's OWN package.json). Needed to
+  # catch manifest fields that disagree between the two sources (license did).
+  # worker: boots clean with zero infra when no --queue-provider is given (the
+  # scaffold leaves `this.adapter` unset → resolves to the in-memory adapter).
+  "worker|worker|worker|1|4416|"
+  # pubsub: the default provider is NATS, which needs a live broker to fully
+  # serve — no broker is guaranteed here, so this row only asserts
+  # create+build (manifest hygiene + typecheck), not boot.
+  "pubsub|pubsub|pubsub|0|4417|"
 )
 
 if [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
@@ -109,14 +120,20 @@ for row in "${ROWS[@]}"; do
   #     dangled at the trigger PACKAGE's own entry (`dist/index.js`) instead of
   #     the generated project's real entry (`dist/triggers/<kind>/index.js`),
   #     and `description` was still the trigger's own blurb ("Cron/scheduled
-  #     trigger for Blok workflows..."). `license` is deliberately NOT asserted
-  #     here — still inherited from the primary trigger's package on purpose.
+  #     trigger for Blok workflows...").
+  #
+  #     #864 — `license` must NOT leak either: it disagreed depending on which
+  #     trigger happened to be primary (Apache-2.0 for most, MIT for the
+  #     pubsub/worker `template/package.json`), which is why pubsub/worker are
+  #     exercised as PRIMARY below (the "pubsub" and "worker" rows) instead of
+  #     only ever appearing as a secondary trigger.
   if ! node -e '
     const pkg = require(process.argv[1] + "/package.json");
     const primary = process.argv[2];
     const proj = process.argv[3];
     const leaked = ["files", "publishConfig", "repository", "homepage", "bugs"].filter((k) => k in pkg);
     if (leaked.length) { console.error("publish-only keys leaked from the trigger package: " + leaked.join(", ")); process.exit(1); }
+    if ("license" in pkg) { console.error("license leaked from the trigger package: " + JSON.stringify(pkg.license)); process.exit(1); }
     if (pkg.private !== true) { console.error("generated app is not private: private=" + JSON.stringify(pkg.private)); process.exit(1); }
     const wantMain = "dist/triggers/" + primary + "/index.js";
     if (pkg.main && pkg.main !== wantMain) { console.error("main dangles at the trigger package entry: " + pkg.main + " (want " + wantMain + ")"); process.exit(1); }
