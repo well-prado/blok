@@ -80,7 +80,7 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 				source: e.v,
 				target: e.w,
 				animated: nodes.find((n) => n.id === e.w)?.status === "running",
-				style: { stroke: "#3f3f46", strokeWidth: 1.5 },
+				style: { stroke: "var(--color-line-strong)", strokeWidth: 1.5 },
 			});
 		}
 
@@ -97,7 +97,7 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 	const nodeTypes = useMemo(() => ({ traceNode: TraceNodeComponent }), []);
 
 	return (
-		<div className="h-[500px] rounded-lg border border-zinc-800 overflow-hidden">
+		<div className="h-[500px] rounded-md border border-line overflow-hidden">
 			<ReactFlow
 				nodes={flowNodes}
 				edges={flowEdges}
@@ -109,22 +109,27 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 				minZoom={0.3}
 				maxZoom={2}
 			>
-				<Background color="#27272a" gap={16} size={1} />
+				<Background color="var(--color-line)" gap={16} size={1} />
 				<Controls
 					showInteractive={false}
-					className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+					className="bg-raised! border-line-strong! rounded-md! [&>button]:bg-overlay! [&>button]:border-line-strong! [&>button]:text-ink-dimmed! [&>button:hover]:bg-control!"
 				/>
 				<MiniMap
-					nodeStrokeColor="#3f3f46"
-					nodeColor={(node) => {
-						const status = (node.data as { node: NodeRun }).node.status;
-						if (status === "completed") return "#22c55e";
-						if (status === "running") return "#3b82f6";
-						if (status === "failed") return "#ef4444";
-						return "#52525b";
-					}}
-					maskColor="rgba(0,0,0,0.6)"
-					className="bg-zinc-900! border-zinc-700! rounded-md!"
+					nodeStrokeColor="var(--color-line-strong)"
+					// Every status has a token, so the name is computed rather than a
+					// three-case if-chain with a hex default — the default arm is what had
+					// drifted (`#52525b`, and before that the pre-brand green `#22c55e`).
+					// Safe to compute here because this is a CSS custom-property lookup at
+					// runtime, NOT a Tailwind class name: `@theme static` emits all 14.
+					// Fallback arm matters: a status the client union does not know yet
+					// (backend drift) resolves to an undefined custom property, which
+					// paints rgb(0,0,0) — an invisible node on the dark canvas, strictly
+					// worse than the hex default this replaced.
+					nodeColor={(node) =>
+						`var(--color-status-${(node.data as { node: NodeRun }).node.status}, var(--color-line-strong))`
+					}
+					maskColor="color-mix(in srgb, var(--color-canvas) 60%, transparent)"
+					className="bg-raised! border-line-strong! rounded-md!"
 				/>
 			</ReactFlow>
 		</div>
@@ -136,13 +141,15 @@ function TraceNodeComponent({ data }: NodeProps) {
 
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-2! h-2! border-0!" />
+			<Handle type="target" position={Position.Top} className="bg-line-bright! w-2! h-2! border-0!" />
 			<div
 				className={cn(
 					"rounded-md border px-3 py-2 min-w-[160px] transition-all",
+					// Selection is the brand accent, not `status-running` — a node can be
+					// selected in any status and the two signals must not collide.
 					selected
-						? "border-blue-500 bg-zinc-800 ring-1 ring-blue-500/30"
-						: "border-zinc-700 bg-zinc-900 hover:border-zinc-600",
+						? "border-accent bg-control ring-1 ring-accent/30"
+						: "border-line-strong bg-overlay hover:border-line-bright",
 				)}
 			>
 				<div className="flex items-center gap-2">
@@ -153,16 +160,16 @@ function TraceNodeComponent({ data }: NodeProps) {
 							node.status === "running" && "animate-pulse-dot",
 						)}
 					/>
-					<span className="text-xs font-medium text-zinc-200 truncate">{node.nodeName}</span>
+					<span className="text-xs font-medium text-ink truncate">{node.nodeName}</span>
 				</div>
 				<div className="flex items-center gap-2 mt-1">
-					{node.runtimeKind && <span className="text-[10px] text-zinc-500">{node.runtimeKind}</span>}
-					<span className="text-[10px] font-mono text-zinc-500 ml-auto">
+					{node.runtimeKind && <span className="text-[10px] text-ink-muted">{node.runtimeKind}</span>}
+					<span className="text-[10px] font-mono text-ink-muted ml-auto">
 						{node.status === "running" ? "..." : formatDuration(node.durationMs)}
 					</span>
 				</div>
 			</div>
-			<Handle type="source" position={Position.Bottom} className="bg-zinc-600! w-2! h-2! border-0!" />
+			<Handle type="source" position={Position.Bottom} className="bg-line-bright! w-2! h-2! border-0!" />
 		</>
 	);
 }

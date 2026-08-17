@@ -1,37 +1,47 @@
 import type { NodeRunStatus, RunEventType, WorkflowRunStatus } from "@/types";
 
+// Status color lives in exactly ONE place: the `--color-status-*` tokens in
+// `app.css`. These maps used to be a third, disagreeing vocabulary (raw
+// `text-green-400` here, `#2bcd71` in the token layer, `#22c55e` in the chart
+// code). The `Record<WorkflowRunStatus | NodeRunStatus, string>` type keeps
+// them exhaustive, so a new status is a typecheck error, not a blank chip.
+//
+// Chip = `-ink` for the label, the plain fill at 10% for the wash. The two
+// roles are separate tokens on purpose (app.css layer 3): the fill is sized
+// for a 6px dot, the ink for 12px text. Every pair here is asserted >= 4.5:1
+// in `src/__tests__/tokens.test.ts`.
 export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
-	pending: "text-zinc-400 bg-zinc-400/10",
-	running: "text-blue-400 bg-blue-400/10",
-	paused: "text-amber-300 bg-amber-300/10",
-	completed: "text-green-400 bg-green-400/10",
-	failed: "text-red-400 bg-red-400/10",
-	cancelled: "text-purple-400 bg-purple-400/10",
-	skipped: "text-zinc-500 bg-zinc-500/10",
-	throttled: "text-amber-300 bg-amber-300/10",
-	delayed: "text-yellow-400 bg-yellow-400/10",
-	expired: "text-zinc-500 bg-zinc-500/10",
-	debounced: "text-cyan-400 bg-cyan-400/10",
-	queued: "text-lime-300 bg-lime-300/10",
-	crashed: "text-red-500 bg-red-500/10",
-	timedOut: "text-orange-400 bg-orange-400/10",
+	pending: "text-status-pending-ink bg-status-pending/10",
+	running: "text-status-running-ink bg-status-running/10",
+	paused: "text-status-paused-ink bg-status-paused/10",
+	completed: "text-status-completed-ink bg-status-completed/10",
+	failed: "text-status-failed-ink bg-status-failed/10",
+	cancelled: "text-status-cancelled-ink bg-status-cancelled/10",
+	skipped: "text-status-skipped-ink bg-status-skipped/10",
+	throttled: "text-status-throttled-ink bg-status-throttled/10",
+	delayed: "text-status-delayed-ink bg-status-delayed/10",
+	expired: "text-status-expired-ink bg-status-expired/10",
+	debounced: "text-status-debounced-ink bg-status-debounced/10",
+	queued: "text-status-queued-ink bg-status-queued/10",
+	crashed: "text-status-crashed-ink bg-status-crashed/10",
+	timedOut: "text-status-timedOut-ink bg-status-timedOut/10",
 };
 
 export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
-	pending: "bg-zinc-400",
-	running: "bg-blue-400",
-	paused: "bg-amber-300",
-	completed: "bg-green-400",
-	failed: "bg-red-400",
-	cancelled: "bg-purple-400",
-	skipped: "bg-zinc-500",
-	throttled: "bg-amber-300",
-	delayed: "bg-yellow-400",
-	expired: "bg-zinc-500",
-	debounced: "bg-cyan-400",
-	queued: "bg-lime-300",
-	crashed: "bg-red-500",
-	timedOut: "bg-orange-400",
+	pending: "bg-status-pending",
+	running: "bg-status-running",
+	paused: "bg-status-paused",
+	completed: "bg-status-completed",
+	failed: "bg-status-failed",
+	cancelled: "bg-status-cancelled",
+	skipped: "bg-status-skipped",
+	throttled: "bg-status-throttled",
+	delayed: "bg-status-delayed",
+	expired: "bg-status-expired",
+	debounced: "bg-status-debounced",
+	queued: "bg-status-queued",
+	crashed: "bg-status-crashed",
+	timedOut: "bg-status-timedOut",
 };
 
 export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = {

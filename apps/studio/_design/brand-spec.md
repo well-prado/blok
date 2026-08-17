@@ -19,13 +19,13 @@
 
 ### Status palette (real, keep)
 
-From `apps/studio/src/app.css:5-16`:
+From the layer-3 `@theme static` block in `apps/studio/src/app.css`:
 
 | Token | Hex | Usage |
 |---|---|---|
 | `--color-status-pending` | `#71717a` (zinc-500) | not yet started |
 | `--color-status-running` | `#3b82f6` (blue-500) | in flight — pulse animation |
-| `--color-status-completed` | `#22c55e` (green-500) | success |
+| `--color-status-completed` | `#2bcd71` (brand green — was `#22c55e`) | success |
 | `--color-status-failed` | `#ef4444` (red-500) | error |
 | `--color-status-cancelled` | `#a855f7` (purple-500) | user cancelled |
 | `--color-status-skipped` | `#6b7280` (gray-500) | conditional skip |
