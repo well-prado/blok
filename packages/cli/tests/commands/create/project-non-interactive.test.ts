@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import fsExtra from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,14 +22,26 @@ import { setNonInteractive } from "../../../src/services/non-interactive.js";
  */
 const REPO_ROOT = path.resolve(__dirname, "../../../../..");
 
-// A real scaffold runs a real `npm install`, so the package default 30s is not
+// A real scaffold runs a real install, so the package default 30s is not
 // enough headroom on a cold runner.
 const SCAFFOLD_TIMEOUT = 120_000;
 
 describe("create project (non-interactive)", () => {
-	const created: string[] = [];
+	const origCwd = process.cwd();
+	let workDir: string;
 
 	beforeEach(() => {
+		// Scaffold into a tmpdir, NEVER into packages/cli itself. createProject
+		// always targets `process.cwd()`, and the manifest it writes takes
+		// blokctl as `file:<repo>/packages/cli`. With the scaffold sitting
+		// inside packages/cli, `bun install` — which COPIES a `file:`
+		// dependency instead of symlinking it, unlike npm — copies packages/cli
+		// into packages/cli/<name>/node_modules/blokctl, <name> included, and
+		// recurses until it runs out of path. That reached 26 levels / 1034
+		// chars on macOS (PATH_MAX 1024, so cleanup still worked) and deeper on
+		// Linux CI, where the cleanup died with ENAMETOOLONG.
+		workDir = fsExtra.mkdtempSync(path.join(os.tmpdir(), "blok-create-ni-"));
+		process.chdir(workDir);
 		setNonInteractive(true);
 		process.exitCode = undefined;
 	});
@@ -37,18 +50,15 @@ describe("create project (non-interactive)", () => {
 		setNonInteractive(false);
 		// A swallowed failure must not leak into vitest's own exit code.
 		process.exitCode = undefined;
-		for (const dir of created.splice(0)) {
-			fsExtra.removeSync(dir);
-		}
+		process.chdir(origCwd);
+		fsExtra.removeSync(workDir);
 	});
 
 	async function scaffold(name: string, opts: Record<string, string> = {}) {
-		const dir = path.join(process.cwd(), name);
-		created.push(dir);
 		await createProject({ name, packageManager: "npm", ...opts }, "0.0.0-test", false, REPO_ROOT);
 
 		expect(process.exitCode).not.toBe(1);
-		expect(fsExtra.existsSync(path.join(dir, "package.json"))).toBe(true);
+		expect(fsExtra.existsSync(path.join(workDir, name, "package.json"))).toBe(true);
 	}
 
 	it(

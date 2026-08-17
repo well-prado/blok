@@ -1,6 +1,7 @@
+import os from "node:os";
 import path from "node:path";
 import fsExtra from "fs-extra";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import { createProject } from "../../../src/commands/create/project";
 
 /**
@@ -15,22 +16,34 @@ import { createProject } from "../../../src/commands/create/project";
  * @blokjs/* through `file:` links in this monorepo. Without it createProject
  * git-clones the release tag into ~/.blok/blok — removing whatever is already
  * there — and then installs `^undefined` ranges from the registry.
+ *
+ * The scaffold goes into a tmpdir, never into packages/cli itself: see the
+ * note in project-non-interactive.test.ts for what a `file:` self-reference
+ * does to a scaffold nested inside the package it depends on.
  */
 const REPO_ROOT = path.resolve(__dirname, "../../../../..");
-const PROJECT_DIR = path.join(process.cwd(), "default-node");
+
+const origCwd = process.cwd();
+let workDir: string;
+
+beforeEach(() => {
+	workDir = fsExtra.mkdtempSync(path.join(os.tmpdir(), "blok-create-"));
+	process.chdir(workDir);
+	process.exitCode = undefined;
+});
 
 afterEach(() => {
 	// A swallowed failure must not leak into vitest's own exit code.
 	process.exitCode = undefined;
-	fsExtra.removeSync(PROJECT_DIR);
+	process.chdir(origCwd);
+	fsExtra.removeSync(workDir);
 });
 
 test("create project", async () => {
-	process.exitCode = undefined;
 	await createProject({ name: "default-node", packageManager: "npm" }, "0.0.0-test", false, REPO_ROOT);
 
 	expect(process.exitCode).not.toBe(1);
-	expect(fsExtra.existsSync(path.join(PROJECT_DIR, "package.json"))).toBe(true);
+	expect(fsExtra.existsSync(path.join(workDir, "default-node", "package.json"))).toBe(true);
 }, 120_000);
 
 test("create path", async () => {
