@@ -12,7 +12,10 @@ import BlokError, {
 	DEFAULT_RETRYABLE,
 	ErrorCategory,
 	ErrorSeverity,
+	isNonRetryableError,
+	isNonRetryableStepError,
 	isNonRetryableValidationError,
+	markNonRetryableStepError,
 	type NodeErrorPayload,
 	WORKFLOW_INPUT_VALIDATION,
 	WorkflowInputValidationError,
@@ -84,6 +87,12 @@ export {
 	DEFAULT_HTTP_STATUS,
 	DEFAULT_RETRYABLE,
 	isNonRetryableValidationError,
+	// #679 — the ONE non-retryable matcher plus the marker the runner uses to
+	// hand its verdict to the transports, so step-level and job-level retry can
+	// never disagree.
+	isNonRetryableError,
+	markNonRetryableStepError,
+	isNonRetryableStepError,
 	WORKFLOW_INPUT_VALIDATION,
 	WorkflowInputValidationError,
 	type WorkflowInputValidationInfo,

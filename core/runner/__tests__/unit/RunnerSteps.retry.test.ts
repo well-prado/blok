@@ -1,4 +1,4 @@
-import { type Context, GlobalError, type ResponseContext } from "@blokjs/shared";
+import { type Context, GlobalError, type ResponseContext, isNonRetryableStepError } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
@@ -356,5 +356,74 @@ describe("RunnerSteps — selective retry (nonRetryableErrorNames)", () => {
 		node.retry = { maxAttempts: 3, minTimeoutInMs: 1, factor: 1 };
 		await runToRejection(node);
 		expect(node.attempts).toBe(3);
+	});
+});
+
+/**
+ * #679 — the verdict must ride OUT of the runner on the propagating error.
+ * The transports (worker/BullMQ) read it back with `isNonRetryableStepError`
+ * instead of re-deriving the classification, which is what makes step-level
+ * and job-level retry agree by construction rather than by a second
+ * implementation that could drift.
+ */
+describe("RunnerSteps — non-retryable verdict propagation (#679)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		vi.useFakeTimers({ toFake: ["setTimeout"] });
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+		RunTracker.resetInstance();
+	});
+
+	const NAMES = { maxAttempts: 3, minTimeoutInMs: 1, factor: 1, nonRetryableErrorNames: ["GRAPH_STILL_A_TREE"] };
+
+	async function rejection(node: NamedThrowNode): Promise<unknown> {
+		const runner = new Runner([node]);
+		const promise = runner.run(ctxWithTracing(`wf-${node.name}`).ctx);
+		const caught = promise.then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		await vi.runAllTimersAsync();
+		return caught;
+	}
+
+	it("stamps the verdict when a plain Error.name is declared non-retryable", async () => {
+		const node = new NamedThrowNode("plain-name", () => {
+			const error = new Error("graph is containment-only");
+			error.name = "GRAPH_STILL_A_TREE";
+			return error;
+		});
+		node.retry = NAMES;
+		const err = await rejection(node);
+		expect(node.attempts).toBe(1);
+		expect(isNonRetryableStepError(err)).toBe(true);
+	});
+
+	it("stamps the verdict when only a wrapped `cause` carries the declared name", async () => {
+		const node = new NamedThrowNode("wrapped-name", () => {
+			const inner = new GlobalError("graph is containment-only");
+			inner.setName("GRAPH_STILL_A_TREE");
+			return new Error("adapter wrapper", { cause: inner });
+		});
+		node.retry = NAMES;
+		const err = await rejection(node);
+		expect(node.attempts).toBe(1);
+		// The runner's unwrap swaps the outer wrap for the inner GlobalError —
+		// the verdict must survive that swap or the transport never sees it.
+		expect(isNonRetryableStepError(err)).toBe(true);
+	});
+
+	it("leaves an UNLISTED error unstamped so job-level retry proceeds normally", async () => {
+		const node = new NamedThrowNode("unlisted", () => {
+			const error = new GlobalError("dependency down");
+			error.setName("KNOWLEDGE_UNAVAILABLE");
+			return error;
+		});
+		node.retry = NAMES;
+		const err = await rejection(node);
+		expect(node.attempts).toBe(3);
+		expect(isNonRetryableStepError(err)).toBe(false);
 	});
 });

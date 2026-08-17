@@ -232,6 +232,33 @@ describe("WorkflowNormalizer — v2 input", () => {
 		});
 	});
 
+	// #679 — this field was validated by the v2 schema and honoured by
+	// RunnerSteps, but the normalizer copied only the four timing keys, so it
+	// never reached the runner from ANY authored workflow. Both step-level and
+	// job-level selective retry were dead until it was carried through.
+	it("carries nonRetryableErrorNames through, dropping non-string entries", () => {
+		const v2 = {
+			name: "Selective",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "guard",
+					use: "@blokjs/api-call",
+					retry: {
+						maxAttempts: 3,
+						nonRetryableErrorNames: ["GRAPH_STILL_A_TREE", "", 42, "SNAPSHOT_CHANGED"],
+					} as Record<string, unknown>,
+				},
+			],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].retry).toEqual({
+			maxAttempts: 3,
+			nonRetryableErrorNames: ["GRAPH_STILL_A_TREE", "SNAPSHOT_CHANGED"],
+		});
+	});
+
 	it("ignores retry config without an integer maxAttempts (defensive)", () => {
 		const v2 = {
 			name: "Bad",

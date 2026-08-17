@@ -464,6 +464,75 @@ export function isNonRetryableValidationError(err: unknown): boolean {
 	return err instanceof GlobalError && err.context.name === WORKFLOW_INPUT_VALIDATION;
 }
 
+/**
+ * How far a `cause` chain is walked when classifying an error. Bounded so a
+ * self-referential or pathologically deep chain can't spin.
+ */
+const CAUSE_WALK_DEPTH = 8;
+
+/**
+ * Selective retry — THE matcher for a step's `retry.nonRetryableErrorNames`.
+ * Inspects the error name through wrapped causes: both plain `Error.name` and
+ * `GlobalError.context.name` count, and `cause` chains are walked to a bounded
+ * depth so an enriched or re-thrown error cannot hide a non-retryable
+ * classification.
+ *
+ * `RunnerSteps` calls this to short-circuit STEP retries, then records the
+ * verdict on the propagating error with {@link markNonRetryableStepError}.
+ * Transports read the verdict back with {@link isNonRetryableStepError} rather
+ * than re-deriving it, so JOB-level retry (#679 — BullMQ and every other worker
+ * adapter) agrees with step-level retry by construction instead of via a second
+ * implementation that could drift.
+ */
+export function isNonRetryableError(error: unknown, names: string[] | undefined): boolean {
+	if (!names || names.length === 0) return false;
+	let current: unknown = error;
+	for (let depth = 0; depth < CAUSE_WALK_DEPTH && current && typeof current === "object"; depth++) {
+		const candidate = current as { name?: unknown; context?: { name?: unknown }; cause?: unknown };
+		if (typeof candidate.name === "string" && names.includes(candidate.name)) return true;
+		if (
+			candidate.context &&
+			typeof candidate.context === "object" &&
+			typeof candidate.context.name === "string" &&
+			names.includes(candidate.context.name)
+		) {
+			return true;
+		}
+		current = candidate.cause;
+	}
+	return false;
+}
+
+/**
+ * Property the runner stamps on a failure {@link isNonRetryableError} matched.
+ * Sticky-TRUE only: its absence means "never classified", never "retryable" —
+ * the runner re-wraps errors several times (step enrichment → GlobalError
+ * unwrap) and an intermediate wrap whose own step declared nothing must not
+ * erase an inner verdict.
+ */
+const NON_RETRYABLE_STEP_ERROR = "_blokNonRetryable";
+
+/** Record a {@link isNonRetryableError} match on `error` (no-op for non-objects). */
+export function markNonRetryableStepError(error: unknown): void {
+	if (error && typeof error === "object") {
+		(error as Record<string, unknown>)[NON_RETRYABLE_STEP_ERROR] = true;
+	}
+}
+
+/**
+ * True when the runner classified this failure — or one it wraps — as declared
+ * non-retryable. Walks `cause` to the same bounded depth as
+ * {@link isNonRetryableError} so an outer wrap cannot hide the verdict.
+ */
+export function isNonRetryableStepError(error: unknown): boolean {
+	let current: unknown = error;
+	for (let depth = 0; depth < CAUSE_WALK_DEPTH && current && typeof current === "object"; depth++) {
+		if ((current as Record<string, unknown>)[NON_RETRYABLE_STEP_ERROR] === true) return true;
+		current = (current as { cause?: unknown }).cause;
+	}
+	return false;
+}
+
 /** One Zod issue, flattened to plain data for the wire. */
 export interface WorkflowInputValidationIssue {
 	path: (string | number)[];
