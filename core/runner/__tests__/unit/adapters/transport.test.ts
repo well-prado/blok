@@ -3,6 +3,7 @@ import {
 	MAX_MESSAGE_BYTES_CEILING,
 	assertGrpcOnlyTransport,
 	isLoopbackHost,
+	isStateDietEnabled,
 	isStreamLogsEnabled,
 	isStrictTlsEnabled,
 	loadTlsConfigForKind,
@@ -228,6 +229,24 @@ describe("isStrictTlsEnabled", () => {
 	it("returns false for explicit false-ish values", () => {
 		for (const value of ["0", "false", "no", "off", ""]) {
 			expect(isStrictTlsEnabled({ BLOK_GRPC_REQUIRE_TLS: value })).toBe(false);
+		}
+	});
+});
+
+describe("isStateDietEnabled", () => {
+	it("is ON when the env var is unset — accumulated state is not shipped (#874)", () => {
+		expect(isStateDietEnabled({})).toBe(true);
+	});
+
+	it("is OFF only for an explicitly falsy value", () => {
+		for (const value of ["0", "false", "FALSE", " off ", "no"]) {
+			expect(isStateDietEnabled({ BLOK_GRPC_STATE_DIET: value })).toBe(false);
+		}
+	});
+
+	it("stays ON for the truthy values the old opt-in flag accepted", () => {
+		for (const value of ["1", "true", "yes", "on", ""]) {
+			expect(isStateDietEnabled({ BLOK_GRPC_STATE_DIET: value })).toBe(true);
 		}
 	});
 });

@@ -30,25 +30,32 @@ under-configured side rejects oversized messages with a gRPC
 
 ## What counts toward the limit
 
-Each remote node call inlines four things into one message:
+Each remote node call inlines two things into one message:
 
 - **inputs** — the step's mapped inputs.
-- **accumulated state** — every prior step's output (`ctx.state`). This grows
-  as the workflow progresses, so late steps carry more than early ones.
-- **previous output** — the immediately preceding step's result.
 - **trigger body** — the original request/job payload.
 
-The accumulated-state term is the usual surprise: a workflow that fans a
-large array through several `runtime.*` steps re-ships that array on **every**
-call.
+<Note>
+**Accumulated state** (`ctx.state`, every prior step's output) and the
+**previous step's output** are **not** sent, since v2.2. They used to be, and
+because state grows as a workflow progresses, a `runtime.*` node inside a
+`forEach` re-shipped a payload that grew with the loop — per-call cost linear
+in the run's state, total cost quadratic in the number of items.
+
+Set `BLOK_GRPC_STATE_DIET=0` to restore the old payload if one of your nodes
+reads `ctx.vars` / `ctx.response.data` inside its own body. That is a
+process-wide switch; the per-node fix is to map the value the node needs into
+that step's `inputs`. State still flows **back** from the node via
+`vars_delta` either way.
+</Note>
 
 ## The fail-fast error
 
 When the encoded request would exceed the limit, the runner fails the step
 **before dispatch** with a `GRPC_REQUEST_TOO_LARGE` error naming the node and
 a per-blob byte breakdown — instead of the opaque `RESOURCE_EXHAUSTED` the
-sidecar would otherwise raise mid-flight. Read the breakdown to see which of
-the four blobs is the offender.
+sidecar would otherwise raise mid-flight. Read the breakdown to see which
+blob is the offender.
 
 This guard runs **after** the claim-check offload below, so it only fires on
 data that really is crossing the wire inline.
@@ -101,13 +108,9 @@ bounded by the message limit.
    key, a file path both sides can reach) and have the node fetch the bytes
    itself — the claim-check pattern. `BLOK_BLOB_DIR` above automates this for
    step inputs; do it by hand when your runtime can't use it.
-2. **Keep bulk values out of accumulated state.** Mark steps whose large
-   output isn't needed downstream as `ephemeral: true` so they never enter
-   `ctx.state` and stop re-shipping on later calls. To drop the accumulated
-   state and previous-step output from **every** runtime call at once, set
-   `BLOK_GRPC_STATE_DIET=1` — but only when your runtime nodes follow the v2
-   ABI (they read their mapped `inputs`, never `ctx.vars` or
-   `ctx.response.data`), since the diet makes both empty on the node side.
+2. **Keep bulk values out of the step's inputs.** Map only what the node
+   reads. Accumulated state no longer rides along (see the note above), so
+   what you map is what you pay for.
 3. **Split the pipeline** so no single boundary crossing carries everything.
 4. **Raise the limit** as a last resort: set `BLOK_GRPC_MAX_MESSAGE_BYTES` (up
    to 256 MiB) on **both** the runner and the sidecar, accepting that peak
