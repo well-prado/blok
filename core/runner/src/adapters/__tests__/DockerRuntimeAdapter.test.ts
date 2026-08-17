@@ -525,6 +525,76 @@ describe("DockerRuntimeAdapter", () => {
 			expect(capturedBody.context.request.method).toBe("POST");
 		});
 
+		// #895 — the O(n²) growth term #885 removed from the gRPC codec. The
+		// container payload used to inline `ctx.vars` (EVERY completed step's
+		// output) and the previous step's output on every call, so a
+		// `runtime.*` node inside a `forEach` re-serialized a payload that
+		// grows with the loop.
+		it("should NOT ship accumulated state or the previous output", async () => {
+			adapter = new DockerRuntimeAdapter("docker", "test-image", {
+				minInstances: 0,
+			});
+
+			mockContext.vars = { "step-1": "a".repeat(1024), "step-2": "b".repeat(1024) };
+			mockContext.response = { data: { previous: "output" }, error: null, success: true };
+
+			let capturedBody: any = null;
+			vi.mocked(fetch).mockImplementation((url: any, options: any) => {
+				if (url.includes("/health")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: "healthy" }) } as Response);
+				}
+				if (options?.body) capturedBody = JSON.parse(options.body);
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ success: true, data: {}, errors: null }),
+				} as Response);
+			});
+
+			const resultPromise = adapter.execute(mockNode, mockContext);
+			await vi.runOnlyPendingTimersAsync();
+			await resultPromise;
+
+			expect(capturedBody.context.vars).toEqual({});
+			expect(capturedBody.context.response.data).toBeNull();
+			// Nothing from the accumulated state reaches the wire.
+			expect(JSON.stringify(capturedBody)).not.toContain("a".repeat(64));
+			expect(JSON.stringify(capturedBody)).not.toContain("b".repeat(64));
+		});
+
+		it("should ship the full state bag when the diet is switched off", async () => {
+			process.env.BLOK_RUNTIME_STATE_DIET = "0";
+			try {
+				adapter = new DockerRuntimeAdapter("docker", "test-image", {
+					minInstances: 0,
+				});
+
+				mockContext.vars = { "step-1": "kept" };
+				mockContext.response = { data: { previous: "output" }, error: null, success: true };
+
+				let capturedBody: any = null;
+				vi.mocked(fetch).mockImplementation((url: any, options: any) => {
+					if (url.includes("/health")) {
+						return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: "healthy" }) } as Response);
+					}
+					if (options?.body) capturedBody = JSON.parse(options.body);
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ success: true, data: {}, errors: null }),
+					} as Response);
+				});
+
+				const resultPromise = adapter.execute(mockNode, mockContext);
+				await vi.runOnlyPendingTimersAsync();
+				await resultPromise;
+
+				expect(capturedBody.context.vars).toEqual({ "step-1": "kept" });
+				expect(capturedBody.context.response.data).toEqual({ previous: "output" });
+			} finally {
+				// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
+				delete process.env.BLOK_RUNTIME_STATE_DIET;
+			}
+		});
+
 		it("should include node config when available", async () => {
 			adapter = new DockerRuntimeAdapter("docker", "test-image", {
 				minInstances: 0,

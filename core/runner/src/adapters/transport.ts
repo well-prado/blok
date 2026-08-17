@@ -1,3 +1,4 @@
+import type { Context, ResponseContext, VarsContext } from "@blokjs/shared";
 import type { RuntimeKind } from "./RuntimeAdapter";
 import type { TlsConfig } from "./grpc/types";
 
@@ -202,13 +203,42 @@ export function isLoopbackHost(host: string): boolean {
  * trigger body still ride along, and state still flows BACK via the response
  * `vars_delta`.
  *
- * `BLOK_GRPC_STATE_DIET=0` restores the pre-#874 full-state payload for a v1
- * node that reads `ctx.vars` / `ctx.response.data` inside its own body. That
- * is a whole-process switch; the per-node fix is to map the value the node
- * needs into that step's `inputs`.
+ * `BLOK_RUNTIME_STATE_DIET=0` restores the pre-#874 full-state payload for a
+ * v1 node that reads `ctx.vars` / `ctx.response.data` inside its own body.
+ * That is a whole-process switch; the per-node fix is to map the value the
+ * node needs into that step's `inputs`.
+ *
+ * `BLOK_GRPC_STATE_DIET` is the original, gRPC-specific spelling and still
+ * works as an alias (#885 shipped it and the docs name it). The diet applies
+ * to every remote runtime transport — Docker, WASM and Bun-subprocess ship
+ * the same state bag (#895) — so the transport-neutral name is canonical and
+ * wins when both are set.
  */
 export function isStateDietEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	return !isFalsyFlag(env.BLOK_GRPC_STATE_DIET);
+	const raw = env.BLOK_RUNTIME_STATE_DIET ?? env.BLOK_GRPC_STATE_DIET;
+	return !isFalsyFlag(raw);
+}
+
+/**
+ * The `{ response, vars }` half of a remote runtime payload, with the state
+ * diet applied. Docker, WASM and Bun-subprocess all inline these two fields
+ * verbatim, which is the same unbounded O(n²) growth term #885 removed from
+ * the gRPC codec: `ctx.vars` holds EVERY completed step's output, so a
+ * `runtime.*` node inside a `forEach` re-serializes a payload that grows with
+ * the loop.
+ *
+ * The keys are kept (an SDK decoding the envelope still finds them) but
+ * emptied: `vars` becomes `{}` and the previous step's output becomes `null`,
+ * matching {@link isStateDietEnabled}'s gRPC semantics exactly — one flag,
+ * one meaning, whatever the transport.
+ */
+export function stateForRuntimePayload(
+	ctx: Context,
+	env: NodeJS.ProcessEnv = process.env,
+): { response: ResponseContext; vars: VarsContext } {
+	const response = ctx.response ?? ({ data: null, error: null } as ResponseContext);
+	if (!isStateDietEnabled(env)) return { response, vars: ctx.vars ?? {} };
+	return { response: { ...response, data: null }, vars: {} };
 }
 
 function isTruthyFlag(value: string | undefined): boolean {

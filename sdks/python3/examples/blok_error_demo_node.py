@@ -32,7 +32,12 @@ class BlokErrorDemoNode(NodeHandler):
         if mode == "ok":
             return {"ok": True, "language": "python3"}
 
-        snapshot = build_context_snapshot(inputs=config, vars_map=ctx.vars)
+        # `ctx.vars` arrives EMPTY under the default state diet — the runner
+        # stopped shipping accumulated run state on every call (#874/#885),
+        # so a node must not read it in its own body. Anything the node needs
+        # belongs in its mapped `inputs` (= `config` here), which always ships.
+        # `BLOK_RUNTIME_STATE_DIET=0` restores the old payload process-wide.
+        snapshot = build_context_snapshot(inputs=config)
 
         if mode == "rate-limit":
             raise BlokError.rate_limit(

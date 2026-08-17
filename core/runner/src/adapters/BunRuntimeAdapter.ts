@@ -1,6 +1,7 @@
 import type { Context } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
+import { stateForRuntimePayload } from "./transport";
 
 /**
  * BunRuntimeAdapter executes TypeScript/JavaScript nodes using Bun runtime
@@ -117,8 +118,8 @@ export class BunRuntimeAdapter implements RuntimeAdapter {
 						params: ctx.request.params,
 						query: ctx.request.query,
 					},
-					response: ctx.response,
-					vars: ctx.vars,
+					// `response` + `vars`, with the state diet applied (#895).
+					...stateForRuntimePayload(ctx),
 				},
 			});
 

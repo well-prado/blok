@@ -42,10 +42,14 @@ because state grows as a workflow progresses, a `runtime.*` node inside a
 `forEach` re-shipped a payload that grew with the loop — per-call cost linear
 in the run's state, total cost quadratic in the number of items.
 
-Set `BLOK_GRPC_STATE_DIET=0` to restore the old payload if one of your nodes
-reads `ctx.vars` / `ctx.response.data` inside its own body. That is a
-process-wide switch; the per-node fix is to map the value the node needs into
-that step's `inputs`. State still flows **back** from the node via
+This applies to every remote runtime transport, not just gRPC — the Docker,
+WASM and Bun-subprocess adapters inline the same state bag.
+
+Set `BLOK_RUNTIME_STATE_DIET=0` to restore the old payload if one of your
+nodes reads `ctx.vars` / `ctx.response.data` inside its own body (the original
+gRPC-only spelling, `BLOK_GRPC_STATE_DIET`, still works as an alias). That is
+a process-wide switch; the per-node fix is to map the value the node needs
+into that step's `inputs`. State still flows **back** from the node via
 `vars_delta` either way.
 </Note>
 

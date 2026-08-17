@@ -1,3 +1,4 @@
+import type { Context } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import {
 	MAX_MESSAGE_BYTES_CEILING,
@@ -10,6 +11,7 @@ import {
 	resolveHealthCheckFailureThreshold,
 	resolveHealthCheckIntervalMs,
 	resolveMaxMessageBytes,
+	stateForRuntimePayload,
 } from "../../../src/adapters/transport";
 
 describe("assertGrpcOnlyTransport", () => {
@@ -248,6 +250,62 @@ describe("isStateDietEnabled", () => {
 		for (const value of ["1", "true", "yes", "on", ""]) {
 			expect(isStateDietEnabled({ BLOK_GRPC_STATE_DIET: value })).toBe(true);
 		}
+	});
+
+	// #895 — the diet is not gRPC-specific: Docker/WASM/Bun ship the same
+	// state bag. `BLOK_RUNTIME_STATE_DIET` is the transport-neutral spelling;
+	// `BLOK_GRPC_STATE_DIET` stays a working alias so #885's docs stay true.
+	it("honors the transport-neutral BLOK_RUNTIME_STATE_DIET", () => {
+		expect(isStateDietEnabled({ BLOK_RUNTIME_STATE_DIET: "0" })).toBe(false);
+		expect(isStateDietEnabled({ BLOK_RUNTIME_STATE_DIET: "1" })).toBe(true);
+	});
+
+	it("lets the transport-neutral name win when both are set", () => {
+		expect(isStateDietEnabled({ BLOK_RUNTIME_STATE_DIET: "1", BLOK_GRPC_STATE_DIET: "0" })).toBe(true);
+		expect(isStateDietEnabled({ BLOK_RUNTIME_STATE_DIET: "0", BLOK_GRPC_STATE_DIET: "1" })).toBe(false);
+	});
+});
+
+describe("stateForRuntimePayload", () => {
+	// A run that has completed three steps: the bag every remote call used to
+	// re-serialize (#895 — the O(n²) term #885 removed from the gRPC codec).
+	const ctxWithState = () =>
+		({
+			response: { data: { previous: "step output" }, error: null, success: true, contentType: "application/json" },
+			vars: { "step-1": "a".repeat(512), "step-2": "b".repeat(512), "step-3": "c".repeat(512) },
+		}) as unknown as Context;
+
+	it("empties vars and the previous output by default", () => {
+		const { response, vars } = stateForRuntimePayload(ctxWithState(), {});
+		expect(vars).toEqual({});
+		expect(response.data).toBeNull();
+		// The envelope survives — only the payload is dropped.
+		expect(response.success).toBe(true);
+		expect(response.contentType).toBe("application/json");
+	});
+
+	it("stays flat as the accumulated state grows (#874)", () => {
+		const grow = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`step-${i}`, "x".repeat(512)]));
+		const small = stateForRuntimePayload({ vars: grow(2) } as unknown as Context, {});
+		const large = stateForRuntimePayload({ vars: grow(400) } as unknown as Context, {});
+		expect(JSON.stringify(large).length).toBe(JSON.stringify(small).length);
+	});
+
+	it("restores the full state bag when the diet is switched off", () => {
+		const { response, vars } = stateForRuntimePayload(ctxWithState(), { BLOK_RUNTIME_STATE_DIET: "0" });
+		expect(Object.keys(vars)).toEqual(["step-1", "step-2", "step-3"]);
+		expect(response.data).toEqual({ previous: "step output" });
+	});
+
+	it("honors the legacy gRPC alias as the off switch", () => {
+		const { vars } = stateForRuntimePayload(ctxWithState(), { BLOK_GRPC_STATE_DIET: "0" });
+		expect(Object.keys(vars)).toHaveLength(3);
+	});
+
+	it("tolerates a context with no response or vars", () => {
+		const { response, vars } = stateForRuntimePayload({} as Context, {});
+		expect(vars).toEqual({});
+		expect(response.data).toBeNull();
 	});
 });
 
