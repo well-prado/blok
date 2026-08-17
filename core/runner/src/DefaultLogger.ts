@@ -102,6 +102,11 @@ export default class DefaultLogger extends GlobalLogger {
 		return (LEVEL_RANK[level.toLowerCase()] ?? LEVEL_RANK.info) >= threshold;
 	}
 
+	/** Public form of {@link shouldEmit} — callers gate expensive messages on it. */
+	isLevelEnabled(level = "info"): boolean {
+		return this.shouldEmit(level);
+	}
+
 	/**
 	 * Logs a message to the console with metadata.
 	 *

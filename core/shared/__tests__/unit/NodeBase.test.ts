@@ -66,16 +66,22 @@ describe("NodeBase", () => {
 			expect(node.runCalls).toHaveLength(1);
 		});
 
-		it("should clone config for originalConfig", async () => {
-			const configData = { key: "val" };
+		it("resolves into a copy, leaving originalConfig unresolved", async () => {
+			const configData = { inputs: { key: "js/ctx.id" } };
 			const ctx = createTestContext({
 				config: { "test-node": configData },
 			});
 
 			await node.process(ctx);
-			expect(node.originalConfig).toEqual(configData);
-			// Should be a deep clone, not same reference
-			expect(node.originalConfig).not.toBe(configData);
+			// The source slice is never mutated — it IS `originalConfig`, and it
+			// still carries the authored expression, so re-running the same step
+			// (a forEach iteration, a retry) resolves from scratch.
+			expect(node.originalConfig).toBe(configData);
+			expect(configData.inputs.key).toBe("js/ctx.id");
+			// The resolved values are published on the ctx's own config object.
+			const resolved = (ctx.config as unknown as Record<string, { inputs: { key: string } }>)["test-node"];
+			expect(resolved).not.toBe(configData);
+			expect(resolved.inputs.key).toBe("test-ctx");
 		});
 
 		it("should set ctx.response on success", async () => {

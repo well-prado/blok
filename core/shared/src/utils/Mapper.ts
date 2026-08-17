@@ -358,6 +358,36 @@ function isPlainContainer(value: object): boolean {
 	return proto === Object.prototype || proto === null;
 }
 
+/**
+ * Copy exactly what {@link Mapper.replaceObjectStrings} can mutate — the plain
+ * objects and arrays it recurses into — and SHARE everything else by reference.
+ * Resolving a copy leaves the caller's object pristine, which is what lets a
+ * step's config slice be resolved per execution (per forEach iteration, per
+ * retry) from the same unresolved source (#874).
+ *
+ * Deliberately not `_.cloneDeep`: this runs on every node execution, and a full
+ * deep clone would also walk the framework instances hanging off a flow step's
+ * slice (`steps: RunnerNode[]`) — expensive, and the mapper never touches them.
+ * Same `isPlainContainer` rule as the walker, so "cloned" and "mutable" are the
+ * same set by construction.
+ */
+export function cloneResolvable<T>(value: T): T {
+	if (value === null || typeof value !== "object") return value;
+	if (Array.isArray(value)) {
+		const out = new Array(value.length);
+		for (let i = 0; i < value.length; i++) out[i] = cloneResolvable(value[i]);
+		return out as T;
+	}
+	if (!isPlainContainer(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const key in value) {
+		if (Object.prototype.hasOwnProperty.call(value, key)) {
+			out[key] = cloneResolvable((value as Record<string, unknown>)[key]);
+		}
+	}
+	return out as T;
+}
+
 // =============================================================================
 // Mapper
 // =============================================================================

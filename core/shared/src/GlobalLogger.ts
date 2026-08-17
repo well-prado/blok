@@ -11,6 +11,11 @@ export default abstract class GlobalLogger implements LoggerContext {
 	abstract logLevel(level: string, message: string): void;
 	abstract error(message: string, stack: string): void;
 
+	/** Loggers that filter by level override this; the base emits everything. */
+	isLevelEnabled(_level = "info"): boolean {
+		return true;
+	}
+
 	getLogs() {
 		return this.logs;
 	}

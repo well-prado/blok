@@ -29,7 +29,6 @@
  */
 
 import type { Context, ResponseContext } from "@blokjs/shared";
-import _ from "lodash";
 import { RunCancelledError } from "./RunCancelledError";
 import RunnerNode from "./RunnerNode";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
@@ -586,10 +585,14 @@ export class ForEachNode extends RunnerNode {
 		const state: Record<string, unknown> = { ...baseState };
 		state[as] = item;
 		state[`${as}Index`] = index;
-		// Deep-clone config so per-iteration blueprint mapper resolutions
-		// don't bleed across iterations (same hazard the v0.4 Configuration
-		// deep-clone fix addressed at the workflow level).
-		const config = _.cloneDeep(ctx.config);
+		// Own top-level config object per iteration, so a step resolving its
+		// slice (`NodeBase.process` publishes the resolved COPY at
+		// `config[name]`) can't bleed into a sibling iteration. A deep clone
+		// used to be needed because the mapper resolved slices IN PLACE — at
+		// O(whole workflow config) per iteration, which on a 1200-item loop
+		// meant re-cloning the loop's own resolved input array 1200 times
+		// (#874). The slices themselves stay shared: nobody mutates them.
+		const config = { ...ctx.config };
 		const childCtx = {
 			...ctx,
 			state,
