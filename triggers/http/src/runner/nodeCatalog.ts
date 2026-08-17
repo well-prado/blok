@@ -13,6 +13,8 @@
  * Pure + structurally typed so it's unit-testable without booting a server.
  */
 
+import { bounded } from "./bootTimeout.js";
+
 /** One node in the catalog. */
 export interface NodeCatalogEntry {
 	name: string;
@@ -57,6 +59,7 @@ interface ListableAdapter {
  * needs a way to FAIL, not just hang. An unreachable/wedged runtime sidecar's
  * `listNodes()` can otherwise never settle, stalling boot (and the
  * `/__blok/nodes` route) forever with no error, no exit, no diagnostic.
+ * The race itself lives in {@link bounded} (`bootTimeout.ts`) since #873.
  */
 const LIST_NODES_TIMEOUT_MS = 5_000; // ponytail: fixed cap; make it BLOK_NODE_CATALOG_TIMEOUT_MS-configurable if a real sidecar ever needs longer just to enumerate its nodes
 
@@ -123,17 +126,8 @@ export async function buildNodeCatalog(
 
 	for (const { kind, adapter } of runtimes) {
 		if (typeof adapter.listNodes !== "function") continue;
-		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			const nodes = await Promise.race([
-				adapter.listNodes(),
-				new Promise<RuntimeNode[]>((_, reject) => {
-					timer = setTimeout(
-						() => reject(new Error(`did not respond to listNodes() within ${LIST_NODES_TIMEOUT_MS}ms`)),
-						LIST_NODES_TIMEOUT_MS,
-					);
-				}),
-			]);
+			const nodes = await bounded(adapter.listNodes(), LIST_NODES_TIMEOUT_MS, "listNodes()");
 			for (const n of nodes) {
 				out.push({
 					name: n.name,
@@ -153,8 +147,6 @@ export async function buildNodeCatalog(
 			console.warn(
 				`[blok][node-catalog] runtime "${kind}" (${adapter.endpoint ?? "unknown endpoint"}) is unreachable — skipping its nodes: ${reason}`,
 			);
-		} finally {
-			clearTimeout(timer);
 		}
 	}
 

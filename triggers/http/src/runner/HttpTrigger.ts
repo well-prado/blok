@@ -55,6 +55,7 @@ import {
 	buildRouteTable,
 	readMiddlewareFlag,
 } from "./WorkflowRouter.js";
+import { bounded } from "./bootTimeout.js";
 import { bootstrapMetrics } from "./metrics/opentelemetry_metrics.js";
 import { buildNodeCatalog } from "./nodeCatalog.js";
 import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter.js";
@@ -180,11 +181,31 @@ interface BootRoutingInfo {
 	readonly nonHttpTriggerCounts: Readonly<Record<string, number>>;
 }
 
+/**
+ * #873 — bound for the foreign promises `listen()` awaits on the boot path: a
+ * user's `Workflows.ts` entry and a sibling trigger's pre-catch-all hook.
+ * Both are ordinary in-process work (module resolution, route mounting) with
+ * no network dial, so 10s is far beyond any honest case while still ending a
+ * boot that would otherwise hang forever. Deliberately looser than
+ * `nodeCatalog`'s 5s `listNodes()` bound: `Workflows.ts` entries resolve
+ * CONCURRENTLY under one shared clock, so a large app's dynamic imports all
+ * spend the same budget.
+ */
+const BOOT_AWAIT_TIMEOUT_MS = 10_000;
+
+/**
+ * A `Workflows.ts` entry may be a promise (a lazy `import()`), so each is
+ * awaited — but bounded (#873): a never-settling entry used to hang boot
+ * forever with nothing naming the offending key. On expiry the rejection
+ * flows through the caller's existing `catch`, which logs it, exactly as a
+ * REJECTING entry has always behaved — time and failure now mean the same
+ * thing here.
+ */
 async function resolveManualRegistrations(workflowsMap: Record<string, unknown>): Promise<ManualRegistration[]> {
 	return Promise.all(
 		Object.keys(workflowsMap ?? {}).map(async (key) => ({
 			key,
-			workflow: await workflowsMap[key],
+			workflow: await bounded(Promise.resolve(workflowsMap[key]), BOOT_AWAIT_TIMEOUT_MS, `Workflows.ts entry "${key}"`),
 		})),
 	);
 }
@@ -1319,18 +1340,23 @@ export default class HttpTrigger extends TriggerBase {
 		// match BEFORE the legacy `/:workflow{.+}` catch-all below. The
 		// workflow registry is fully populated by this point, so hooks can
 		// walk it to discover the routes they need to mount.
-		for (const hook of this.preCatchAllHooks) {
+		//
+		// #873 — the await is BOUNDED: catching the rejection covered failure
+		// but not TIME, so a sibling trigger's hook whose promise never settled
+		// hung boot forever. Expiry is reported like any other hook failure —
+		// logged, boot continues — and the label names which hook wedged.
+		for (const [i, hook] of this.preCatchAllHooks.entries()) {
+			const label = hook.name ? `"${hook.name}"` : `#${i + 1} of ${this.preCatchAllHooks.length}`;
 			try {
 				const result = hook();
 				if (result instanceof Promise) {
-					await result.catch((err: unknown) => {
-						const msg = err instanceof Error ? err.message : String(err);
-						this.logger.error(`[blok] pre-catch-all hook failed: ${msg}`);
-					});
+					await bounded(result, BOOT_AWAIT_TIMEOUT_MS, `pre-catch-all hook ${label}`);
 				}
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.logger.error(`[blok] pre-catch-all hook failed: ${msg}`);
+				this.logger.error(
+					`[blok] pre-catch-all hook ${label} failed: ${msg} — routes it registers may be missing, or shadowed by the catch-all.`,
+				);
 			}
 		}
 
