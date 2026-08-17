@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 
 import { tokenManager } from "../../services/local-token-manager.js";
 
@@ -13,12 +13,14 @@ export async function logout(opts: OptionValues) {
 program
 	.command("logout")
 	.description("Logout from Bloks")
-	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "logout",
-			args: options,
-			execution: async () => {
-				await logout(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await trackCommandExecution({
+				command: "logout",
+				args: options,
+				execution: async () => {
+					await logout(options);
+				},
+			});
+		}),
+	);

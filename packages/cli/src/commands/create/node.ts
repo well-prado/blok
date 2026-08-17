@@ -656,32 +656,32 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 	} catch (error) {
 		if (!skipPrompts) s.stop("An error occurred");
 
+		// Translate the internal `opsN` markers into a readable message and
+		// rethrow. The command error boundary (#899) prints it once and sets
+		// the non-zero exit — a failed node scaffold must FAIL the process,
+		// same as create project (#648) — while a programmatic caller gets a
+		// rejected promise instead of a silently-mutated process.exitCode.
 		const message = (error as Error).message;
 		if (message === "ops1") {
-			console.log(
+			throw new Error(
 				"Oops! It seems like you haven't created a project yet... or have you? 🤔\n" +
 					"If you already did, you can navigate to it using: cd project-name\n" +
 					"Otherwise, you can create a new project with: npx blokctl@latest create project",
 			);
 		}
 		if (message === "ops2") {
-			console.log(
+			throw new Error(
 				"The node you are trying to create already exists in the project.\n" +
 					"Please use a different name, or delete the existing node to create a new one.",
 			);
 		}
 		if (message === "ops3") {
-			console.log(
+			throw new Error(
 				"Oops! It seems like you haven't created a project with python3 support yet... or have you? 🤔\n" +
 					"If you already did, you can navigate to it using: cd project-name\n" +
 					"Otherwise, you can create a new project with: npx blokctl@latest create project",
 			);
 		}
-		if (message !== "ops1" && message !== "ops2") {
-			console.log((error as Error).message);
-		}
-
-		// A failed node scaffold must FAIL the process, same as create project (#648).
-		process.exitCode = 1;
+		throw error;
 	}
 }

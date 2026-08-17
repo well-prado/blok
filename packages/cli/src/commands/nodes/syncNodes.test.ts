@@ -317,7 +317,9 @@ describe("#371 — `--check` drift detection (CLI flow)", () => {
 	let exitSpy: ReturnType<typeof vi.spyOn>;
 	beforeEach(async () => {
 		outDir = await fsp.mkdtemp(path.join(tmpdir(), "blok-check-cli-"));
-		// process.exit must not kill the test runner — capture the code instead.
+		// #899: syncNodes REJECTS on failure instead of exiting, so importing it
+		// can never kill the host (this test runner included). The spy stays to
+		// assert process.exit is NEVER reached.
 		exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => undefined) as never);
 		vi.spyOn(console, "log").mockImplementation(() => undefined);
 	});
@@ -332,7 +334,7 @@ describe("#371 — `--check` drift detection (CLI flow)", () => {
 	}
 	const okCatalog = () => new Response(JSON.stringify({ nodes: catalog }), { status: 200 });
 
-	it("(a) in-sync stubs → no drift, never exits non-zero", async () => {
+	it("(a) in-sync stubs → no drift, resolves and never exits", async () => {
 		// seed outDir with the exact generated stubs → on-disk matches catalog.
 		stubFetch(okCatalog);
 		for (const [filename, source] of generateRuntimeStubs(catalog)) {
@@ -341,11 +343,10 @@ describe("#371 — `--check` drift detection (CLI flow)", () => {
 
 		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
 
-		// no exit at all, or only exit(0) — never a non-zero failure code.
-		for (const call of exitSpy.mock.calls) expect(call[0]).not.toBe(1);
+		expect(exitSpy).not.toHaveBeenCalled();
 	});
 
-	it("(b) stale on-disk stub → exits non-zero", async () => {
+	it("(b) stale on-disk stub → rejects (non-zero exit is the boundary's job)", async () => {
 		stubFetch(okCatalog);
 		// one of the two expected files is hand-edited stale; the other matches.
 		await fsp.writeFile(path.join(outDir, "runtime.python3.ts"), "// stale\n", "utf8");
@@ -354,12 +355,13 @@ describe("#371 — `--check` drift detection (CLI flow)", () => {
 			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
 		}
 
-		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
-
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(syncNodes({ url: "http://localhost:4000", out: outDir, check: true })).rejects.toThrow(
+			/Stub drift detected/,
+		);
+		expect(exitSpy).not.toHaveBeenCalled();
 	});
 
-	it("(c) UNREACHABLE runtime → exits 1, NEVER a false 'in sync' (key safety case)", async () => {
+	it("(c) UNREACHABLE runtime → rejects, NEVER a false 'in sync' (key safety case)", async () => {
 		// fetch throws → fetchCatalog returns null → cannot verify drift.
 		stubFetch(() => {
 			throw new Error("ECONNREFUSED");
@@ -370,24 +372,26 @@ describe("#371 — `--check` drift detection (CLI flow)", () => {
 			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
 		}
 
-		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
-
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(syncNodes({ url: "http://localhost:4000", out: outDir, check: true })).rejects.toThrow(
+			/Could not load the node catalog/,
+		);
+		expect(exitSpy).not.toHaveBeenCalled();
 		// no "in sync" green message — the diff path was never reached.
 		const logged = (console.log as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
 		expect(logged).not.toMatch(/in sync/i);
 	});
 
-	it("(c') non-ok HTTP (server up, endpoint errors) → exits 1, no false 'in sync'", async () => {
+	it("(c') non-ok HTTP (server up, endpoint errors) → rejects, no false 'in sync'", async () => {
 		// fetch resolves but res.ok is false → fetchCatalog returns null too.
 		stubFetch(() => new Response("boom", { status: 500 }));
 		for (const [filename, source] of generateRuntimeStubs(catalog)) {
 			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
 		}
 
-		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
-
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(syncNodes({ url: "http://localhost:4000", out: outDir, check: true })).rejects.toThrow(
+			/Could not load the node catalog/,
+		);
+		expect(exitSpy).not.toHaveBeenCalled();
 		const logged = (console.log as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
 		expect(logged).not.toMatch(/in sync/i);
 	});

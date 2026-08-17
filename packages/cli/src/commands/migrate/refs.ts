@@ -87,7 +87,7 @@ export async function migrateRefs(opts: OptionValues): Promise<void> {
 		`\nTotal: ${files.length} · ${color.green(`${dryRun ? "would change" : "changed"}: ${totals.changed}`)} · migrated refs: ${totals.migrated} · marked: ${totals.marked}`,
 	);
 	if (dryRun) console.log(color.dim("Dry run — no files written."));
-	if (totals.errors > 0) process.exit(1);
+	if (totals.errors > 0) throw new Error(`${totals.errors} file(s) failed to migrate.`);
 }
 
 export function migrateJsonText(raw: string): RefMigrationResult<string> {

@@ -435,6 +435,12 @@ import { z } from "zod";
 - Do not hardcode runtime ports when env vars exist.
 - Do not edit generated `.blok/runtimes/` files.
 - Do not use ESLint/Prettier.
+- Do not call `process.exit()` from a `blokctl` command. Exported command
+  functions throw; `withErrorBoundary` (`packages/cli/src/services/commander.ts`)
+  wraps every `.action()`, prints the message once and sets `process.exitCode`,
+  which is what lets the telemetry flush run. `scripts/check-no-process-exit.sh`
+  gates it; clack cancel paths and a long-running command's final signal exit
+  are the only exceptions, and each carries a `#899 allow-list` comment.
 
 ## Do
 

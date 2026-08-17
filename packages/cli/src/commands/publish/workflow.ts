@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as p from "@clack/prompts";
 
 import { validateWorkflow } from "@blokjs/helper";
-import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
+import { Command, type OptionValues, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
@@ -226,14 +226,16 @@ export default new Command()
 	.description("Publish a workflow")
 	.option("-d, --directory <value>", "Directory to publish")
 	.argument("<workflow>", "Workflow name")
-	.action(async (workflow: string, options: OptionValues) => {
-		await trackCommandExecution({
-			command: "publish workflow",
-			args: options,
-			execution: async () => {
-				options.workflow = workflow;
-				if (!options.directory) options.directory = process.cwd();
-				await publish(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (workflow: string, options: OptionValues) => {
+			await trackCommandExecution({
+				command: "publish workflow",
+				args: options,
+				execution: async () => {
+					options.workflow = workflow;
+					if (!options.directory) options.directory = process.cwd();
+					await publish(options);
+				},
+			});
+		}),
+	);

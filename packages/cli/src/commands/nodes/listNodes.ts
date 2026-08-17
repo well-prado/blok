@@ -82,8 +82,8 @@ export async function listNodes(opts: OptionValues): Promise<void> {
 	const baseUrl = ((opts.url as string | undefined) ?? "http://localhost:4000").replace(/\/+$/, "");
 	const nodes = await fetchCatalog(opts.url as string | undefined);
 	if (nodes === null) {
-		process.exit(1);
-		return;
+		// fetchCatalog already printed the diagnostic; this only sets the failure.
+		throw new Error("Could not load the node catalog.");
 	}
 
 	if (opts.json === true) {

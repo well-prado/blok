@@ -2,7 +2,7 @@ import child_process from "node:child_process";
 import crypto from "node:crypto";
 import * as p from "@clack/prompts";
 import fs from "fs-extra";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
@@ -220,26 +220,30 @@ const buildCmd = program
 	.command("build")
 	.option("-d, --directory [value]", "Directory of the blok (defaults to current directory)", process.cwd())
 	.description("Build blok")
-	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "build",
-			args: options,
-			execution: async () => {
-				await build(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await trackCommandExecution({
+				command: "build",
+				args: options,
+				execution: async () => {
+					await build(options);
+				},
+			});
+		}),
+	);
 
 buildCmd
 	.command(".")
 	.description("Build blok in the current directory")
-	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "build .",
-			args: options,
-			execution: async () => {
-				options.directory = process.cwd();
-				await build(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await trackCommandExecution({
+				command: "build .",
+				args: options,
+				execution: async () => {
+					options.directory = process.cwd();
+					await build(options);
+				},
+			});
+		}),
+	);

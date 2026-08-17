@@ -607,19 +607,21 @@ describe("migrateWorkflows — recursive scan", () => {
 });
 
 describe("migrateWorkflows — error handling", () => {
-	it("does not crash on invalid JSON; reports as error", async () => {
+	// #899: migrateWorkflows REJECTS on failure instead of calling process.exit,
+	// so importing it can never kill the host (this test runner included). The
+	// exit code is the command error boundary's job, not this function's.
+	it("does not crash on invalid JSON; rejects and never exits the process", async () => {
 		const dir = path.join(tmpDir, "workflows", "json");
 		await fsp.mkdir(dir, { recursive: true });
 		await fsp.writeFile(path.join(dir, "broken.json"), "{ not valid json");
 
-		await migrateWorkflows({ backup: false });
-		// process.exit(1) called — verify
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(migrateWorkflows({ backup: false })).rejects.toThrow(/failed to migrate/i);
+		expect(exitSpy).not.toHaveBeenCalled();
 	});
 
-	it("exits 1 when no workflows directory found", async () => {
+	it("rejects when no workflows directory found, and never exits the process", async () => {
 		// No workflows/json dir created
-		await migrateWorkflows({ backup: false });
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(migrateWorkflows({ backup: false })).rejects.toThrow(/Could not find a JSON workflows directory/);
+		expect(exitSpy).not.toHaveBeenCalled();
 	});
 });

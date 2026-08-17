@@ -10,6 +10,11 @@ import { tokenManager } from "../../../src/services/local-token-manager";
  * one REJECTS — `login()` used to call `process.exit(1)` from its own catch
  * block, which tore down any host that imports it (a vitest worker, a
  * programmatic caller, Studio embedding) with no chance to recover (#891).
+ *
+ * Since #899 it does not touch `process.exitCode` either: setting the exit
+ * status is the command error boundary's job (withErrorBoundary in
+ * services/commander.ts), so `login()` is inert for a programmatic caller that
+ * catches the rejection.
  */
 let savedToken: string | null = null;
 const originalExitCode = process.exitCode;
@@ -63,10 +68,9 @@ test("login rejects on a failed token instead of killing the process", async () 
 	await expect(login({ token: "bad-token" })).rejects.toThrow("Unauthorized");
 
 	expect(exitSpy).not.toHaveBeenCalled();
-	// The process still ends up with a failing exit code — just set
-	// cooperatively instead of forced — so a real CLI invocation still
-	// exits non-zero.
-	expect(process.exitCode).toBe(1);
+	// And it leaves the host's exit status ALONE — the boundary sets it from
+	// the rejection, so catching the error here has no side effect.
+	expect(process.exitCode).toBeUndefined();
 });
 
 test("login rejects when no token can be resolved in non-interactive mode", async () => {
@@ -80,5 +84,5 @@ test("login rejects when no token can be resolved in non-interactive mode", asyn
 	await expect(login({})).rejects.toThrow(/non-interactive mode/);
 
 	expect(exitSpy).not.toHaveBeenCalled();
-	expect(process.exitCode).toBe(1);
+	expect(process.exitCode).toBeUndefined();
 });

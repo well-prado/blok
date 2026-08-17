@@ -245,14 +245,10 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 
 	const dir = await resolveWorkflowsDir(cwd, explicitDir);
 	if (!dir) {
-		console.log(
-			color.red(
-				"❌ Could not find a TS workflows directory. Looked in: triggers/http/src/workflows/, " +
-					"src/workflows/, workflows/. Pass --dir <path> to override.",
-			),
+		throw new Error(
+			"Could not find a TS workflows directory. Looked in: triggers/http/src/workflows/, " +
+				"src/workflows/, workflows/. Pass --dir <path> to override.",
 		);
-		process.exit(1);
-		return;
 	}
 
 	const outFile = path.isAbsolute(opts.out ?? "")

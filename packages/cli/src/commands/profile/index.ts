@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import * as p from "@clack/prompts";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 
 async function getPerformanceProfiler() {
 	const { PerformanceProfiler } = await import("@blokjs/runner");
@@ -42,97 +42,99 @@ program
 	.option("--host <host>", "Prometheus host", "http://localhost:9090")
 	.option("--token <token>", "Prometheus auth token")
 	.option("--top <count>", "Show top N bottlenecks", "10")
-	.action(async (workflowName: string | undefined, options: OptionValues) => {
-		await trackCommandExecution({
-			command: "profile",
-			args: options,
-			execution: async () => {
-				const logger = p.spinner();
-				logger.start("Collecting performance metrics from Prometheus...");
+	.action(
+		withErrorBoundary(async (workflowName: string | undefined, options: OptionValues) => {
+			await trackCommandExecution({
+				command: "profile",
+				args: options,
+				execution: async () => {
+					const logger = p.spinner();
+					logger.start("Collecting performance metrics from Prometheus...");
 
-				const host = (options.host as string) || "http://localhost:9090";
-				const token = options.token as string | undefined;
-				const topN = Number.parseInt(options.top as string, 10) || 10;
+					const host = (options.host as string) || "http://localhost:9090";
+					const token = options.token as string | undefined;
+					const topN = Number.parseInt(options.top as string, 10) || 10;
 
-				// Query per-node metrics from Prometheus (the canonical `blok_node_*`
-				// family — the legacy un-prefixed `node_*` gauges were retired).
-				// Duration is averaged ms from the histogram; memory is peak bytes.
-				const [nodeTimeResults, nodeMemResults] = await Promise.all([
-					queryPrometheus("(blok_node_duration_seconds_sum / blok_node_duration_seconds_count) * 1000", host, token),
-					queryPrometheus("blok_node_memory_bytes / 1000000", host, token),
-				]);
+					// Query per-node metrics from Prometheus (the canonical `blok_node_*`
+					// family — the legacy un-prefixed `node_*` gauges were retired).
+					// Duration is averaged ms from the histogram; memory is peak bytes.
+					const [nodeTimeResults, nodeMemResults] = await Promise.all([
+						queryPrometheus("(blok_node_duration_seconds_sum / blok_node_duration_seconds_count) * 1000", host, token),
+						queryPrometheus("blok_node_memory_bytes / 1000000", host, token),
+					]);
 
-				const PerformanceProfiler = await getPerformanceProfiler();
-				const profiler = new PerformanceProfiler({ topN });
+					const PerformanceProfiler = await getPerformanceProfiler();
+					const profiler = new PerformanceProfiler({ topN });
 
-				let hasData = false;
+					let hasData = false;
 
-				// Process node time metrics
-				for (const result of nodeTimeResults) {
-					const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
-					const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
+					// Process node time metrics
+					for (const result of nodeTimeResults) {
+						const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
+						const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
 
-					if (workflowName && wf !== workflowName) continue;
+						if (workflowName && wf !== workflowName) continue;
 
-					const timeMs = Number.parseFloat(result.value[1]) || 0;
-					if (timeMs > 0) {
-						profiler.addSample(wf, node, timeMs);
-						hasData = true;
+						const timeMs = Number.parseFloat(result.value[1]) || 0;
+						if (timeMs > 0) {
+							profiler.addSample(wf, node, timeMs);
+							hasData = true;
+						}
 					}
-				}
 
-				// Process memory metrics
-				for (const result of nodeMemResults) {
-					const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
-					const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
-					if (workflowName && wf !== workflowName) continue;
+					// Process memory metrics
+					for (const result of nodeMemResults) {
+						const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
+						const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
+						if (workflowName && wf !== workflowName) continue;
 
-					const memMb = Number.parseFloat(result.value[1]) || 0;
-					if (memMb > 0) {
-						profiler.addSample(wf, node, 0, memMb);
+						const memMb = Number.parseFloat(result.value[1]) || 0;
+						if (memMb > 0) {
+							profiler.addSample(wf, node, 0, memMb);
+						}
 					}
-				}
 
-				if (!hasData) {
-					logger.error("No profiling data available.");
-					p.log.warn("Make sure Prometheus is running and workflows have been executed.");
-					p.log.info(`Tried connecting to: ${host}`);
-					return;
-				}
-
-				logger.stop("Metrics collected.");
-
-				let output: string;
-				const format = options.format as string;
-
-				switch (format) {
-					case "flamechart":
-						output = profiler.toFlameChart();
-						break;
-					case "json":
-						output = profiler.toJson();
-						break;
-					default:
-						output = profiler.toTable();
-				}
-
-				if (options.output) {
-					fs.writeFileSync(options.output as string, output, "utf-8");
-					p.log.success(`Profile written to ${options.output}`);
-				} else {
-					console.log(output);
-				}
-
-				// Show bottleneck summary
-				const bottlenecks = profiler.getBottlenecks(3);
-				if (bottlenecks.length > 0) {
-					p.log.info("Top bottlenecks:");
-					for (const b of bottlenecks) {
-						p.log.message(
-							`  ${b.nodeName}: avg ${b.avgTimeMs.toFixed(1)}ms (${b.percentOfTotal.toFixed(0)}% of total)`,
-						);
+					if (!hasData) {
+						logger.error("No profiling data available.");
+						p.log.warn("Make sure Prometheus is running and workflows have been executed.");
+						p.log.info(`Tried connecting to: ${host}`);
+						return;
 					}
-				}
-			},
-		});
-	});
+
+					logger.stop("Metrics collected.");
+
+					let output: string;
+					const format = options.format as string;
+
+					switch (format) {
+						case "flamechart":
+							output = profiler.toFlameChart();
+							break;
+						case "json":
+							output = profiler.toJson();
+							break;
+						default:
+							output = profiler.toTable();
+					}
+
+					if (options.output) {
+						fs.writeFileSync(options.output as string, output, "utf-8");
+						p.log.success(`Profile written to ${options.output}`);
+					} else {
+						console.log(output);
+					}
+
+					// Show bottleneck summary
+					const bottlenecks = profiler.getBottlenecks(3);
+					if (bottlenecks.length > 0) {
+						p.log.info("Top bottlenecks:");
+						for (const b of bottlenecks) {
+							p.log.message(
+								`  ${b.nodeName}: avg ${b.avgTimeMs.toFixed(1)}ms (${b.percentOfTotal.toFixed(0)}% of total)`,
+							);
+						}
+					}
+				},
+			});
+		}),
+	);

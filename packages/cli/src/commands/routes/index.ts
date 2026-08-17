@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import color from "picocolors";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { readProjectConfig } from "../../services/runtime-setup.js";
 
 /**
@@ -63,12 +63,14 @@ program
 	.command("routes")
 	.description("Print the boot-time HTTP route table without starting the server (CI/agent friendly)")
 	.option("-d, --directory [value]", "Project directory", process.cwd())
-	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "routes",
-			args: options,
-			execution: async () => {
-				await routesCommand(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await trackCommandExecution({
+				command: "routes",
+				args: options,
+				execution: async () => {
+					await routesCommand(options);
+				},
+			});
+		}),
+	);

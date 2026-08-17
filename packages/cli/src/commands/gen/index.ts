@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import type { OptionValues } from "../../services/commander.js";
-import { program } from "../../services/commander.js";
+import { program, withErrorBoundary } from "../../services/commander.js";
 import { generateAppTypes } from "./appTypes.js";
 
 const gen = new Command("gen").description("Generate typed client artifacts for @blokjs/client");
@@ -13,9 +13,11 @@ const appTypes = new Command("app-types")
 	)
 	.option("-o, --out <value>", "Output file (default: ./blok-app.d.ts)")
 	.option("--dry-run", "Print the generated file without writing it")
-	.action(async (options: OptionValues) => {
-		await generateAppTypes(options);
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await generateAppTypes(options);
+		}),
+	);
 
 gen.addCommand(appTypes);
 

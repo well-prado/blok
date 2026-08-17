@@ -165,8 +165,9 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	// Resolve Studio static assets
 	const staticPath = resolveStaticPath();
 	if (!staticPath) {
-		p.log.error(`Studio assets not found.\n  Build them first: ${color.cyan("bun run --filter @blokjs/studio build")}`);
-		process.exit(1);
+		throw new Error(
+			`Studio assets not found.\n  Build them first: ${color.cyan("bun run --filter @blokjs/studio build")}`,
+		);
 	}
 
 	// Decide mode
@@ -212,11 +213,10 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 			standaloneApp = await buildStandaloneApp(dbPath);
 			p.log.success(`Standalone mode · reading ${color.cyan(path.relative(process.cwd(), dbPath))}`);
 		} catch (e) {
-			p.log.error(
+			throw new Error(
 				`Failed to open trace file ${color.cyan(dbPath)}\n  ${(e as Error).message}\n` +
 					`  Make sure better-sqlite3 is available: ${color.cyan("npm install better-sqlite3")}`,
 			);
-			process.exit(1);
 		}
 	}
 
@@ -264,14 +264,17 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 			}
 		});
 
-		// Graceful shutdown
+		// Graceful shutdown. KEEP both process.exit calls (#899 allow-list):
+		// startStudio returns a Promise that NEVER resolves (it owns the process
+		// for as long as the server runs), so a signal has no caller to return
+		// to — exiting here is the only way to stop.
 		const stop = () => {
 			console.log();
 			server.close(() => {
 				p.outro(color.dim("Blok Studio stopped."));
 				process.exit(0);
 			});
-			// Force exit after 3s if server doesn't close cleanly
+			// Force exit after 3s if server doesn't close cleanly (#899 allow-list)
 			setTimeout(() => process.exit(0), 3000);
 		};
 

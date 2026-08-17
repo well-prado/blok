@@ -11,7 +11,12 @@ import { checkWorkflowRefs, formatRefReport, loadCatalog } from "./refs.js";
  *   - Exit code 0: all checks passed
  *   - Exit code 1: one or more checks failed
  *
- * `--json` prints one machine-readable object instead of the human report.
+ * The exit code itself is set by the command error boundary (#899): this
+ * function RETURNS when everything passed and THROWS when it did not, so it is
+ * safe to call from a test or any other host process.
+ *
+ * `--json` prints one machine-readable object instead of the human report. The
+ * failure message goes to stderr via the boundary, so stdout stays pure JSON.
  */
 export async function checkProject(opts: OptionValues) {
 	const currentPath = process.cwd();
@@ -19,8 +24,7 @@ export async function checkProject(opts: OptionValues) {
 
 	const config = readProjectConfig(currentPath);
 	if (!config) {
-		console.error("  No .blok/config.json found. Run this from a Blok project directory.");
-		process.exit(1);
+		throw new Error("No .blok/config.json found. Run this from a Blok project directory.");
 	}
 
 	const results = await validateProjectRuntimes(currentPath);
@@ -55,7 +59,11 @@ export async function checkProject(opts: OptionValues) {
 				2,
 			),
 		);
-		process.exit(runtimeFailures.length > 0 || refs.errorCount > 0 || catalogError !== undefined ? 1 : 0);
+		const jsonFailures = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0);
+		if (jsonFailures > 0) {
+			throw new Error(`${jsonFailures} check${jsonFailures > 1 ? "s" : ""} failed.`);
+		}
+		return;
 	}
 
 	console.log(`\n  ${color.bold("Blok Runtime Version Check")}`);
@@ -90,10 +98,8 @@ export async function checkProject(opts: OptionValues) {
 
 	const failed = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0);
 	if (failed > 0) {
-		console.log(`  ${color.red(`${failed} check${failed > 1 ? "s" : ""} failed.`)}\n`);
-		process.exit(1);
+		throw new Error(`${failed} check${failed > 1 ? "s" : ""} failed.`);
 	}
 
 	console.log(`  ${color.green("All checks passed.")}\n`);
-	process.exit(0);
 }

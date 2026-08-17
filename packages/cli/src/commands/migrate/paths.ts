@@ -45,13 +45,10 @@ export async function migratePaths(opts: OptionValues): Promise<void> {
 
 	const root = await resolveJsonRoot(cwd, explicitDir);
 	if (!root) {
-		console.log(
-			color.red(
-				"❌ Could not find a JSON workflows directory. Looked in: " +
-					"workflows/json/, triggers/http/workflows/json/. Pass --dir <path> to override.",
-			),
+		throw new Error(
+			"Could not find a JSON workflows directory. Looked in: " +
+				"workflows/json/, triggers/http/workflows/json/. Pass --dir <path> to override.",
 		);
-		process.exit(1);
 	}
 
 	console.log(color.dim(`Scanning ${color.cyan(root)} (recursive)\n`));

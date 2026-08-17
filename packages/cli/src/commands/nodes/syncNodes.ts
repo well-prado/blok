@@ -157,8 +157,8 @@ export async function syncNodes(opts: OptionValues): Promise<void> {
 	const nodes = await fetchCatalog(opts.url as string | undefined);
 	if (nodes === null) {
 		// Runtime unreachable — cannot verify. Fail loud, never a false "in sync".
-		process.exit(1);
-		return;
+		// fetchCatalog already printed the diagnostic.
+		throw new Error("Could not load the node catalog.");
 	}
 
 	const files = generateRuntimeStubs(nodes);
@@ -175,8 +175,7 @@ export async function syncNodes(opts: OptionValues): Promise<void> {
 				console.log(color.red(`   • ${path.join(path.relative(cwd, outDir), filename)}`));
 			}
 			console.log(color.dim("\nRun `blokctl nodes sync` to regenerate.\n"));
-			process.exit(1);
-			return;
+			throw new Error(`Stub drift detected in ${drifted.length} file(s).`);
 		}
 		console.log(color.green(`✅ Stubs in sync (${files.size} file(s) checked).`));
 		return;

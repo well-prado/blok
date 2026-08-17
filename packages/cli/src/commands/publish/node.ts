@@ -4,7 +4,7 @@ import path from "node:path";
 import util from "node:util";
 import * as p from "@clack/prompts";
 
-import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
+import { Command, type OptionValues, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
 import { VersionUpdateType, manager as pm } from "../../services/package-manager.js";
@@ -273,14 +273,16 @@ export default new Command()
 	.option("-r, --runtime <value>", "Publishing runtime (default: npm)")
 	.option("--bump <value>", "Version bump: patch, minor, major (default: patch)")
 	.argument("<node>", "Node name")
-	.action(async (node: string, options: OptionValues) => {
-		await trackCommandExecution({
-			command: "publish",
-			args: options,
-			execution: async () => {
-				if (!options.directory) options.directory = process.cwd();
-				options.node = node;
-				await publish(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (node: string, options: OptionValues) => {
+			await trackCommandExecution({
+				command: "publish",
+				args: options,
+				execution: async () => {
+					if (!options.directory) options.directory = process.cwd();
+					options.node = node;
+					await publish(options);
+				},
+			});
+		}),
+	);

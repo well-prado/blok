@@ -1,4 +1,4 @@
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { startStudio } from "./startStudio.js";
 
 program
@@ -15,20 +15,22 @@ program
 	.option("--workflow <name>", "Open specific workflow")
 	.option("--run <id>", "Open specific run")
 	.option("--no-open", "Don't auto-open browser")
-	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "trace",
-			args: options,
-			execution: async () => {
-				await startStudio({
-					port: Number.parseInt(options.port as string, 10),
-					url: options.url as string,
-					db: options.db as string | undefined,
-					standalone: options.standalone as boolean | undefined,
-					workflow: options.workflow as string | undefined,
-					run: options.run as string | undefined,
-					open: options.open as boolean,
-				});
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await trackCommandExecution({
+				command: "trace",
+				args: options,
+				execution: async () => {
+					await startStudio({
+						port: Number.parseInt(options.port as string, 10),
+						url: options.url as string,
+						db: options.db as string | undefined,
+						standalone: options.standalone as boolean | undefined,
+						workflow: options.workflow as string | undefined,
+						run: options.run as string | undefined,
+						open: options.open as boolean,
+					});
+				},
+			});
+		}),
+	);
