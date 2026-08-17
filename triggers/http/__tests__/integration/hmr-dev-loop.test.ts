@@ -171,7 +171,14 @@ describe("#692 · blokctl dev loop — HMR is real (BLOK_HMR=true, no CLI, no NO
 
 		writeFileSync(join(jsonDir, "greet.json"), constantWorkflow("hmr-greet", "/hmr/greet", "after"));
 
-		await waitFor(async () => (await value(await get("/hmr/greet"))) === "after", 2000, "workflow edit to go live");
+		// #900: 2000ms flaked under host load (real fs.watch → 250ms debounce →
+		// reload → HTTP round trip observed at ~300-400ms idle, but fs-watch
+		// dispatch and debounce timers both ride the event loop, so CPU
+		// starvation stretches them). This asserts THAT the edit goes live and
+		// the PID is unchanged, not how fast, so a generous budget loses
+		// nothing; 10000ms gave ~25-30x headroom over the measured idle
+		// round-trip in testing under a real ~190-260 load average.
+		await waitFor(async () => (await value(await get("/hmr/greet"))) === "after", 10_000, "workflow edit to go live");
 		expect(process.pid).toBe(bootPid);
 	}, 15_000);
 
@@ -198,7 +205,9 @@ describe("#692 · blokctl dev loop — HMR is real (BLOK_HMR=true, no CLI, no NO
 
 		writeFileSync(join(jsonDir, "fresh.json"), constantWorkflow("hmr-fresh", "/hmr/fresh", "brand-new"));
 
-		await waitFor(async () => (await get("/hmr/fresh")).status === 200, 2000, "new workflow route to appear");
+		// #900: same fixed-budget treatment as (a) above — same write → debounce
+		// → route-table-scan mechanism, same load-sensitivity.
+		await waitFor(async () => (await get("/hmr/fresh")).status === 200, 10_000, "new workflow route to appear");
 		expect(await value(await get("/hmr/fresh"))).toBe("brand-new");
 		expect(process.pid).toBe(bootPid);
 	}, 15_000);
@@ -208,7 +217,8 @@ describe("#692 · blokctl dev loop — HMR is real (BLOK_HMR=true, no CLI, no NO
 
 		rmSync(join(jsonDir, "fresh.json"));
 
-		await waitFor(async () => (await get("/hmr/fresh")).status === 404, 2000, "deleted workflow route to 404");
+		// #900: same fixed-budget treatment as (a) above.
+		await waitFor(async () => (await get("/hmr/fresh")).status === 404, 10_000, "deleted workflow route to 404");
 		expect(process.pid).toBe(bootPid);
 	}, 15_000);
 
@@ -275,10 +285,15 @@ export default workflow("hmr.tsFresh", { version: "1.0.0", trigger: http.get("/h
 			expect(process.pid).toBe(bootPid);
 
 			rmSync(freshTsFile);
-			await waitFor(async () => (await get("/hmr/ts-fresh")).status === 404, 2000, "deleted TS workflow route to 404");
+			// #900: same fixed-budget treatment as (a) above.
+			await waitFor(
+				async () => (await get("/hmr/ts-fresh")).status === 404,
+				10_000,
+				"deleted TS workflow route to 404",
+			);
 			expect(process.pid).toBe(bootPid);
 		} finally {
 			rmSync(freshTsFile, { force: true });
 		}
-	}, 15_000);
+	}, 20_000); // #900: two sequential waits (4000 + 10000) need more headroom than 15_000 left
 });
