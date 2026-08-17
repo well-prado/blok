@@ -22,11 +22,17 @@ const UTILITY_PREFIXES =
 const TAILWIND_HUES =
 	"zinc|gray|slate|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
 const RAW_COLOR = new RegExp(`\\b(?:${UTILITY_PREFIXES})-(?:${TAILWIND_HUES})-\\d{2,3}\\b`);
-const HEX = /#[0-9a-fA-F]{6}\b/;
+// {3,8}, not {6}: `#f00` and 8-digit `#rrggbbaa` are just as raw.
+const HEX = /#[0-9a-fA-F]{3,8}\b/;
 // The one reference-dialect class that carries no color prefix, so the
 // undeclared-token check below cannot see it. Studio's is `.focus-ring`.
 const REFERENCE_DIALECT = /\bfocus-custom\b/;
-const ARBITRARY_COLOR = /-\[(?:#|rgb|hsl|oklch|oklab|color-mix|var\(--color-)/;
+// Also catches the CSS-property spelling Tailwind allows — `[color:oklch(...)]`
+// and `text-[color:var(--color-graphite-500)]` both emit real CSS and both slipped
+// the earlier pattern, the second being a hardcoded layer-1 ramp reference that a
+// light theme can never re-map (the exact §3.2 failure the doc claims to catch).
+const ARBITRARY_COLOR =
+	/-\[(?:#|rgb|hsl|oklch|oklab|color-mix|color:|var\(--color-)|\[(?:color|fill|stroke|background|border-color|outline-color):/;
 
 // The token vocabulary, DERIVED FROM app.css so the guard cannot drift from the
 // tokens. Layer 1 is declared but banned in components (CONVENTIONS §10): a raw
@@ -45,6 +51,16 @@ const KEYWORDS: Record<string, RegExp> = {
 };
 const BORDER_SIDE = /^(?:[trblxyse]|inline-start|inline-end|block-start|block-end)-/;
 
+// Declared tokens that are still WRONG in the `text-` position — role misuse the
+// name check alone cannot see, because every one of these is a real token. Measured
+// on their usual backgrounds: a bare `text-status-*` fill lands at 3.56-4.60,
+// `text-ink-faint` at 3.90, and a surface token as text (`text-canvas`) at ~1.06,
+// i.e. invisible. §3.1/§3.2 ban all three in prose; this makes the ban executable.
+// `text-accent` stays legal at 8.02:1 on canvas, and `on-accent` is BY DEFINITION
+// a text role — it is the ink that sits on an accent fill.
+const TEXT_FORBIDDEN =
+	/^(?:ink-faint|canvas|raised|overlay|hover|control|focus-ring|line(?:-strong|-bright)?|(?:status|log)-(?!.*-ink$)[a-zA-Z]+)$/;
+
 /** Utility class names using a color-capable prefix, with their resolved token name. */
 function unknownTokens(line: string): string[] {
 	const out: string[] = [];
@@ -53,6 +69,10 @@ function unknownTokens(line: string): string[] {
 		let rest = (m[2] as string).split("/")[0] as string; // drop the /10 opacity modifier
 		if (prefix === "border") rest = rest.replace(BORDER_SIDE, ""); // border-l-[3px] → [3px]
 		// Arbitrary values are ARBITRARY_COLOR's job; a non-color one (`border-l-[3px]`) is fine.
+		if (prefix === "text" && TOKENS.has(rest) && TEXT_FORBIDDEN.test(rest)) {
+			out.push(`${prefix}-${rest} (declared, but not a text role)`);
+			continue;
+		}
 		if (rest === "" || rest.startsWith("[") || TOKENS.has(rest) || KEYWORDS[prefix]?.test(rest)) continue;
 		out.push(`${prefix}-${rest}`);
 	}
@@ -155,7 +175,11 @@ describe("token layer", () => {
 		for (const [status, value] of Object.entries(STATUS_COLORS)) {
 			expect(value).not.toMatch(RAW_COLOR);
 			for (const cls of value.split(" ")) {
-				expect(cls).toMatch(new RegExp(`^(?:bg|text)-status-${status}(?:-ink)?(?:/\\d+)?$`));
+				// `-ink` is MANDATORY in the text position and FORBIDDEN in the fill
+				// position — the whole point of the role split. Making the suffix
+				// optional let `text-status-pending` satisfy the shape assertion,
+				// which is the pairing that was sub-AA in the first place.
+				expect(cls).toMatch(new RegExp(`^(?:bg-status-${status}(?:/\\d+)?|text-status-${status}-ink)$`));
 				expect(TOKENS.has(cls.replace(/^(?:bg|text)-/, "").split("/")[0] as string)).toBe(true);
 			}
 		}
@@ -208,10 +232,20 @@ function resolve(token: string): string {
 describe("contrast", () => {
 	const SURFACES = ["canvas", "raised", "overlay", "hover", "control"];
 
-	it.each(Object.keys(STATUS_LABELS))("chip %s is legible on bg-raised", (status) => {
+	// Drive this off the pairing STATUS_COLORS actually SHIPS, not off token
+	// names the test interpolates itself. The earlier spelling recomputed the
+	// ratio from `status-<x>` + `status-<x>-ink` read straight out of app.css,
+	// so it never saw what the component renders: reverting constants.ts to the
+	// fill-as-text pairing restored all five sub-AA chips and this suite stayed
+	// green (457/457). A guard that cannot fail on the regression it exists to
+	// catch is decoration.
+	it.each(Object.entries(STATUS_COLORS))("chip %s is legible on bg-raised", (_status, classes) => {
 		// StatusBadge is text-xs/font-medium = 12px/500 = normal text, so AA is 4.5.
-		const chip = wash(resolve(`status-${status}`), 0.1, resolve("raised"));
-		expect(ratio(resolve(`status-${status}-ink`), chip)).toBeGreaterThanOrEqual(4.5);
+		const parts = classes.split(" ");
+		const ink = (parts.find((c) => c.startsWith("text-")) as string).slice(5);
+		const [fill, pct] = (parts.find((c) => c.startsWith("bg-")) as string).slice(3).split("/");
+		const chip = wash(resolve(fill as string), Number(pct ?? 100) / 100, resolve("raised"));
+		expect(ratio(resolve(ink), chip)).toBeGreaterThanOrEqual(4.5);
 	});
 
 	it("every text ink clears AA on every surface", () => {

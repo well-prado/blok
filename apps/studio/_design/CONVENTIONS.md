@@ -57,7 +57,7 @@ import { cn } from "@/lib/utils";
 
 const variants = {
 	default: "bg-control text-ink border border-line",
-	danger: "bg-status-failed/10 text-status-failed border border-status-failed/30",
+	danger: "bg-status-failed/10 text-status-failed-ink border border-status-failed/30",
 } as const;
 
 const sizes = {
@@ -463,7 +463,9 @@ Do not add primitive tests there. It is the second-worst collision point after a
 
 It is scoped to new directories only, so it needs no allowlist and the 1,373 legacy occurrences elsewhere stay out of scope. It also pins the token layer itself: the semantic vocabulary, a fill **and** an ink token per union member, `@theme static`, `.focus-ring`, and the two `constants.ts` maps.
 
-Separately it computes **contrast** from `app.css`: all 14 status chips `>= 4.5:1` on their own wash, all four text inks `>= 4.5:1` on all five surfaces, `ink-faint >= 3:1`. This is the guard the type checker, the linter and 440 tests all missed the first time.
+Separately it computes **contrast**: all 14 status chips `>= 4.5:1` on their own wash — read out of the pairing `STATUS_COLORS` actually ships, not out of token names the test interpolates — plus all four text inks `>= 4.5:1` on all five surfaces and `ink-faint >= 3:1`.
+
+**Known limits — do not read the list above as "the guard catches everything".** It reads *class strings*. These slip and are your responsibility, not CI's: inline `style={{ color: "#f00" }}`, SVG paint attributes (`fill="#0f0"`), and class names assembled at runtime from fragments (`` `text-${hue}-400` `` — which Tailwind also never emits, so it is self-punishing). An earlier draft of this section claimed coverage it did not have; the claims above are the ones actually proven by probe.
 
 `apps/studio/src/__tests__/catalog.test.tsx` asserts the glob is non-empty and renders every discovered page, so a broken page fails the suite the moment it lands.
 

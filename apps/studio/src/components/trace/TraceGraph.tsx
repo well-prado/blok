@@ -121,7 +121,13 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 					// drifted (`#52525b`, and before that the pre-brand green `#22c55e`).
 					// Safe to compute here because this is a CSS custom-property lookup at
 					// runtime, NOT a Tailwind class name: `@theme static` emits all 14.
-					nodeColor={(node) => `var(--color-status-${(node.data as { node: NodeRun }).node.status})`}
+					// Fallback arm matters: a status the client union does not know yet
+					// (backend drift) resolves to an undefined custom property, which
+					// paints rgb(0,0,0) — an invisible node on the dark canvas, strictly
+					// worse than the hex default this replaced.
+					nodeColor={(node) =>
+						`var(--color-status-${(node.data as { node: NodeRun }).node.status}, var(--color-line-strong))`
+					}
 					maskColor="color-mix(in srgb, var(--color-canvas) 60%, transparent)"
 					className="bg-raised! border-line-strong! rounded-md!"
 				/>
