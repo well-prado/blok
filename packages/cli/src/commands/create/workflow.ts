@@ -133,5 +133,8 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 		if (message !== "ops1" && message !== "ops2") {
 			console.log((error as Error).message);
 		}
+
+		// A failed workflow scaffold must FAIL the process, same as create project (#648).
+		process.exitCode = 1;
 	}
 }
