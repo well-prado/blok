@@ -1,95 +1,13 @@
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { type Notification, requestNotificationPermission, useNotificationStore } from "@/stores/notifications";
+import { requestNotificationPermission, useNotificationStore } from "@/stores/notifications";
 import { useNavigate } from "@tanstack/react-router";
-import { Bell, BellOff, CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bell, BellOff } from "lucide-react";
+import { useState } from "react";
 
-/** Toast popup for recent notifications. */
-export function NotificationToast() {
-	const { notifications } = useNotificationStore();
-	const [visibleToasts, setVisibleToasts] = useState<Notification[]>([]);
-
-	// Show new unread notifications as toasts
-	useEffect(() => {
-		const latest = notifications[0];
-		if (!latest || latest.read) return;
-		// Only show if it arrived in the last 5 seconds
-		if (Date.now() - latest.timestamp > 5000) return;
-
-		setVisibleToasts((prev) => {
-			if (prev.some((t) => t.id === latest.id)) return prev;
-			return [latest, ...prev].slice(0, 3);
-		});
-
-		// Auto-dismiss after 5 seconds
-		const timer = setTimeout(() => {
-			setVisibleToasts((prev) => prev.filter((t) => t.id !== latest.id));
-		}, 5000);
-
-		return () => clearTimeout(timer);
-	}, [notifications]);
-
-	const dismissToast = (id: string) => {
-		setVisibleToasts((prev) => prev.filter((t) => t.id !== id));
-	};
-
-	if (visibleToasts.length === 0) return null;
-
-	return (
-		<div className="fixed bottom-8 right-4 z-50 flex flex-col gap-2 w-80">
-			{visibleToasts.map((toast) => (
-				<ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />
-			))}
-		</div>
-	);
-}
-
-function ToastItem({ toast, onDismiss }: { toast: Notification; onDismiss: (id: string) => void }) {
-	const navigate = useNavigate();
-
-	const icons = {
-		success: <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />,
-		error: <XCircle className="w-4 h-4 text-red-400 shrink-0" />,
-		info: <Info className="w-4 h-4 text-blue-400 shrink-0" />,
-	};
-
-	return (
-		// biome-ignore lint/a11y/useKeyWithClickEvents: toast notification dismissal does not need keyboard interaction
-		<div
-			className={cn(
-				"bg-overlay border border-zinc-800 rounded-lg shadow-lg p-3",
-				"animate-slide-in cursor-pointer hover:bg-hover/80 transition-colors",
-			)}
-			role="presentation"
-			onClick={() => {
-				if (toast.runId) {
-					navigate({ to: "/runs/$runId", params: { runId: toast.runId } });
-				}
-				onDismiss(toast.id);
-			}}
-		>
-			<div className="flex items-start gap-2">
-				{icons[toast.type]}
-				<div className="flex-1 min-w-0">
-					<p className="text-sm font-medium text-zinc-200 truncate">{toast.title}</p>
-					{toast.message && <p className="text-xs text-zinc-400 mt-0.5 truncate">{toast.message}</p>}
-				</div>
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation();
-						onDismiss(toast.id);
-					}}
-					className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors"
-					aria-label="Dismiss"
-				>
-					<X className="w-3 h-3" />
-				</button>
-			</div>
-		</div>
-	);
-}
+// The toast rendering moved to the design-system primitive (CONVENTIONS §6);
+// `NotificationBell` is not superseded, so it stays here in full.
+export { NotificationToast } from "@/components/primitives/Toast";
 
 /** Notification bell button for the status bar. */
 export function NotificationBell() {
