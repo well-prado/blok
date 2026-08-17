@@ -5,6 +5,22 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 /**
+ * #669 — dev fixtures the scaffold's copy filter must never ship. Copied
+ * verbatim they look like working examples (they declare routes) but only
+ * register via the http trigger's OWN in-repo Workflows.ts, which scaffolds
+ * don't ship — so they'd 500 on first request. See the `devFixtures` regex
+ * in `packages/cli/src/commands/create/project.ts`.
+ */
+const DEV_FIXTURE_PATHS = [
+	"src/workflows/http/countries-helper.ts",
+	"src/workflows/http/countries-cats-helper.ts",
+	"src/workflows/http/empty.ts",
+	"src/workflows/http/eval/eval-run.ts",
+	"src/workflows/http/eval/eval-retrieve.ts",
+	"src/workflows/http/eval/foreign-auth.ts",
+];
+
+/**
  * #733 — real build+boot regression for the default HTTP scaffold.
  *
  * Every OTHER scaffold test in this package (`handle-dsl-workflow.test.ts`,
@@ -26,6 +42,11 @@ import { afterAll, describe, expect, it } from "vitest";
  * exact repro shape from the issue. Zero "route collision" lines is the
  * assertion; a regression here would have caught #733 before it shipped.
  *
+ * Extended for #669 (same real-boot rig, `--examples` added to the scaffold
+ * flags): asserts the dev-fixture exclusion above, that an unknown path
+ * 404s instead of falling through the legacy catch-all to a 500, and that
+ * a shipped TS example workflow is actually routed and reachable.
+ *
  * SLOW + needs network (a real `npm install`) — opt in with
  * `BLOK_INTEGRATION_SCAFFOLD_BOOT=1`. Skipped otherwise, same convention
  * as the other `real-*`-gated integration suites in this monorepo.
@@ -42,8 +63,8 @@ afterAll(() => {
 	if (workdir) rmSync(workdir, { recursive: true, force: true });
 });
 
-d("HTTP scaffold — real build + boot under plain Node (#733)", () => {
-	it("blokctl create --local . && npm run build && npm run start logs ZERO route-collision lines and health-checks 200", async () => {
+d("HTTP scaffold — real build + boot under plain Node (#733, #669)", () => {
+	it("blokctl create --local . --examples && npm run build && npm run start ships no dev fixtures, 404s on unknown paths, and logs ZERO route-collision lines", async () => {
 		if (!existsSync(CLI_DIST)) {
 			throw new Error(
 				`${CLI_DIST} not built — run \`bun run build\` first (the packaging/fast CI lanes do this already).`,
@@ -71,6 +92,7 @@ d("HTTP scaffold — real build + boot under plain Node (#733)", () => {
 				"--package-manager",
 				"npm",
 				"--non-interactive",
+				"--examples",
 			],
 			{
 				cwd: workdir,
@@ -79,6 +101,12 @@ d("HTTP scaffold — real build + boot under plain Node (#733)", () => {
 			},
 		);
 		expect(existsSync(projectDir)).toBe(true);
+
+		// #669 (shipping half) — none of the http trigger's own dev/test
+		// fixtures made it into the scaffold.
+		for (const rel of DEV_FIXTURE_PATHS) {
+			expect(existsSync(join(projectDir, rel)), `${rel} should NOT be shipped by the scaffold`).toBe(false);
+		}
 
 		// 2. Build with the SCAFFOLD's own tsc (not the monorepo's) — this is
 		//    the exact step that compiles Workflows.ts to dist/ and produces
@@ -127,11 +155,33 @@ d("HTTP scaffold — real build + boot under plain Node (#733)", () => {
 				true,
 			);
 			expect(lastStatus).toBe(200);
+
+			// #669 (catch-all half) — an unknown path is resource-not-found (404),
+			// never the legacy catch-all's 500.
+			const unknownRes = await fetch(`http://localhost:${port}/this-path-does-not-exist-at-all`);
+			expect(unknownRes.status).toBe(404);
+
+			// Also true for the excluded dev-fixture paths above: even if a future
+			// regression re-ships one of them, hitting it must 404, not 500.
+			const devFixtureRes = await fetch(`http://localhost:${port}/countries-helper`);
+			expect(devFixtureRes.status).toBe(404);
+
+			// #669 — every shipped workflow is registered and reachable. The
+			// typed-handle DSL example (`src/workflows/http/countries-handle-dsl.ts`,
+			// declares `http.get("/countries-dsl")`) ships with every HTTP scaffold
+			// and is auto-routed by the TS file-based scan — no manual
+			// `Workflows.ts` entry required. Confirms it isn't a shipped-but-dead
+			// file like the excluded fixtures above.
+			const exampleRes = await fetch(`http://localhost:${port}/countries-dsl`);
+			expect(exampleRes.status, "the countries-dsl example route must resolve to a real workflow").not.toBe(404);
 		} finally {
 			boot.kill("SIGTERM");
 		}
 
 		expect(output).not.toContain("route collision");
+		// #669 — the file-based scanner found every shipped workflow's HTTP
+		// trigger a route; nothing was silently orphaned.
+		expect(output).not.toContain("declares an HTTP trigger but produced no route");
 		expect(output).not.toContain("workflow(s) dropped due to route collisions");
 	}, 180_000);
 });
