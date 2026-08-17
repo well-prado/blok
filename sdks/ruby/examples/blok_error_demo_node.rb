@@ -25,10 +25,12 @@ class BlokErrorDemoNode < Blok::Node::NodeHandler
       return { "ok" => true, "language" => "ruby" }
     end
 
-    snapshot = Blok::Errors::BuildContextSnapshot.of(
-      inputs: config,
-      vars: ctx.respond_to?(:vars) ? (ctx.vars || {}) : {}
-    )
+    # +ctx.vars+ arrives EMPTY under the default state diet — the runner
+    # stopped shipping accumulated run state on every call (#874/#885), so a
+    # node must not read it in its own body. Anything the node needs belongs
+    # in its mapped +inputs+ (+config+ here), which always ships.
+    # +BLOK_RUNTIME_STATE_DIET=0+ restores the old payload process-wide.
+    snapshot = Blok::Errors::BuildContextSnapshot.of(inputs: config, vars: {})
 
     case mode
     when "rate-limit"

@@ -14,6 +14,28 @@ import {
 import type RunnerNode from "../../RunnerNode";
 import { BunRuntimeAdapter } from "../BunRuntimeAdapter";
 
+// `executeViaSubprocess` shells out to `bun eval`. Stub it so the subprocess
+// tests are hermetic (they no longer depend on whether a `bun` binary exists
+// on PATH) and so the payload argv can be inspected. Default behavior is a
+// spawn failure, which is what the pre-existing failure test asserts.
+const subprocess = vi.hoisted(() => ({
+	argv: null as string[] | null,
+	behavior: "fail" as "fail" | "ok",
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return {
+		...actual,
+		execFile: (_file: string, args: string[], _opts: unknown, cb: (err: Error | null, res?: unknown) => void) => {
+			subprocess.argv = args;
+			if (subprocess.behavior === "fail") cb(new Error("bun: command not found"));
+			else cb(null, { stdout: JSON.stringify({ success: true, data: {}, errors: null }), stderr: "" });
+			return {};
+		},
+	};
+});
+
 describe("BunRuntimeAdapter", () => {
 	let adapter: BunRuntimeAdapter;
 
@@ -282,6 +304,45 @@ describe("BunRuntimeAdapter", () => {
 			expect((freshAdapter as any).isBunRuntime).toBe(false);
 		});
 
+		// #895 — the subprocess payload used to inline `ctx.vars` (EVERY
+		// completed step's output) and the previous step's output on every
+		// call: the same O(n²) growth term #885 removed from the gRPC codec.
+		it("should NOT ship accumulated state or the previous output", async () => {
+			(adapter as any).isBunRuntime = false;
+
+			const mockContext = createMockContext({
+				vars: { "step-1": "a".repeat(1024), "step-2": "b".repeat(1024) },
+				response: { data: { previous: "output" }, error: null, success: true },
+			});
+
+			const payload = await captureSubprocessPayload(adapter, mockContext);
+
+			expect(payload.context.vars).toEqual({});
+			expect(payload.context.response.data).toBeNull();
+			expect(JSON.stringify(payload)).not.toContain("a".repeat(64));
+			expect(JSON.stringify(payload)).not.toContain("b".repeat(64));
+		});
+
+		it("should ship the full state bag when the diet is switched off", async () => {
+			process.env.BLOK_RUNTIME_STATE_DIET = "0";
+			try {
+				(adapter as any).isBunRuntime = false;
+
+				const mockContext = createMockContext({
+					vars: { "step-1": "kept" },
+					response: { data: { previous: "output" }, error: null, success: true },
+				});
+
+				const payload = await captureSubprocessPayload(adapter, mockContext);
+
+				expect(payload.context.vars).toEqual({ "step-1": "kept" });
+				expect(payload.context.response.data).toEqual({ previous: "output" });
+			} finally {
+				// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
+				delete process.env.BLOK_RUNTIME_STATE_DIET;
+			}
+		});
+
 		it("should handle subprocess execution failure gracefully", async () => {
 			// Ensure subprocess mode (non-Bun environment)
 			(adapter as any).isBunRuntime = false;
@@ -305,6 +366,28 @@ describe("BunRuntimeAdapter", () => {
 });
 
 // Test Helper Functions
+
+/**
+ * Run the subprocess path and return the JSON payload the adapter handed to
+ * the child process — `bun eval <script> <payload>`, so argv[2].
+ */
+async function captureSubprocessPayload(adapter: BunRuntimeAdapter, ctx: Context): Promise<any> {
+	subprocess.behavior = "ok";
+	subprocess.argv = null;
+	const mockNode = {
+		name: "test-node",
+		node: "some-module",
+		type: "module",
+		run: vi.fn(),
+	} as unknown as RunnerNode;
+
+	try {
+		await adapter.execute(mockNode, ctx);
+		return JSON.parse(subprocess.argv![2]);
+	} finally {
+		subprocess.behavior = "fail";
+	}
+}
 
 function createMockNodeWithRun(response: {
 	success: boolean | undefined;

@@ -242,6 +242,70 @@ describe("WasmRuntimeAdapter", () => {
 		});
 	});
 
+	describe("execute() - State Diet", () => {
+		/**
+		 * Run `execute()` with the module load + invocation stubbed, and return
+		 * the JSON input the adapter would have handed to the WASM module.
+		 */
+		async function captureWasmInput(target: WasmRuntimeAdapter, ctx: ReturnType<typeof createMockContext>) {
+			let captured = "";
+			vi.spyOn(target as never as { loadModule: () => Promise<unknown> }, "loadModule").mockResolvedValue({});
+			vi.spyOn(
+				target as never as { executeModule: (m: unknown, input: string) => Promise<string> },
+				"executeModule",
+			).mockImplementation(async (_module: unknown, input: string) => {
+				captured = input;
+				return '{"success": true, "data": null}';
+			});
+
+			const mockNode = {
+				name: "test-node",
+				node: "/module.wasm",
+				type: "module",
+				run: vi.fn(),
+			} as unknown as RunnerNode;
+
+			await target.execute(mockNode, ctx);
+			vi.restoreAllMocks();
+			return JSON.parse(captured);
+		}
+
+		// #895 — the WASM input used to inline `ctx.vars` (EVERY completed
+		// step's output) and the previous step's output on every call: the same
+		// O(n²) growth term #885 removed from the gRPC codec.
+		it("should NOT ship accumulated state or the previous output", async () => {
+			const mockContext = createMockContext({
+				vars: { "step-1": "a".repeat(1024), "step-2": "b".repeat(1024) },
+				response: { data: { previous: "output" }, error: null, success: true },
+			});
+
+			const input = await captureWasmInput(adapter, mockContext);
+
+			expect(input.context.vars).toEqual({});
+			expect(input.context.response.data).toBeNull();
+			expect(JSON.stringify(input)).not.toContain("a".repeat(64));
+			expect(JSON.stringify(input)).not.toContain("b".repeat(64));
+		});
+
+		it("should ship the full state bag when the diet is switched off", async () => {
+			process.env.BLOK_RUNTIME_STATE_DIET = "0";
+			try {
+				const mockContext = createMockContext({
+					vars: { "step-1": "kept" },
+					response: { data: { previous: "output" }, error: null, success: true },
+				});
+
+				const input = await captureWasmInput(adapter, mockContext);
+
+				expect(input.context.vars).toEqual({ "step-1": "kept" });
+				expect(input.context.response.data).toEqual({ previous: "output" });
+			} finally {
+				// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
+				delete process.env.BLOK_RUNTIME_STATE_DIET;
+			}
+		});
+	});
+
 	describe("execute() - Context Handling", () => {
 		it("should include node config from context", async () => {
 			const mockContext = createMockContext({

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Context } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./RuntimeAdapter";
+import { stateForRuntimePayload } from "./transport";
 
 const execAsync = promisify(exec);
 
@@ -274,8 +275,8 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 					cookies: ctx.request.cookies,
 					baseUrl: ctx.request.baseUrl,
 				},
-				response: ctx.response,
-				vars: ctx.vars,
+				// `response` + `vars`, with the state diet applied (#895).
+				...stateForRuntimePayload(ctx),
 				env: ctx.env,
 			},
 		};
