@@ -125,7 +125,7 @@ async function main() {
 					command: "create project",
 					args: options,
 					execution: async () => {
-						createProject(options, version, false, options.local);
+						await createProject(options, version, false, options.local);
 					},
 				});
 			});
@@ -138,7 +138,7 @@ async function main() {
 					command: "create project .",
 					args: options,
 					execution: async () => {
-						createProject(options, version, true, project.opts().local);
+						await createProject(options, version, true, project.opts().local);
 					},
 				});
 			});
@@ -156,7 +156,7 @@ async function main() {
 					command: "create node",
 					args: options,
 					execution: async () => {
-						createNode(options, false);
+						await createNode(options, false);
 					},
 				});
 			});
@@ -170,7 +170,7 @@ async function main() {
 					command: "create node",
 					args: options,
 					execution: async () => {
-						createNode(options, true);
+						await createNode(options, true);
 					},
 				});
 			});
@@ -183,7 +183,7 @@ async function main() {
 					command: "create workflow",
 					args: options,
 					execution: async () => {
-						createWorkflow(options, false);
+						await createWorkflow(options, false);
 					},
 				});
 			});
@@ -196,7 +196,7 @@ async function main() {
 					command: "create workflow",
 					args: options,
 					execution: async () => {
-						createWorkflow(options, true);
+						await createWorkflow(options, true);
 					},
 				});
 			});
@@ -246,9 +246,16 @@ async function main() {
 				});
 			});
 
-		program.parse(process.argv);
+		// parseAsync (not parse) so a rejected action — e.g. a non-interactive
+		// flag validation throw from services/non-interactive.ts — is awaited
+		// here instead of becoming an unhandled rejection (#890). Every action
+		// already routes through analytics.trackCommandExecution, which tracks
+		// the failure and rethrows, so this catch is the single place that
+		// turns it into a clean message + non-zero exit.
+		await program.parseAsync(process.argv);
 	} catch (err) {
 		console.log((err as Error).message);
+		process.exitCode = 1;
 	}
 }
 
