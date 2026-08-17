@@ -141,6 +141,7 @@ Connecting non-TypeScript nodes (Python, Go, Rust, etc.) to the runner.
 | `RUNTIME_<KIND>_HOST` | `localhost` | Hostname for the SDK container per language. |
 | `RUNTIME_<KIND>_GRPC_PORT` | varies | gRPC port per language. Conventionally `<httpPort> + 1000` — Go `10001`, Rust `10002`, Java `10003`, C# `10004`, PHP `10005`, Ruby `10006`, Python3 `10007`. |
 | `RUNTIME_<KIND>_PORT` | varies | Legacy port field retained for back-compat with older configs; not health-probed by the CLI since v0.5. |
+| `BLOK_GRPC_STATE_DIET` | on | Accumulated state (`ctx.state`/`ctx.vars`) and the previous step's output are **not** sent to runtime nodes. Set to `0` only if a node reads them in its own body — it re-shipping the whole state bag on every call is what made runtime nodes in a `forEach` cost O(n²). See [Large payloads](/d/reliability/large-payloads). |
 
 For C# specifically, env keys preserve dots (e.g.
 `RUNTIME_CSHARP_HOST` becomes `Runtime.Csharp.Host` in the .NET
