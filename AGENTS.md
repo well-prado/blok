@@ -377,6 +377,13 @@ bun run lint:check
 bun run ci:fast
 ```
 
+Concurrency is capped on purpose (#867): `nx.json` pins `"parallel": 3` and
+the root `test` scripts set `VITEST_MAX_WORKERS=3`, so a full run stays at
+~9 worker processes. Unbounded, each `vitest run` defaults to `cpus - 1`
+workers and nx runs 3 projects at once — ~27 processes on a 10-core box,
+which is enough oversubscription to make timing-sensitive suites flake.
+Raise both together if you have the cores; do not raise one without the other.
+
 Testing utilities — all from `@blokjs/core/testing`, no server and no config:
 
 - `runNode(node, input, opts?)` — one node, Zod-validated in and out, returns
