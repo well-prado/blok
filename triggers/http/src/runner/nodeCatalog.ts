@@ -48,7 +48,17 @@ interface RuntimeNode {
 
 interface ListableAdapter {
 	listNodes?: () => Promise<RuntimeNode[]>;
+	/** `host:port` (or similar), for the timeout diagnostic below. */
+	endpoint?: string;
 }
+
+/**
+ * #868 — sibling of #752 (HttpTrigger.listen()): every await on the boot path
+ * needs a way to FAIL, not just hang. An unreachable/wedged runtime sidecar's
+ * `listNodes()` can otherwise never settle, stalling boot (and the
+ * `/__blok/nodes` route) forever with no error, no exit, no diagnostic.
+ */
+const LIST_NODES_TIMEOUT_MS = 5_000; // ponytail: fixed cap; make it BLOK_NODE_CATALOG_TIMEOUT_MS-configurable if a real sidecar ever needs longer just to enumerate its nodes
 
 /** An empty object (`{}`) means "no constraints" — surface it as null in the catalog. */
 function normSchema(schema: unknown): unknown | null {
@@ -79,8 +89,16 @@ export function reflectModuleNode(node: unknown): {
 
 /**
  * Build the full catalog from the in-process node map + the runtime adapters.
- * One unreachable runtime can't break the catalog (its `listNodes()` rejection
- * is swallowed). Sorted by runtime then name for stable output.
+ * One unreachable OR wedged runtime can't break the catalog: its `listNodes()`
+ * is bounded to {@link LIST_NODES_TIMEOUT_MS} (#868) and any failure —
+ * rejection or timeout — is skipped with a loud `console.warn` naming the
+ * runtime and its endpoint, rather than swallowed silently or left to hang.
+ * Degrading (vs. failing boot) is deliberate: a step referencing a skipped
+ * runtime's node just becomes "unchecked" for `#691` boot ref-validation
+ * (never a false error — see `nodeSchemaLookup`), and real execution never
+ * consults this catalog at all (`runtimeResolver` dials the adapter directly
+ * at request time and fails there, on its own terms, if the sidecar is still
+ * down). Sorted by runtime then name for stable output.
  */
 export async function buildNodeCatalog(
 	moduleNodes: Map<string, unknown> | undefined,
@@ -105,8 +123,17 @@ export async function buildNodeCatalog(
 
 	for (const { kind, adapter } of runtimes) {
 		if (typeof adapter.listNodes !== "function") continue;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			const nodes = await adapter.listNodes();
+			const nodes = await Promise.race([
+				adapter.listNodes(),
+				new Promise<RuntimeNode[]>((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error(`did not respond to listNodes() within ${LIST_NODES_TIMEOUT_MS}ms`)),
+						LIST_NODES_TIMEOUT_MS,
+					);
+				}),
+			]);
 			for (const n of nodes) {
 				out.push({
 					name: n.name,
@@ -118,8 +145,16 @@ export async function buildNodeCatalog(
 					tags: n.tags ?? [],
 				});
 			}
-		} catch {
-			/* skip an unreachable runtime — don't fail the whole catalog */
+		} catch (err) {
+			// Loud, not silent — an operator staring at an incomplete catalog
+			// (or a boot that used to just hang) needs to know WHICH runtime is
+			// the culprit and WHERE it lives.
+			const reason = err instanceof Error ? err.message : String(err);
+			console.warn(
+				`[blok][node-catalog] runtime "${kind}" (${adapter.endpoint ?? "unknown endpoint"}) is unreachable — skipping its nodes: ${reason}`,
+			);
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 

@@ -74,6 +74,17 @@ export interface RuntimeAdapter {
 	readonly transport: AdapterTransport;
 
 	/**
+	 * Best-effort human-readable address this adapter talks to (e.g.
+	 * `localhost:9107` for the gRPC transport). Surfaced in diagnostics when a
+	 * call to this adapter can't be bounded to a fast, self-explanatory
+	 * failure — e.g. `buildNodeCatalog`'s per-adapter `listNodes()` timeout
+	 * (#868), so an operator staring at a skipped runtime can tell which
+	 * sidecar to go check. Undefined for adapters with no meaningful network
+	 * endpoint (in-process `module`/`nodejs`).
+	 */
+	readonly endpoint?: string;
+
+	/**
 	 * Execute a node in this runtime
 	 *
 	 * @param node - The node to execute (includes node path, name, config)

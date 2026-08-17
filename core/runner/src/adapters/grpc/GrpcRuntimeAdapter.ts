@@ -111,6 +111,8 @@ interface ListNodesResponseShape {
 export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	readonly kind: RuntimeKind;
 	readonly transport = "grpc" as const;
+	/** #868 — `host:port` this adapter dials, for diagnostics on an unreachable/wedged sidecar. */
+	readonly endpoint: string;
 	private readonly config: GrpcAdapterConfig;
 	private readonly pool: GrpcClientPool;
 	private readonly ownsPool: boolean;
@@ -124,6 +126,7 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	constructor(config: GrpcAdapterConfig, pool?: GrpcClientPool) {
 		this.kind = config.kind;
 		this.config = config;
+		this.endpoint = `${config.host}:${config.port}`;
 		this.pool = pool ?? new GrpcClientPool();
 		this.ownsPool = pool === undefined;
 		this.healthChecker = this.buildHealthChecker();
