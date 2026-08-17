@@ -1,4 +1,3 @@
-import _ from "lodash";
 import GlobalError from "./GlobalError";
 import type Context from "./types/Context";
 import type ErrorContext from "./types/ErrorContext";
@@ -8,8 +7,35 @@ import type ParamsDictionary from "./types/ParamsDictionary";
 import type ResponseContext from "./types/ResponseContext";
 import type Step from "./types/Step";
 import type VarsContext from "./types/VarsContext";
-import mapper from "./utils/Mapper";
+import mapper, { cloneResolvable } from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
+
+/**
+ * Resolve one step's config slice for this execution and publish the resolved
+ * COPY at `config[name]`, leaving the source slice unresolved. Returns the
+ * pristine source (the step's `originalConfig`).
+ *
+ * The mapper mutates in place, so before #874 every caller that might run a
+ * step more than once against one config — a forEach iteration, a loop body —
+ * had to hand it a deep clone of the WHOLE workflow config first, which is
+ * O(config) per iteration and O(config × steps) per run. Copying only the
+ * slice being resolved, and only the parts the mapper can reach, gives the
+ * same isolation for the cost of the one thing that changes.
+ *
+ * Safe because `RunnerSteps.runSteps` already gives every (nested, parallel)
+ * pipeline its own top-level config object: replacing a key is private to the
+ * pipeline that does it, while the slice VALUES stay shared and unresolved.
+ */
+function resolveSlice(
+	config: NodeConfigContext,
+	name: string,
+	map: NodeBase["blueprintMapper"],
+	ctx: Context,
+): ParamsDictionary {
+	const original = config[name];
+	config[name] = map(cloneResolvable(original), ctx) as typeof original;
+	return original;
+}
 
 export default abstract class NodeBase {
 	public flow = false;
@@ -140,8 +166,7 @@ export default abstract class NodeBase {
 		};
 
 		const config: NodeConfigContext = ctx.config as unknown as NodeConfigContext;
-		this.originalConfig = _.cloneDeep(config[this.name]);
-		this.blueprintMapper(config[this.name], ctx);
+		this.originalConfig = resolveSlice(config, this.name, this.blueprintMapper, ctx);
 
 		response = await this.run(ctx);
 
@@ -160,7 +185,7 @@ export default abstract class NodeBase {
 
 		try {
 			const config: NodeConfigContext = ctx.config as unknown as NodeConfigContext;
-			this.blueprintMapper(config[this.name], ctx);
+			resolveSlice(config, this.name, this.blueprintMapper, ctx);
 
 			response = await this.run(ctx);
 		} catch (error: unknown) {

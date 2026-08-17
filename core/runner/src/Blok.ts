@@ -1,7 +1,6 @@
-import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
+import { type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
 import { type Counter, type Gauge, type Histogram, metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
-import _ from "lodash";
 import type { IBlokResponse } from "./BlokResponse";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
@@ -88,10 +87,17 @@ export default abstract class BlokService<T> extends NodeBase {
 		const response: ResponseContext = { success: true, data: {}, error: null };
 
 		const start = performance.now();
-		ctx.logger.log(`Running node: ${this.name} [${JSON.stringify(this.originalConfig)}]`);
+		// Lazy: the config JSON is built ONLY when the logger will actually emit
+		// it. Eagerly stringifying the whole step config on every node execution
+		// cost more than most nodes do (#874).
+		if (ctx.logger.isLevelEnabled?.() !== false) {
+			ctx.logger.log(`Running node: ${this.name} [${JSON.stringify(this.originalConfig)}]`);
+		}
 
-		const config = _.cloneDeep(ctx.config) as ConfigContext;
-		let opts: JsonLikeObject = (config as JsonLikeObject)[this.name] as unknown as JsonLikeObject;
+		// No clone here: `NodeBase.process` already resolved this step's slice
+		// into a copy that belongs to this execution, so the second mapper pass
+		// below (the one that gets `data`) has nothing to bleed into.
+		let opts: JsonLikeObject = (ctx.config as JsonLikeObject)[this.name] as unknown as JsonLikeObject;
 		const data = ctx.response?.data || ctx.request?.body;
 		const inputs = opts.inputs || opts.conditions;
 

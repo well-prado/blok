@@ -45,6 +45,16 @@ export class TracingLogger implements LoggerContext {
 		}
 	}
 
+	/**
+	 * True when EITHER destination wants the line: the inner (stdout) logger at
+	 * its level, or the run tracker — Studio's run log is not filtered by
+	 * `BLOK_LOG_LEVEL`, so a suppressed stdout level must not silently empty it.
+	 */
+	isLevelEnabled(level = "info"): boolean {
+		if (this.tracker.active) return true;
+		return this.inner.isLevelEnabled?.(level) ?? true;
+	}
+
 	log(message: string): void {
 		this.inner.log(message);
 		this.forwardToTracker("info", message);
