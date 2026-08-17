@@ -67,7 +67,15 @@ export async function login(opts: OptionValues) {
 	} catch (error) {
 		p.log.error("Login failed. Please try again.");
 		p.log.error((error as Error).message);
-		process.exit(1);
+		// Signal failure instead of exiting: an exported function that calls
+		// process.exit() kills any host process that imports it (tests,
+		// programmatic callers, Studio embedding) and drops pending work like
+		// the telemetry flush below (#891). process.exitCode marks the exit
+		// status without forcing an immediate exit; rethrowing lets
+		// trackCommandExecution (posthog.ts) record status:"error" before the
+		// command boundary below decides what to do with it.
+		process.exitCode = 1;
+		throw error;
 	}
 }
 
@@ -77,11 +85,20 @@ program
 	.description("Login to Bloks")
 	.option("-t, --token <value>", "Login with a token")
 	.action(async (options: OptionValues) => {
-		await trackCommandExecution({
-			command: "login",
-			args: options,
-			execution: async () => {
-				await login(options);
-			},
-		});
+		try {
+			await trackCommandExecution({
+				command: "login",
+				args: options,
+				execution: async () => {
+					await login(options);
+				},
+			});
+		} catch {
+			// login() already logged the failure and set process.exitCode = 1.
+			// Swallow the rethrow here — this action callback is the CLI
+			// boundary; without this catch the rejection would be unhandled
+			// (Commander's program.parse() doesn't await async actions), and
+			// Node would report it as an uncaught exception instead of the
+			// clean non-zero exit already set above.
+		}
 	});
