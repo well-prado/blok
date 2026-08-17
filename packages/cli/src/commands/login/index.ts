@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
 
 import { BLOK_URL } from "../../services/constants.js";
@@ -65,16 +65,13 @@ export async function login(opts: OptionValues) {
 		if (!isStored) throw new Error("Failed to store the token.");
 		p.log.info("You can now use the CLI commands. For help, run: blokctl --help");
 	} catch (error) {
-		p.log.error("Login failed. Please try again.");
-		p.log.error((error as Error).message);
-		// Signal failure instead of exiting: an exported function that calls
+		// Rethrow instead of exiting: an exported function that calls
 		// process.exit() kills any host process that imports it (tests,
 		// programmatic callers, Studio embedding) and drops pending work like
-		// the telemetry flush below (#891). process.exitCode marks the exit
-		// status without forcing an immediate exit; rethrowing lets
-		// trackCommandExecution (posthog.ts) record status:"error" before the
-		// command boundary below decides what to do with it.
-		process.exitCode = 1;
+		// the telemetry flush (#891). Rethrowing lets trackCommandExecution
+		// (posthog.ts) record status:"error", then the command error boundary
+		// (#899) prints the message once and sets the exit code.
+		p.log.error("Login failed. Please try again.");
 		throw error;
 	}
 }
@@ -84,8 +81,8 @@ program
 	.command("login")
 	.description("Login to Bloks")
 	.option("-t, --token <value>", "Login with a token")
-	.action(async (options: OptionValues) => {
-		try {
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
 			await trackCommandExecution({
 				command: "login",
 				args: options,
@@ -93,12 +90,5 @@ program
 					await login(options);
 				},
 			});
-		} catch {
-			// login() already logged the failure and set process.exitCode = 1.
-			// Swallow the rethrow here — this action callback is the CLI
-			// boundary; without this catch the rejection would be unhandled
-			// (Commander's program.parse() doesn't await async actions), and
-			// Node would report it as an uncaught exception instead of the
-			// clean non-zero exit already set above.
-		}
-	});
+		}),
+	);

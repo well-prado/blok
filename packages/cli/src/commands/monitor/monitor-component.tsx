@@ -479,7 +479,9 @@ const Monitor: React.FC<{ host?: string; token?: string }> = ({ host, token }) =
 		else if (input === "2") setView("system");
 		else if (input === "3") setView("triggers");
 		else if (input === "4") setView("runtimes");
-		// Quit
+		// Quit. KEEP the process.exit (#899 allow-list): this is the Ink TUI's
+		// own quit key — the terminal-owning render loop has no error to
+		// propagate and no caller left to return to.
 		else if (input === "q") process.exit(0);
 	});
 

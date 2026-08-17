@@ -10,7 +10,7 @@ import { createNode } from "./commands/create/node.js";
 import { createProject } from "./commands/create/project.js";
 import { createWorkflow } from "./commands/create/workflow.js";
 import { devProject } from "./commands/dev/index.js";
-import { type OptionValues, program } from "./services/commander.js";
+import { type OptionValues, program, withErrorBoundary } from "./services/commander.js";
 import { setNonInteractive } from "./services/non-interactive.js";
 import { PosthogAnalytics } from "./services/posthog.js";
 import { getPackageVersion } from "./services/utils.js";
@@ -120,28 +120,32 @@ async function main() {
 				"Comma-separated observability modules: metrics,tracing,trace-store,logging,alerting,error-sink",
 			)
 			.option("--examples", "Install example workflows and nodes")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create project",
-					args: options,
-					execution: async () => {
-						await createProject(options, version, false, options.local);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create project",
+						args: options,
+						execution: async () => {
+							await createProject(options, version, false, options.local);
+						},
+					});
+				}),
+			);
 
 		project
 			.command(".")
 			.description("Create a new Project")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create project .",
-					args: options,
-					execution: async () => {
-						await createProject(options, version, true, project.opts().local);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create project .",
+						args: options,
+						execution: async () => {
+							await createProject(options, version, true, project.opts().local);
+						},
+					});
+				}),
+			);
 
 		const node = new Command("node")
 			.description("Create a new Node")
@@ -151,55 +155,63 @@ async function main() {
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--node-type <value>", "Node type: module, class (TypeScript only)")
 			.option("--template <value>", "Template: standard, ui (TypeScript only)")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create node",
-					args: options,
-					execution: async () => {
-						await createNode(options, false);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create node",
+						args: options,
+						execution: async () => {
+							await createNode(options, false);
+						},
+					});
+				}),
+			);
 
 		node
 			.command(".")
 			.description("Create a new Node")
 			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create node",
-					args: options,
-					execution: async () => {
-						await createNode(options, true);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create node",
+						args: options,
+						execution: async () => {
+							await createNode(options, true);
+						},
+					});
+				}),
+			);
 
 		const workflow = new Command("workflow")
 			.description("Create a new Workflow")
 			.option("-n, --name <value>", "Create a default Workflow")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create workflow",
-					args: options,
-					execution: async () => {
-						await createWorkflow(options, false);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create workflow",
+						args: options,
+						execution: async () => {
+							await createWorkflow(options, false);
+						},
+					});
+				}),
+			);
 
 		workflow
 			.command(".")
 			.description("Create a new Workflow")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "create workflow",
-					args: options,
-					execution: async () => {
-						await createWorkflow(options, true);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create workflow",
+						args: options,
+						execution: async () => {
+							await createWorkflow(options, true);
+						},
+					});
+				}),
+			);
 
 		create.addCommand(project);
 		create.addCommand(node);
@@ -215,15 +227,17 @@ async function main() {
 			.option("--json", "Emit a machine-readable report (for CI)")
 			.option("--nodes <file>", "Node catalog JSON (from `blokctl nodes list --json`) to check output schemas against")
 			.option("--url <baseUrl>", "Fetch the node catalog from a running server instead of a file")
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "check",
-					args: options,
-					execution: async () => {
-						await checkProject(options);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "check",
+						args: options,
+						execution: async () => {
+							await checkProject(options);
+						},
+					});
+				}),
+			);
 
 		// Dev server
 
@@ -236,25 +250,28 @@ async function main() {
 				"--watch-all",
 				"Run every trigger under `bun --watch` — full process restart on ANY source change, preempting in-process hot reload. Escape hatch for the pre-0.8 behaviour; also settable with BLOK_DEV_WATCH_ALL=1",
 			)
-			.action(async (options: OptionValues) => {
-				await analytics.trackCommandExecution({
-					command: "dev",
-					args: options,
-					execution: async () => {
-						devProject(options);
-					},
-				});
-			});
+			.action(
+				withErrorBoundary(async (options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "dev",
+						args: options,
+						execution: async () => {
+							await devProject(options);
+						},
+					});
+				}),
+			);
 
-		// parseAsync (not parse) so a rejected action — e.g. a non-interactive
-		// flag validation throw from services/non-interactive.ts — is awaited
-		// here instead of becoming an unhandled rejection (#890). Every action
-		// already routes through analytics.trackCommandExecution, which tracks
-		// the failure and rethrows, so this catch is the single place that
-		// turns it into a clean message + non-zero exit.
+		// parseAsync (not parse) so a rejected action is awaited here rather than
+		// becoming an unhandled rejection (#890). Every registered action — the
+		// ones above and the ones self-registered by the side-effect imports at
+		// the top of this file — is wrapped in withErrorBoundary, which already
+		// reports the failure and sets the exit code (#899). This catch is the
+		// last-resort net for the rest of main(): the config-dir setup, the npm
+		// version check, and commander's own parse errors.
 		await program.parseAsync(process.argv);
 	} catch (err) {
-		console.log((err as Error).message);
+		console.error((err as Error).message);
 		process.exitCode = 1;
 	}
 }

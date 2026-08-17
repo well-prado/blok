@@ -188,8 +188,7 @@ export async function devProject(opts: OptionValues) {
 
 	const override = resolveDevPortOverride(opts.port as string | undefined, process.env.PORT);
 	if (override.error) {
-		console.error(override.error);
-		process.exit(1);
+		throw new Error(override.error);
 	}
 	const portFor = (trigger: { kind?: string; port: number }): number => resolveTriggerPort(trigger, override.port);
 
@@ -207,8 +206,7 @@ export async function devProject(opts: OptionValues) {
 				console.error(f.message);
 				console.error();
 			}
-			console.error("  Tip: Use --skip-version-check to bypass this check.\n");
-			process.exit(1);
+			throw new Error("Runtime version requirements not met. Tip: use --skip-version-check to bypass this check.");
 		}
 
 		// Print version check results
@@ -367,9 +365,9 @@ export async function devProject(opts: OptionValues) {
 		runtimeDefs.flatMap((def) => (def.port === undefined ? [] : [def.port])),
 	);
 	if (occupiedRuntimePorts.length > 0) {
-		console.error(`\nRuntime gRPC port(s) already in use: ${occupiedRuntimePorts.join(", ")}`);
-		console.error("Stop the existing runtime(s), or choose unused ports in .blok/config.json and .env.local.\n");
-		process.exit(1);
+		throw new Error(
+			`Runtime gRPC port(s) already in use: ${occupiedRuntimePorts.join(", ")}\nStop the existing runtime(s), or choose unused ports in .blok/config.json and .env.local.`,
+		);
 	}
 
 	// 1. Start all runtime processes
@@ -578,7 +576,11 @@ export async function devProject(opts: OptionValues) {
 
 		killAllGroups("SIGTERM");
 
-		// Force-kill any remaining process groups after 3 seconds
+		// Force-kill any remaining process groups after 3 seconds.
+		// KEEP the process.exit here (#899 allow-list): this is the terminal step
+		// of a SIGINT/SIGTERM handler for a long-running server. `keepAlive` and
+		// the detached children can hold the loop open past the sweep, so the
+		// signal would otherwise not actually stop `blokctl dev`.
 		setTimeout(() => {
 			killAllGroups("SIGKILL");
 			process.exit(0);

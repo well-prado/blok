@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { type OptionValues, program } from "../../services/commander.js";
+import { type OptionValues, program, withErrorBoundary } from "../../services/commander.js";
 import { runtimeAdd } from "./add.js";
 import { runtimeList } from "./list.js";
 import { runtimeRemove } from "./remove.js";
@@ -7,9 +7,11 @@ import { runtimeRemove } from "./remove.js";
 const runtime = new Command("runtime").description("Add, remove, or list language runtimes in an existing project");
 
 // Bare `blokctl runtime` shows the subcommand help instead of a terse usage line.
-runtime.action(() => {
-	runtime.help();
-});
+runtime.action(
+	withErrorBoundary(() => {
+		runtime.help();
+	}),
+);
 
 runtime
 	.command("add")
@@ -22,9 +24,11 @@ runtime
 	.option("--enable", "Wire an already-scaffolded runtime (SDK dir on disk) into config.json without reinstalling")
 	.option("--skip-toolchain-check", "Add even if the language toolchain isn't detected")
 	.option("-y, --yes", "Skip prompts (non-interactive)")
-	.action(async (runtimeArg: string | undefined, options: OptionValues) => {
-		await runtimeAdd(runtimeArg, options);
-	});
+	.action(
+		withErrorBoundary(async (runtimeArg: string | undefined, options: OptionValues) => {
+			await runtimeAdd(runtimeArg, options);
+		}),
+	);
 
 runtime
 	.command("remove")
@@ -34,9 +38,11 @@ runtime
 	.option("-d, --directory <path>", "Project directory (default: current directory)")
 	.option("--purge-nodes", "Also delete your custom nodes in runtimes/<runtime>/nodes/")
 	.option("-y, --yes", "Skip prompts (keeps your custom nodes)")
-	.action(async (runtimeArg: string, options: OptionValues) => {
-		await runtimeRemove(runtimeArg.toLowerCase(), options);
-	});
+	.action(
+		withErrorBoundary(async (runtimeArg: string, options: OptionValues) => {
+			await runtimeRemove(runtimeArg.toLowerCase(), options);
+		}),
+	);
 
 runtime
 	.command("list")
@@ -44,8 +50,10 @@ runtime
 	.description("List installed runtimes and which are available to add")
 	.option("-d, --directory <path>", "Project directory (default: current directory)")
 	.option("--json", "Output as JSON")
-	.action(async (options: OptionValues) => {
-		await runtimeList(options);
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			await runtimeList(options);
+		}),
+	);
 
 program.addCommand(runtime);

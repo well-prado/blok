@@ -78,6 +78,12 @@ jobs:
       - name: No legacy expression check
         run: bash scripts/check-no-legacy-expr.sh
 
+      # The CLI has ONE async error boundary (#899). A command that calls
+      # process.exit() escapes it: it kills any host that imported the function
+      # and drops the pending telemetry flush.
+      - name: No unguarded CLI process.exit() check
+        run: bash scripts/check-no-process-exit.sh
+
       # Single source of truth for the gRPC contract: every SDK + runner copy of
       # runtime.proto must match the canonical proto/blok/runtime/v1/runtime.proto.
       # A drifted copy silently breaks one runtime — fail the merge instead.

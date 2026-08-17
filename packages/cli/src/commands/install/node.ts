@@ -4,7 +4,7 @@ import path from "node:path";
 import util from "node:util";
 import * as p from "@clack/prompts";
 
-import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
+import { Command, type OptionValues, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
@@ -100,14 +100,16 @@ export default new Command()
 	.option("-d, --directory <value>", "Directory to publish")
 	.option("-m, --package-manager <value>", "Package manager to use (npm, yarn, pnpm, bun)")
 	.argument("<node>", "Node name")
-	.action(async (node: string, options: OptionValues) => {
-		await trackCommandExecution({
-			command: "install",
-			args: options,
-			execution: async () => {
-				options.node = node;
-				if (!options.directory) options.directory = process.cwd();
-				await install(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (node: string, options: OptionValues) => {
+			await trackCommandExecution({
+				command: "install",
+				args: options,
+				execution: async () => {
+					options.node = node;
+					if (!options.directory) options.directory = process.cwd();
+					await install(options);
+				},
+			});
+		}),
+	);

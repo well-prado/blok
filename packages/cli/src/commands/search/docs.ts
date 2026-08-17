@@ -1,4 +1,4 @@
-import { Command, type OptionValues } from "../../services/commander.js";
+import { Command, type OptionValues, withErrorBoundary } from "../../services/commander.js";
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -224,12 +224,13 @@ export default new Command()
 	.description("This command allows you to search for information in the documentation.")
 	.option("-q, --question <value>", "Question to search for")
 	.option("--no-cache", "Force rebuild of search index")
-	.action(async (options: OptionValues) => {
-		const question = options.question;
-		if (!question) {
-			console.error("Question is required");
-			process.exit(1);
-		}
-		const searchService = new SearchService();
-		await searchService.ask(question, { noCache: !options.cache });
-	});
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			const question = options.question;
+			if (!question) {
+				throw new Error("Question is required — pass one with --question.");
+			}
+			const searchService = new SearchService();
+			await searchService.ask(question, { noCache: !options.cache });
+		}),
+	);

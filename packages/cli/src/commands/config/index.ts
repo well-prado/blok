@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import { Command } from "commander";
-import { type OptionValues, program } from "../../services/commander.js";
+import { type OptionValues, program, withErrorBoundary } from "../../services/commander.js";
 
 interface CliConfig {
 	defaultEditor?: string;
@@ -23,40 +23,44 @@ create
 			return value;
 		},
 	)
-	.action(async (options: OptionValues) => {
-		const configDir = `${os.homedir()}/.blok`;
-		const configPath = `${configDir}/config.json`;
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			const configDir = `${os.homedir()}/.blok`;
+			const configPath = `${configDir}/config.json`;
 
-		// Ensure config directory exists
-		if (!fs.existsSync(configDir)) {
-			fs.mkdirSync(configDir, { recursive: true });
-		}
+			// Ensure config directory exists
+			if (!fs.existsSync(configDir)) {
+				fs.mkdirSync(configDir, { recursive: true });
+			}
 
-		// Load existing config or create new one
-		let config: CliConfig = {};
-		if (fs.existsSync(configPath)) {
-			config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-		}
+			// Load existing config or create new one
+			let config: CliConfig = {};
+			if (fs.existsSync(configPath)) {
+				config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+			}
 
-		if (options.editor) {
-			config.defaultEditor = options.editor;
-			fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-			console.log(`Default editor set to: ${options.editor}`);
-		}
-	});
+			if (options.editor) {
+				config.defaultEditor = options.editor;
+				fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+				console.log(`Default editor set to: ${options.editor}`);
+			}
+		}),
+	);
 
 create
 	.command("list")
 	.description("Show current CLI configuration")
-	.action(() => {
-		const configPath = `${os.homedir()}/.blok/config.json`;
-		if (fs.existsSync(configPath)) {
-			const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-			console.log("Current configuration:");
-			console.log(JSON.stringify(config, null, 2));
-		} else {
-			console.log("No configuration file found. Using defaults.");
-		}
-	});
+	.action(
+		withErrorBoundary(() => {
+			const configPath = `${os.homedir()}/.blok/config.json`;
+			if (fs.existsSync(configPath)) {
+				const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+				console.log("Current configuration:");
+				console.log(JSON.stringify(config, null, 2));
+			} else {
+				console.log("No configuration file found. Using defaults.");
+			}
+		}),
+	);
 
 program.addCommand(create);

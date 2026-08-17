@@ -15,8 +15,7 @@ export async function migrateNode(opts: OptionValues) {
 	const nodePath = opts.path as string | undefined;
 
 	if (!nodePath) {
-		p.cancel("Error: Please provide a node path using --path");
-		process.exit(1);
+		throw new Error("Please provide a node path using --path");
 	}
 
 	const s = p.spinner();
@@ -27,9 +26,7 @@ export async function migrateNode(opts: OptionValues) {
 		const absolutePath = path.isAbsolute(nodePath) ? nodePath : path.resolve(process.cwd(), nodePath);
 
 		if (!fsExtra.existsSync(absolutePath)) {
-			s.stop("Error: File not found");
-			console.log(color.red(`\n❌ File not found: ${absolutePath}`));
-			process.exit(1);
+			throw new Error(`File not found: ${absolutePath}`);
 		}
 
 		// Read the file content
@@ -40,15 +37,15 @@ export async function migrateNode(opts: OptionValues) {
 			s.stop("Already using function-first pattern");
 			console.log(color.yellow("\n⚠️  This node is already using the function-first pattern!"));
 			console.log(color.dim("No migration needed.\n"));
-			process.exit(0);
+			return;
 		}
 
 		// Check if it's a class-based node
 		if (!fileContent.includes("extends BlokService")) {
-			s.stop("Not a class-based node");
-			console.log(color.red("\n❌ This doesn't appear to be a class-based BlokService node."));
-			console.log(color.dim("Migration is only supported for nodes extending BlokService.\n"));
-			process.exit(1);
+			throw new Error(
+				"This doesn't appear to be a class-based BlokService node. " +
+					"Migration is only supported for nodes extending BlokService.",
+			);
 		}
 
 		s.stop("Node analyzed");
@@ -137,8 +134,9 @@ export async function migrateNode(opts: OptionValues) {
 				color.dim(" Start by migrating one node as a reference, then use it as a template for others.\n"),
 		);
 	} catch (error) {
+		// The spinner must stop before the boundary prints, but the message
+		// itself is the boundary's job — rethrow rather than print + exit (#899).
 		s.stop("Error occurred");
-		console.log(color.red(`\n❌ Error: ${(error as Error).message}\n`));
-		process.exit(1);
+		throw error;
 	}
 }

@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
+import { Command, type OptionValues, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
@@ -107,13 +107,15 @@ export default new Command()
 	.option("-i, --install <value>", "Package name to auto-install (skip select prompt)")
 	.option("-l, --list", "List results without prompting to install")
 	.argument("<node>", "Node name")
-	.action(async (node: string, options: OptionValues) => {
-		await trackCommandExecution({
-			command: "search node",
-			args: options,
-			execution: async () => {
-				options.node = node;
-				await search(options);
-			},
-		});
-	});
+	.action(
+		withErrorBoundary(async (node: string, options: OptionValues) => {
+			await trackCommandExecution({
+				command: "search node",
+				args: options,
+				execution: async () => {
+					options.node = node;
+					await search(options);
+				},
+			});
+		}),
+	);

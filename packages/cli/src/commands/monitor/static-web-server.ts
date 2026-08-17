@@ -17,8 +17,7 @@ export default async function startWebMonitorUI(host?: string, token?: string) {
 	const port = 4040;
 
 	if (!fs.existsSync(staticPath)) {
-		console.error(`❌ Static path not found: ${staticPath}`);
-		process.exit(1);
+		throw new Error(`Static path not found: ${staticPath}`);
 	}
 
 	const server = http.createServer((req, res) => {
@@ -32,6 +31,9 @@ export default async function startWebMonitorUI(host?: string, token?: string) {
 		await open(url);
 	});
 
+	// KEEP the process.exit here (#899 allow-list): terminal step of a signal
+	// handler for a long-running server. `blokctl monitor` also runs an Ink TUI
+	// holding stdin open, so closing this server alone never ends the process.
 	const stop = () => {
 		server.close(() => {
 			console.log("🛑 Monitor UI server stopped.");

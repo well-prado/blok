@@ -43,13 +43,10 @@ export async function migrateWorkflows(opts: OptionValues): Promise<void> {
 
 	const root = await resolveJsonRoot(cwd, explicitDir);
 	if (!root) {
-		console.log(
-			color.red(
-				"❌ Could not find a JSON workflows directory. Looked in: " +
-					"workflows/json/, triggers/http/workflows/json/. Pass --dir <path> to override.",
-			),
+		throw new Error(
+			"Could not find a JSON workflows directory. Looked in: " +
+				"workflows/json/, triggers/http/workflows/json/. Pass --dir <path> to override.",
 		);
-		process.exit(1);
 	}
 
 	console.log(color.dim(`Scanning ${color.cyan(root)} (recursive)\n`));
@@ -437,5 +434,5 @@ function printSummary(results: readonly MigrationResult[], dryRun: boolean, writ
 			color.dim("\nBackups written next to each file as <name>.json.bak. Run with --no-backup to skip backups."),
 		);
 	}
-	if (counts.error > 0) process.exit(1);
+	if (counts.error > 0) throw new Error(`${counts.error} workflow file(s) failed to migrate.`);
 }

@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import fs from "fs-extra";
 import color from "picocolors";
-import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { type OptionValues, program, trackCommandExecution, withErrorBoundary } from "../../services/commander.js";
 import { isNonInteractive } from "../../services/non-interactive.js";
 
 import { BLOK_URL } from "../../services/constants.js";
@@ -161,44 +161,48 @@ const deployCmd = program
 	.option("--public", "Make the blok public (default: false)", false)
 	.option("-d, --directory [value]", "Directory of the blok (defaults to current directory)", process.cwd())
 	.option("-y, --yes", "Auto-confirm name mismatch update")
-	.action(async (options: OptionValues) => {
-		if (options.build) {
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			if (options.build) {
+				await trackCommandExecution({
+					command: "deploy --build",
+					args: options,
+					execution: async () => {
+						await buildCommand(options);
+					},
+				});
+			}
 			await trackCommandExecution({
-				command: "deploy --build",
+				command: "deploy",
 				args: options,
 				execution: async () => {
-					await buildCommand(options);
+					await deploy(options);
 				},
 			});
-		}
-		await trackCommandExecution({
-			command: "deploy",
-			args: options,
-			execution: async () => {
-				await deploy(options);
-			},
-		});
-	});
+		}),
+	);
 
 deployCmd
 	.command(".")
 	.description("Deploy blok in the current directory")
-	.action(async (options: OptionValues) => {
-		if (options.build) {
+	.action(
+		withErrorBoundary(async (options: OptionValues) => {
+			if (options.build) {
+				await trackCommandExecution({
+					command: "deploy . --build",
+					args: options,
+					execution: async () => {
+						await buildCommand(options);
+					},
+				});
+			}
 			await trackCommandExecution({
-				command: "deploy . --build",
+				command: "deploy .",
 				args: options,
 				execution: async () => {
-					await buildCommand(options);
+					options.directory = process.cwd();
+					await deploy(options);
 				},
 			});
-		}
-		await trackCommandExecution({
-			command: "deploy .",
-			args: options,
-			execution: async () => {
-				options.directory = process.cwd();
-				await deploy(options);
-			},
-		});
-	});
+		}),
+	);
