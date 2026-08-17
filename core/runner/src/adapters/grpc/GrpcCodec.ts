@@ -4,6 +4,7 @@ import type { Context } from "@blokjs/shared";
 import { type GrpcObject, type ServiceClientConstructor, loadPackageDefinition } from "@grpc/grpc-js";
 import { type Options, loadSync } from "@grpc/proto-loader";
 import type RunnerNode from "../../RunnerNode";
+import { isStateDietEnabled } from "../transport";
 
 // =============================================================================
 // Proto loading — single point of I/O in this module
@@ -245,16 +246,16 @@ export function encodeExecuteRequest(
 	deadlineMs: number,
 ): ExecuteRequestProto {
 	const resolvedInputs = extractResolvedInputs(ctx, node.name);
-	// ADR 0014 Phase 0 — opt-in "state diet". By default the full accumulated
-	// workflow state (`ctx.vars`, which grows with every step) and the previous
-	// step's output ride along on every remote call. `BLOK_GRPC_STATE_DIET=1`
-	// stops sending both — cutting the monotonic-growth term for pipelines whose
-	// runtime nodes follow the v2 ABI (mapped `inputs` only, no `ctx.vars` /
-	// `ctx.response.data` reads). Opt-in because all 7 SDKs surface these to node
-	// code, so dropping them is observable to any node that reads them. `env` and
-	// `trigger.body` are always sent (kept ABI). State still flows BACK via the
-	// response `vars_delta` — unaffected.
-	const diet = process.env.BLOK_GRPC_STATE_DIET === "1" || process.env.BLOK_GRPC_STATE_DIET === "true";
+	// ADR 0014 Phase 0 — the "state diet", ON by default since #874. The full
+	// accumulated workflow state (`ctx.vars`, an alias of `ctx.state`, which
+	// grows with every completed step) and the previous step's output used to
+	// ride along on EVERY remote call, so a `runtime.*` node inside a `forEach`
+	// re-serialized a payload that grows with the loop. `env` and `trigger.body`
+	// are always sent (kept ABI); `inputs` — where a v2 node reads its data — is
+	// untouched; state still flows BACK via the response `vars_delta`.
+	// `BLOK_GRPC_STATE_DIET=0` restores the old payload for v1 nodes that read
+	// `ctx.vars` / `ctx.response.data` in their own body.
+	const diet = isStateDietEnabled();
 	const previousOutput = diet ? null : (ctx.response?.data ?? null);
 	const vars = diet ? {} : (ctx.vars ?? {});
 	const env = stringEnv(ctx.env as Record<string, unknown> | undefined);

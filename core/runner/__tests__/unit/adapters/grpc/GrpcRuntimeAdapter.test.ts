@@ -681,8 +681,12 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 			// A VALIDATION/GRPC_REQUEST_TOO_LARGE proves it returned before dispatch.
 			const isolated = new GrpcRuntimeAdapter(makeAdapterConfig(1, { maxMessageBytes: 64, defaultDeadlineMs: 500 }));
 			try {
-				const bigState = { blob: "x".repeat(4096) }; // ~4 KiB accumulated state, well over 64 B
-				const result = await isolated.execute(makeNode(), makeCtx({ vars: bigState }));
+				// Oversized via the TRIGGER BODY, which is kept ABI and always ships.
+				// Accumulated state would not work here — it stopped riding along in
+				// #874 — and oversized `inputs` can be claim-checked away.
+				const ctx = makeCtx();
+				(ctx.request as unknown as { body: unknown }).body = "x".repeat(4096); // ~4 KiB, well over 64 B
+				const result = await isolated.execute(makeNode(), ctx);
 				expect(result.success).toBe(false);
 				expect(result.errors).toBeInstanceOf(BlokError);
 				const err = result.errors as BlokError;

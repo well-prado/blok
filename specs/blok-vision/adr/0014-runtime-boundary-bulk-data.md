@@ -4,6 +4,32 @@
 - **Date:** 2026-07-21
 - **Resolves:** [#677](https://github.com/well-prado/blok/issues/677)
 
+> **Progress (2026-08-17): Phase 0's opt-in decision REVERSED — the diet is now
+> the default ([#874](https://github.com/well-prado/blok/issues/874)).**
+>
+> The 2026-07-23 note below kept full-state as the default because all 7 SDKs
+> surface `state.vars` / `state.previous_output` to node code. A real pipeline
+> (tetrix indexing a 2,234-file repo) then hit exactly the failure this ADR
+> exists for, from the other direction: `ctx.vars` aliases `ctx.state`, so every
+> remote call re-shipped every completed step's output, and a `runtime.rust`
+> node inside a `forEach` paid a per-call cost linear in the accumulated state —
+> O(n²) over the loop. It never completed in 70+ minutes; `BLOK_GRPC_STATE_DIET=1`
+> made it finish in ~8. Two workarounds in that app (raising
+> `BLOK_GRPC_MAX_MESSAGE_BYTES` to 256 MiB, stripping heavy fields per item)
+> turned out to be symptoms of the same thing.
+>
+> Founder call: an unbounded default whose failure mode is a slow crawl rather
+> than an error is worse than a documented ABI narrowing. The flag is now an
+> OPT-OUT — `BLOK_GRPC_STATE_DIET=0` restores the v1 payload — resolved in
+> `isStateDietEnabled()` (`core/runner/src/adapters/transport.ts`), the single
+> place `GrpcCodec` reads it. `inputs`, `env`, the trigger body and the response
+> `vars_delta` are all unchanged, so a v2 node sees no difference; a v1 node that
+> reads `ctx.vars` / `ctx.response.data` in its own body needs the escape hatch,
+> or (better) the value mapped into that step's `inputs`. Harness:
+> `benchmarks/grpc-state-payload.ts` — 1200 calls over real gRPC against a state
+> that grows one 512 B output per call: 384.79 MiB → 0.09 MiB sent, 4984 ms →
+> 427 ms, per-call time 1.07 → 6.88 ms by decile → flat ~0.25 ms.
+
 > **Progress (2026-08-08): Phase 2 core shipped — request-direction claim-check.**
 >
 > The runner now owns a filesystem `BlobStore`
@@ -155,12 +181,12 @@ never read `ctx.state`/`ctx.vars` (`CLAUDE.md`, node ABI). Sending the full
 accumulated state and the previous output to every remote node is legacy ABI
 baggage — and it is the *monotonic growth* term.
 
-- `encodeExecuteRequest` drops `vars` and `previous_output`. **Shipped as
-  opt-in `BLOK_GRPC_STATE_DIET=1` (default off)**, not the default-flip
-  originally drafted here — the SDK sweep showed all 7 SDKs surface both fields
-  to node code (`ctx.vars` / `ctx.response.data`), so flipping the default is a
-  breaking change. See the progress note above for the deviation and rationale.
-  Flip the default in a major release once SDKs stop surfacing these to v2 nodes.
+- `encodeExecuteRequest` drops `vars` and `previous_output`. Shipped 2026-07-23
+  as opt-in `BLOK_GRPC_STATE_DIET=1` (default off) because the SDK sweep showed
+  all 7 SDKs surface both fields to node code (`ctx.vars` / `ctx.response.data`).
+  **Reversed 2026-08-17 (#874): the diet is the default and
+  `BLOK_GRPC_STATE_DIET=0` is the escape hatch** — see the progress note at the
+  top for the field evidence that forced it.
 - `trigger.body` **stays** — `ctx.request` is an explicitly kept runtime ABI
   (headers/params/query/body) and nodes legitimately read it. It is bounded by
   trigger-level body limits and constant per run, not growing.

@@ -53,6 +53,20 @@ function makeCtx(overrides: Partial<Context> = {}): Context {
 	};
 }
 
+/** An accumulated `ctx.state` bag of `n` step outputs — the #874 growth term. */
+function bigState(n: number): Context["vars"] {
+	const state: Record<string, unknown> = {};
+	for (let i = 0; i < n; i++) state[`step-${i}`] = { path: `src/file-${i}.ts`, symbols: ["a", "b", "c"] };
+	return state as Context["vars"];
+}
+
+const priorDiet = process.env.BLOK_GRPC_STATE_DIET;
+afterEach(() => {
+	// biome-ignore lint/performance/noDelete: env-var cleanup needs real deletion
+	if (priorDiet === undefined) delete process.env.BLOK_GRPC_STATE_DIET;
+	else process.env.BLOK_GRPC_STATE_DIET = priorDiet;
+});
+
 describe("getNodeRuntimeService", () => {
 	it("lazily loads runtime.proto and exposes the service constructor", () => {
 		const ctor = getNodeRuntimeService();
@@ -120,42 +134,52 @@ describe("encodeExecuteRequest", () => {
 		expect(req.step.depth).toBe(1);
 	});
 
-	it("populates state.previous_output from ctx.response.data", () => {
+	it("populates state.previous_output from ctx.response.data when the diet is off", () => {
+		process.env.BLOK_GRPC_STATE_DIET = "0";
 		const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
 		expect(bufferToJson(req.state.previousOutput)).toEqual({ previous: 1 });
 	});
 
-	it("populates state.vars from ctx.vars", () => {
+	it("populates state.vars from ctx.vars when the diet is off", () => {
+		process.env.BLOK_GRPC_STATE_DIET = "0";
 		const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
 		expect(bufferToJson(req.state.vars)).toEqual({ fetch: { id: "v" } });
 	});
 
 	describe("state diet (ADR 0014 Phase 0, BLOK_GRPC_STATE_DIET)", () => {
-		const prior = process.env.BLOK_GRPC_STATE_DIET;
-		afterEach(() => {
-			// biome-ignore lint/performance/noDelete: env-var cleanup needs real deletion
-			if (prior === undefined) delete process.env.BLOK_GRPC_STATE_DIET;
-			else process.env.BLOK_GRPC_STATE_DIET = prior;
-		});
-
-		it("drops vars + previous_output but keeps env, inputs, and trigger.body when enabled", () => {
-			process.env.BLOK_GRPC_STATE_DIET = "1";
+		it("is ON by default — no accumulated state rides along when unset (#874)", () => {
+			// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
+			delete process.env.BLOK_GRPC_STATE_DIET;
 			const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
-			// Diet: the growth terms are empty...
+			// The growth terms are empty...
 			expect(bufferToJson(req.state.vars)).toEqual({});
 			expect(bufferToJson(req.state.previousOutput)).toBeNull();
 			// ...but the kept-ABI fields still ride along.
 			expect(req.state.env).toEqual({ NODE_ENV: "test" });
 			expect(bufferToJson(req.trigger.body)).toBeTruthy();
-			expect(bufferToJson(req.inputs)).toBeTruthy();
+			expect(bufferToJson(req.inputs)).toEqual({ table: "tutorials", title: "T" });
 		});
 
-		it("is off by default — full state is sent when unset", () => {
+		it("keeps the request flat as accumulated state grows (#874)", () => {
 			// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
 			delete process.env.BLOK_GRPC_STATE_DIET;
+			const small = encodeExecuteRequest(makeNode(), makeCtx({ vars: bigState(2) }), 0, 1, 0, 30_000);
+			const large = encodeExecuteRequest(makeNode(), makeCtx({ vars: bigState(400) }), 0, 1, 0, 30_000);
+			expect(large.state.vars.length).toBe(small.state.vars.length);
+		});
+
+		it("BLOK_GRPC_STATE_DIET=0 restores the v1 full-state payload", () => {
+			process.env.BLOK_GRPC_STATE_DIET = "0";
 			const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
 			expect(bufferToJson(req.state.vars)).toEqual({ fetch: { id: "v" } });
 			expect(bufferToJson(req.state.previousOutput)).toEqual({ previous: 1 });
+		});
+
+		it("BLOK_GRPC_STATE_DIET=0 is the payload that grows with accumulated state", () => {
+			process.env.BLOK_GRPC_STATE_DIET = "0";
+			const small = encodeExecuteRequest(makeNode(), makeCtx({ vars: bigState(2) }), 0, 1, 0, 30_000);
+			const large = encodeExecuteRequest(makeNode(), makeCtx({ vars: bigState(400) }), 0, 1, 0, 30_000);
+			expect(large.state.vars.length).toBeGreaterThan(small.state.vars.length * 100);
 		});
 	});
 

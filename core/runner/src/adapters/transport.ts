@@ -189,8 +189,36 @@ export function isLoopbackHost(host: string): boolean {
 	return false;
 }
 
+/**
+ * Whether a remote runtime call OMITS the accumulated run state
+ * (`ctx.vars` — an alias of `ctx.state`, so it holds EVERY completed step's
+ * output) and the previous step's output.
+ *
+ * ON by default since #874. Shipping the state bag on every call made per-call
+ * cost linear in the run's accumulated state, so a `runtime.*` node inside a
+ * `forEach` cost O(n²) over the loop — and the failure mode is a slow crawl,
+ * not an error, so nobody thinks to look for a flag. Mapped `inputs` are
+ * unaffected (that is where a v2 node reads its data from), `env` and the
+ * trigger body still ride along, and state still flows BACK via the response
+ * `vars_delta`.
+ *
+ * `BLOK_GRPC_STATE_DIET=0` restores the pre-#874 full-state payload for a v1
+ * node that reads `ctx.vars` / `ctx.response.data` inside its own body. That
+ * is a whole-process switch; the per-node fix is to map the value the node
+ * needs into that step's `inputs`.
+ */
+export function isStateDietEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	return !isFalsyFlag(env.BLOK_GRPC_STATE_DIET);
+}
+
 function isTruthyFlag(value: string | undefined): boolean {
 	if (!value) return false;
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function isFalsyFlag(value: string | undefined): boolean {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
+	return normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off";
 }
