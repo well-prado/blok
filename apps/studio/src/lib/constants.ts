@@ -5,21 +5,26 @@ import type { NodeRunStatus, RunEventType, WorkflowRunStatus } from "@/types";
 // `text-green-400` here, `#2bcd71` in the token layer, `#22c55e` in the chart
 // code). The `Record<WorkflowRunStatus | NodeRunStatus, string>` type keeps
 // them exhaustive, so a new status is a typecheck error, not a blank chip.
+//
+// Chip = `-ink` for the label, the plain fill at 10% for the wash. The two
+// roles are separate tokens on purpose (app.css layer 3): the fill is sized
+// for a 6px dot, the ink for 12px text. Every pair here is asserted >= 4.5:1
+// in `src/__tests__/tokens.test.ts`.
 export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
-	pending: "text-status-pending bg-status-pending/10",
-	running: "text-status-running bg-status-running/10",
-	paused: "text-status-paused bg-status-paused/10",
-	completed: "text-status-completed bg-status-completed/10",
-	failed: "text-status-failed bg-status-failed/10",
-	cancelled: "text-status-cancelled bg-status-cancelled/10",
-	skipped: "text-status-skipped bg-status-skipped/10",
-	throttled: "text-status-throttled bg-status-throttled/10",
-	delayed: "text-status-delayed bg-status-delayed/10",
-	expired: "text-status-expired bg-status-expired/10",
-	debounced: "text-status-debounced bg-status-debounced/10",
-	queued: "text-status-queued bg-status-queued/10",
-	crashed: "text-status-crashed bg-status-crashed/10",
-	timedOut: "text-status-timedOut bg-status-timedOut/10",
+	pending: "text-status-pending-ink bg-status-pending/10",
+	running: "text-status-running-ink bg-status-running/10",
+	paused: "text-status-paused-ink bg-status-paused/10",
+	completed: "text-status-completed-ink bg-status-completed/10",
+	failed: "text-status-failed-ink bg-status-failed/10",
+	cancelled: "text-status-cancelled-ink bg-status-cancelled/10",
+	skipped: "text-status-skipped-ink bg-status-skipped/10",
+	throttled: "text-status-throttled-ink bg-status-throttled/10",
+	delayed: "text-status-delayed-ink bg-status-delayed/10",
+	expired: "text-status-expired-ink bg-status-expired/10",
+	debounced: "text-status-debounced-ink bg-status-debounced/10",
+	queued: "text-status-queued-ink bg-status-queued/10",
+	crashed: "text-status-crashed-ink bg-status-crashed/10",
+	timedOut: "text-status-timedOut-ink bg-status-timedOut/10",
 };
 
 export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {

@@ -24,7 +24,7 @@ export function ExecutionTimeline({ data }: Props) {
 
 	if (!hasData) {
 		return (
-			<div className="flex items-center justify-center h-48 text-zinc-600 text-sm">
+			<div className="flex items-center justify-center h-48 text-ink-muted text-sm">
 				No executions in the last 24 hours
 			</div>
 		);
@@ -33,31 +33,34 @@ export function ExecutionTimeline({ data }: Props) {
 	return (
 		<ResponsiveContainer width="100%" height={220}>
 			<BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-				<CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+				{/* Recharts takes CSS values, not classes, so tokens arrive as `var()` —
+				    same mechanism the status fills below use. Tick and legend labels are
+				    10-11px TEXT, so they take `ink-muted` (AA), never `ink-faint`. */}
+				<CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" />
 				<XAxis
 					dataKey="time"
-					tick={{ fill: "#71717a", fontSize: 10 }}
+					tick={{ fill: "var(--color-ink-muted)", fontSize: 10 }}
 					tickLine={false}
-					axisLine={{ stroke: "#3f3f46" }}
+					axisLine={{ stroke: "var(--color-line-strong)" }}
 					interval="preserveStartEnd"
 				/>
 				<YAxis
-					tick={{ fill: "#71717a", fontSize: 10 }}
+					tick={{ fill: "var(--color-ink-muted)", fontSize: 10 }}
 					tickLine={false}
-					axisLine={{ stroke: "#3f3f46" }}
+					axisLine={{ stroke: "var(--color-line-strong)" }}
 					allowDecimals={false}
 				/>
 				<Tooltip
 					contentStyle={{
-						backgroundColor: "#18181b",
-						border: "1px solid #3f3f46",
+						backgroundColor: "var(--color-overlay)",
+						border: "1px solid var(--color-line-strong)",
 						borderRadius: "6px",
 						fontSize: "12px",
 					}}
-					labelStyle={{ color: "#a1a1aa" }}
-					itemStyle={{ color: "#d4d4d8" }}
+					labelStyle={{ color: "var(--color-ink-dimmed)" }}
+					itemStyle={{ color: "var(--color-ink)" }}
 				/>
-				<Legend wrapperStyle={{ fontSize: "11px", color: "#71717a" }} />
+				<Legend wrapperStyle={{ fontSize: "11px", color: "var(--color-ink-muted)" }} />
 				{/* Token, not a copy — `#22c55e` here was the pre-brand green. */}
 				<Bar
 					dataKey="completed"

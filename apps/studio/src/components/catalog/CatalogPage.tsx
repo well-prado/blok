@@ -31,8 +31,8 @@ export function CatalogPage({
 export function Variant({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<section>
-			<h2 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{label}</h2>
-			<div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-raised p-4">{children}</div>
+			<h2 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">{label}</h2>
+			<div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-raised p-4">{children}</div>
 		</section>
 	);
 }

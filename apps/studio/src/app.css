@@ -37,6 +37,10 @@
 	--color-graphite-100: #f4f4f5;
 	--color-graphite-200: #e4e4e7;
 	--color-graphite-400: #a1a1aa;
+	/* 450 exists because 500 (#71717a) measures 3.90:1 on `raised` and 3.08:1
+	   on `control` — sub-AA for text. 450 is the lightest step that clears
+	   4.5:1 on ALL five surfaces (4.65 worst case, on `control`). */
+	--color-graphite-450: #8f8f99;
 	--color-graphite-500: #71717a;
 	--color-graphite-600: #52525b;
 	--color-graphite-700: #3f3f46;
@@ -58,12 +62,14 @@
 	--color-hover: var(--color-graphite-850);
 	--color-control: var(--color-graphite-800);
 
-	/* Ink, strongest → faintest. */
+	/* Ink, strongest → faintest. The first four are TEXT inks and every one
+	   clears WCAG AA (4.5:1) on all five surfaces. `ink-faint` is NOT a text
+	   ink — it clears only the 3:1 non-text threshold — see CONVENTIONS §3.1. */
 	--color-ink-strong: var(--color-graphite-100);
 	--color-ink: var(--color-graphite-200);
 	--color-ink-dimmed: var(--color-graphite-400);
-	--color-ink-muted: var(--color-graphite-500);
-	--color-ink-faint: var(--color-graphite-600);
+	--color-ink-muted: var(--color-graphite-450);
+	--color-ink-faint: var(--color-graphite-500);
 
 	/* Lines. */
 	--color-line: var(--color-graphite-800);
@@ -91,7 +97,21 @@
    status color by accident. The first six are byte-identical to the
    battle-tested palette in `_design/brand-spec.md`; the rest complete
    the `WorkflowRunStatus | NodeRunStatus` union, which had 8 members
-   with no token at all. */
+   with no token at all.
+
+   TWO ROLES, TWO TOKENS. `--color-status-X` is the FILL: dots, chart
+   bars, minimap nodes, and the 10% chip wash. `--color-status-X-ink` is
+   the TEXT drawn on that wash. They are not interchangeable — a fill
+   chosen to read as a 6px dot is too dark to be legible as 12px text,
+   and collapsing the two roles onto the fill token is exactly how the
+   chip palette lost AA (pending 6.27 → 3.56). The reference does the
+   same split (`runStatusClassNameColor` returns `text-*` role names,
+   never the dot fill — trigger.dev TaskRunStatus.tsx:208).
+
+   Every `-ink` value MUST measure >= 4.5:1 against its own chip
+   background (its fill at 10% over `raised`). That is asserted in
+   `src/__tests__/tokens.test.ts`, computed from THIS file, so an edit
+   here that breaks it fails the suite. */
 @theme static {
 	--color-status-pending: #71717a;
 	--color-status-running: #3b82f6;
@@ -108,6 +128,26 @@
 	--color-status-crashed: #dc2626;
 	--color-status-timedOut: #f97316;
 	--color-status-warning: #f59e0b;
+
+	/* Text role. These are the legible -300/-400 shades `constants.ts`
+	   shipped before the token migration, with the four that were already
+	   sub-AA raised one step (skipped/expired 3.56, crashed 4.60 hairline,
+	   pending). Measured ratios are in the test. */
+	--color-status-pending-ink: #a1a1aa;
+	--color-status-running-ink: #60a5fa;
+	--color-status-completed-ink: #7ee2a8;
+	--color-status-failed-ink: #f87171;
+	--color-status-cancelled-ink: #c084fc;
+	--color-status-skipped-ink: #9ca3af;
+	--color-status-paused-ink: #fcd34d;
+	--color-status-throttled-ink: #fcd34d;
+	--color-status-delayed-ink: #facc15;
+	--color-status-expired-ink: #9ca3af;
+	--color-status-debounced-ink: #22d3ee;
+	--color-status-queued-ink: #bef264;
+	--color-status-crashed-ink: #fca5a5;
+	--color-status-timedOut-ink: #fb923c;
+	--color-status-warning-ink: #fcd34d;
 
 	--color-log-debug: #71717a;
 	--color-log-info: #3b82f6;
@@ -156,11 +196,11 @@
 	background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-	background: #3f3f46;
+	background: var(--color-line-strong);
 	border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-	background: #52525b;
+	background: var(--color-line-bright);
 }
 
 /* SSE pulse animation for running nodes */

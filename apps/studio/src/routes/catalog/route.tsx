@@ -10,7 +10,7 @@ function CatalogLayout() {
 	return (
 		<div className="flex h-full">
 			<nav aria-label="Catalog" className="w-52 shrink-0 overflow-y-auto border-r border-line bg-canvas p-3">
-				<h2 className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">Catalog</h2>
+				<h2 className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">Catalog</h2>
 				<ul className="space-y-0.5">
 					{catalogPages.map(({ slug, label }) => (
 						<li key={slug}>

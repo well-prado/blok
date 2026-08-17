@@ -14,10 +14,14 @@ import { Loader2 } from "lucide-react";
  * Deliberately a primitive no E1 task owns, so nobody collides with it while
  * still having a loading indicator to reach for.
  */
+// The GLYPH column of the size ladder (`_design/CONVENTIONS.md` §2.4). A
+// spinner has no box of its own, so it takes the icon size for the row — an
+// `md` Spinner sits inside an `md` Button without changing its height.
 const sizes = {
-	sm: "h-3 w-3",
+	xs: "h-3 w-3",
+	sm: "h-3.5 w-3.5",
 	md: "h-4 w-4",
-	lg: "h-6 w-6",
+	lg: "h-5 w-5",
 } as const;
 
 const tones = {

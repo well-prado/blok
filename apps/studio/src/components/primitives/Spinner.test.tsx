@@ -20,6 +20,6 @@ describe("Spinner", () => {
 	it("applies the size variant", () => {
 		const { container } = render(<Spinner size="lg" />);
 		// No semantic signal distinguishes sizes, so exactly one discriminating class.
-		expect(container.querySelector("svg")).toHaveClass("h-6");
+		expect(container.querySelector("svg")).toHaveClass("h-5");
 	});
 });

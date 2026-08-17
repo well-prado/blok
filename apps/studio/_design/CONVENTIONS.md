@@ -12,7 +12,7 @@
 
 1. **No new dependencies.** The dependency list is closed (§4). If you think you need a package, you are wrong; use §4's rejection table.
 2. **No barrel file.** Never create or edit `components/primitives/index.ts`. Import by full path.
-3. **Tokens only.** Zero `zinc-*`/`gray-*`/`slate-*`/`neutral-*`/`stone-*`, zero hex, zero arbitrary color values (`text-[#...]`) in any file you write. Enforced by a test (§8.4).
+3. **Tokens only.** Zero raw Tailwind colors of any hue (`zinc-400` and `red-500` alike), zero hex, zero arbitrary color values (`text-[#...]`), zero invented token names. Enforced by a test that derives the legal vocabulary from `app.css` (§8.4).
 4. **Colocate your test.** `src/__tests__/components.test.tsx` is FROZEN. Do not open it.
 5. **Do not import another downstream task's primitive.** You may import only from §1's foundation. See §12.4.
 
@@ -61,7 +61,7 @@ const variants = {
 } as const;
 
 const sizes = {
-	sm: "h-6 px-2 text-xs",
+	sm: "h-7 px-2.5 text-xs",
 	md: "h-8 px-3 text-sm",
 } as const;
 
@@ -71,7 +71,7 @@ type BadgeProps = React.ComponentPropsWithRef<"span"> & {
 };
 
 export function Badge({ className, variant = "default", size = "md", ...props }: BadgeProps) {
-	return <span className={cn("inline-flex items-center rounded", variants[variant], sizes[size], className)} {...props} />;
+	return <span className={cn("inline-flex items-center rounded-md", variants[variant], sizes[size], className)} {...props} />;
 }
 ```
 
@@ -98,7 +98,57 @@ const variants = {
 
 Typography primitives ship **zero margins by default**. Each variant carries `{ text, spacing }` and `spacing` is applied only under an opt-in `spacing?: boolean` prop defaulting to `false`. A primitive must never fight its container's layout.
 
-### 2.4 `ref` — no `forwardRef`
+### 2.4 The size ladder — FOUR rows, identical in every primitive
+
+**DECIDED. A `size` prop takes exactly these keys with exactly these values.** T3's Button and T5's Input have to line up vertically in a form row, and nothing else in this document makes that happen.
+
+| `size` | height | padding-x | text | icon / glyph | gap |
+|---|---|---|---|---|---|
+| `xs` | `h-6` (24px) | `px-2` | `text-xs` | `h-3 w-3` | `gap-1` |
+| `sm` | `h-7` (28px) | `px-2.5` | `text-xs` | `h-3.5 w-3.5` | `gap-1.5` |
+| `md` | `h-8` (32px) | `px-3` | `text-sm` | `h-4 w-4` | `gap-2` |
+| `lg` | `h-9` (36px) | `px-4` | `text-sm` | `h-5 w-5` | `gap-2` |
+
+- **`md` is the default** for every primitive that has a size.
+- A primitive may **omit** rows it has no use for (Badge needs no `lg`); it may **never redefine** one. Two primitives that both ship `sm` MUST both be `h-7 px-2.5 text-xs`.
+- A **square** icon-only control uses the height as its width (`h-8 w-8 p-0`), not `px-*`.
+- A **glyph-only** primitive (Spinner) takes only the icon column — that is why `Spinner` sizes are `h-3 / h-3.5 / h-4 / h-5` and not control heights. An `md` Spinner drops into an `md` Button without changing its height.
+- **Multi-line** boxes (TextArea) set `min-h-*` from the row height and keep the row's padding-x and text size.
+- `/catalog/foundation` renders the ladder. If your primitive looks taller than the row above it there, it is wrong.
+
+### 2.5 Radius — one rule
+
+**Pills are `rounded-full`; everything else with a box is `rounded-md`.** No bare `rounded`, no `rounded-sm`, no `rounded-lg`, no `rounded-xl` in a primitive.
+
+- `rounded-full` — status chips, badges that read as pills, dots, avatars, circular icon buttons.
+- `rounded-md` (6px) — buttons, inputs, selects, cards, panels, dialogs, popovers, menus, tooltips, code blocks.
+- Nested corners: an inner element inside a `rounded-md` box uses `rounded-md` too, never a smaller step.
+- Reason `md` and not something else: `.focus-ring` is `border-radius: 5px` with a `-1px` inset offset, which is exactly the inner edge of a 6px corner. Any other radius makes the focus ring visibly disagree with the control it is on.
+
+### 2.6 Disabled — one recipe
+
+**For anything with a native `disabled` attribute (`button`, `input`, `select`, `textarea`), the ONLY accepted form is:**
+
+```tsx
+"disabled:opacity-50 disabled:pointer-events-none"
+```
+
+- Do not add `disabled:cursor-not-allowed` — `pointer-events-none` already suppresses the cursor, and the two together are a no-op plus a lie.
+- Do not vary the opacity. `50` everywhere.
+- Do not gate the handler in JS as well; the native attribute already does it, and a `disabled` element receives no events.
+- **Only** when the element is NOT natively disable-able (a Radix trigger you must keep focusable, a `role="menuitem"` div) use `aria-disabled="true"` **plus** the same two classes **plus** an early `return` in the handler. `aria-disabled` alone is not a disabled state, and `disabled` alone on a non-native element is not either.
+- Never render a disabled control with no accessible explanation of why; if the reason is not on screen, it is a bug for T7's Tooltip to solve later, not for you to invent.
+
+### 2.7 Focus ring — where it goes
+
+Restating §3.4 as a placement rule, because "add `.focus-ring`" is ambiguous on compound markup:
+
+- `.focus-ring` goes on **the element that actually receives focus** — the `<button>`, the `<input>`, the Radix `*Trigger` — never on a wrapper `div`, never on a Radix `*Content`.
+- Never write `outline-none`, `focus:outline-none`, `ring-*`, `focus:ring-*`, or `focus-visible:ring-*`. There is one focus treatment and it is this utility.
+- A control whose focusable element is visually inside another box still puts `.focus-ring` on the focusable element; the inset offset is what keeps it from being clipped.
+- Radix `*Content` gets no focus ring: Radix moves focus into it and the surrounding overlay is the affordance.
+
+### 2.8 `ref` — no `forwardRef`
 
 Studio is React 19 with no SSR. `forwardRef` is deprecated. Declare `ref` as a plain prop: `React.ComponentPropsWithRef<"button">` already includes it.
 **One exception:** inside a Radix wrapper file, copy Radix's own `React.forwardRef` idiom verbatim — their types expect it and fighting it costs more than it saves.
@@ -123,13 +173,15 @@ Layer 1 is the raw ramps (`--color-graphite-*`, `--color-blok-green-*`). Layer 2
 | `control` | `bg-control` | inputs, buttons, chips |
 
 **Ink** (text, strongest → faintest)
-| Token | Utility | Replaces |
-|---|---|---|
-| `ink-strong` | `text-ink-strong` | `text-zinc-100/50/200` |
-| `ink` | `text-ink` | `text-zinc-300` |
-| `ink-dimmed` | `text-ink-dimmed` | `text-zinc-400` |
-| `ink-muted` | `text-ink-muted` | `text-zinc-500` |
-| `ink-faint` | `text-ink-faint` | `text-zinc-600` |
+| Token | Utility | Replaces | Worst contrast (on `control`) |
+|---|---|---|---|
+| `ink-strong` | `text-ink-strong` | `text-zinc-100/50/200` | 13.55 |
+| `ink` | `text-ink` | `text-zinc-300` | 11.74 |
+| `ink-dimmed` | `text-ink-dimmed` | `text-zinc-400` | 5.81 |
+| `ink-muted` | `text-ink-muted` | `text-zinc-500` | 4.65 |
+| `ink-faint` | **not for text** | `text-zinc-600` | 3.08 |
+
+**`ink-faint` is NOT a text token.** It clears the 3:1 non-text threshold on every surface and nothing more, so it is for hairlines, disabled glyphs, chart gridlines, and decorative separators. **If it holds words, use `ink-muted`** — which is the faintest ink that clears WCAG AA (4.5:1) on all five surfaces. A `text-ink-faint` on a label is a review failure, not a taste question.
 
 **Lines**
 | Token | Utility | Replaces |
@@ -146,23 +198,39 @@ Layer 1 is the raw ramps (`--color-graphite-*`, `--color-blok-green-*`). Layer 2
 | `on-accent` | `text-on-accent` | text **on** an accent fill (replaces the 21 `text-[#00231b]`) |
 | `focus-ring` | via `.focus-ring` utility | focus treatment |
 
-**Status** — all 14 `WorkflowRunStatus` members have a token: `status-{pending,running,paused,completed,failed,cancelled,skipped,throttled,delayed,expired,debounced,queued,crashed,timedOut}` plus `status-warning`. Logs: `log-{debug,info,warn,error}`.
+**Status — two tokens per status, one per ROLE.** All 14 `WorkflowRunStatus` members plus `warning` have both: `status-{name}` and `status-{name}-ink`. Logs: `log-{debug,info,warn,error}`.
 
-Note the camelCase in `status-timedOut` — it matches the type union member and Tailwind emits `bg-status-timedOut` for it.
+| Role | Token | Use for |
+|---|---|---|
+| fill | `status-failed` | dots, chart bars, minimap nodes, the `/10` chip wash, `/30` borders |
+| text | `status-failed-ink` | **any text that names a status**, including the chip label |
+
+```tsx
+// the chip, which is what STATUS_COLORS already gives you:
+"text-status-failed-ink bg-status-failed/10"
+```
+
+**Never put a fill token on text.** The fills are tuned to read as a 6px dot on a dark surface; as 12px text they are 3.5–4.3:1, i.e. below AA. Collapsing the two roles onto the fill token is the exact defect that cost all 14 chips their contrast once already. The reference splits the same way (`runStatusClassNameColor` in trigger.dev's `TaskRunStatus.tsx` returns `text-*` role names, never a dot fill).
+
+Every `-ink` is asserted `>= 4.5:1` against its own chip background in `tokens.test.ts`, computed from `app.css` — so a status retune that breaks contrast fails the suite.
+
+Note the camelCase in `status-timedOut` / `status-timedOut-ink` — it matches the type union member and Tailwind emits `bg-status-timedOut` and `text-status-timedOut-ink` for it.
 
 Opacity modifiers work on every one of these (`bg-status-failed/10`, `border-accent/30`) — Tailwind v4 lowers them via `color-mix`.
 
 ### 3.2 The hard rule
 
 **Inside any file you create, these are banned:**
-- any `zinc|gray|slate|neutral|stone` color class
+- any raw Tailwind color class, **every hue, not just the neutrals** — `text-zinc-400` and `text-red-500` are equally banned (§3.3)
+- `text-white`, `bg-black` — they are not in the vocabulary and light mode cannot re-map them
 - any hex literal
-- any arbitrary color value: `text-[#00231b]`, `bg-[rgb(...)]`
+- any arbitrary color value: `text-[#00231b]`, `bg-[rgb(...)]`, `bg-[var(--color-…)]`
+- any **layer-1** name: `bg-graphite-800`, `text-blok-green-500`. Layer 1 exists only for layer 2 to `var()` into (§10). Use `bg-control` / `text-accent`.
 - any trigger.dev token name pasted from the reference: `text-text-bright`, `text-text-dimmed`, `bg-background-raised`, `border-border-bright`, `bg-tertiary`, `focus-custom`, and the `system:` / `light:` variants. **These tokens do not exist in Studio and Tailwind emits nothing for them — your component silently renders unstyled.** This is the single most likely way to ship a broken primitive.
 
-Non-color raw Tailwind (spacing, radius, `flex`, `text-sm`) is fine and expected. So is `text-[10px]` — the guard only rejects arbitrary values that are colors.
+Non-color raw Tailwind (spacing, radius, `flex`, `text-sm`) is fine and expected. So is `text-[10px]` and `border-l-[3px]` — the guard only rejects arbitrary values that are colors.
 
-A test enforces this (§8.4). It will fail your PR, not a reviewer.
+A test enforces **all six bullets** (§8.4). It will fail your PR, not a reviewer.
 
 ### 3.3 Semantic colors that are not neutrals
 
@@ -176,7 +244,7 @@ Every interactive element MUST be focus-visible. Use the foundation's utility:
 <button className={cn("focus-ring", ...)}>
 ```
 
-`.focus-ring` is defined in `app.css` as `outline: 1px solid var(--color-focus-ring); outline-offset: -1px`. The **inset** offset is deliberate — a 0-offset outline gets clipped by `overflow:hidden` scroll ancestors, of which Studio has many. Do not substitute `ring-2 ring-blok-green-400`.
+Placement rules — which element carries it, and the `outline-none`/`ring-*` ban — are §2.7. `.focus-ring` is defined in `app.css` as `outline: 1px solid var(--color-focus-ring); outline-offset: -1px`. The **inset** offset is deliberate — a 0-offset outline gets clipped by `overflow:hidden` scroll ancestors, of which Studio has many. Do not substitute `ring-2 ring-blok-green-400`.
 
 ---
 
@@ -245,27 +313,70 @@ apps/studio/src/catalog/<slug>.tsx                      ← its catalog page
 Studio has 14 ad-hoc components in `src/components/shared/`. Several are superseded by your primitives. **The rule, because it is what keeps seven diffs from colliding:**
 
 1. Build the new primitive under `components/primitives/`.
-2. If an old `shared/` component is superseded, **leave the old file in place and turn it into a one-line re-export shim** pointing at your new primitive.
+2. If an old `shared/` component is superseded, **leave the old file at its path and replace its body with a re-export of the new primitive.**
 3. **Do NOT delete the old file. Do NOT migrate its call sites. Do NOT touch `runs/`, `trace/`, `layout/`, `dashboard/`, or `routes/`.**
 
 `StatusBadge` and `NotificationToast` are imported across `runs/`, `trace/`, and `layout/` — files other agents are actively editing. A call-site migration inside a parallel wave is a guaranteed multi-way conflict. A single later PR deletes the shims and migrates call sites.
 
+### 6.0 What a shim MUST preserve (this is a hard contract, not a style note)
+
+A shim is a **rename-free, behaviour-free** change. It MUST preserve, exactly:
+
+- **Every exported symbol name** the old file had. `export { Badge as StatusBadge }` is NOT acceptable — the consumer imports `StatusBadge`, and a rename is a call-site migration in disguise. Your primitive file exports a symbol *already named* `StatusBadge`; the shim re-exports that name unchanged.
+- **The public prop signature.** Same prop names, same types, same defaults, same optionality. Adding a new *optional* prop is allowed. Renaming, removing, or making a prop required is not.
+- **The rendered output** for every existing call: same text, same accessible roles/names, same `aria-*`. Restyling with tokens is fine; changing what a caller reads on screen is not.
+- **The non-superseded exports.** Where the old file exports more than the superseded component, **keep those exports in the old file** and re-export only what moved. A shim is not required to be one line — `NotificationToast.tsx` keeps its whole `NotificationBell` implementation and re-exports only `NotificationToast`.
+
+The binding check: **`bun run --filter @blokjs/studio test` stays green with ZERO changes under `src/__tests__/`.** That directory is frozen (§0.4, §8.2) and `components.test.tsx` imports `{ StatusBadge } from "@/components/shared/StatusBadge"` and asserts `<StatusBadge status="completed" />` renders the text "Completed". If your shim breaks that test, the shim is wrong — you have no sanctioned way to edit the test.
+
+**Worked example (verified against the frozen suite before this document shipped).** T6's primitive exports both the generic Badge and the status wrapper under its historical name:
+
+```tsx
+// apps/studio/src/components/primitives/Badge.tsx  — T6 creates this
+export function Badge({ className, variant = "default", size = "md", ...props }: BadgeProps) { /* … */ }
+
+// Same name, same props, same output as the old shared/ component.
+interface StatusBadgeProps {
+	status: WorkflowRunStatus | NodeRunStatus;
+	className?: string;
+}
+
+export function StatusBadge({ status, className }: StatusBadgeProps) {
+	return (
+		<span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium", STATUS_COLORS[status], className)}>
+			<span
+				className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT_COLORS[status], status === "running" && "animate-pulse-dot")}
+				aria-hidden="true"
+			/>
+			{STATUS_LABELS[status]}
+		</span>
+	);
+}
+```
+
+```tsx
+// apps/studio/src/components/shared/StatusBadge.tsx  — the whole shim
+export { StatusBadge } from "@/components/primitives/Badge";
+```
+
+Nine call sites keep working, `components.test.tsx` stays green untouched, and the later migration PR is a `sed` of the import path.
+
 **Fold-in map** (who shims what):
 
-| Existing | Action | Task |
-|---|---|---|
-| `shared/StatusBadge.tsx` | shim → `primitives/Badge.tsx` status variants | T6 |
-| `shared/DurationBadge.tsx` | badge chrome → a `Badge` variant; `ElapsedTimer` is app logic, leave it | T6 |
-| `shared/EmptyState.tsx` | move to `primitives/EmptyState.tsx`, shim the old path | T6 |
-| `shared/NotificationToast.tsx` | toast rendering → `primitives/Toast.tsx`; **keep the zustand store**; `NotificationBell` stays in `shared/` | T6 |
-| `shared/ExportMenu.tsx` | shim → rebuilt on `primitives/DropdownMenu.tsx` | T8 |
+| Existing | Exports today | Action | Task |
+|---|---|---|---|
+| `shared/StatusBadge.tsx` | `StatusBadge` | whole file becomes the one-line shim; `primitives/Badge.tsx` must export a symbol *named* `StatusBadge` (§6.0 worked example) | T6 |
+| `shared/DurationBadge.tsx` | `DurationBadge` | badge chrome → a `Badge` variant; the elapsed-ticking `useEffect` is app logic and stays inside `DurationBadge` — so this file keeps its own body and is **not** a shim | T6 |
+| `shared/EmptyState.tsx` | `EmptyState` | move the implementation to `primitives/EmptyState.tsx` under the same name, old path becomes the one-line shim | T6 |
+| `shared/NotificationToast.tsx` | `NotificationToast`, `NotificationBell` | **not a one-liner.** Toast rendering → `primitives/Toast.tsx`; re-export `NotificationToast` from there; **keep the zustand store**; keep the entire `NotificationBell` implementation in this file | T6 |
+| `shared/ExportMenu.tsx` | `ExportMenu` | shim → rebuilt on `primitives/DropdownMenu.tsx`, exported as `ExportMenu`, same props (`onExportJson`, `onExportCsv`, `label`, `size`) | T8 |
 | `shared/EnvChip.tsx` | **leave entirely alone** — it is the only component with real ARIA and its markup is a *listbox*, not a menu | — |
 | `CommandPalette`, `TagEditor`, `JsonViewer`, `BlokMark`, `ErrorBoundary`, `RefDiagnosticsPanel`, `RoutingDiagnosticsBanner` | **untouched by E1** | — |
 | `trace/NodeLibraryDialog`, `dashboard/AddWidgetDialog`, `trace/UpstreamPicker` | **untouched by E1** — follow-up tickets | — |
 
 ### 6.1 Status color — READ THIS BEFORE BUILDING BADGE (T6)
 
-`src/lib/constants.ts` used to define `STATUS_COLORS` and `STATUS_DOT_COLORS` with **raw** Tailwind classes (`text-green-400`, `bg-zinc-400/10`). The foundation PR has already rewritten those two maps to use `status-*` tokens. **Consume `STATUS_COLORS` / `STATUS_DOT_COLORS` / `STATUS_LABELS` from `@/lib/constants` as-is — they are now token-based.** Do not copy their old raw values into your variant table, and do not edit `constants.ts`. All 14 statuses have tokens; the `Record<WorkflowRunStatus | NodeRunStatus, string>` type makes the map exhaustive, so a missing status is a typecheck error, not a runtime hole. `src/__tests__/tokens.test.ts` asserts both maps stay token-only.
+`src/lib/constants.ts` used to define `STATUS_COLORS` and `STATUS_DOT_COLORS` with **raw** Tailwind classes (`text-green-400`, `bg-zinc-400/10`). The foundation PR has already rewritten those two maps to use `status-*` tokens, with the text/fill role split of §3.1 baked in (`text-status-failed-ink bg-status-failed/10`). **Consume `STATUS_COLORS` / `STATUS_DOT_COLORS` / `STATUS_LABELS` from `@/lib/constants` as-is — they are now token-based and contrast-checked.** Do not copy their old raw values into your variant table, do not rebuild the pairing by hand (`text-status-failed` on a chip is sub-AA), and do not edit `constants.ts`. All 14 statuses have tokens; the `Record<WorkflowRunStatus | NodeRunStatus, string>` type makes the map exhaustive, so a missing status is a typecheck error, not a runtime hole. `src/__tests__/tokens.test.ts` asserts both maps stay token-only.
 
 ---
 
@@ -342,7 +453,17 @@ Do not add primitive tests there. It is the second-worst collision point after a
 
 ### 8.4 The guards (already exist — they will fail your PR)
 
-`apps/studio/src/__tests__/tokens.test.ts` scans every file under `components/primitives/`, `components/catalog/`, and `src/catalog/` and fails on any raw neutral class, hex literal, or arbitrary color value, naming the offending line. It is scoped to new directories only, so it needs no allowlist and the 1,373 legacy occurrences elsewhere stay out of scope. It also pins the token layer itself: the semantic vocabulary, a status token per union member, `@theme static`, `.focus-ring`, and the two `constants.ts` maps.
+`apps/studio/src/__tests__/tokens.test.ts` scans every file under `components/primitives/`, `components/catalog/`, and `src/catalog/`, and fails the file — naming the line and the reason — on:
+
+1. a raw Tailwind color in **any** of the 22 hues (`text-red-500` is caught, not only `text-zinc-400`);
+2. a hex literal;
+3. an arbitrary color value (`text-[#…]`, `bg-[rgb(…)]`, `bg-[var(--color-…)]`);
+4. **an undeclared token name.** For every `text-*` / `bg-* `/ `border-*` class it resolves the name against the `--color-*` declarations it parses **out of `app.css`**, so the allowed set cannot drift from the tokens. `text-text-bright`, `bg-background-raised`, `bg-tertiary` and friends fail here. Layer-1 names (`graphite-*`, `blok-green-*`) are declared but excluded, so referencing the raw ramp fails too;
+5. `focus-custom` — the one reference-dialect class with no color prefix.
+
+It is scoped to new directories only, so it needs no allowlist and the 1,373 legacy occurrences elsewhere stay out of scope. It also pins the token layer itself: the semantic vocabulary, a fill **and** an ink token per union member, `@theme static`, `.focus-ring`, and the two `constants.ts` maps.
+
+Separately it computes **contrast** from `app.css`: all 14 status chips `>= 4.5:1` on their own wash, all four text inks `>= 4.5:1` on all five surfaces, `ink-faint >= 3:1`. This is the guard the type checker, the linter and 440 tests all missed the first time.
 
 `apps/studio/src/__tests__/catalog.test.tsx` asserts the glob is non-empty and renders every discovered page, so a broken page fails the suite the moment it lands.
 
@@ -424,7 +545,7 @@ Also note the reference's `Button` uses a nested `group/button` architecture (un
 
 ### 12.3 If your ticket contradicts this document
 
-This document wins. Note the contradiction in your PR description. Known bad ticket content: the Radix claims in §4.2, and any reference to `apps/studio/_design/trigger-dev-parity.md` — **that file does not exist**; the real design docs are `_design/brand-spec.md` and `_design/design-plan.md`. Ticket #769 also calls the catalog `/storybook`; it ships at `/catalog`, with a redirect at `/storybook`.
+This document wins. Note the contradiction in your PR description. Known bad ticket content: the Radix claims in §4.2, `apps/studio/_design/trigger-dev-parity.md` **does** exist and is on this branch (it was untracked when an earlier draft of this document called it missing) — read it alongside `_design/brand-spec.md` and `_design/design-plan.md`. Ticket #769 also calls the catalog `/storybook`; it ships at `/catalog`, with a redirect at `/storybook`.
 
 ### 12.4 Cross-task dependency rule
 
@@ -441,6 +562,8 @@ Practical consequence: if your catalog page or primitive wants a Button, use a p
 - [ ] Primitive(s) at `src/components/primitives/<Name>.tsx`, only the ones in your §12.1 row.
 - [ ] Colocated `<Name>.test.tsx` meeting §8.3's three assertions.
 - [ ] Catalog page at `src/catalog/<your-slug>.tsx`, default export, `<CatalogPage>` root, every variant shown.
+- [ ] Every `size` row is copied verbatim from §2.4's ladder; radius follows §2.5; `disabled` follows §2.6; focus follows §2.7.
+- [ ] Any `shared/` shim satisfies §6.0 — same exported names, same props, same rendered output, non-superseded exports kept, and **nothing under `src/__tests__/` edited**.
 - [ ] `bun run lint` clean (Biome, tabs, 120).
 - [ ] `bun run build` clean (`tsc -b` included — no `any`, `noUncheckedIndexedAccess` is on so no `arr[0]!`).
 - [ ] `bun run test` clean, including `tokens.test.ts` and `catalog.test.tsx`.

@@ -1,4 +1,5 @@
 import { CatalogPage, Variant } from "@/components/catalog/CatalogPage";
+import { Spinner } from "@/components/primitives/Spinner";
 import { STATUS_COLORS, STATUS_DOT_COLORS, STATUS_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +19,6 @@ const inks = [
 	{ token: "ink", className: "text-ink" },
 	{ token: "ink-dimmed", className: "text-ink-dimmed" },
 	{ token: "ink-muted", className: "text-ink-muted" },
-	{ token: "ink-faint", className: "text-ink-faint" },
 ] as const;
 
 const lines = [
@@ -42,6 +42,15 @@ const logs = [
 
 const statuses = Object.keys(STATUS_LABELS) as (keyof typeof STATUS_LABELS)[];
 
+// Written out literally, same reason as everything else on this page. The row
+// values are the normative ladder in `_design/CONVENTIONS.md` §2.4.
+const sizeLadder = [
+	{ size: "xs", box: "h-6 px-2 text-xs", spinner: "xs" },
+	{ size: "sm", box: "h-7 px-2.5 text-xs", spinner: "sm" },
+	{ size: "md", box: "h-8 px-3 text-sm", spinner: "md" },
+	{ size: "lg", box: "h-9 px-4 text-sm", spinner: "lg" },
+] as const;
+
 function Swatch({ token, className }: { token: string; className: string }) {
 	return (
 		<div className="flex w-32 flex-col gap-1.5">
@@ -63,13 +72,20 @@ export default function FoundationCatalog() {
 				))}
 			</Variant>
 
-			<Variant label="Ink">
+			<Variant label="Ink — text roles, every one AA (4.5:1) on all five surfaces">
 				{inks.map(({ token, className }) => (
 					<div key={token} className="flex w-32 flex-col gap-1.5">
 						<p className={cn("text-sm", className)}>Aa Blok 42ms</p>
 						<code className="font-mono text-[10px] text-ink-muted">{token}</code>
 					</div>
 				))}
+			</Variant>
+
+			<Variant label="ink-faint — NOT a text role (3:1 only): rules, disabled glyphs, gridlines">
+				<div className="flex w-32 flex-col gap-1.5">
+					<div className="h-12 rounded-md border-2 border-ink-faint" />
+					<code className="font-mono text-[10px] text-ink-muted">ink-faint</code>
+				</div>
 			</Variant>
 
 			<Variant label="Lines">
@@ -87,14 +103,16 @@ export default function FoundationCatalog() {
 				))}
 			</Variant>
 
-			<Variant label="Status — swatch, chip and dot for all 14 statuses">
+			<Variant label="Status — two roles per status: the FILL (dot) and the INK (label)">
 				{statuses.map((status) => (
 					<div key={status} className="flex w-36 flex-col gap-1.5">
-						<span className={cn("inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs", STATUS_COLORS[status])}>
+						<span
+							className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs", STATUS_COLORS[status])}
+						>
 							<span className={cn("h-2 w-2 rounded-full", STATUS_DOT_COLORS[status])} />
 							{STATUS_LABELS[status]}
 						</span>
-						<code className="font-mono text-[10px] text-ink-muted">status-{status}</code>
+						<code className="font-mono text-[10px] text-ink-muted">status-{status}[-ink]</code>
 					</div>
 				))}
 			</Variant>
@@ -105,7 +123,21 @@ export default function FoundationCatalog() {
 				))}
 			</Variant>
 
-			<Variant label="Focus — tab into these, the ring is inset by design">
+			<Variant label="Size ladder — every sized primitive uses these four rows (CONVENTIONS §2.4)">
+				{sizeLadder.map(({ size, box, spinner }) => (
+					<div key={size} className="flex flex-col items-center gap-1.5">
+						<div
+							className={cn("inline-flex items-center gap-2 rounded-md border border-line bg-control text-ink", box)}
+						>
+							<Spinner size={spinner} label={null} />
+							Aa
+						</div>
+						<code className="font-mono text-[10px] text-ink-muted">{size}</code>
+					</div>
+				))}
+			</Variant>
+
+			<Variant label="Focus + disabled — tab into these; the ring is inset by design">
 				<button type="button" className="focus-ring rounded-md bg-control px-3 py-1.5 text-sm text-ink">
 					Focusable control
 				</button>
@@ -114,6 +146,13 @@ export default function FoundationCatalog() {
 					className="focus-ring rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent"
 				>
 					Accent control
+				</button>
+				<button
+					type="button"
+					disabled
+					className="focus-ring rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent disabled:pointer-events-none disabled:opacity-50"
+				>
+					Disabled
 				</button>
 			</Variant>
 
