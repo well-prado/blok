@@ -78,18 +78,22 @@ def run(ctx: Context, input: Input) -> Output:
     return Output(message=f"Hello, {input.name}!")
 `;
 
+// Keep in lock-step with what `--examples` actually copies: the repo-root
+// `workflows/json/*.json` bundle plus `triggers/http/src/workflows/*.ts`.
+// The 2026-07 purge (#671) deleted workflow-docs / db-manager / dashboard-gen
+// and their nodes but left this list advertising them — every new user's first
+// three clicks were 404s, the exact confusion #669 was about.
 const examples_url = `
 Examples:
-1- Open "workflow-docs.json" in your browser at http://localhost:4000/workflow-docs
-2- Open "db-manager.json" in your browser at http://localhost:4000/db-manager
-3- Open "dashboard-gen.json" in your browser at http://localhost:4000/dashboard-gen
-4- Open "countries.json" in your browser at http://localhost:4000/countries
-5- Open "chat.json" in your browser at http://localhost:4000/chat (set OPENROUTER_API_KEY first)
-6- Open "chat-memory.json" in your browser at http://localhost:4000/chat-memory (needs OPENROUTER_API_KEY + Redis at REDIS_URL)
-7- Webhook router: POST /webhooks/{stripe,github,linear} with signed bodies — set the matching *_WEBHOOK_SECRET env vars (needs --triggers webhook)
-8- LLM agent w/ tool calls: open http://localhost:4000/agent — model picks between get_weather and calculate tools (needs OPENROUTER_API_KEY + Redis)
-9- Worker fan-out: POST /fanout/jobs with body '{items:[...], tenantId?:"..."}' to enqueue N worker jobs (needs --triggers worker; BLOK_WORKER_ADAPTER=in-memory works single-process)
-10- Trigger references (NOT http): workflows/json/{cron-heartbeat,pubsub-on-order}.json demonstrate the cron and pubsub triggers; src/workflows/websocket/events/echo-demo.ts demonstrates websocket — read AGENTS.md "Choosing a trigger" to pick the right one by intent instead of defaulting to HTTP.
+1- Open "countries.json" in your browser at http://localhost:4000/countries
+2- Open "countries-vs-facts.json" in your browser at http://localhost:4000/countries-vs-facts
+3- Typed-handle DSL sample (@blokjs/core): src/workflows/http/countries-handle-dsl.ts — http://localhost:4000/countries-dsl
+4- Open "chat-page.json" in your browser at http://localhost:4000/chat (set OPENROUTER_API_KEY first)
+5- Open "chat-memory-page.json" in your browser at http://localhost:4000/chat-memory (needs OPENROUTER_API_KEY + Redis at REDIS_URL)
+6- Webhook router: POST /webhooks/{stripe,github,linear} with signed bodies — set the matching *_WEBHOOK_SECRET env vars (needs --triggers webhook)
+7- LLM agent w/ tool calls: open http://localhost:4000/agent — model picks between get_weather and calculate tools (needs OPENROUTER_API_KEY + Redis)
+8- Worker fan-out: POST /fanout/jobs with body '{items:[...], tenantId?:"..."}' to enqueue N worker jobs (needs --triggers worker; BLOK_WORKER_ADAPTER=in-memory works single-process)
+9- Trigger references (NOT http): workflows/json/{cron-heartbeat,pubsub-on-order}.json demonstrate the cron and pubsub triggers; src/workflows/websocket/events/echo-demo.ts demonstrates websocket — read AGENTS.md "Choosing a trigger" to pick the right one by intent instead of defaulting to HTTP.
 
 For more documentation, visit src/nodes/examples/README.md.
 `;

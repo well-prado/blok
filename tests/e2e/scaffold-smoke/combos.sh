@@ -27,11 +27,31 @@
 #   SMOKE_SKIP_BUILD=1   skip the monorepo `bun run build` (assume dist current)
 #   SMOKE_COMBOS=a,b     limit to these row names
 #   SMOKE_KEEP=1         keep the scaffolded projects for inspection
+#
+# npm_config_install_links=true is exported below — see the comment there for
+# why the `file:` deps must not be symlinked.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 CLI="$ROOT/packages/cli/dist/index.js"
 WORKDIR=""
+
+# `create --local` writes the @blokjs/* deps as `file:` paths into this repo,
+# which npm installs as SYMLINKS by default. TypeScript then follows those
+# symlinks and resolves `hono` from the REPO's node_modules for the linked
+# packages, while the scaffold's own copied sources resolve the `hono` that npm
+# just installed under the project — two copies of the same lib, so
+# `Hono<BlankEnv, …>` stops being assignable to `Hono<any, any, any>` (TS2345)
+# the moment those versions differ. The repo pins hono through a frozen
+# bun.lock while the scaffold's `^4.11.7` floats, so an upstream hono release
+# silently reddened every sse/websocket/mcp/webhook row (HonoRequest gained/lost
+# an internal symbol between the two).
+#
+# install-links packs and installs `file:` deps as real directories instead, so
+# the generated project resolves exactly ONE hono. It also makes this lane more
+# faithful to the thing it exists to test — a user's plain `npm install` of the
+# published packages, which never symlinks anything.
+export npm_config_install_links=true
 
 log() { echo "[combos] $*"; }
 

@@ -1,0 +1,437 @@
+name: CI
+
+# The single CI workflow. Runs ONLY on merge to main — pull requests do not
+# trigger it. Run the gates locally before merging (`bun run ci:fast`,
+# `bun run ci:packaging`, `bash tests/e2e/scaffold-smoke/combos.sh`); main is
+# where they're enforced.
+#
+# Consolidated from six separate workflows (integration, cross-runtime,
+# packaging, scaffold-smoke, no-dollar-proxy, no-legacy-expr) so a merge
+# produces ONE run with one status instead of six. The jobs below are those
+# workflows verbatim — same steps, same coverage, one checkout+install apiece.
+#
+# The old per-workflow `paths-ignore` filters (skip the heavy lanes for
+# docs-only changes) are deliberately NOT carried over: GitHub has no native
+# per-job path filter, and the two grep guards deliberately ran with no filter
+# at all because docs are exactly where a stray legacy example creeps back in.
+# Actions minutes are free on this public repo and a full run is ~7 minutes
+# wall-clock, so "always run everything" is simpler than reproducing six
+# different filters, at no real cost.
+#
+# `post-publish-smoke.yml` stays separate — it's dispatch/release-triggered and
+# belongs to the publish lifecycle, not to merges.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit lands on main — don't leave a
+# superseded SHA building 7 Docker images.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ==========================================================================
+  # Lint + proto contract + authoring-surface guards + unit/integration tests.
+  # Was integration.yml, plus the two standalone grep guards folded in (the
+  # $-proxy check already ran here; the legacy-expression one now sits beside
+  # it instead of owning a whole workflow for a `git grep`).
+  # ==========================================================================
+  test:
+    name: Lint, guards + tests (real brokers + backends)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # Full history + tags: `buf breaking` compares the proto against the last
+      # release tag, which a shallow checkout doesn't have.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Pinned: bun.lock + bunfig linker are generated/validated with this
+      # version; "latest" drifted the linker default mid-flight (1.3.14).
+      # Keep in lock-step with the other jobs below.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: bun run lint:check
+
+      # The `$` proxy authoring sugar is deleted (#689) and `js/ctx....` /
+      # `${ctx....}` are wire format, not an authoring API (#690, ADR 0001).
+      # Both are plain `git grep`s — they run before anything expensive so a
+      # stray old-style example fails fast.
+      - name: No $ proxy check
+        run: bash scripts/check-no-dollar-proxy.sh
+
+      - name: No legacy expression check
+        run: bash scripts/check-no-legacy-expr.sh
+
+      # Single source of truth for the gRPC contract: every SDK + runner copy of
+      # runtime.proto must match the canonical proto/blok/runtime/v1/runtime.proto.
+      # A drifted copy silently breaks one runtime — fail the merge instead.
+      - name: Proto drift check
+        run: bun run proto:check
+
+      # Drift check above only proves the SDK copies are byte-identical to the
+      # canonical proto — it says nothing about the wire contract itself. This
+      # is the semantic gate: renumbering, deleting or retyping a field breaks
+      # every already-published SDK (#739).
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.72.0
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Proto breaking-change check
+        run: make proto-breaking
+
+      # sdks/go had no formatting gate, so drift accumulated silently on main
+      # (#749). Own toolchain setup, same pattern as the buf step above.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Go fmt check (sdks/go)
+        run: bun run check:go-fmt
+
+      # Sibling of the packaging gate (#687/#696, dist-under-Node): proves
+      # every publishable package's SOURCE entry also imports cleanly under
+      # Bun's per-file loader. MUST run after a workspace build: source
+      # imports sibling workspace packages, whose exports maps point at
+      # dist/ — untracked, so a fresh CI checkout has none until built (#702).
+      - name: Build workspace packages (dist for source-import resolution)
+        run: bun run build
+
+      - name: Source-under-Bun import check
+        run: bun run check:source-imports
+
+      - name: Bring up test fixtures
+        run: docker compose -f infra/testing/docker-compose.yml up -d
+          postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator
+
+      - name: Wait for services to be healthy
+        run: |
+          set -e
+          deadline=$(( $(date +%s) + 120 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            unhealthy=$(docker compose -f infra/testing/docker-compose.yml ps --format json | \
+              grep -E '"Health":\s*"(starting|unhealthy)"' | wc -l | tr -d ' ' || echo "0")
+            if [ "$unhealthy" = "0" ]; then
+              echo "All services healthy."
+              exit 0
+            fi
+            echo "Waiting for $unhealthy service(s)..."
+            sleep 3
+          done
+          echo "Healthcheck timeout — printing status:"
+          docker compose -f infra/testing/docker-compose.yml ps
+          exit 1
+
+      - name: Build all workspace packages
+        # `bun run build` = nx run-many -t build + scripts/fix-esm-extensions.ts.
+        # nx builds every package's dist/ before tests run (trigger-http's
+        # index.ts imports @blokjs/trigger-websocket / -sse / -webhook, and
+        # blokctl/nodes have similar transitive imports, so each downstream
+        # package fails to resolve sibling entries without it). The fix step
+        # then makes those dists loadable by Node's ESM loader (#687) — always
+        # go through `bun run build`, never bare `nx run-many -t build`.
+        run: bun run build
+
+      # #708 — the AI-facing skills doc's TypeScript samples must still compile
+      # against @blokjs/core. Placed after the build because it typechecks
+      # against the built .d.ts. Catches the regression vector that matters
+      # here: a change to the authoring surface silently invalidating what every
+      # agent is taught.
+      - name: Skill-doc samples typecheck
+        run: bun run check:skill-samples
+
+      # Informational only — never gates the merge (continue-on-error). Prints
+      # current coverage for the framework packages that have honest, current-
+      # state thresholds in their vitest config. Ratchet those floors up as
+      # coverage improves. worker/pubsub coverage belongs in a broker lane.
+      - name: Coverage report (non-gating)
+        continue-on-error: true
+        run: bunx nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage
+
+      - name: Run integration tests
+        env:
+          BLOK_INTEGRATION_REDIS: "1"
+          REDIS_HOST: localhost
+          REDIS_PORT: "6380"
+          BLOK_INTEGRATION_NATS_SERVERS: nats://localhost:4223
+          BLOK_INTEGRATION_KAFKA_BROKERS: localhost:9094
+          BLOK_INTEGRATION_RABBITMQ_URL: amqp://blok:blok_test@localhost:5673
+          BLOK_INTEGRATION_POSTGRES_URL: postgres://blok:blok_test@localhost:5433/blok_test
+          # LocalStack credentials — any value satisfies the SDK's signer.
+          BLOK_INTEGRATION_SQS_ENDPOINT: http://localhost:4567
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          # GCP Pub/Sub emulator (Phase 2.1 #5).
+          BLOK_INTEGRATION_GCP_PUBSUB_ENDPOINT: localhost:8086
+          PUBSUB_EMULATOR_HOST: localhost:8086
+          PUBSUB_PROJECT_ID: blok-test
+          GOOGLE_CLOUD_PROJECT: blok-test
+        run: bun run test
+
+      - name: Print compose logs on failure
+        if: failure()
+        run: docker compose -f infra/testing/docker-compose.yml logs --tail=200
+
+      - name: Tear down test fixtures
+        if: always()
+        run: docker compose -f infra/testing/docker-compose.yml down -v
+
+  # ==========================================================================
+  # Was packaging.yml — the gate that makes #687 unrepresentable.
+  #
+  # Everything in this repo runs under Bun, whose resolver accepts specifiers
+  # Node's ESM loader rejects — so `@blokjs/*` shipped for months with
+  # extensionless relative imports in dist/, and NOTHING caught it: `npx
+  # blokctl`, vitest, plain `node` and Next.js SSR consumers were all broken
+  # while every suite stayed green. Pack the tarballs, install them into a
+  # throwaway project, load every exports subpath with real Node. Never against
+  # the workspace — its symlinks and Bun's resolver mask the failure.
+  # Mirrored locally by `bun run ci:packaging`.
+  # ==========================================================================
+  packaging:
+    name: Packed artifacts import under Node LTS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      # The whole point: the CONSUMER side runs on Node, not Bun.
+      - name: Set up Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `bun run build` = nx run-many -t build + scripts/fix-esm-extensions.ts.
+      - name: Build all workspace packages
+        run: bun run build
+
+      # Fails if any emitted file still carries an extensionless relative
+      # import — a fast, precise signal ahead of the slower packed run below.
+      - name: dist/ is Node-ESM clean
+        run: bun run scripts/fix-esm-extensions.ts --check
+
+      - name: Packed-artifact gate
+        run: bun run check:packaging
+
+  # ==========================================================================
+  # Was scaffold-smoke.yml, job 1. The "scaffold → boot → curl" gate: create a
+  # real project with the local blokctl (every trigger + all 7 language
+  # runtimes + --examples), boot it under `blokctl dev`, curl every endpoint.
+  # Catches the class unit tests miss — a shipped scaffold whose
+  # trigger/runtime/helper-node silently doesn't work.
+  # BLOK_SMOKE_REQUIRE_ALL=1 fails the run if any applicable check fails, so a
+  # trigger/runtime that stops booting can't pass as a skip.
+  #
+  # All 7 runtimes boot inside ONE scaffolded project under one `blokctl dev` —
+  # that's the shipped user experience this gate protects (found e.g. the Rust
+  # sidecar compiling its gRPC server out, and the java-launcher spawn
+  # mismatch). Per-language SDK unit/conformance coverage is the cross-runtime
+  # job below.
+  # ==========================================================================
+  scaffold-smoke:
+    name: Scaffold → boot → curl (all triggers + 7 runtimes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    # NATS backs the pubsub trigger's produce → consume loop.
+    services:
+      nats:
+        image: nats:2.10
+        ports:
+          - 4222:4222
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The scaffold vendors the Rust SDK into a fresh dir each run; run.sh
+      # points CARGO_TARGET_DIR at ~/.cache/blok-smoke/cargo-target so this
+      # cache turns the cold multi-minute tonic/axum build into an incremental one.
+      - name: Cache cargo (registry + shared smoke target dir)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/blok-smoke/cargo-target
+          key: smoke-cargo-${{ runner.os }}-${{ hashFiles('sdks/rust/Cargo.toml') }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: sdks/java/pom.xml
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      # PHP's gRPC server is RoadRunner — a separate binary the CLI boots via
+      # `rr serve` (grpcStartCmd). get-binary downloads the SERVER binary to
+      # /usr/local/bin; then remove the composer package so its `rr` shim
+      # ("RoadRunner CLI", no `serve` command) can't shadow the real binary
+      # on $PATH — setup-php puts the composer bin dir ahead of /usr/local/bin.
+      - name: Install RoadRunner
+        run: |
+          composer global require spiral/roadrunner-cli --quiet
+          "$(composer global config bin-dir --absolute --quiet)/rr" get-binary --location /usr/local/bin --quiet
+          composer global remove spiral/roadrunner-cli --quiet
+          command -v rr
+          rr --version
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Scaffold smoke (7 runtimes, all applicable triggers, all required)
+        env:
+          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
+          NATS_SERVERS: localhost:4222
+          BLOK_SMOKE_REQUIRE_ALL: '1'
+        run: bash tests/e2e/scaffold-smoke/run.sh
+
+  # ==========================================================================
+  # Was scaffold-smoke.yml, job 2. The job above builds ONE maximal scaffold
+  # with bun. This one walks the trigger COMBINATIONS on plain npm/Node — the
+  # two axes that hid all three #741 defects: npm's resolver (EOVERRIDE on
+  # @hono/node-server), the "primary trigger" path for kinds that are never
+  # first in the maximal set (cron/mcp/webhook shipped no .env.example), and
+  # the generated project's own `tsc` exit code (dist still emits on a type
+  # error). No language toolchains needed, so it stays cheap.
+  # ==========================================================================
+  scaffold-combos:
+    name: Scaffold combos → npm install → build → boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Scaffold combo matrix
+        run: bash tests/e2e/scaffold-smoke/combos.sh
+
+  # ==========================================================================
+  # Was cross-runtime.yml. Builds all 7 SDK runtimes (Go/Rust/Java/C#/PHP/Ruby/
+  # Python3) in gRPC mode and drives them through the runner's own
+  # GrpcRuntimeAdapter. This is the only lane that exercises the polyglot
+  # runtimes end-to-end — without it they silently rot (the whole reason this
+  # gate exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if any single runtime
+  # fails to come up, so a broken Dockerfile can't pass as a skip.
+  # ==========================================================================
+  cross-runtime:
+    name: Cross-runtime chain over gRPC (7 languages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The harness imports GrpcRuntimeAdapter from @blokjs/runner.
+      - name: Build @blokjs/runner
+        run: bunx nx build @blokjs/runner
+
+      # Bake a scaffolded `e2e-user` node into each SDK build context (real
+      # codegen for compiled langs, BLOK_NODES_DIR node-dir for dynamic) so the
+      # harness proves user-authored nodes are discoverable + executable too.
+      - name: Prepare user-node build contexts
+        run: bun tests/e2e/cross-runtime/prepare-usernodes.ts
+
+      # ADR 0014 — the directory docker-compose bind-mounts into every container
+      # at /blok-blobs. Created before `up` so the daemon binds a directory, not
+      # a root-owned one it would create itself.
+      - name: Create the shared claim-check directory
+        run: mkdir -p tests/e2e/cross-runtime/.blobs
+
+      - name: Build + start the 7 SDK gRPC runtimes
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
+
+      - name: Run cross-runtime gRPC harness (all 7 required, user nodes + claim-check asserted)
+        env:
+          BLOK_E2E_REQUIRE_ALL: "1"
+          BLOK_E2E_USERNODES: "1"
+          # Host side of the shared mount — turns on the harness's claim-check
+          # lane (oversized inputs offloaded to a blob, resolved by each SDK).
+          BLOK_BLOB_DIR: ${{ github.workspace }}/tests/e2e/cross-runtime/.blobs
+        run: bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
+
+      - name: Print runtime logs on failure
+        if: failure()
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml down -v
