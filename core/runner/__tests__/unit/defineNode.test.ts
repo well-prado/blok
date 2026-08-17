@@ -648,6 +648,38 @@ describe("defineNode", () => {
 			expect(result.error?.context.name).toBe("error-node");
 		});
 
+		// #893 — the rebuilt GlobalError must keep the ORIGINAL error reachable
+		// on `cause`, or `retry.nonRetryableErrorNames` can never match a
+		// defineNode node's `Error.name` / wrapped cause. `context.name` keeps
+		// carrying the NODE name (HTTP trigger `origin`, BlokError `node`).
+		it("keeps the original error on `cause` while context.name stays the node name", async () => {
+			class Boom extends Error {
+				constructor(message: string) {
+					super(message);
+					this.name = "Boom";
+				}
+			}
+			const inner = new Boom("inner");
+			const node = defineNode({
+				name: "cause-node",
+				description: "Throws a wrapped error",
+				input: z.object({}),
+				output: z.object({}),
+				async execute() {
+					throw new Error("outer", { cause: inner });
+				},
+			});
+
+			const result = (await node.handle(createTestContext(), {})) as IBlokResponse;
+
+			expect(result.error?.context.name).toBe("cause-node");
+			expect(result.error?.context.message).toBe("outer");
+			expect((result.error as Error & { cause?: unknown }).cause).toBeInstanceOf(Error);
+			expect(((result.error as Error & { cause?: Error }).cause as Error & { cause?: unknown }).cause).toBe(inner);
+			// Native `{ cause }` semantics — invisible to own-enumerable-key serializers.
+			expect(Object.propertyIsEnumerable.call(result.error, "cause")).toBe(false);
+		});
+
 		it("should include stack trace in error", async () => {
 			const node = defineNode({
 				name: "stack-node",
