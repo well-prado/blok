@@ -83,6 +83,25 @@ interface HttpTriggerLike {
 	addPreCatchAllHook(cb: () => void | Promise<void>): void;
 }
 
+/**
+ * The slice of Hono's route-registration surface this trigger uses (#886).
+ *
+ * The constructor CANNOT take `Hono<any, any, any>`: hono's public types
+ * include a `unique symbol` (`HonoRequest[GET_MATCH_RESULT]`), so two copies of
+ * hono on disk are two NOMINALLY distinct `Hono` types even at identical
+ * versions. A generated project builds `new Hono()` from its own
+ * `node_modules/hono` — whenever this package's `hono` resolves elsewhere
+ * (every `blokctl create --local` scaffold, since the `file:` link makes tsc
+ * resolve through the monorepo's realpath; likewise any npm tree where hono
+ * ends up nested rather than hoisted) `tsc` rejects the argument outright.
+ * Structural at the boundary, same treatment `HttpTriggerLike` already gets;
+ * the field below stays `Hono` so the internals keep their real types.
+ */
+interface HonoAppLike {
+	// biome-ignore lint/suspicious/noExplicitAny: must accept any concrete Hono's overloaded handler signatures
+	get(path: string, ...handlers: any[]): unknown;
+}
+
 /** Internal per-stream state. */
 interface StreamState {
 	id: string;
@@ -152,10 +171,10 @@ export default class SSETrigger extends TriggerBase {
 	 *                     win Hono's first-match dispatch over the
 	 *                     legacy workflow-name catch-all.
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: matches `app` field's any generic
-	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike) {
+	constructor(app: HonoAppLike, httpTrigger?: HttpTriggerLike) {
 		super();
-		this.app = app;
+		// biome-ignore lint/suspicious/noExplicitAny: see HonoAppLike — structural in, real Hono out
+		this.app = app as Hono<any, any, any>;
 		this.httpTrigger = httpTrigger ?? null;
 		_setActiveSSETrigger(this);
 	}
