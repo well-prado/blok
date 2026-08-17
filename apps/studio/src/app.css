@@ -1,39 +1,81 @@
 @import "tailwindcss";
 
-@theme {
-	/* ── Brand (Direction A · Linear-grade Operator) ────────────── */
-	/* Real Blok green from docs/assets/logo/dark.svg. The wordmark
-	   icon, primary CTA, focus ring, completed-status, and the live-
-	   feed pulse are the only places this color appears — keep it
-	   one accent, not a palette. */
+/* ═══════════════════════════════════════════════════════════════
+   TOKEN LAYER (E1-T2). Three layers, and the indirection is the
+   point: components name ONLY layer 2/3. Light mode later is then a
+   scoped re-map of layer 2 and nothing else. See
+   `_design/CONVENTIONS.md` §3 for the vocabulary and the rules.
+
+   Every block is `@theme static`, which is the documented guarantee
+   that a variable is emitted whether or not a utility referencing it
+   survives the class scan. Two sets of tokens here have no utility
+   keeping them alive: layer 1, which layer 2 reaches only through
+   `var()`, and the status colors that JS chart code reads as
+   `var(--color-status-*)`. MEASURED at tailwind 4.3.3: plain `@theme`
+   emits them too — the built CSS is byte-identical either way — so
+   `static` is currently a no-op and costs nothing. It stays because
+   the alternative is depending on undocumented behaviour for a
+   failure that would be production-build-only and silently
+   transparent. Do not "simplify" it away without re-measuring.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Layer 1 · raw ramps ─── never name these in a component ───── */
+@theme static {
+	/* Real Blok green from docs/assets/logo/dark.svg. 500/600 are the
+	   brand-spec values; 950 is the on-green ink already hard-coded 21×
+	   as `text-[#00231b]`; 300/400 are interpolations (see PR notes) —
+	   deliberately NOT neon, per brand-spec "no #3FFFA0 glow versions". */
+	--color-blok-green-300: #7ee2a8;
+	--color-blok-green-400: #4dd98a;
 	--color-blok-green-500: #2bcd71;
 	--color-blok-green-600: #22a85b;
+	--color-blok-green-950: #00231b;
 
-	/* ── Surface ladder ─────────────────────────────────────────── */
-	/* 4-step neutral so dark-mode depth comes from layering, not
-	   shadows (shadows look bad on dark UI). Tailwind v4 maps these
-	   `--color-*` tokens to `bg-canvas`, `bg-raised`, `bg-overlay`,
-	   `bg-hover` (and matching `text-` / `border-` utilities). */
-	--color-canvas: #0b0b0d;
-	--color-raised: #111113;
-	--color-overlay: #18181b;
-	--color-hover: #1f1f23;
-	--color-zinc-925: #111113; /* preserved alias for legacy refs */
+	/* Neutral ramp. Values track the zinc scale the app already ships so
+	   the token migration is a rename, not a reskin; 850-1000 are the
+	   four surface values that were already here. */
+	--color-graphite-100: #f4f4f5;
+	--color-graphite-200: #e4e4e7;
+	--color-graphite-400: #a1a1aa;
+	--color-graphite-500: #71717a;
+	--color-graphite-600: #52525b;
+	--color-graphite-700: #3f3f46;
+	--color-graphite-800: #27272a;
+	--color-graphite-850: #1f1f23;
+	--color-graphite-900: #18181b;
+	--color-graphite-950: #111113;
+	--color-graphite-1000: #0b0b0d;
+}
 
-	/* ── Status palette (preserved) ─────────────────────────────── */
-	/* Tightened `completed` to the brand green so every successful
-	   run shares the brand DNA without changing existing semantics. */
-	--color-status-pending: #71717a;
-	--color-status-running: #3b82f6;
-	--color-status-completed: #2bcd71;
-	--color-status-failed: #ef4444;
-	--color-status-cancelled: #a855f7;
-	--color-status-skipped: #6b7280;
+/* ── Layer 2 · semantic ─── this is the component vocabulary ───── */
+@theme static {
+	/* Surfaces, deepest → most raised. Dark-mode depth comes from
+	   layering, not shadows. canvas/raised/overlay/hover keep their
+	   existing names and values — 125 call sites depend on that. */
+	--color-canvas: var(--color-graphite-1000);
+	--color-raised: var(--color-graphite-950);
+	--color-overlay: var(--color-graphite-900);
+	--color-hover: var(--color-graphite-850);
+	--color-control: var(--color-graphite-800);
 
-	--color-log-debug: #71717a;
-	--color-log-info: #3b82f6;
-	--color-log-warn: #f59e0b;
-	--color-log-error: #ef4444;
+	/* Ink, strongest → faintest. */
+	--color-ink-strong: var(--color-graphite-100);
+	--color-ink: var(--color-graphite-200);
+	--color-ink-dimmed: var(--color-graphite-400);
+	--color-ink-muted: var(--color-graphite-500);
+	--color-ink-faint: var(--color-graphite-600);
+
+	/* Lines. */
+	--color-line: var(--color-graphite-800);
+	--color-line-strong: var(--color-graphite-700);
+	--color-line-bright: var(--color-graphite-600);
+
+	/* Accent — one accent, not a palette. `on-accent` is the ink that
+	   goes ON an accent fill. */
+	--color-accent: var(--color-blok-green-500);
+	--color-accent-hover: var(--color-blok-green-600);
+	--color-on-accent: var(--color-blok-green-950);
+	--color-focus-ring: var(--color-blok-green-400);
 
 	/* ── Type ────────────────────────────────────────────────────── */
 	/* JetBrains Mono is for IDs / durations / payloads. Newsreader
@@ -42,6 +84,67 @@
 	   page H1s, big stat numbers — and nowhere else. */
 	--font-mono: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
 	--font-display: "Newsreader", Georgia, "Times New Roman", serif;
+}
+
+/* ── Layer 3 · status ─── literal hex on purpose ───────────────── */
+/* Kept out of the ramp so a future neutral/brand retune cannot move a
+   status color by accident. The first six are byte-identical to the
+   battle-tested palette in `_design/brand-spec.md`; the rest complete
+   the `WorkflowRunStatus | NodeRunStatus` union, which had 8 members
+   with no token at all. */
+@theme static {
+	--color-status-pending: #71717a;
+	--color-status-running: #3b82f6;
+	--color-status-completed: #2bcd71;
+	--color-status-failed: #ef4444;
+	--color-status-cancelled: #a855f7;
+	--color-status-skipped: #6b7280;
+	--color-status-paused: #f59e0b;
+	--color-status-throttled: #f59e0b;
+	--color-status-delayed: #eab308;
+	--color-status-expired: #6b7280;
+	--color-status-debounced: #06b6d4;
+	--color-status-queued: #84cc16;
+	--color-status-crashed: #dc2626;
+	--color-status-timedOut: #f97316;
+	--color-status-warning: #f59e0b;
+
+	--color-log-debug: #71717a;
+	--color-log-info: #3b82f6;
+	--color-log-warn: #f59e0b;
+	--color-log-error: #ef4444;
+}
+
+@layer base {
+	:root {
+		/* Studio declared no color-scheme, so native scrollbars, form
+		   controls and autofill rendered light chrome on a black app. */
+		color-scheme: dark;
+	}
+
+	body {
+		background-color: var(--color-canvas);
+		color: var(--color-ink);
+	}
+
+	/* Tailwind v4 defaults border-color to `currentcolor`. */
+	*,
+	::after,
+	::before,
+	::backdrop {
+		border-color: var(--color-line);
+	}
+}
+
+/* The one focus treatment. `outline-offset` is INSET on purpose: a
+   0-offset outline is clipped by `overflow:hidden` scroll ancestors,
+   of which Studio has many. */
+@utility focus-ring {
+	&:focus-visible {
+		outline: 1px solid var(--color-focus-ring);
+		outline-offset: -1px;
+		border-radius: 5px;
+	}
 }
 
 /* Custom scrollbar */

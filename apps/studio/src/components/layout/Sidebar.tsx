@@ -7,6 +7,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
 	Activity,
 	BarChart3,
+	Blocks,
 	CalendarClock,
 	FileText,
 	GitBranch,
@@ -43,6 +44,9 @@ export function Sidebar() {
 		{ to: "/deployments", label: "Deployments", icon: GitBranch },
 		{ to: "/metrics", label: "Metrics", icon: BarChart3 },
 		{ to: "/webhooks", label: "Webhooks", icon: Webhook },
+		// Design-system catalog. Ships to end users (Studio's dist is bundled into
+		// @blokjs/cli) but it is lazily chunked, so it costs nothing until visited.
+		{ to: "/catalog", label: "Catalog", icon: Blocks },
 	] as const;
 
 	return (

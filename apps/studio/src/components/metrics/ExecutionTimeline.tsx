@@ -58,8 +58,23 @@ export function ExecutionTimeline({ data }: Props) {
 					itemStyle={{ color: "#d4d4d8" }}
 				/>
 				<Legend wrapperStyle={{ fontSize: "11px", color: "#71717a" }} />
-				<Bar dataKey="completed" name="Completed" fill="#22c55e" opacity={0.7} radius={[2, 2, 0, 0]} stackId="status" />
-				<Bar dataKey="failed" name="Failed" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} stackId="status" />
+				{/* Token, not a copy — `#22c55e` here was the pre-brand green. */}
+				<Bar
+					dataKey="completed"
+					name="Completed"
+					fill="var(--color-status-completed)"
+					opacity={0.7}
+					radius={[2, 2, 0, 0]}
+					stackId="status"
+				/>
+				<Bar
+					dataKey="failed"
+					name="Failed"
+					fill="var(--color-status-failed)"
+					opacity={0.7}
+					radius={[2, 2, 0, 0]}
+					stackId="status"
+				/>
 			</BarChart>
 		</ResponsiveContainer>
 	);

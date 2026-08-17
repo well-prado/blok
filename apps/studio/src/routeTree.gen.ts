@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
+import { Route as CatalogRouteRouteImport } from "./routes/catalog/route"
 import { Route as DashboardsRouteImport } from "./routes/dashboards"
 import { Route as DeploymentsRouteImport } from "./routes/deployments"
 import { Route as LogsRouteImport } from "./routes/logs"
@@ -17,7 +18,10 @@ import { Route as MetricsRouteImport } from "./routes/metrics"
 import { Route as QueuesRouteImport } from "./routes/queues"
 import { Route as ScheduledRouteImport } from "./routes/scheduled"
 import { Route as SettingsRouteImport } from "./routes/settings"
+import { Route as StorybookRouteImport } from "./routes/storybook"
 import { Route as WebhooksRouteImport } from "./routes/webhooks"
+import { Route as CatalogIndexRouteImport } from "./routes/catalog/index"
+import { Route as CatalogPageRouteImport } from "./routes/catalog/$page"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
 import { Route as RunsRunIdRouteImport } from "./routes/runs/$runId"
 import { Route as RunsDiffRouteImport } from "./routes/runs/diff"
@@ -26,6 +30,11 @@ import { Route as WorkflowsNameRouteImport } from "./routes/workflows/$name"
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CatalogRouteRoute = CatalogRouteRouteImport.update({
+  id: "/catalog",
+  path: "/catalog",
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardsRoute = DashboardsRouteImport.update({
@@ -63,10 +72,25 @@ const SettingsRoute = SettingsRouteImport.update({
   path: "/settings",
   getParentRoute: () => rootRouteImport,
 } as any)
+const StorybookRoute = StorybookRouteImport.update({
+  id: "/storybook",
+  path: "/storybook",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WebhooksRoute = WebhooksRouteImport.update({
   id: "/webhooks",
   path: "/webhooks",
   getParentRoute: () => rootRouteImport,
+} as any)
+const CatalogIndexRoute = CatalogIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => CatalogRouteRoute,
+} as any)
+const CatalogPageRoute = CatalogPageRouteImport.update({
+  id: "/$page",
+  path: "/$page",
+  getParentRoute: () => CatalogRouteRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: "/runs/",
@@ -91,6 +115,7 @@ const WorkflowsNameRoute = WorkflowsNameRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/catalog": typeof CatalogRouteRouteWithChildren
   "/dashboards": typeof DashboardsRoute
   "/deployments": typeof DeploymentsRoute
   "/logs": typeof LogsRoute
@@ -98,10 +123,13 @@ export interface FileRoutesByFullPath {
   "/queues": typeof QueuesRoute
   "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
+  "/storybook": typeof StorybookRoute
   "/webhooks": typeof WebhooksRoute
+  "/catalog/$page": typeof CatalogPageRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
+  "/catalog/": typeof CatalogIndexRoute
   "/runs/": typeof RunsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -113,15 +141,19 @@ export interface FileRoutesByTo {
   "/queues": typeof QueuesRoute
   "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
+  "/storybook": typeof StorybookRoute
   "/webhooks": typeof WebhooksRoute
+  "/catalog/$page": typeof CatalogPageRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
+  "/catalog": typeof CatalogIndexRoute
   "/runs": typeof RunsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/catalog": typeof CatalogRouteRouteWithChildren
   "/dashboards": typeof DashboardsRoute
   "/deployments": typeof DeploymentsRoute
   "/logs": typeof LogsRoute
@@ -129,16 +161,20 @@ export interface FileRoutesById {
   "/queues": typeof QueuesRoute
   "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
+  "/storybook": typeof StorybookRoute
   "/webhooks": typeof WebhooksRoute
+  "/catalog/$page": typeof CatalogPageRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
+  "/catalog/": typeof CatalogIndexRoute
   "/runs/": typeof RunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
+    | "/catalog"
     | "/dashboards"
     | "/deployments"
     | "/logs"
@@ -146,10 +182,13 @@ export interface FileRouteTypes {
     | "/queues"
     | "/scheduled"
     | "/settings"
+    | "/storybook"
     | "/webhooks"
+    | "/catalog/$page"
     | "/runs/$runId"
     | "/runs/diff"
     | "/workflows/$name"
+    | "/catalog/"
     | "/runs/"
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -161,14 +200,18 @@ export interface FileRouteTypes {
     | "/queues"
     | "/scheduled"
     | "/settings"
+    | "/storybook"
     | "/webhooks"
+    | "/catalog/$page"
     | "/runs/$runId"
     | "/runs/diff"
     | "/workflows/$name"
+    | "/catalog"
     | "/runs"
   id:
     | "__root__"
     | "/"
+    | "/catalog"
     | "/dashboards"
     | "/deployments"
     | "/logs"
@@ -176,15 +219,19 @@ export interface FileRouteTypes {
     | "/queues"
     | "/scheduled"
     | "/settings"
+    | "/storybook"
     | "/webhooks"
+    | "/catalog/$page"
     | "/runs/$runId"
     | "/runs/diff"
     | "/workflows/$name"
+    | "/catalog/"
     | "/runs/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CatalogRouteRoute: typeof CatalogRouteRouteWithChildren
   DashboardsRoute: typeof DashboardsRoute
   DeploymentsRoute: typeof DeploymentsRoute
   LogsRoute: typeof LogsRoute
@@ -192,6 +239,7 @@ export interface RootRouteChildren {
   QueuesRoute: typeof QueuesRoute
   ScheduledRoute: typeof ScheduledRoute
   SettingsRoute: typeof SettingsRoute
+  StorybookRoute: typeof StorybookRoute
   WebhooksRoute: typeof WebhooksRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   RunsDiffRoute: typeof RunsDiffRoute
@@ -206,6 +254,13 @@ declare module "@tanstack/react-router" {
       path: "/"
       fullPath: "/"
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/catalog": {
+      id: "/catalog"
+      path: "/catalog"
+      fullPath: "/catalog"
+      preLoaderRoute: typeof CatalogRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/dashboards": {
@@ -257,12 +312,33 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/storybook": {
+      id: "/storybook"
+      path: "/storybook"
+      fullPath: "/storybook"
+      preLoaderRoute: typeof StorybookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/webhooks": {
       id: "/webhooks"
       path: "/webhooks"
       fullPath: "/webhooks"
       preLoaderRoute: typeof WebhooksRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/catalog/": {
+      id: "/catalog/"
+      path: "/"
+      fullPath: "/catalog/"
+      preLoaderRoute: typeof CatalogIndexRouteImport
+      parentRoute: typeof CatalogRouteRoute
+    }
+    "/catalog/$page": {
+      id: "/catalog/$page"
+      path: "/$page"
+      fullPath: "/catalog/$page"
+      preLoaderRoute: typeof CatalogPageRouteImport
+      parentRoute: typeof CatalogRouteRoute
     }
     "/runs/": {
       id: "/runs/"
@@ -295,8 +371,23 @@ declare module "@tanstack/react-router" {
   }
 }
 
+interface CatalogRouteRouteChildren {
+  CatalogPageRoute: typeof CatalogPageRoute
+  CatalogIndexRoute: typeof CatalogIndexRoute
+}
+
+const CatalogRouteRouteChildren: CatalogRouteRouteChildren = {
+  CatalogPageRoute: CatalogPageRoute,
+  CatalogIndexRoute: CatalogIndexRoute,
+}
+
+const CatalogRouteRouteWithChildren = CatalogRouteRoute._addFileChildren(
+  CatalogRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CatalogRouteRoute: CatalogRouteRouteWithChildren,
   DashboardsRoute: DashboardsRoute,
   DeploymentsRoute: DeploymentsRoute,
   LogsRoute: LogsRoute,
@@ -304,6 +395,7 @@ const rootRouteChildren: RootRouteChildren = {
   QueuesRoute: QueuesRoute,
   ScheduledRoute: ScheduledRoute,
   SettingsRoute: SettingsRoute,
+  StorybookRoute: StorybookRoute,
   WebhooksRoute: WebhooksRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   RunsDiffRoute: RunsDiffRoute,

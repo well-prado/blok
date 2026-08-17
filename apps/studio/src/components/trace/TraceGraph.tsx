@@ -118,9 +118,11 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 					nodeStrokeColor="#3f3f46"
 					nodeColor={(node) => {
 						const status = (node.data as { node: NodeRun }).node.status;
-						if (status === "completed") return "#22c55e";
-						if (status === "running") return "#3b82f6";
-						if (status === "failed") return "#ef4444";
+						// Read the token, not a copy of it — this branch had drifted to the
+						// pre-brand green (#22c55e) while the token layer said #2bcd71.
+						if (status === "completed") return "var(--color-status-completed)";
+						if (status === "running") return "var(--color-status-running)";
+						if (status === "failed") return "var(--color-status-failed)";
 						return "#52525b";
 					}}
 					maskColor="rgba(0,0,0,0.6)"

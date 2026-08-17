@@ -24,6 +24,13 @@ export default defineConfig({
 					"tanstack-router": ["@tanstack/react-router"],
 					"tanstack-query": ["@tanstack/react-query"],
 					"tanstack-table": ["@tanstack/react-table"],
+					radix: [
+						"@radix-ui/react-tooltip",
+						"@radix-ui/react-dialog",
+						"@radix-ui/react-popover",
+						"@radix-ui/react-dropdown-menu",
+						"@radix-ui/react-switch",
+					],
 					graph: ["@xyflow/react", "dagre"],
 					charts: ["recharts"],
 					icons: ["lucide-react"],
