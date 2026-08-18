@@ -10,6 +10,10 @@ vi.mock("@/hooks/useFilterEngine", () => ({
 }));
 
 // Mock the TimePeriodFilter so it doesn't complain about icons or popovers
+vi.mock("./SavedFilterSelect", () => ({
+	SavedFilterSelect: () => <div data-testid="saved-filter-select">SavedFilterSelect</div>,
+}));
+
 vi.mock("./TimePeriodFilter", () => ({
 	TimePeriodFilter: ({ onChange }: Record<string, unknown> & { onChange: (val: unknown) => void }) => (
 		<button type="button" data-testid="time-period" onClick={() => onChange({ type: "relative", value: "1h" })}>
