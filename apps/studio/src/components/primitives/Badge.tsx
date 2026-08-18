@@ -2,10 +2,13 @@ import { STATUS_COLORS, STATUS_DOT_COLORS, STATUS_LABELS } from "@/lib/constants
 import { cn } from "@/lib/utils";
 import type { NodeRunStatus, WorkflowRunStatus } from "@/types";
 
+// The shared emphasis vocabulary (§2.10) — the same three names Button ships,
+// applied to a chip: `primary` is the accent-emphasis badge, `secondary` the
+// default control fill, `minimal` the transparent outline.
 const variants = {
-	default: "border border-line bg-control text-ink",
-	accent: "border border-accent/30 bg-accent/10 text-accent",
-	outline: "border border-line-strong bg-transparent text-ink-dimmed",
+	primary: "border border-accent/30 bg-accent/10 text-accent",
+	secondary: "border border-line bg-control text-ink",
+	minimal: "border border-line-strong bg-transparent text-ink-dimmed",
 } as const;
 
 // The size ladder (`_design/CONVENTIONS.md` §2.4), rows `xs`/`sm`/`md`. `lg` is
@@ -22,7 +25,7 @@ type BadgeProps = React.ComponentPropsWithRef<"span"> & {
 	size?: keyof typeof sizes;
 };
 
-export function Badge({ className, variant = "default", size = "md", ...props }: BadgeProps) {
+export function Badge({ className, variant = "secondary", size = "md", ...props }: BadgeProps) {
 	return (
 		<span
 			className={cn(

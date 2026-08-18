@@ -17,7 +17,7 @@ describe("Spinner", () => {
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 
-	it("applies the size variant", () => {
+	it("applies the size", () => {
 		const { container } = render(<Spinner size="lg" />);
 		// No semantic signal distinguishes sizes, so exactly one discriminating class.
 		expect(container.querySelector("svg")).toHaveClass("h-5");

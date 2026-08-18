@@ -14,10 +14,10 @@ export default function FeedbackCatalog() {
 			title="Feedback"
 			description="Badges, callouts, toasts and empty states. Statuses read their colors from STATUS_COLORS / STATUS_DOT_COLORS, which already carry the fill/ink role split."
 		>
-			<Variant label="Badge — variants">
-				<Badge>default</Badge>
-				<Badge variant="accent">accent</Badge>
-				<Badge variant="outline">outline</Badge>
+			<Variant label="Badge — variants (the shared emphasis vocabulary, §2.10)">
+				<Badge variant="primary">primary</Badge>
+				<Badge>secondary (default)</Badge>
+				<Badge variant="minimal">minimal</Badge>
 			</Variant>
 
 			<Variant label="Badge — sizes (ladder rows xs / sm / md; lg omitted)">
@@ -32,37 +32,37 @@ export default function FeedbackCatalog() {
 				))}
 			</Variant>
 
-			<Variant label="Callout — variants">
+			<Variant label="Callout — tones (semantic status, §2.10)">
 				<div className="flex w-full flex-col gap-3">
-					<Callout variant="info">Runs older than 30 days are archived.</Callout>
-					<Callout variant="success">Deployment finished in 4.2s.</Callout>
-					<Callout variant="warning">This workflow has no retry policy.</Callout>
-					<Callout variant="error">3 steps failed on the last run.</Callout>
-					<Callout variant="neutral">Nothing has run in this environment yet.</Callout>
+					<Callout tone="info">Runs older than 30 days are archived.</Callout>
+					<Callout tone="success">Deployment finished in 4.2s.</Callout>
+					<Callout tone="warning">This workflow has no retry policy.</Callout>
+					<Callout tone="error">3 steps failed on the last run.</Callout>
+					<Callout tone="neutral">Nothing has run in this environment yet.</Callout>
 				</div>
 			</Variant>
 
 			<Variant label="Callout — with a title, and dismissible (tab to the ✕ for the focus ring)">
 				<div className="flex w-full flex-col gap-3">
-					<Callout variant="warning" title="Rate limited">
+					<Callout tone="warning" title="Rate limited">
 						The HTTP trigger returned 429 twice. The next attempt is in 30s.
 					</Callout>
-					<Callout variant="info" title="New runtime available" onDismiss={() => {}}>
+					<Callout tone="info" title="New runtime available" onDismiss={() => {}}>
 						Python 3.12 is now supported for node execution.
 					</Callout>
-					<Callout variant="error" onDismiss={() => {}}>
+					<Callout tone="error" onDismiss={() => {}}>
 						Could not reach the scheduler.
 					</Callout>
 				</div>
 			</Variant>
 
-			<Variant label="Toast — variants, plain / actionable / dismissible (tab through them)">
+			<Variant label="Toast — tones, plain / actionable / dismissible (tab through them)">
 				<div className="flex w-full max-w-sm flex-col gap-2">
-					<Toast variant="success" title="Run finished" message="wf-orders · 1.24s" />
-					<Toast variant="error" title="Run failed" message="validate-order threw" onDismiss={() => {}} />
-					<Toast variant="warning" title="Queue backing up" message="428 pending" onDismiss={() => {}} />
+					<Toast tone="success" title="Run finished" message="wf-orders · 1.24s" />
+					<Toast tone="error" title="Run failed" message="validate-order threw" onDismiss={() => {}} />
+					<Toast tone="warning" title="Queue backing up" message="428 pending" onDismiss={() => {}} />
 					<Toast
-						variant="info"
+						tone="info"
 						title="Run started"
 						message="wf-orders · click to open"
 						onSelect={() => {}}

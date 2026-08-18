@@ -11,7 +11,7 @@ describe("DropdownMenu", () => {
 				trigger={<button type="button">Actions</button>}
 				items={[
 					{ label: "Replay", onSelect: () => {} },
-					{ label: "Delete", onSelect: () => {}, tone: "danger", disabled: true },
+					{ label: "Delete", onSelect: () => {}, tone: "error", disabled: true },
 				]}
 			/>,
 		);

@@ -7,14 +7,14 @@ import { describe, expect, it, vi } from "vitest";
 // app-wired container (zustand store + router) and belongs to an integration test.
 describe("Toast", () => {
 	it("announces itself as a live region carrying the message", () => {
-		render(<Toast variant="success" title="Run finished" message="wf-orders · 1.2s" />);
+		render(<Toast tone="success" title="Run finished" message="wf-orders · 1.2s" />);
 		const toast = screen.getByRole("status");
 		expect(toast).toHaveTextContent("Run finished");
 		expect(toast).toHaveTextContent("wf-orders · 1.2s");
 	});
 
-	it("hides the variant glyph from assistive tech", () => {
-		const { container } = render(<Toast variant="error" title="Run failed" />);
+	it("hides the tone glyph from assistive tech", () => {
+		const { container } = render(<Toast tone="error" title="Run failed" />);
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 

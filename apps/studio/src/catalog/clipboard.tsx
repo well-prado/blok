@@ -13,42 +13,42 @@ export default function ClipboardCatalog() {
 			description="Copy affordances and id truncation. Every copy announces itself politely; a missing clipboard API (insecure context) lands in a visible failure state instead of doing nothing."
 		>
 			<Variant label="CopyButton — variants (md, icon-only)">
-				<CopyButton value={RUN_ID} variant="ghost" />
-				<CopyButton value={RUN_ID} variant="solid" />
+				<CopyButton value={RUN_ID} variant="minimal" />
+				<CopyButton value={RUN_ID} variant="secondary" />
 			</Variant>
 
 			<Variant label="CopyButton — sizes (icon-only, square)">
-				<CopyButton value={RUN_ID} variant="solid" size="xs" />
-				<CopyButton value={RUN_ID} variant="solid" size="sm" />
-				<CopyButton value={RUN_ID} variant="solid" size="md" />
+				<CopyButton value={RUN_ID} variant="secondary" size="xs" />
+				<CopyButton value={RUN_ID} variant="secondary" size="sm" />
+				<CopyButton value={RUN_ID} variant="secondary" size="md" />
 			</Variant>
 
 			<Variant label="CopyButton — sizes (with a label)">
-				<CopyButton value={RUN_ID} variant="solid" size="xs">
+				<CopyButton value={RUN_ID} variant="secondary" size="xs">
 					Copy id
 				</CopyButton>
-				<CopyButton value={RUN_ID} variant="solid" size="sm">
+				<CopyButton value={RUN_ID} variant="secondary" size="sm">
 					Copy id
 				</CopyButton>
-				<CopyButton value={RUN_ID} variant="solid" size="md">
+				<CopyButton value={RUN_ID} variant="secondary" size="md">
 					Copy id
 				</CopyButton>
-				<CopyButton value={RUN_ID} variant="ghost" size="md">
+				<CopyButton value={RUN_ID} variant="minimal" size="md">
 					Copy id
 				</CopyButton>
 			</Variant>
 
 			<Variant label="CopyButton — disabled">
-				<CopyButton value={RUN_ID} variant="solid" disabled />
-				<CopyButton value={RUN_ID} variant="ghost" disabled />
-				<CopyButton value={RUN_ID} variant="solid" disabled>
+				<CopyButton value={RUN_ID} variant="secondary" disabled />
+				<CopyButton value={RUN_ID} variant="minimal" disabled />
+				<CopyButton value={RUN_ID} variant="secondary" disabled>
 					Copy id
 				</CopyButton>
 			</Variant>
 
 			<Variant label="CopyButton — focus (tab into this row; the ring is inset)">
-				<CopyButton value={RUN_ID} variant="solid" />
-				<CopyButton value={RUN_ID} variant="ghost">
+				<CopyButton value={RUN_ID} variant="secondary" />
+				<CopyButton value={RUN_ID} variant="minimal">
 					Tab here next
 				</CopyButton>
 			</Variant>

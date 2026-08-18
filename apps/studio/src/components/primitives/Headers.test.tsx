@@ -17,9 +17,9 @@ describe("Headers", () => {
 		expect(screen.getByRole("heading", { level: 3, name: "Attempt 1" })).toBeInTheDocument();
 	});
 
-	it("applies the tone variant", () => {
-		render(<Header2 tone="dimmed">Timeline</Header2>);
-		// No semantic signal distinguishes tones, so exactly one discriminating class.
+	it("applies the ink axis", () => {
+		render(<Header2 ink="dimmed">Timeline</Header2>);
+		// No semantic signal distinguishes inks, so exactly one discriminating class.
 		expect(screen.getByRole("heading", { level: 2 })).toHaveClass("text-ink-dimmed");
 	});
 

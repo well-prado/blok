@@ -9,7 +9,7 @@ describe("Badge", () => {
 	});
 
 	it("applies the variant", () => {
-		render(<Badge variant="accent">beta</Badge>);
+		render(<Badge variant="primary">beta</Badge>);
 		// Nothing semantic distinguishes badge variants, so exactly one class.
 		expect(screen.getByText("beta")).toHaveClass("bg-accent/10");
 	});

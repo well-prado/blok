@@ -14,7 +14,6 @@ import {
 } from "@/components/primitives/Dialog";
 import { ExportMenu, SimpleDropdownMenu } from "@/components/primitives/DropdownMenu";
 import { SimplePopover } from "@/components/primitives/Popover";
-import { Resizable } from "@/components/primitives/Resizable";
 import { SimpleSheet } from "@/components/primitives/Sheet";
 import { cn } from "@/lib/utils";
 import { RotateCcw, Trash2 } from "lucide-react";
@@ -33,7 +32,7 @@ export default function OverlaysCatalog() {
 	return (
 		<CatalogPage
 			title="Overlays"
-			description="Dialog, Sheet, Popover and DropdownMenu are Radix wrappers — focus trap, focus return, Escape and scroll lock come from the library and are not disabled. Accordion is native <details>; Resizable is a hand-rolled splitter (see its notes below)."
+			description="Dialog, Sheet, Popover and DropdownMenu are Radix wrappers — focus trap, focus return, Escape and scroll lock come from the library and are not disabled. Accordion is native <details>. Every floating surface obeys the §2.9 elevation ladder."
 		>
 			<Variant label="Dialog — compound parts">
 				<Dialog>
@@ -130,7 +129,7 @@ export default function OverlaysCatalog() {
 					items={[
 						{ label: "Replay run", onSelect: () => {}, icon: RotateCcw },
 						{ label: "Cancel run", onSelect: () => {}, disabled: true },
-						{ label: "Delete run", onSelect: () => {}, icon: Trash2, tone: "danger" },
+						{ label: "Delete run", onSelect: () => {}, icon: Trash2, tone: "error" },
 					]}
 				/>
 				<ExportMenu size="sm" onExportJson={() => {}} onExportCsv={() => {}} />
@@ -157,36 +156,6 @@ export default function OverlaysCatalog() {
 					<AccordionItem title="Attempt 2">…and vice versa.</AccordionItem>
 					<AccordionItem title="Attempt 3">No state, no effect, no library.</AccordionItem>
 				</Accordion>
-			</Variant>
-
-			<Variant label="Resizable — horizontal. Tab to the handle: arrows move 2%, Shift+arrow 10%, Home/End jump">
-				<Resizable
-					className="h-40 w-full rounded-md border border-line bg-canvas"
-					defaultSize={35}
-					min={20}
-					max={80}
-					label="Resize trace panes"
-					first={<p className="p-3 text-sm text-ink-dimmed">Trace tree</p>}
-					second={<p className="p-3 text-sm text-ink-dimmed">Span detail</p>}
-				/>
-			</Variant>
-
-			<Variant label="Resizable — vertical, and nested (two panes only, so nesting is the three-way split)">
-				<Resizable
-					className="h-56 w-full rounded-md border border-line bg-canvas"
-					direction="vertical"
-					defaultSize={45}
-					label="Resize log panes"
-					first={<p className="p-3 text-sm text-ink-dimmed">Logs</p>}
-					second={
-						<Resizable
-							className="h-full"
-							label="Resize payload panes"
-							first={<p className="p-3 text-sm text-ink-dimmed">Payload</p>}
-							second={<p className="p-3 text-sm text-ink-dimmed">Output</p>}
-						/>
-					}
-				/>
 			</Variant>
 		</CatalogPage>
 	);

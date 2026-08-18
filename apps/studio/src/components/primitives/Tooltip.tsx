@@ -27,9 +27,13 @@ import type * as React from "react";
 // or on top of another raised surface (`contrast`), where `overlay` would
 // disappear into its host. Multi-slot (§2.2) so the title inside a definition
 // tooltip stays legible on both.
+//
+// `border-line` on both, per the §2.9 elevation ladder: one border token for
+// every floating surface. The elevation difference is carried by the shadow
+// tier (`shadow-md` — transient), not by a second border token.
 const variants = {
-	default: "bg-overlay border-line-strong text-ink",
-	contrast: "bg-control border-line-bright text-ink-strong",
+	default: "bg-overlay border-line text-ink",
+	contrast: "bg-control border-line text-ink-strong",
 } as const;
 
 export type TooltipVariant = keyof typeof variants;
@@ -143,7 +147,9 @@ type InfoIconTooltipProps = Omit<SimpleTooltipProps, "button" | "asChild" | "but
 
 /** The "what is this field?" affordance: an icon-only trigger that still has a name. */
 export function InfoIconTooltip({
-	size = "sm",
+	// `md`, per §2.4: it is the mandated default for every sized primitive, and an
+	// info icon has to line up with the `md` control it annotates.
+	size = "md",
 	label = "More information",
 	iconClassName,
 	...props

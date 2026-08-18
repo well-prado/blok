@@ -29,8 +29,14 @@ export function MiddleTruncate({ text, maxLength = 24, className, ...props }: Mi
 	return (
 		<span className={cn("font-mono", className)} {...props}>
 			<span aria-hidden="true">{middleTruncate(text, maxLength)}</span>
-			{/* Screen readers get the whole id; sighted users get the ellipsis. */}
-			<span className="sr-only">{text}</span>
+			{/* Screen readers get the whole id; sighted users get the ellipsis.
+			    `select-none` is load-bearing, not cosmetic: without it BOTH strings are
+			    selectable, so a mouse-select + Cmd+C over this element copies them
+			    concatenated ("run_d1…a2c4erun_d1f7dca71dbe8f3a2c4e") — i.e. it ships a
+			    corrupt id. `user-select: none` removes the node from Chrome's visual
+			    selection without touching the accessibility tree, so screen readers
+			    still read the full value. */}
+			<span className="sr-only select-none">{text}</span>
 		</span>
 	);
 }

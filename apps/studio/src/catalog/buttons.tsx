@@ -3,7 +3,7 @@ import { Button, type ButtonSize, type ButtonVariant, LinkButton } from "@/compo
 import { useRouter } from "@tanstack/react-router";
 import { ArrowRight, Play, Plus, Trash2 } from "lucide-react";
 
-const allVariants: ButtonVariant[] = ["primary", "secondary", "minimal", "danger"];
+const allVariants: ButtonVariant[] = ["primary", "secondary", "minimal", "error"];
 const allSizes: ButtonSize[] = ["xs", "sm", "md", "lg"];
 
 export default function ButtonsCatalog() {
@@ -40,7 +40,7 @@ export default function ButtonsCatalog() {
 			<Variant label="Icon slots">
 				<Button leadingIcon={<Plus />}>Leading</Button>
 				<Button trailingIcon={<ArrowRight />}>Trailing</Button>
-				<Button variant="danger" leadingIcon={<Trash2 />} trailingIcon={<ArrowRight />}>
+				<Button variant="error" leadingIcon={<Trash2 />} trailingIcon={<ArrowRight />}>
 					Both
 				</Button>
 			</Variant>

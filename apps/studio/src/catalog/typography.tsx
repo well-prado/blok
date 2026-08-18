@@ -8,7 +8,7 @@ export default function TypographyCatalog() {
 	return (
 		<CatalogPage
 			title="Typography"
-			description="Headings, body copy, links and inline code. Every one ships zero margin — pass `spacing` to opt into the variant's bottom margin."
+			description="Headings, body copy, links and inline code. Scale is `size` (§2.4a's text ladder), color is `ink` — never `variant`, never `tone` (§2.10). Every one ships zero margin: pass `spacing` to opt into the size's bottom margin."
 		>
 			{/*
 			 * The Header1 specimen carries `aria-level={2}`: the page's real <h1> is
@@ -24,41 +24,39 @@ export default function TypographyCatalog() {
 				</div>
 			</Variant>
 
-			<Variant label="Heading tones">
+			<Variant label="Heading ink — the text-color axis (§2.10), not tone">
 				<div className="flex flex-col gap-3">
-					<Header2 tone="strong">tone=&quot;strong&quot; (default)</Header2>
-					<Header2 tone="dimmed">tone=&quot;dimmed&quot;</Header2>
+					<Header2 ink="strong">ink=&quot;strong&quot; (default)</Header2>
+					<Header2 ink="dimmed">ink=&quot;dimmed&quot;</Header2>
 				</div>
 			</Variant>
 
-			<Variant label="Paragraph sizes">
+			<Variant label="Paragraph sizes — §2.4a's text ladder">
 				<div className="flex flex-col gap-3">
-					<Paragraph variant="base">base · 16px — long-form copy, empty states.</Paragraph>
-					<Paragraph variant="small">small · 14px — the Studio default.</Paragraph>
-					<Paragraph variant="extra-small">extra-small · 12px — table captions, metadata.</Paragraph>
+					<Paragraph size="lg">lg · 16px — long-form copy, empty states.</Paragraph>
+					<Paragraph size="md">md · 14px — the Studio default.</Paragraph>
+					<Paragraph size="sm">sm · 12px — table captions, metadata.</Paragraph>
 				</div>
 			</Variant>
 
-			<Variant label="Paragraph tones — every one AA on all five surfaces">
+			<Variant label="Paragraph ink — every one AA on all five surfaces">
 				<div className="flex flex-col gap-3">
-					<Paragraph tone="strong">tone=&quot;strong&quot; — ink-strong</Paragraph>
-					<Paragraph tone="ink">tone=&quot;ink&quot; (default) — ink</Paragraph>
-					<Paragraph tone="dimmed">tone=&quot;dimmed&quot; — ink-dimmed</Paragraph>
-					<Paragraph tone="muted">
-						tone=&quot;muted&quot; — ink-muted, the faintest ink that still holds words
-					</Paragraph>
+					<Paragraph ink="strong">ink=&quot;strong&quot; — ink-strong</Paragraph>
+					<Paragraph ink="default">ink=&quot;default&quot; (default) — ink</Paragraph>
+					<Paragraph ink="dimmed">ink=&quot;dimmed&quot; — ink-dimmed</Paragraph>
+					<Paragraph ink="muted">ink=&quot;muted&quot; — ink-muted, the faintest ink that still holds words</Paragraph>
 				</div>
 			</Variant>
 
 			<Variant label="Spacing — opt-in, off by default">
 				<div className="flex flex-col">
-					<Paragraph variant="base">No spacing: these two lines sit flush.</Paragraph>
-					<Paragraph variant="base">No spacing: these two lines sit flush.</Paragraph>
-					<Paragraph variant="base" spacing>
-						spacing: adds the variant&apos;s mb-3.
+					<Paragraph size="lg">No spacing: these two lines sit flush.</Paragraph>
+					<Paragraph size="lg">No spacing: these two lines sit flush.</Paragraph>
+					<Paragraph size="lg" spacing>
+						spacing: adds the size&apos;s mb-3.
 					</Paragraph>
-					<Paragraph variant="base" spacing>
-						spacing: adds the variant&apos;s mb-3.
+					<Paragraph size="lg" spacing>
+						spacing: adds the size&apos;s mb-3.
 					</Paragraph>
 				</div>
 			</Variant>
@@ -84,7 +82,7 @@ export default function TypographyCatalog() {
 							the repo
 						</TextLink>
 					</Paragraph>
-					<Paragraph variant="extra-small">
+					<Paragraph size="sm">
 						A link inherits the size of the text around it: <TextLink href="/logs">this one is 12px</TextLink>.
 					</Paragraph>
 				</div>
@@ -102,14 +100,14 @@ export default function TypographyCatalog() {
 
 			<Variant label="InlineCode">
 				<div className="flex flex-col gap-3">
-					<Paragraph variant="base">
-						base · <InlineCode variant="base">ctx.state.validate</InlineCode>
+					<Paragraph size="lg">
+						lg · <InlineCode size="lg">ctx.state.validate</InlineCode>
 					</Paragraph>
-					<Paragraph variant="small">
-						small · <InlineCode>run_01H8Z3K9</InlineCode>
+					<Paragraph size="md">
+						md · <InlineCode>run_01H8Z3K9</InlineCode>
 					</Paragraph>
-					<Paragraph variant="extra-small">
-						extra-small · <InlineCode variant="extra-small">BLOK_ENV=production</InlineCode>
+					<Paragraph size="sm">
+						sm · <InlineCode size="sm">BLOK_ENV=production</InlineCode>
 					</Paragraph>
 				</div>
 			</Variant>

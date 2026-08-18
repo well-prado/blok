@@ -24,7 +24,9 @@ const sizes = {
 	lg: "h-5 w-5",
 } as const;
 
-const tones = {
+// `ink`, not `tone` (§2.10): this is glyph color, and `tone` means semantic
+// status everywhere else in the system.
+const inks = {
 	default: "text-ink-muted",
 	accent: "text-accent",
 	inherit: "text-current",
@@ -32,16 +34,16 @@ const tones = {
 
 type SpinnerProps = Omit<React.ComponentPropsWithRef<"output">, "children"> & {
 	size?: keyof typeof sizes;
-	tone?: keyof typeof tones;
+	ink?: keyof typeof inks;
 	/** Accessible name. Pass `null` when an adjacent visible label already says it. */
 	label?: string | null;
 };
 
 // `<output>` rather than `<span role="status">`: same role, native element, and
 // it is what keeps this file free of a `biome-ignore lint/a11y/*` suppression.
-export function Spinner({ className, size = "md", tone = "default", label = "Loading", ...props }: SpinnerProps) {
+export function Spinner({ className, size = "md", ink = "default", label = "Loading", ...props }: SpinnerProps) {
 	return (
-		<output className={cn("inline-flex items-center", tones[tone], className)} {...props}>
+		<output className={cn("inline-flex items-center", inks[ink], className)} {...props}>
 			<Loader2 aria-hidden="true" className={cn("animate-spin", sizes[size])} />
 			{label !== null && <span className="sr-only">{label}</span>}
 		</output>

@@ -55,12 +55,17 @@ const sizes = {
 	md: { box: "h-8 gap-2 px-3 text-sm", square: "h-8 w-8 p-0", icon: "h-4 w-4" },
 } as const;
 
+// The shared emphasis vocabulary (§2.10). `secondary` is the bordered control
+// fill, `minimal` the transparent one — the same two rows Button ships under the
+// same two names. `primary` is deliberately absent: a copy affordance never leads.
 const variants = {
-	solid: "border border-line bg-control text-ink hover:bg-hover",
-	ghost: "border border-transparent text-ink-dimmed hover:bg-hover hover:text-ink",
+	secondary: "border border-line bg-control text-ink hover:bg-hover",
+	minimal: "border border-transparent text-ink-dimmed hover:bg-hover hover:text-ink",
 } as const;
 
-const tones: Record<CopyState, string> = {
+// State → ink. Named `stateInk`, not `tones`: `tone` is reserved for the semantic
+// status axis (§2.10) and this table is text color.
+const stateInk: Record<CopyState, string> = {
 	idle: "",
 	copied: "text-status-completed-ink",
 	error: "text-status-failed-ink",
@@ -76,7 +81,7 @@ type CopyButtonProps = Omit<React.ComponentPropsWithRef<"button">, "value"> & {
 
 export function CopyButton({
 	value,
-	variant = "ghost",
+	variant = "minimal",
 	size = "md",
 	className,
 	children,
@@ -102,7 +107,7 @@ export function CopyButton({
 					"disabled:opacity-50 disabled:pointer-events-none",
 					variants[variant],
 					children === undefined ? square : box,
-					tones[state],
+					stateInk[state],
 					className,
 				)}
 			>

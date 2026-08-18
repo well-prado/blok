@@ -9,8 +9,8 @@ describe("InlineCode", () => {
 		expect(screen.getByText("run_01H8").tagName).toBe("CODE");
 	});
 
-	it("applies the size variant", () => {
-		render(<InlineCode variant="base">run_01H8</InlineCode>);
+	it("applies the size", () => {
+		render(<InlineCode size="lg">run_01H8</InlineCode>);
 		expect(screen.getByText("run_01H8")).toHaveClass("text-base");
 	});
 

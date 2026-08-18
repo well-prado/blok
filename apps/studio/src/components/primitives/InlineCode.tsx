@@ -1,26 +1,26 @@
 import { cn } from "@/lib/utils";
 
 /**
- * A run id, a node ref, an env var — mono text inside a bordered chip. Sizes are
- * type-scale names shared with `Paragraph`, so `<InlineCode variant="small">`
- * sits on the same line as a `small` paragraph without changing its height.
+ * A run id, a node ref, an env var — mono text inside a bordered chip. It takes
+ * §2.4a's TEXT ladder, the same rows as `Paragraph`, so `<InlineCode size="md">`
+ * sits on the same line as an `md` paragraph without changing its height.
  */
-const variants = {
-	base: "text-base",
-	small: "text-sm",
-	"extra-small": "text-xs",
+const sizes = {
+	sm: "text-xs",
+	md: "text-sm",
+	lg: "text-base",
 } as const;
 
 type InlineCodeProps = React.ComponentPropsWithRef<"code"> & {
-	variant?: keyof typeof variants;
+	size?: keyof typeof sizes;
 };
 
-export function InlineCode({ className, variant = "small", ...props }: InlineCodeProps) {
+export function InlineCode({ className, size = "md", ...props }: InlineCodeProps) {
 	return (
 		<code
 			className={cn(
 				"rounded-md border border-line bg-control px-1 py-0.5 font-mono text-ink-strong",
-				variants[variant],
+				sizes[size],
 				className,
 			)}
 			{...props}

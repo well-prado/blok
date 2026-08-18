@@ -4,7 +4,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const variants = {
+// SEMANTIC STATUS, so the prop is `tone`, not `variant` (§2.10). A toast has no
+// emphasis ladder. `neutral` is omitted: a statusless toast has nothing to say.
+const tones = {
 	success: { Icon: CheckCircle2, glyph: "text-status-completed-ink" },
 	error: { Icon: XCircle, glyph: "text-status-failed-ink" },
 	warning: { Icon: AlertTriangle, glyph: "text-status-warning-ink" },
@@ -12,7 +14,7 @@ const variants = {
 } as const;
 
 type ToastProps = Omit<React.ComponentPropsWithRef<"output">, "children" | "title"> & {
-	variant?: keyof typeof variants;
+	tone?: keyof typeof tones;
 	title: React.ReactNode;
 	message?: React.ReactNode;
 	/** Renders the title as a button. Used for "jump to the run this is about". */
@@ -29,11 +31,12 @@ type ToastProps = Omit<React.ComponentPropsWithRef<"output">, "children" | "titl
  * suppression for it; here the clickable thing is a real `<button>`, so the
  * toast is keyboard-reachable and the suppression is gone.
  */
-export function Toast({ className, variant = "info", title, message, onSelect, onDismiss, ...props }: ToastProps) {
-	const { Icon, glyph } = variants[variant];
+export function Toast({ className, tone = "info", title, message, onSelect, onDismiss, ...props }: ToastProps) {
+	const { Icon, glyph } = tones[tone];
 	return (
 		<output
 			className={cn(
+				// §2.9 elevation: self-dismissing, does not block the page → `floating`.
 				"flex w-full items-start gap-2 rounded-md border border-line bg-overlay p-3 shadow-lg",
 				"animate-slide-in",
 				className,
@@ -110,7 +113,7 @@ export function NotificationToast() {
 				return (
 					<Toast
 						key={id}
-						variant={toast.type}
+						tone={toast.type}
 						title={toast.title}
 						message={toast.message}
 						onDismiss={() => dismiss(id)}

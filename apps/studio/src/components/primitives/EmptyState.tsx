@@ -1,5 +1,5 @@
+import { useCopy } from "@/components/primitives/CopyButton";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
 
 /**
  * Folded in from `shared/EmptyState.tsx` (§6): same name, same props, same
@@ -79,34 +79,38 @@ export function EmptyState({
 	);
 }
 
+// One clipboard state machine in the design system, not two: `useCopy` already
+// handles the missing-`navigator.clipboard` case (insecure context), carries an
+// `error` state, and supplies the `aria-live` announcement. The bare boolean this
+// used to hold silently swallowed a failed copy and announced nothing.
+const copyLabels = { idle: "copy", copied: "copied", error: "copy failed" } as const;
+
+const copyStyles = {
+	idle: "border-line text-ink-dimmed hover:bg-hover hover:text-ink-strong",
+	copied: "border-accent/30 bg-accent/15 text-accent",
+	error: "border-status-failed/30 bg-status-failed/10 text-status-failed-ink",
+} as const;
+
 function Snippet({ snippet }: { snippet: CodeSnippet }) {
-	const [copied, setCopied] = useState(false);
-	const onCopy = async () => {
-		try {
-			await navigator.clipboard.writeText(snippet.code);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 1500);
-		} catch {
-			// Clipboard API can be denied (permissions) or absent (no-https
-			// preview). Fall back gracefully — better than throwing.
-		}
-	};
+	const { copy, state, announcement } = useCopy(snippet.code);
 	return (
 		<div className="overflow-hidden rounded-md border border-line bg-overlay text-left">
 			<div className="flex items-center gap-2 border-line border-b bg-canvas/40 px-3 py-1.5">
 				<span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-muted">{snippet.lang}</span>
 				<button
 					type="button"
-					onClick={onCopy}
+					onClick={() => void copy()}
 					className={cn(
 						"focus-ring ml-auto rounded-md border px-2 py-0.5 font-mono text-[10.5px] transition-colors",
-						copied
-							? "border-accent/30 bg-accent/15 text-accent"
-							: "border-line text-ink-dimmed hover:bg-hover hover:text-ink-strong",
+						copyStyles[state],
 					)}
 				>
-					{copied ? "copied" : "copy"}
+					{copyLabels[state]}
 				</button>
+				{/* Outside the button: inside, this would join its accessible name. */}
+				<output aria-live="polite" className="sr-only">
+					{announcement}
+				</output>
 			</div>
 			<pre className="overflow-x-auto whitespace-pre px-4 py-3 font-mono text-[11.5px] text-ink-strong leading-relaxed">
 				{snippet.code}

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 describe("Callout", () => {
 	it("renders its title and body", () => {
 		render(
-			<Callout variant="warning" title="Rate limited">
+			<Callout tone="warning" title="Rate limited">
 				Retrying in 30s.
 			</Callout>,
 		);
@@ -14,8 +14,8 @@ describe("Callout", () => {
 		expect(screen.getByText("Retrying in 30s.")).toBeInTheDocument();
 	});
 
-	it("hides the variant glyph from assistive tech", () => {
-		const { container } = render(<Callout variant="error">Boom</Callout>);
+	it("hides the tone glyph from assistive tech", () => {
+		const { container } = render(<Callout tone="error">Boom</Callout>);
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 

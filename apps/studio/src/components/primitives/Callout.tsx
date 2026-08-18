@@ -6,8 +6,11 @@ import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react"
  * banner), `Alert.tsx` (dismissible) and `InfoPanel.tsx` (titled panel). They
  * differ only by "has a title" and "has a dismiss button", so this is one
  * component with two optional props. See the PR notes for the ticket delta.
+ *
+ * The axis here is SEMANTIC STATUS, so the prop is `tone`, not `variant` (§2.10).
+ * A Callout has no emphasis ladder — every one of them is the same box.
  */
-const variants = {
+const tones = {
 	info: { box: "border-status-running/30 bg-status-running/10", glyph: "text-status-running-ink", Icon: Info },
 	success: {
 		box: "border-status-completed/30 bg-status-completed/10",
@@ -24,17 +27,17 @@ const variants = {
 } as const;
 
 type CalloutProps = Omit<React.ComponentPropsWithRef<"div">, "title"> & {
-	variant?: keyof typeof variants;
+	tone?: keyof typeof tones;
 	/** Optional heading above the body. */
 	title?: React.ReactNode;
-	/** Replaces the variant's default glyph. Pass your own `aria-hidden` icon. */
+	/** Replaces the tone's default glyph. Pass your own `aria-hidden` icon. */
 	icon?: React.ReactNode;
 	/** When given, renders a dismiss button. Owning the open state is the caller's job. */
 	onDismiss?: () => void;
 };
 
-export function Callout({ className, variant = "info", title, icon, onDismiss, children, ...props }: CalloutProps) {
-	const { box, glyph, Icon } = variants[variant];
+export function Callout({ className, tone = "info", title, icon, onDismiss, children, ...props }: CalloutProps) {
+	const { box, glyph, Icon } = tones[tone];
 	return (
 		<div className={cn("flex w-full items-start gap-2.5 rounded-md border p-3", box, className)} {...props}>
 			{icon ?? <Icon aria-hidden="true" className={cn("mt-0.5 h-4 w-4 shrink-0", glyph)} />}

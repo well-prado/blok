@@ -29,7 +29,9 @@ const variants = {
 		root: "bg-transparent text-ink-dimmed hover:bg-hover hover:text-ink",
 		shortcut: "border-line-bright text-ink-muted",
 	},
-	danger: {
+	// `error`, not `danger` — §2.10: red has ONE name across the design system,
+	// and it is the one `Callout`, `Toast` and `useCopy` already use.
+	error: {
 		root: "border border-status-failed/30 bg-status-failed/10 text-status-failed-ink hover:bg-status-failed/20",
 		shortcut: "border-status-failed/40 text-status-failed-ink",
 	},
@@ -64,10 +66,11 @@ type ButtonContentProps = {
 	leadingIcon?: ReactNode;
 	trailingIcon?: ReactNode;
 	/**
-	 * Presentational key hint rendered INSIDE the button, e.g. "⌘K". Studio has
-	 * no hotkey subsystem (CONVENTIONS §12.2 rules one out of this task), so this
-	 * renders the cap and binds nothing — which is why it is `aria-hidden`:
-	 * announcing a shortcut that does not fire would be a lie.
+	 * PRESENTATIONAL ONLY — this renders the key cap and BINDS NOTHING. Studio has
+	 * no hotkey subsystem and CONVENTIONS §12.2 keeps it out of E1, so passing
+	 * `shortcut="⌘K"` does not make ⌘K do anything; the caller still has to wire
+	 * the key itself. That is also why the cap is `aria-hidden`: announcing a
+	 * shortcut that does not fire would be a lie.
 	 */
 	shortcut?: string;
 	isLoading?: boolean;
@@ -86,7 +89,7 @@ export function ButtonContent({
 	return (
 		<>
 			{isLoading ? (
-				<Spinner size={sizes[size].spinner} tone="inherit" label={null} />
+				<Spinner size={sizes[size].spinner} ink="inherit" label={null} />
 			) : (
 				leadingIcon && (
 					<span aria-hidden="true" className="inline-flex">

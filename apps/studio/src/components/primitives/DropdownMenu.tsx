@@ -34,7 +34,8 @@ export function DropdownMenuContent({
 				align={align}
 				sideOffset={sideOffset}
 				className={cn(
-					"z-50 min-w-44 overflow-hidden rounded-md border border-line bg-overlay p-1 shadow-xl",
+					// §2.9 elevation: anchored + dismissible → the `floating` tier.
+					"z-50 min-w-44 overflow-hidden rounded-md border border-line bg-overlay p-1 shadow-lg",
 					className,
 				)}
 				{...props}
@@ -46,16 +47,21 @@ export function DropdownMenuContent({
 // A menu item is not a natively disable-able element, so §2.6's second recipe
 // applies: Radix supplies `aria-disabled` and swallows the select; these two
 // classes supply the rest.
+//
+// `tone` is the SEMANTIC STATUS axis (§2.10), so these are the canonical status
+// keys — `neutral` for "no status" and `error` for the destructive item. A menu
+// item has no use for `info`/`success`/`warning`, and §2.10 lets a primitive omit
+// the values it has no use for.
 const itemTones = {
-	default: "text-ink data-[highlighted]:bg-hover data-[highlighted]:text-ink-strong",
-	danger: "text-status-failed-ink data-[highlighted]:bg-status-failed/10",
+	neutral: "text-ink data-[highlighted]:bg-hover data-[highlighted]:text-ink-strong",
+	error: "text-status-failed-ink data-[highlighted]:bg-status-failed/10",
 } as const;
 
 type DropdownMenuItemProps = React.ComponentPropsWithRef<typeof MenuPrimitive.Item> & {
 	tone?: keyof typeof itemTones;
 };
 
-export function DropdownMenuItem({ className, tone = "default", ...props }: DropdownMenuItemProps) {
+export function DropdownMenuItem({ className, tone = "neutral", ...props }: DropdownMenuItemProps) {
 	return (
 		<MenuPrimitive.Item
 			className={cn(

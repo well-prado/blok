@@ -8,17 +8,17 @@ describe("Paragraph", () => {
 		expect(screen.getByText("Waiting on upstream node").tagName).toBe("P");
 	});
 
-	it("applies the size variant", () => {
-		render(<Paragraph variant="extra-small">Tiny</Paragraph>);
+	it("applies the size", () => {
+		render(<Paragraph size="sm">Tiny</Paragraph>);
 		// Nothing semantic separates the type scale, so one discriminating class.
 		expect(screen.getByText("Tiny")).toHaveClass("text-xs");
 	});
 
 	it("ships no margin until spacing is opted into", () => {
-		const { rerender } = render(<Paragraph variant="base">Body</Paragraph>);
+		const { rerender } = render(<Paragraph size="lg">Body</Paragraph>);
 		expect(screen.getByText("Body")).not.toHaveClass("mb-3");
 		rerender(
-			<Paragraph variant="base" spacing>
+			<Paragraph size="lg" spacing>
 				Body
 			</Paragraph>,
 		);

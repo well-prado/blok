@@ -30,7 +30,8 @@ export function PopoverContent({
 				// No `.focus-ring` here: Radix moves focus into the content and the
 				// panel itself is the affordance (§2.7).
 				className={cn(
-					"z-50 min-w-max rounded-md border border-line bg-overlay p-3 text-sm text-ink shadow-xl",
+					// §2.9 elevation: anchored + dismissible → the `floating` tier.
+					"z-50 min-w-max rounded-md border border-line bg-overlay p-3 text-sm text-ink shadow-lg",
 					className,
 				)}
 				// Radix exposes the collision-clamped height; without it a long

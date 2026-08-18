@@ -1,10 +1,17 @@
 # Blok Studio design-system conventions
 
-> **Status: BINDING CONTRACT for Blok Studio E1-T3 … E1-T9.**
+> **Status: BINDING CONTRACT for Blok Studio E1-T3 … E1-T9, and INHERITED BY E2 … E16.**
 > You (a downstream agent) were handed this document verbatim. It is not advice. Where it says MUST, deviation fails review.
 > Everything in §1 already exists on `main` before your worktree was cut. Do not re-create it, do not "improve" it, do not edit it.
 >
 > The single failure this document exists to prevent: **seven agents inventing seven Buttons, seven token vocabularies, and seven test layouts.** Every rule below is chosen so that your branch touches *zero files any other agent touches*.
+>
+> **Post-integration amendment (E1 wave B merge, `feat/e1-primitives`).** The seven wave-B branches
+> landed with zero merge conflicts but four different meanings for `variant`, two names for red, and
+> three shadow tiers with no rule. §2.4a, §2.9 and §2.10 are NEW and were written from what the merge
+> actually produced; §12.2's `shortcut` entry is CORRECTED. Those four sections are the prop and
+> elevation contract every later epic inherits. Where an older paragraph in this document still says
+> `variant` for something §2.10 now calls `tone`, `ink` or `size`, §2.10 wins.
 
 ---
 
@@ -116,6 +123,22 @@ Typography primitives ship **zero margins by default**. Each variant carries `{ 
 - **Multi-line** boxes (TextArea) set `min-h-*` from the row height and keep the row's padding-x and text size.
 - `/catalog/foundation` renders the ladder. If your primitive looks taller than the row above it there, it is wrong.
 
+**The `md` default is not negotiable and it is audited.** At the E1 wave-B merge, 17 primitives shipped a `size` default: 15 were `md`, and the two `sm` outliers were `InfoIconTooltip` (a straight drift — corrected to `md`) and `ExportMenu`. `ExportMenu` keeps `sm` as the ONE sanctioned exception, because it is a §6 fold-in of `shared/ExportMenu.tsx` whose historical default was `sm`, and §6.0 forbids a shim changing a default. Any new `sm` default is a bug unless it is a §6 shim preserving history, and it must say so in a comment on the line.
+
+### 2.4a The TEXT ladder — for primitives with no box
+
+§2.4 is control heights. A **boxless text primitive** (`Paragraph`, `InlineCode`) has no height, padding or gap to take from it, so it takes only a type scale — but it takes the ladder's KEYS, and it uses `size`, never `variant` (§2.10).
+
+| `size` | text | equals the control ladder's… |
+|---|---|---|
+| `sm` | `text-xs` | `sm` / `xs` control text — a `sm` paragraph sits on a `sm` button's baseline |
+| `md` | `text-sm` | `md` / `lg` control text — **the default** |
+| `lg` | `text-base` | nothing; this is the body step ABOVE control text |
+
+- There is **no `xs` row**: the control ladder's `xs` and `sm` are both `text-xs`, so an `xs` text row would duplicate `sm`. §2.4's "omit rows you have no use for" covers it.
+- `lg` is the one deliberate divergence from §2.4's text column, and it is why the rule is written down: a `lg` CONTROL is 36px tall with `text-sm` (a taller control does not get bigger text), while a `lg` PARAGRAPH is long-form body copy and genuinely wants the larger step.
+- Ink is a separate, orthogonal axis — `ink`, per §2.10. Never fold color into the scale table.
+
 ### 2.5 Radius — one rule
 
 **Pills are `rounded-full`; everything else with a box is `rounded-md`.** No bare `rounded`, no `rounded-sm`, no `rounded-lg`, no `rounded-xl` in a primitive.
@@ -152,6 +175,44 @@ Restating §3.4 as a placement rule, because "add `.focus-ring`" is ambiguous on
 
 Studio is React 19 with no SSR. `forwardRef` is deprecated. Declare `ref` as a plain prop: `React.ComponentPropsWithRef<"button">` already includes it.
 **One exception:** inside a Radix wrapper file, copy Radix's own `React.forwardRef` idiom verbatim — their types expect it and fighting it costs more than it saves.
+
+### 2.9 Elevation — three tiers, ONE border token
+
+§2.5 did this for radius; this is the same rule for the z-axis. Wave B shipped three shadows and two border tokens across five floating surfaces with nothing deciding which was which. **The tier is chosen by how much the surface interrupts the user, not by taste.**
+
+| tier | `shadow` | `border` | surface | who |
+|---|---|---|---|---|
+| **modal** — traps focus, blocks the page behind a scrim | `shadow-xl` | `border-line` | `bg-overlay` | `Dialog`, `Sheet` |
+| **floating** — anchored or stacked, dismissible, page stays live | `shadow-lg` | `border-line` | `bg-overlay` | `Popover`, `DropdownMenu`, `Toast` |
+| **transient** — hover/focus only, never interactive, never dismissed | `shadow-md` | `border-line` | `bg-overlay` | `Tooltip` |
+
+- **`border-line` on every floating surface.** `border-line-strong` and `border-line-bright` are for in-flow chrome (control borders, separators); on a portaled surface they read as a second, competing elevation signal. Elevation is the shadow's job — one variable, not two.
+- **`z-50` on every portaled content**, per §4.3. The tier does not change that.
+- These are the only three shadow classes a primitive may use. No `shadow-sm`, no `shadow-2xl`, no arbitrary `shadow-[…]`, and no shadow at all on an in-flow element — a card sitting on `bg-canvas` separates with `bg-raised` + `border-line`, not with a shadow.
+- Adding a fourth tier requires adding a row here first.
+
+### 2.10 The prop vocabulary — FOUR axes, one word each
+
+This is the rule the wave-B merge existed to produce. Four independent axes, four reserved prop names. **A prop name means the same thing in every primitive, or the design system is seven dialects.**
+
+| prop | axis | legal values | default |
+|---|---|---|---|
+| `variant` | **emphasis / appearance** — how loud is this thing | `primary` · `secondary` · `minimal` (+ `error` where a destructive form exists) | the primitive's quietest sensible row |
+| `tone` | **semantic status** — what is the system telling me | `neutral` · `info` · `success` · `warning` · `error` | `neutral`, or `info` where statuslessness is meaningless |
+| `ink` | **text / glyph color** — how strongly does this read | `default` · `strong` · `dimmed` · `muted` (+ `accent` / `inherit` for glyphs) | `default` |
+| `size` | **scale** | §2.4's control ladder `xs`·`sm`·`md`·`lg`, or §2.4a's text ladder `sm`·`md`·`lg` | `md` (§2.4) |
+
+Rules:
+
+1. **A primitive may omit any value it has no use for; it may never redefine one and never add a synonym.** `Badge` has no `lg` size; `Toast` has no `neutral` tone; `CopyButton` has no `primary` variant. All fine. `variant="solid"` for what another primitive calls `secondary` is not.
+   - **One sanctioned deviation: `Tooltip` / `DefinitionTooltip` keep `variant="default" | "contrast"`.** That axis is not emphasis — it answers *which surface am I floating over* (`default` = the app canvas, `contrast` = on top of another raised surface, where `bg-overlay` would disappear into its host). A "primary tooltip" is a meaningless idea, so it is not forced onto the ladder. Any future primitive wanting its own `variant` keys must argue the same way — that the axis genuinely is not emphasis — and add itself to this bullet.
+2. **`variant` is NEVER a status and NEVER a scale.** `Callout` and `Toast` carry status only, so they take `tone`, not `variant`. `Paragraph` and `InlineCode` carry scale only, so they take `size`, not `variant`. A primitive that genuinely has both an emphasis ladder and a status takes both props.
+3. **`tone` is NEVER ink color.** `Headers`, `Paragraph` and `Spinner` take `ink`. The keys are the ink token names with the `ink-` prefix dropped (`text-ink-dimmed` → `ink="dimmed"`), so the prop value and the token are the same word.
+4. **Red has exactly one name and it is `error`.** Not `danger`, not `destructive`, not `critical` — on a Button variant, a menu item tone, a Callout tone, a Toast tone and the `useCopy` state machine alike. `error` wins over `danger` because it is the word that already sits next to `info`/`success`/`warning` in the status set and next to `log-error` in `app.css`, and because a copy failure is an error, not a danger. All five red surfaces resolve to the same `status-failed` token pair regardless.
+5. **A private lookup table is named for its axis too.** A `const tones` inside a file whose prop is ink is how the overload got in; name it `inks`, `stateInk`, etc.
+6. **No compatibility aliases.** This is pre-release. One name, everywhere, or the rename did not happen.
+
+Also reserved by convention and not to be reused for something else: `spacing` (opt-in margin, §2.3), `isLoading`, `disabled`, `className`.
 
 ---
 
@@ -537,12 +598,12 @@ Also note the reference's `Button` uses a nested `group/button` architecture (un
 
 **All tasks, universally out of scope:** editing any §1 foundation file; migrating call sites anywhere in `routes/`, `trace/`, `runs/`, `dashboard/`, `layout/`; deleting any `shared/` file; adding a dependency; light mode; the 1,373 legacy raw-neutral occurrences outside your own new files.
 
-- **T3 buttons** — OUT: the `shortcut` prop and any hotkey system (it depends on a 5-module subsystem Studio does not have; ship `Button` without it and let the hotkey subsystem be its own ticket). OUT: `asChild`/`Slot`. OUT: `NavLinkButton`. OUT: `PermissionButton`.
+- **T3 buttons** — ~~OUT: the `shortcut` prop~~ **CORRECTED — `shortcut` is IN, as a presentational-only affordance.** This document was wrong to exclude it: issue #771 explicitly requires the button to render its keyboard shortcut *inside* the button, so the original entry contradicted the ticket it governed. The prop `shortcut?: string` renders the key cap and **binds nothing** — it is `aria-hidden`, because announcing a shortcut that does not fire would be a lie, and the caller still wires the key itself. **The hotkey subsystem stays OUT of E1** (it depends on a 5-module subsystem Studio does not have) and remains its own ticket; nothing in E1 may read this prop as a working binding. OUT: `asChild`/`Slot`. OUT: `NavLinkButton`. OUT: `PermissionButton`.
 - **T4 typography** — OUT: any margin/spacing by default (§2.3). OUT: a `level` prop — the heading tag is the API, export three components. OUT: prose/markdown styling, `@tailwindcss/typography`.
 - **T5 forms** — OUT: Radix Select, Radix Checkbox, Radix RadioGroup (§4.2 — use native). OUT: any form-state library, validation, `react-hook-form`. OUT: date pickers, combobox, multi-select, searchable select — if one is genuinely needed it is a separate ticket with its own decision, not an improvisation.
 - **T6 feedback** — OUT: adding `sonner` or any toast library; keep the existing zustand store. OUT: deleting `StatusBadge.tsx`/`NotificationToast.tsx` (shim only, §6). OUT: `NotificationBell` itself. OUT: editing `src/lib/constants.ts`.
 - **T7 tooltips** — OUT: replacing the 127 existing `title=` attributes (that is a follow-up migration PR). OUT: popover/menu behavior — that is T8.
-- **T8 overlays** — OUT: migrating `CommandPalette`, `NodeLibraryDialog`, `AddWidgetDialog`, `UpstreamPicker` (four separate follow-up tickets; doing them here explodes the diff). OUT: `EnvChip` (§6). OUT: resizable panels. OUT: a global dialog manager/store.
+- **T8 overlays** — OUT: migrating `CommandPalette`, `NodeLibraryDialog`, `AddWidgetDialog`, `UpstreamPicker` (four separate follow-up tickets; doing them here explodes the diff). OUT: `EnvChip` (§6). **OUT: resizable panels — and this one was breached and then reverted.** T8 shipped a hand-rolled `Resizable.tsx` (135 lines of novel drag + keyboard interaction) plus its test; both were REMOVED at integration. Dodging §4.2's dependency rejection by hand-rolling does not clear §12.2's scope rejection: a new drag/keyboard interaction with no owner and no design review does not enter the system through a primitives PR. The work survives in `feat/e1-t8-overlays`' history and is re-ticketed for **E9**, where the run-detail panes actually need it. OUT: a global dialog manager/store.
 - **T9 clipboard** — OUT: depending on T7's Tooltip (see §12.4). Ship copy feedback as an inline state change announced via `aria-live="polite"`. OUT: clipboard *read*, permissions prompts, fallback `document.execCommand` paths.
 
 ### 12.3 If your ticket contradicts this document
@@ -556,6 +617,12 @@ This document wins. Note the contradiction in your PR description. Known bad tic
 You may import: anything in §1 (including `Spinner`), `@/lib/utils`, `@/lib/constants`, `@/types`, `lucide-react`, Radix packages you own.
 
 Practical consequence: if your catalog page or primitive wants a Button, use a plain `<button>` with token classes. Composing primitives into each other happens in a follow-up wiring PR, not here.
+
+**LIFTED as of the wave-B integration merge (`feat/e1-primitives`).** All seven branches have landed; every primitive now exists in one tree, so E2+ imports primitives from each other freely and by full path (§5.1 — still no barrel). Keep the rule in mind only if a future epic is split across parallel worktrees again.
+
+What this rule cost, recorded so the next parallel wave prices it in: it forced a **duplicated clipboard state machine**. T9 built `useCopy` (idle/copied/error, handles a missing `navigator.clipboard`, announces via `aria-live`); T6, unable to import it, independently grew a weaker one inside `EmptyState`'s `Snippet` — a bare boolean with a silent `catch {}`, no error state and no announcement. That was rewired onto `useCopy` at integration. The lesson is not "the rule was wrong" (it bought seven conflict-free merges) but "**a cross-cutting behavioural hook belongs in §1's foundation before the wave starts, not in one task's primitive**". Anything two tasks would both need — clipboard, a live-region announcer, a timer/ticker — ships in the foundation PR.
+
+Plain-text remains the pattern for anything a downstream primitive needs to be selectable/copyable: see `MiddleTruncate`, whose screen-reader-only full id carries `select-none` precisely so a mouse-select over the ellipsised value cannot copy both strings concatenated.
 
 ---
 
