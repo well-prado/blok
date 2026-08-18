@@ -485,12 +485,58 @@ export class PostgresRunStore implements RunStore {
 			try {
 				const { rows: filterRows } = await client.query("SELECT * FROM trace_saved_filters ORDER BY updated_at DESC");
 				for (const row of filterRows) {
+					let status = [];
+					let workflow = [];
+					let triggerType = [];
+					let runtimeKind = [];
+					let node = [];
+					let tags = [];
+					let metadata = {};
+					let timePeriod = null;
+
+					try {
+						status = typeof row.status === "string" && row.status.startsWith("[") ? JSON.parse(row.status) : [];
+					} catch (e) {}
+					try {
+						workflow = typeof row.workflow === "string" && row.workflow.startsWith("[") ? JSON.parse(row.workflow) : [];
+					} catch (e) {}
+					try {
+						triggerType =
+							typeof row.trigger_type === "string" && row.trigger_type.startsWith("[")
+								? JSON.parse(row.trigger_type)
+								: [];
+					} catch (e) {}
+					try {
+						runtimeKind =
+							typeof row.runtime_kind === "string" && row.runtime_kind.startsWith("[")
+								? JSON.parse(row.runtime_kind)
+								: [];
+					} catch (e) {}
+					try {
+						node = typeof row.node === "string" && row.node.startsWith("[") ? JSON.parse(row.node) : [];
+					} catch (e) {}
+					try {
+						tags = typeof row.tags === "string" && row.tags.startsWith("[") ? JSON.parse(row.tags) : [];
+					} catch (e) {}
+					try {
+						metadata = typeof row.metadata === "string" && row.metadata.startsWith("{") ? JSON.parse(row.metadata) : {};
+					} catch (e) {}
+					try {
+						timePeriod = row.time_period ? JSON.parse(row.time_period) : null;
+					} catch (e) {}
+
 					this.memory.upsertSavedFilter({
 						id: row.id,
 						name: row.name,
-						status: row.status,
-						tagsInput: row.tags_input,
-						metadataInput: row.metadata_input,
+						status,
+						workflow,
+						triggerType,
+						runtimeKind,
+						node,
+						tags,
+						metadata,
+						timePeriod,
+						durationBucket: row.duration_bucket || null,
 						createdAt: Number(row.created_at),
 						updatedAt: Number(row.updated_at),
 					});
@@ -1081,19 +1127,31 @@ export class PostgresRunStore implements RunStore {
 			this.pool
 				.query(
 					`INSERT INTO trace_saved_filters
-						(id, name, status, tags_input, metadata_input, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, $6, $7)
-					 ON CONFLICT (name) DO UPDATE SET
+						(id, name, status, workflow, trigger_type, runtime_kind, node, tags, metadata, time_period, duration_bucket, created_at, updated_at)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+					ON CONFLICT(name) DO UPDATE SET
 						status = EXCLUDED.status,
-						tags_input = EXCLUDED.tags_input,
-						metadata_input = EXCLUDED.metadata_input,
+						workflow = EXCLUDED.workflow,
+						trigger_type = EXCLUDED.trigger_type,
+						runtime_kind = EXCLUDED.runtime_kind,
+						node = EXCLUDED.node,
+						tags = EXCLUDED.tags,
+						metadata = EXCLUDED.metadata,
+						time_period = EXCLUDED.time_period,
+						duration_bucket = EXCLUDED.duration_bucket,
 						updated_at = EXCLUDED.updated_at`,
 					[
 						persisted.id,
 						persisted.name,
-						persisted.status,
-						persisted.tagsInput,
-						persisted.metadataInput,
+						JSON.stringify(persisted.status),
+						JSON.stringify(persisted.workflow),
+						JSON.stringify(persisted.triggerType),
+						JSON.stringify(persisted.runtimeKind),
+						JSON.stringify(persisted.node),
+						JSON.stringify(persisted.tags),
+						JSON.stringify(persisted.metadata),
+						persisted.timePeriod ? JSON.stringify(persisted.timePeriod) : null,
+						persisted.durationBucket,
 						persisted.createdAt,
 						persisted.updatedAt,
 					],

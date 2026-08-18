@@ -520,9 +520,15 @@ export interface SavedFiltersResponse {
 
 export interface SaveFilterInput {
 	name: string;
-	status: string;
-	tagsInput: string;
-	metadataInput: string;
+	status: string[];
+	workflow: string[];
+	triggerType: string[];
+	runtimeKind: string[];
+	node: string[];
+	tags: string[];
+	metadata: Record<string, string>;
+	timePeriod: { type: "relative"; value: string } | { type: "absolute"; from: number; to: number } | null;
+	durationBucket: string | null;
 }
 
 export function fetchSavedFilters(): Promise<SavedFiltersResponse> {

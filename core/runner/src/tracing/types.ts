@@ -919,19 +919,15 @@ export interface Dashboard {
 export interface SavedFilter {
 	id: string;
 	name: string;
-	/** Workflow run status (`""` for "all"). */
-	status: string;
-	/**
-	 * Free-form tag input as the user typed it ("env:prod,team:billing").
-	 * Server stores it verbatim; the run-list URL parser interprets it.
-	 */
-	tagsInput: string;
-	/**
-	 * Free-form metadata input as the user typed it
-	 * ("tier=premium,region__in=us,eu"). Same parsing contract as the
-	 * runs-page URL — `MetadataFilter[]` once parsed.
-	 */
-	metadataInput: string;
+	status: string[];
+	workflow: string[];
+	triggerType: string[];
+	runtimeKind: string[];
+	node: string[];
+	tags: string[];
+	metadata: Record<string, string>;
+	timePeriod: { type: "relative"; value: string } | { type: "absolute"; from: number; to: number } | null;
+	durationBucket: string | null;
 	createdAt: number;
 	updatedAt: number;
 }
