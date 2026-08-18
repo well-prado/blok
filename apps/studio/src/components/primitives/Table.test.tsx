@@ -5,6 +5,7 @@ import {
 	TableBlankRow,
 	TableBody,
 	TableCell,
+	type TableDensity,
 	TableHeader,
 	TableHeaderCell,
 	TableRow,
@@ -12,7 +13,7 @@ import {
 } from "@/components/primitives/Table";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Table", () => {
 	it("renders a named table with its header and rows", () => {
@@ -585,6 +586,152 @@ describe("Table", () => {
 		// Selection is the stronger signal and stays unmoved, exactly as with hover.
 		expect(picked).toHaveClass("bg-control");
 		expect(picked).not.toHaveClass("has-[:focus-visible]:bg-hover");
+	});
+
+	/**
+	 * E2-T6 (issue 783) — windowing.
+	 *
+	 * The virtualizer needs ONE thing jsdom cannot give it: the height of the
+	 * scroll container. It reads that from `offsetHeight` and then watches it with
+	 * a `ResizeObserver`, and `src/__tests__/setup.ts` provides neither — so an
+	 * unstubbed jsdom container measures 0px, the range is null, and a windowed
+	 * table renders ZERO rows (§G.5's warning, met first-hand). Stubbing the
+	 * height in this block, and nowhere else, buys a real range with real overscan
+	 * without touching the frozen setup file — the 100-row gate still keeps every
+	 * OTHER test and every catalog page on the plain path with no polyfill at all.
+	 *
+	 * Scroll position, sticky survival and focus under a real scroll are still not
+	 * observable here; those were measured in a browser (§2.18).
+	 */
+	describe("windowing", () => {
+		const VIEWPORT = 320;
+		const MANY = Array.from({ length: 150 }, (_, i) => ({ id: `run_${i}` }));
+		const FEW = MANY.slice(0, 99);
+
+		beforeEach(() => {
+			// `@tanstack/react-virtual` measures the scroll container with
+			// `offsetHeight` — NOT `getBoundingClientRect()`, which is the natural
+			// thing to stub and the thing that silently does nothing here (cost: one
+			// debugging round). jsdom reports 0 for `offsetHeight` on every element,
+			// so without this the container is 0px tall, the range is null, and a
+			// windowed table renders no rows at all.
+			vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(VIEWPORT);
+		});
+		afterEach(() => vi.restoreAllMocks());
+
+		function Windowed({ rows, density }: { rows: { id: string }[]; density?: TableDensity }) {
+			return (
+				<Table aria-label="Runs" density={density} containerClassName="max-h-64">
+					<TableHeader>
+						<TableRow>
+							<TableHeaderCell>Run</TableHeaderCell>
+						</TableRow>
+					</TableHeader>
+					<TableBody
+						rows={rows}
+						renderRow={(row) => (
+							<TableRow key={row.id}>
+								<TableCell>
+									<a href={`/runs/${row.id}`}>{row.id}</a>
+								</TableCell>
+							</TableRow>
+						)}
+					/>
+				</Table>
+			);
+		}
+
+		it("renders every row below the 100-row gate, and windows the DOM above it (§2.16 rule 2)", () => {
+			const { container, rerender } = render(<Windowed rows={FEW} />);
+			// Below the gate `count` is 0, so the virtualizer measures nothing — which is
+			// also why this suite needs no ResizeObserver polyfill.
+			expect(container.querySelectorAll("tbody tr")).toHaveLength(99);
+
+			rerender(<Windowed rows={MANY} />);
+			const rendered = container.querySelectorAll("tbody tr");
+			// Two of these are the spacers. The point is the count, not its exact value:
+			// delete the gate or the window and 150 rows come back.
+			expect(rendered.length).toBeLessThan(30);
+			expect(rendered.length).toBeGreaterThan(2);
+		});
+
+		it("keeps aria-rowcount and aria-rowindex honest under windowing, and absent without it (§2.15 rule 8)", () => {
+			const { rerender } = render(<Windowed rows={FEW} />);
+			// The DOM holds every row, so the DOM is the truth and the attributes would
+			// only be a second place to be wrong.
+			expect(screen.getByRole("table")).not.toHaveAttribute("aria-rowcount");
+			for (const row of screen.getAllByRole("row")) expect(row).not.toHaveAttribute("aria-rowindex");
+
+			rerender(<Windowed rows={MANY} />);
+			// Data rows + 1 for the header row.
+			expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "151");
+			// The header row is index 1, so data row i (0-based) is i + 2 — measured
+			// against the ABSOLUTE index, which is the whole point: a windowed row must
+			// not report its position within the window.
+			const first = screen.getByRole("link", { name: "run_0" }).closest("tr");
+			expect(first).toHaveAttribute("aria-rowindex", "2");
+			const third = screen.getByRole("link", { name: "run_2" }).closest("tr");
+			expect(third).toHaveAttribute("aria-rowindex", "4");
+
+			// And it goes away again when the data shrinks past the gate.
+			rerender(<Windowed rows={FEW} />);
+			expect(screen.getByRole("table")).not.toHaveAttribute("aria-rowcount");
+		});
+
+		it("windows with two aria-hidden spacer rows whose height comes from the density ladder (§2.16 rules 1, 3)", () => {
+			const { container } = render(<Windowed rows={MANY} density="compact" />);
+			const spacers = container.querySelectorAll<HTMLTableRowElement>("tbody tr[aria-hidden]");
+			// Two, always: above the window and below it. Never absolute positioning —
+			// that stops the element being a real <table> and kills the sticky <thead>.
+			expect(spacers).toHaveLength(2);
+			for (const spacer of spacers) {
+				expect(spacer).not.toHaveAttribute("aria-rowindex");
+				// Hidden AND unreachable, so `noAriaHiddenOnFocusable` is satisfied
+				// honestly and arrow navigation still steps over it.
+				expect(spacer).toHaveAttribute("tabindex", "-1");
+			}
+			// The scroll height is the ladder's row height × the row count — NOT a
+			// literal. Written as `compact` (28px) precisely so a hard-coded 40 fails.
+			const rendered = container.querySelectorAll("tbody tr").length - 2;
+			const top = Number.parseInt(spacers[0]?.style.height ?? "", 10);
+			const bottom = Number.parseInt(spacers[1]?.style.height ?? "", 10);
+			expect(top + bottom + rendered * TABLE_ROW_HEIGHT.compact).toBe(MANY.length * TABLE_ROW_HEIGHT.compact);
+		});
+
+		it("calls renderRow only for the rows it mounts, with each row's ABSOLUTE index", () => {
+			const renderRow = vi.fn((row: { id: string }, _index: number) => (
+				<TableRow key={row.id}>
+					<TableCell>{row.id}</TableCell>
+				</TableRow>
+			));
+			render(
+				<Table aria-label="Runs" containerClassName="max-h-64">
+					<TableBody rows={MANY} renderRow={renderRow} />
+				</Table>,
+			);
+			// Windowing that still builds 150 elements has bought nothing.
+			expect(renderRow.mock.calls.length).toBeLessThan(30);
+			// And the second argument is the row's position in `rows`, never its
+			// position in the window — a caller that numbers its rows, stripes them or
+			// looks anything up by index would otherwise silently repeat the first
+			// screenful for the whole table.
+			const indexes = renderRow.mock.calls.map(([, index]) => index);
+			expect(indexes).toEqual(indexes.map((_, i) => (indexes[0] ?? 0) + i));
+			expect(MANY[indexes[0] ?? 0]).toBe(renderRow.mock.calls[0]?.[0]);
+		});
+
+		it("still moves focus between windowed rows with the arrow keys (E2-T3 survives E2-T6)", async () => {
+			const user = userEvent.setup();
+			render(<Windowed rows={MANY} />);
+			screen.getByRole("link", { name: "run_0" }).focus();
+			await user.keyboard("{ArrowDown}");
+			// The destination is resolved from the DOM at keypress time, so a windowed
+			// row is no different from a composed one — and the spacer above it is
+			// stepped over rather than landed on.
+			expect(screen.getByRole("link", { name: "run_1" })).toHaveFocus();
+			await user.keyboard("{ArrowUp}");
+			expect(screen.getByRole("link", { name: "run_0" })).toHaveFocus();
+		});
 	});
 
 	// The one non-trivial invariant in this file. E2-T6 reads TABLE_ROW_HEIGHT for

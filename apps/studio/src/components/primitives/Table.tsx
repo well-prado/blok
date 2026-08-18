@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
-import { createContext, useContext } from "react";
-import type { ReactNode } from "react";
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 /**
  * The table substrate. Owned by E2-T1 and by the sequenced Wave-C tasks
@@ -53,10 +54,44 @@ export const TABLE_DENSITY_CLASSES = {
 const alignments = { left: "text-left", center: "text-center", right: "text-right" } as const;
 type Alignment = keyof typeof alignments;
 
-// One context, two values. `stickyHeader` has to reach `<thead>` and density has
-// to reach every cell; §2.10 rule 9 forbids prop-drilling either.
-type TableContextValue = { density: TableDensity; stickyHeader: boolean };
-const TableContext = createContext<TableContextValue>({ density: "default", stickyHeader: false });
+/**
+ * §2.16 rule 2 — the windowing gate, and it is not an optimisation. Below it the
+ * virtualizer's `count` is 0, so it measures nothing and the plain path runs:
+ * `src/__tests__/setup.ts` has no `ResizeObserver` polyfill, so a table that
+ * windows unconditionally renders ZERO rows under jsdom. `StepRail.tsx` gates
+ * the same way for the same reason. 100 rows × 40px ≈ 4 viewports.
+ *
+ * **Every `/catalog/*` demo must stay under this**, or the frozen
+ * `catalog.test.tsx` — which renders every page — starts windowing in jsdom.
+ */
+const VIRTUALIZE_THRESHOLD = 100;
+
+/**
+ * How far past the viewport to render. It also absorbs the one approximation in
+ * here: the virtualizer measures the CONTAINER, so it thinks the rows start at
+ * scroll offset 0 when they actually start below the `<thead>` (28-36px, §2.11).
+ * `scrollMargin` is the exact fix and costs a layout read in an effect; 8 rows of
+ * overscan is ≥ 224px against a ≤ 36px error, so the cheap version is correct in
+ * practice. ponytail: revisit only if a header ever gets taller than the overscan.
+ */
+const OVERSCAN = 8;
+
+// One context. `stickyHeader` has to reach `<thead>`, density has to reach every
+// cell (§2.10 rule 9 forbids prop-drilling either) — and E2-T6 adds two more:
+// the scroll element the virtualizer measures, and the way the row count
+// `TableBody` computes gets back up to the `<table>` that must publish it as
+// `aria-rowcount` (§2.16's corrected blast radius).
+type TableContextValue = {
+	density: TableDensity;
+	stickyHeader: boolean;
+	/** `undefined` = the DOM holds every row, so the table publishes no count. */
+	setRowCount: (count: number | undefined) => void;
+};
+const TableContext = createContext<TableContextValue>({
+	density: "default",
+	stickyHeader: false,
+	setRowCount: () => {},
+});
 
 /**
  * True inside `<TableHeader>`. `TableRow` is the ONLY row component — the caller
@@ -88,7 +123,12 @@ type TableProps = React.ComponentPropsWithRef<"table"> & {
 	 * scrolls, so the header never sticks and this prop silently does nothing.
 	 */
 	stickyHeader?: boolean;
-	/** The scroll container. Bound the height here. */
+	/**
+	 * The scroll container. Bound the height here — it is what `stickyHeader`
+	 * sticks to AND what windowing (§2.16) measures. An unbounded container
+	 * never scrolls, so it reports the full content height and every row renders:
+	 * correct, but unwindowed.
+	 */
 	containerClassName?: string;
 };
 
@@ -99,11 +139,27 @@ export function Table({
 	stickyHeader = false,
 	...props
 }: TableProps) {
+	// The row count travels UP from `TableBody`, because `aria-rowcount` belongs on the
+	// `<table>` while only `TableBody` knows how many rows there are and whether
+	// the 100-row gate tripped. Set only while windowing: with every row in the
+	// DOM the DOM is already the truth and the attribute is a second place to be
+	// wrong (§2.15 rule 8).
+	const [rowCount, setRowCount] = useState<number>();
 	return (
-		<TableContext.Provider value={{ density, stickyHeader }}>
-			<div className={cn("overflow-auto rounded-md border border-line bg-raised", containerClassName)}>
+		<TableContext.Provider value={{ density, stickyHeader, setRowCount }}>
+			{/* `data-table-scroll` is how `TableBody` finds the element the virtualizer
+			    must measure (§2.16). A DOM lookup rather than a ref on the context: a
+			    parent's ref is attached only AFTER its children's layout effects have
+			    run, so the virtualizer's first look would find null and the first paint
+			    would be an empty table. */}
+			<div
+				data-table-scroll="true"
+				className={cn("overflow-auto rounded-md border border-line bg-raised", containerClassName)}
+			>
 				{/* `data-density` is the handle for tests and for E16-T5's toggle. */}
-				<table className={cn("w-full", className)} data-density={density} {...props} />
+				{/* `aria-rowcount` is BEFORE the spread on purpose: a caller that knows a
+				    total the table cannot (a server-side count) overrides the local one. */}
+				<table aria-rowcount={rowCount} className={cn("w-full", className)} data-density={density} {...props} />
 			</div>
 		</TableContext.Provider>
 	);
@@ -131,9 +187,11 @@ export function TableHeader({ className, ...props }: React.ComponentPropsWithRef
 }
 
 /**
- * The virtualization seam (§2.16). `rows` + `renderRow` is the alternative to
- * `children`; E2-T6 replaces THAT ONE EXPRESSION with a windowed one and touches
- * nothing else in the codebase.
+ * The virtualization seam (§2.16), FILLED IN by E2-T6 (issue 783). `rows` +
+ * `renderRow` is the alternative to `children`; past `VIRTUALIZE_THRESHOLD` rows
+ * this body renders a window of them between two spacer `<tr>`s instead of all
+ * of them. **No caller changed, no `renderRow` changed, no file outside this one
+ * changed** — which was the promise that actually held (§2.16's correction).
  *
  * `renderRow` MUST return an element carrying a stable `key` — this calls
  * `rows.map(renderRow)` and adds no key of its own.
@@ -227,10 +285,112 @@ function moveRowFocus(event: React.KeyboardEvent<HTMLTableSectionElement>) {
 	}
 }
 
-export function TableBody<T>({ className, children, rows, renderRow, onKeyDown, ...props }: TableBodyProps<T>) {
+/**
+ * §2.16 rule 1 — the window, between two spacer `<tr>`s, NEVER absolute
+ * positioning.
+ *
+ * The reason is structural, not stylistic. You cannot put a translated `<div>`
+ * inside `<tbody>`: it stops the element being a real `<table>`, which kills
+ * `<th scope="col">` semantics and kills the sticky `<thead>` (which sticks to
+ * the scroll container, not to the rows). The reference's `TreeView` uses the
+ * two-div sandwich precisely BECAUSE it is not a table; that technique does not
+ * transfer.
+ *
+ * The spacers are `aria-hidden` and carry no `aria-rowindex` (§2.15 rule 8).
+ * They hold nothing focusable, so E2-T3's ↑/↓ steps over them for free — the
+ * same path a `TableBlankRow` already takes. Their inline `style` is a computed
+ * pixel height, not a color: deliberately outside the token guard's remit.
+ *
+ * `tabIndex={-1}` on them is NOT decoration and NOT a §2.15 rule 3 violation.
+ * Biome classes a `<tr>` as an interactive element, so a bare
+ * `aria-hidden="true"` there trips `a11y/noAriaHiddenOnFocusable`, and §9 forbids
+ * suppressing an a11y rule. `tabIndex={-1}` is that rule's own documented remedy
+ * — the element is hidden AND unreachable. It adds no tab stop, and E2-T3's
+ * `FOCUSABLE` selector already excludes `[tabindex="-1"]`, so arrow navigation
+ * still steps over a spacer instead of landing on it. (Writing `aria-hidden`
+ * bare also passes, because the rule only matches the literal string "true" —
+ * that is a hole in the matcher, not a remedy, so it is not what is used here.)
+ *
+ * `aria-rowindex` is cloned ONTO what `renderRow` returned rather than passed to
+ * it, so the caller's `renderRow` signature is untouched and every existing one
+ * keeps working. `TableRow` spreads its props, and `Table.test.tsx` guards that
+ * spread. `cloneElement` preserves the element's own key.
+ */
+function windowRows<T>(
+	rows: readonly T[],
+	renderRow: (row: T, index: number) => ReactNode,
+	items: { index: number; start: number; end: number }[],
+	totalSize: number,
+) {
+	const paddingTop = items[0]?.start ?? 0;
+	const paddingBottom = totalSize - (items[items.length - 1]?.end ?? 0);
+	return (
+		<>
+			<tr aria-hidden="true" tabIndex={-1} style={{ height: paddingTop }} />
+			{items.map((item) => {
+				const row = rows[item.index];
+				if (row === undefined) return null;
+				const rendered = renderRow(row, item.index);
+				// The header is row 1, so data row i (0-based) is i + 2. Off-by-one here
+				// is the standard bug; it is asserted against the absolute index, not
+				// against the position in the window.
+				return isValidElement(rendered)
+					? cloneElement(rendered as ReactElement<{ "aria-rowindex"?: number }>, { "aria-rowindex": item.index + 2 })
+					: rendered;
+			})}
+			<tr aria-hidden="true" tabIndex={-1} style={{ height: paddingBottom }} />
+		</>
+	);
+}
+
+export function TableBody<T>({ className, children, rows, renderRow, onKeyDown, ref, ...props }: TableBodyProps<T>) {
+	const { density, setRowCount } = useContext(TableContext);
+	// This body's own element, which React attaches BEFORE this component's layout
+	// effects — unlike the container's, which belongs to an ancestor. That ordering
+	// is the whole reason the scroll element is found from here rather than passed
+	// down: the virtualizer reads `getScrollElement()` in a layout effect, so a
+	// container ref would still be null then and the first paint would show no rows.
+	const bodyRef = useRef<HTMLTableSectionElement | null>(null);
+	const useVirtual = rows !== undefined && rows.length >= VIRTUALIZE_THRESHOLD;
+
+	const virtualizer = useVirtualizer({
+		// The gate lives in `count`, exactly as in `StepRail.tsx`: at 0 the
+		// virtualizer measures nothing and needs no `ResizeObserver`.
+		count: useVirtual && rows ? rows.length : 0,
+		// `closest` also does the right thing for a table nested inside a cell: it
+		// finds that table's own container, not the outer one.
+		getScrollElement: () => bodyRef.current?.closest<HTMLElement>("[data-table-scroll]") ?? null,
+		// §2.11's ladder as an integer — the second reason the row height is a fixed
+		// `h-*` and not derived padding. `h-*` is a MINIMUM, so a row with wrapping
+		// content is taller than this and the scrollbar drifts; rows are re-measured
+		// only if a caller opts in, which none does. ponytail: keep cell content on
+		// one line. Attaching `measureElement` would mean cloning a ref onto the
+		// caller's element and clobbering any ref it already set.
+		estimateSize: () => TABLE_ROW_HEIGHT[density],
+		overscan: OVERSCAN,
+	});
+
+	// §2.15 rule 8: data rows + 1 for the header, and ONLY while the DOM is
+	// incomplete. Published by `<Table>`, which owns the `<table>` element.
+	const rowCount = useVirtual && rows ? rows.length + 1 : undefined;
+	useEffect(() => {
+		setRowCount(rowCount);
+		return () => setRowCount(undefined);
+	}, [rowCount, setRowCount]);
+
+	const items = virtualizer.getVirtualItems();
+
 	return (
 		// `relative` is load-bearing: E2-T7's loading overlay positions against it.
 		<tbody
+			ref={(node) => {
+				bodyRef.current = node;
+				// Compose rather than replace: `ref` rides `ComponentPropsWithRef<"tbody">`,
+				// so a caller may already have one. Returning theirs preserves React 19's
+				// ref-cleanup contract.
+				if (typeof ref === "function") return ref(node);
+				if (ref) ref.current = node;
+			}}
 			className={cn("relative", className)}
 			// The caller's handler runs FIRST and can opt out by calling
 			// `preventDefault()`; spreading `props` over this one would have dropped
@@ -245,7 +405,11 @@ export function TableBody<T>({ className, children, rows, renderRow, onKeyDown, 
 			 * Destructuring a union breaks TS narrowing, so both halves are tested —
 			 * `rows &&` alone would leave `renderRow` possibly undefined.
 			 */}
-			{rows && renderRow ? rows.map(renderRow) : children}
+			{rows && renderRow
+				? useVirtual
+					? windowRows(rows, renderRow, items, virtualizer.getTotalSize())
+					: rows.map(renderRow)
+				: children}
 		</tbody>
 	);
 }

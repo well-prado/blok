@@ -593,9 +593,10 @@ export function useTableSelection(
 
 ---
 
-## 2.16 The virtualization seam — built in T1, filled in T6
+## 2.16 The virtualization seam — built in T1, FILLED IN by E2-T6 (issue 783)
 
 > **DECIDED (founder): T1 builds the seam, #783 fills it in later. `@tanstack/react-virtual@^3.11.0` is already a dependency; T6 adds no package.**
+> **SHIPPED.** Windowing is live in `TableBody`. Measured on `/catalog/table-virtualization` with 1,000 rows — see §2.18. The blast radius held exactly as the correction below predicted: `Table.tsx` and one new catalog page, nothing else.
 
 The seam is the `rows` + `renderRow` branch of `<TableBody>` (§2.13). T1 shipped exactly this and nothing more:
 
@@ -630,12 +631,24 @@ T6 replaces that expression, per the corrected blast radius above. Rules for whe
    ```
    **The reason is not stylistic.** You cannot put a translated `<div>` inside `<tbody>`; doing it stops the element being a real `<table>`, which kills `<th scope="col">` semantics AND kills the sticky `<thead>`, which sticks to the scroll container rather than to the rows. The reference's `TreeView` uses the two-div sandwich precisely because it is not a table — that technique does not transfer.
    The inline `style={{ height }}` is a computed pixel value, not a color; it is deliberately outside the token guard's remit and a reviewer must not flag it.
+   > **AMENDED as shipped: the spacers also carry `tabIndex={-1}`.** Biome classes a `<tr>` as an interactive element, so `<tr aria-hidden="true">` alone trips `a11y/noAriaHiddenOnFocusable` — and §9 forbids suppressing an a11y rule. `tabIndex={-1}` is that rule's own documented remedy (hidden AND unreachable); it adds no tab stop, and §2.15 rule 3's "the `<tr>` is never focusable" is about data rows and roving tabindex, which this is not. E2-T3's `FOCUSABLE` selector already excludes `[tabindex="-1"]`, so arrow navigation steps over a spacer exactly as before. Writing `aria-hidden` bare also passes the linter — the rule only matches the literal string `"true"` — but that is a hole in the matcher rather than a remedy, and using it would be smuggling.
 2. **Threshold-gate at 100 rows, exactly like `src/components/trace/StepRail.tsx`:** `count: useVirtual ? rows.length : 0` where `useVirtual = rows.length >= 100`. This is not an optimisation — **it is what makes the table testable at all.** `src/__tests__/setup.ts` has no `ResizeObserver` polyfill, `@tanstack/react-virtual` needs one, and a virtualized table in jsdom renders **zero rows**. Below the threshold the virtualizer measures nothing and the plain path runs. StepRail's tests pass for exactly this reason.
-   **Every `/catalog/table` demo MUST stay under 100 rows** (T1's largest is 20), or the frozen `catalog.test.tsx` — which renders every catalog page — starts failing on `ResizeObserver`.
+   > **CORRECTED by E2-T6, having built it: a `/catalog/*` demo MAY exceed 100 rows, and `table-virtualization` does (1,000).** The old sentence said the frozen `catalog.test.tsx` "starts failing on `ResizeObserver`". It does not: `@tanstack/react-virtual` checks `if (!targetWindow.ResizeObserver) return` before observing, so in jsdom a windowed table renders its two spacers, no rows, and **throws nothing** — the page still renders its `<h1>` and the frozen test still passes (verified, 14/14). What the missing polyfill actually costs is *assertability*, not safety. **The gate stays** — it is what keeps every other table on the plain path — but the reason is performance and testability, not a crash.
+   > **Testing a windowed table in jsdom needs ONE stub, and it is not the obvious one:** the virtualizer measures the scroll container with **`offsetHeight`**, not `getBoundingClientRect()`. jsdom reports 0 for `offsetHeight` on every element, so an unstubbed container is 0px tall, the range is `null`, and the body renders no rows at all. `vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")` inside the one describe block that needs it buys a real range with real overscan and leaves `setup.ts` alone. Stubbing `getBoundingClientRect` instead looks right and does nothing (cost: one debugging round).
 3. **`estimateSize` returns `TABLE_ROW_HEIGHT[density]`** (§2.11). That is the second reason the ladder is a fixed `h-*` per density and not derived padding: a padding-derived height is not a number you can hand to `estimateSize`. **Note the measured caveat: `h-*` is a MINIMUM, so a row with wrapping content is taller than `TABLE_ROW_HEIGHT` (40 → 60.5px measured). `@tanstack/react-virtual` re-measures rendered rows, so `estimateSize` only has to be right for the un-rendered ones — but a table with routinely-wrapping cells will scroll-jump, and that is a reason to keep cell content on one line, not a reason to change the ladder.**
 4. **Do not virtualize horizontally.** Column virtualization buys nothing at 16 columns and breaks sticky columns and `colSpan`.
 5. **`aria-rowcount` / `aria-rowindex` become mandatory the moment windowing turns on**, per §2.15 rule 8, and the spacer rows carry `aria-hidden="true"` and no index.
 6. **Nothing in Studio needs this today** and that is fine. Every current table is paginated; the reference does not virtualize tables at all; the log stream (E10) is the only genuinely unbounded list. The seam costs six lines and prevents a rendering-model rewrite after five features have landed on the old model. The implementation waits for a screen that actually renders >100 rows.
+
+### What E2-T6 decided while filling it in — six things a reviewer should check, not re-derive
+
+7. **The scroll element is found with `bodyRef.current.closest("[data-table-scroll]")`, NOT passed down the context.** The virtualizer reads `getScrollElement()` inside a **layout effect**, and React attaches a parent's refs only AFTER its children's layout effects have run — so a container ref on `TableContext` is still `null` when `TableBody` first looks, and the table paints once with no rows before some later re-render fixes it. `TableBody`'s own `<tbody>` ref *is* attached by then, so the lookup walks up from there. `closest` also does the right thing for a table nested inside a cell: it finds that table's own container. `Table` marks the container with `data-table-scroll="true"`; that attribute is a contract inside `Table.tsx` and nothing outside it may rely on it.
+   The `<tbody>` ref is **composed**, not replaced: `ref` rides `ComponentPropsWithRef<"tbody">`, so a caller may already have one, and the callback returns theirs to preserve React 19's ref-cleanup contract.
+8. **`aria-rowcount` travels UP via a `setRowCount` on the context; `aria-rowindex` is cloned onto the row inside `TableBody`.** Exactly the plumbing the correction above described. `<table aria-rowcount={rowCount} …{...props}>` puts the local value BEFORE the spread on purpose, so a caller that knows a total the table cannot (a server-side count) still wins.
+9. **No `scrollMargin`; `overscan: 8` absorbs the header offset instead.** The virtualizer measures the container, so it believes the rows start at scroll offset 0 when they actually start below the `<thead>` (28–36px, §2.11). `scrollMargin` is the exact fix and costs a layout read in an effect; eight rows of overscan is ≥ 224px against a ≤ 36px error. **Measured: at `scrollTop 20000` the row sitting under the sticky header is `aria-rowindex 502`, and `20000 / 40 + 2 = 502` exactly.** Revisit only if a header ever grows taller than the overscan.
+10. **No dynamic row measurement.** `estimateSize` is trusted and `virtualizer.measureElement` is not attached, because attaching it means cloning a `ref` onto the caller's element and clobbering any ref it already set. §2.11's `h-*` is a MINIMUM, so a table with routinely-wrapping cells will scroll-jump — that is a reason to keep cell content on one line (rule 3 already says so), not a reason to grow the API.
+11. **Keyboard navigation crosses the window; a mouse scroll can drop focus.** E2-T3's ↑/↓ resolves its destination from the DOM at keypress time, and `focus()` scrolls the row into view, which advances the window before the next press — **measured: 140 consecutive `ArrowDown` presses moved focus from row 2 to row 142 with no drops, and 100 `ArrowUp` came back to 42.** The one honest limit: if you scroll the focused row out of the window **with the mouse**, its element is unmounted and focus falls back to `<body>` (**measured**). That is inherent to windowing — the reference dodges it by never letting focus land on a virtualized node at all — and it is why no row is a tab stop.
+12. **An unbounded container degrades to rendering everything, not to rendering nothing.** Windowing needs the same bounded `containerClassName` height `stickyHeader` needs (§2.12 rule 7). Without it the container reports its full content height, the range covers every row, and the table is correct but unwindowed.
 
 ---
 
@@ -726,6 +739,27 @@ type TextProps = React.ComponentPropsWithRef<"span"> & {
 | row navigation does not fight E2-T2's sort | on `/catalog/table`, clicking a sort header then pressing ↓ left focus on the header button and `aria-sort` at `[null,"ascending","none","none"]` | header cells live in `<thead>`; the handler is on `<tbody>` |
 
 > **Third harness trap, and it is not a defect in the page:** this browser's synthetic keys deliver a **trusted** `keydown`, but the browser performs **no default scroll** for them. So "the page scrolled at the boundary" is NOT measurable here — the measurable claim is `defaultPrevented === false`, which is what the table above quotes. **Proven with a control experiment**, exactly as E2-T2's Enter trap was: with focus on `<body>` and no table involved at all, three trusted `ArrowDown` presses moved the scroll container (`scrollHeight 1142 / clientHeight 876`) by **0px**. Also note the harness's `key` names: `"ArrowDown"` works, `"Down"` arrives as `event.key === "Down"` and matches nothing — an arrow that "does not work" is that before it is a bug.
+
+**Measured by E2-T6 (issue 783) on `/catalog/table-virtualization`**, viewport 1280×900, on the 1,000-row demo (`density="default"`, `stickyHeader`, `containerClassName="max-h-[60vh]"` → container `clientHeight 538`). Row-count claims are `querySelectorAll` counts; the keyboard claims are real `ArrowDown` / `ArrowUp` / `Tab` presses.
+
+| claim | measurement | verdict |
+|---|---|---|
+| the DOM really is windowed | 1,000 rows in → **24 `<tr>` at rest** (22 data + 2 spacers), 32–33 while scrolling; `container.scrollHeight 40032` = 1000 × 40 + a 32px header | holds |
+| the spacers carry the scroll height | at top `["0px","39120px"]`; at `scrollTop 20000` `["19680px","19120px"]`; at max scroll `["39160px","0px"]` | rule 1 as written |
+| `aria-rowcount` is honest | `1001` on the `<table>` = 1000 data rows + the header | §2.15 rule 8 |
+| `aria-rowindex` is ABSOLUTE, not window-local | first rendered row `2`; at `scrollTop 20000` the window is `494…523`; the last row at max scroll is `1001` | holds; no off-by-one |
+| the estimate matches reality | the row under the sticky header at `scrollTop 20000` is index `502`, and `20000/40 + 2 = 502` | `estimateSize` correct without `scrollMargin` |
+| rows are the ladder's height | rendered rows `[40, 40, 40]` | §2.11 intact under windowing |
+| the sticky `<thead>` survives windowing | after scrolling to 20000: `thead` moved **0px**, sits 1px from the container top, `position: sticky`, `z-index: 20`, `border-bottom-width: 0px`, `::after` = `content:""` `absolute` `1px` `rgb(39,39,42)` | §2.12 rules 6–8 intact |
+| scroll performance | 60 rAF frames each scrolling 400px and forcing a layout read: **median 1.7 ms, max 3.6 ms** per frame; DOM stayed 24–32 rows across 24,000px | well inside a 16.7 ms budget |
+| the bottom is reachable and exact | at max scroll (`39494`) the last row is `aria-rowindex 1001`, its bottom is flush with the container's, bottom spacer `0px`, no residual gap | holds |
+| keyboard nav crosses the window | 40 presses: row 2 → **42**; 100 more: → **142** (140 presses, 140 rows, no drops); 100 `ArrowUp`: back to **42** | §2.15 rule 3 survives E2-T6 |
+| the focused row still lights up and rings | focused link `:focus-visible` true, `outline: rgb(77,217,138) solid 1px`; its `<tr>` `rgb(31,31,35)` (`--color-hover`); the row was scrolled into view | §2.15 rule 9 intact |
+| Tab still walks the row's own controls | one `Tab` from row 42's link → row 43's link, `:focus-visible`; **no `<tr>` has `tabindex`** except the two spacers, which are `-1` | not a roving tabindex |
+| a mouse scroll past the focused row drops focus | focus on row 43, container scrolled to 30000 → `document.activeElement` is `BODY` | inherent to windowing; documented, §2.16 rule 11 |
+| the gate is real, live | the 99-row demo on the same page: **99 `<tr>` in the DOM, 0 spacers, no `aria-rowcount`, no `aria-rowindex`** | §2.16 rule 2 |
+
+> **Fourth harness trap, and it is not a defect in the page:** a `javascript_exec` call that sets `scrollTop` and then reads the DOM in the SAME call reads the PREVIOUS window — the virtualizer re-renders on the next frame. The first attempt here reported a row index from 24,000px away and looked like a windowing bug. **Scroll in one tool call, measure in the next** — the same shape as E2-T2's rAF-throttling trap above, for a different reason.
 
 > **Measurement trap, cost 15 minutes:** the preview pane throttles `requestAnimationFrame`, so a `transition-[background-color]` does **not** advance inside a single `javascript_exec` call no matter how long you `await sleep()`. The first read after a hover returns the *start* color and looks like a broken hover. **Read the computed background in a SECOND tool call.** Every "no hover" reading in this table was re-confirmed that way.
 
@@ -1145,10 +1179,12 @@ E2-T1 appended a `Text` section to the existing `src/catalog/typography.tsx` (Wa
 | **T7 #784** Wave B | `primitives/TableBlankState.tsx` + test | `table-blank-states` |
 | **T2 #779** Wave C | `hooks/useTableSort.ts` + test; **edits** `Table.tsx` (header cell only) | appends to `table` |
 | **T3 #780** Wave C | **edits** `Table.tsx` (row focus/keyboard only) | ~~appends to `table`~~ → **`table-keyboard`, its own file** |
-| **T6 #783** Wave C | **edits** `Table.tsx` (`TableBody` internals **plus `aria-rowcount` on `Table`** — §2.16's corrected blast radius) | appends to `table` |
+| **T6 #783** Wave C | **edits** `Table.tsx` (`TableBody` internals **plus `aria-rowcount` on `Table`** — §2.16's corrected blast radius) | ~~appends to `table`~~ → **`table-virtualization`, its own file** |
 
 **Each Wave-B task gets its own catalog slug.** That is the E1 glob mechanism and it is the only reason three agents can ship catalog pages with zero conflicts. `slugOf`/`labelOf` handle hyphens (`table-actions` → "Table actions") and slug-sorting keeps them adjacent to `table`. Do **not** append to `src/catalog/table.tsx` during Wave B.
 
+> **CORRECTION (E2-T6).** Same call, same reason: T2's append had already rewritten `src/catalog/table.tsx` and T3 had moved out of it, so **T6 ships `src/catalog/table-virtualization.tsx`**. It is also the only page in the catalog that deliberately exceeds the 100-row gate, which §2.16 rule 2 now sanctions explicitly.
+>
 > **CORRECTION (E2-T3).** The same reasoning applies to a Wave-C task whenever another branch is in flight, so **T3 ships `src/catalog/table-keyboard.tsx` rather than appending to `table`**: T2 had already rewritten parts of `src/catalog/table.tsx`, and T6 is queued to touch it next. A new file costs nothing (the glob registers it, the nav is derived) and removes the only merge conflict the task could have had. T2's append stands as shipped — it landed while it was the only branch in that file.
 
 #### Forbidden-file list — hand this to every Wave-B agent verbatim
