@@ -1,7 +1,8 @@
+import { FilterBar } from "@/components/filters/FilterBar";
 import { ConcurrencyTile } from "@/components/runs/ConcurrencyTile";
-import { RunFilters } from "@/components/runs/RunFilters";
 import { RunsTable } from "@/components/runs/RunsTable";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { useFilterEngine } from "@/hooks/useFilterEngine";
 import { useRuns } from "@/hooks/useRuns";
 import { createFileRoute } from "@tanstack/react-router";
 import { Activity, Loader2 } from "lucide-react";
@@ -12,12 +13,12 @@ export const Route = createFileRoute("/runs/")({
 });
 
 function AllRunsPage() {
-	const [statusFilter, setStatusFilter] = useState("");
+	const { toApiParams, clearAll } = useFilterEngine();
 	const [page, setPage] = useState(1);
 	const limit = 50;
 
 	const { data, isLoading } = useRuns({
-		status: statusFilter || undefined,
+		...toApiParams(),
 		limit,
 		offset: (page - 1) * limit,
 	});
@@ -34,7 +35,7 @@ function AllRunsPage() {
 				<ConcurrencyTile />
 			</div>
 
-			<RunFilters status={statusFilter} onStatusChange={setStatusFilter} />
+			<FilterBar />
 
 			{isLoading ? (
 				<div className="flex justify-center py-8">
@@ -50,18 +51,20 @@ function AllRunsPage() {
 					showWorkflow
 					enableBulk
 				/>
-			) : statusFilter ? (
+			) : Object.keys(toApiParams()).length > 0 ? (
 				<EmptyState
 					icon={<Activity className="w-10 h-10" />}
-					title={`No ${statusFilter} runs match`}
-					description={`Across the latest 50 runs, none have status "${statusFilter}". Either workflows have been quiet or the filter is too tight.`}
+					title={"No runs match filters"}
+					description={
+						"Across the latest 50 runs, none match your current filters. Either workflows have been quiet or the filter is too tight."
+					}
 					action={
 						<button
 							type="button"
-							onClick={() => setStatusFilter("")}
+							onClick={clearAll}
 							className="px-3 py-1.5 rounded-md text-xs font-semibold bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors"
 						>
-							Clear filter
+							Clear filters
 						</button>
 					}
 				/>

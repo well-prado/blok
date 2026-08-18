@@ -65,16 +65,31 @@ export function RunFilters({
 		if (!name) return;
 		const filter = savedFilters.find((f) => f.name === name);
 		if (!filter) return;
-		onStatusChange(filter.status);
-		setTags(filter.tagsInput);
-		setMetadata(filter.metadataInput);
+		onStatusChange(filter.status[0] || "");
+		setTags(filter.tags.join(","));
+		setMetadata(
+			Object.entries(filter.metadata)
+				.map(([k, v]) => `${k}=${v}`)
+				.join(","),
+		);
 	};
 
 	const handleSaveCurrent = () => {
 		const name = (typeof window !== "undefined" ? window.prompt("Name this filter:", "My filter") : null)?.trim();
 		if (!name) return;
 		upsertSavedFilter.mutate(
-			{ name, status, tagsInput: tagsValue, metadataInput: metadataValue },
+			{
+				name,
+				tags: tagsValue ? tagsValue.split(",").map((s) => s.trim()) : [],
+				metadata: parseMetadataInput(metadataValue) || {},
+				workflow: [],
+				triggerType: [],
+				runtimeKind: [],
+				node: [],
+				timePeriod: null,
+				durationBucket: null,
+				status: status ? [status] : [],
+			},
 			{
 				onSuccess: () => setSavedSelected(name),
 			},

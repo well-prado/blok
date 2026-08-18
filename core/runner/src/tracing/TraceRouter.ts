@@ -2007,12 +2007,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 	 * Body: { name, status, tagsInput, metadataInput }
 	 */
 	router.post("/saved-filters", (req: TraceRequest, res: TraceResponse) => {
-		const body = (req.body || {}) as {
-			name?: unknown;
-			status?: unknown;
-			tagsInput?: unknown;
-			metadataInput?: unknown;
-		};
+		const body = (req.body || {}) as Record<string, unknown>;
 
 		const name = typeof body.name === "string" ? body.name.trim() : "";
 		if (name.length === 0) {
@@ -2024,9 +2019,18 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		const persisted = t.upsertSavedFilter({
 			id: `sf_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
 			name,
-			status: typeof body.status === "string" ? body.status : "",
-			tagsInput: typeof body.tagsInput === "string" ? body.tagsInput : "",
-			metadataInput: typeof body.metadataInput === "string" ? body.metadataInput : "",
+			status: Array.isArray(body.status) ? body.status : [],
+			workflow: Array.isArray(body.workflow) ? body.workflow : [],
+			triggerType: Array.isArray(body.triggerType) ? body.triggerType : [],
+			runtimeKind: Array.isArray(body.runtimeKind) ? body.runtimeKind : [],
+			node: Array.isArray(body.node) ? body.node : [],
+			tags: Array.isArray(body.tags) ? body.tags : [],
+			metadata:
+				typeof body.metadata === "object" && body.metadata !== null ? (body.metadata as Record<string, string>) : {},
+			timePeriod:
+				(body.timePeriod as { type: "relative"; value: string } | { type: "absolute"; from: number; to: number }) ||
+				null,
+			durationBucket: typeof body.durationBucket === "string" ? body.durationBucket : null,
 			createdAt: now,
 			updatedAt: now,
 		});

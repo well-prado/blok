@@ -1,4 +1,5 @@
 import { type SaveFilterInput, deleteSavedFilter, fetchSavedFilters, upsertSavedFilter } from "@/lib/api";
+import type { FilterState } from "@/lib/filterTypes";
 import type { SavedFilter } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -36,6 +37,24 @@ export function useUpsertSavedFilter() {
 		mutationFn: (input: SaveFilterInput) => upsertSavedFilter(input),
 		onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
 	});
+}
+
+export function useSaveCurrentFilter() {
+	const upsert = useUpsertSavedFilter();
+	return (name: string, filters: FilterState) => {
+		return upsert.mutateAsync({
+			name,
+			status: filters.status,
+			workflow: filters.workflow,
+			triggerType: filters.triggerType,
+			runtimeKind: filters.runtimeKind,
+			node: filters.node,
+			tags: filters.tags,
+			metadata: filters.metadata,
+			timePeriod: filters.timePeriod,
+			durationBucket: filters.durationBucket,
+		});
+	};
 }
 
 /**

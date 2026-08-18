@@ -799,6 +799,19 @@ export class SqliteRunStore implements RunStore {
 				`,
 			},
 			{
+				version: 18,
+				sql: `
+					ALTER TABLE trace_saved_filters ADD COLUMN workflow TEXT NOT NULL DEFAULT '[]';
+					ALTER TABLE trace_saved_filters ADD COLUMN trigger_type TEXT NOT NULL DEFAULT '[]';
+					ALTER TABLE trace_saved_filters ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT '[]';
+					ALTER TABLE trace_saved_filters ADD COLUMN node TEXT NOT NULL DEFAULT '[]';
+					ALTER TABLE trace_saved_filters ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+					ALTER TABLE trace_saved_filters ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';
+					ALTER TABLE trace_saved_filters ADD COLUMN time_period TEXT;
+					ALTER TABLE trace_saved_filters ADD COLUMN duration_bucket TEXT;
+				`,
+			},
+			{
 				// v0.6 follow-up to #100 — recorded sample bodies for the
 				// Studio empty-state curl. Opt-in per HTTP trigger via
 				// `recordSample: true`. ONE row per workflow (PK on
@@ -1607,23 +1620,49 @@ export class SqliteRunStore implements RunStore {
 				.prepare(
 					`
 					INSERT INTO trace_saved_filters
-						(id, name, status, tags_input, metadata_input, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+						(id, name, status, workflow, trigger_type, runtime_kind, node, tags_input, metadata_input, time_period, duration_bucket, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(name) DO UPDATE SET
 						status = excluded.status,
+						workflow = excluded.workflow,
+						trigger_type = excluded.trigger_type,
+						runtime_kind = excluded.runtime_kind,
+						node = excluded.node,
 						tags_input = excluded.tags_input,
 						metadata_input = excluded.metadata_input,
+						time_period = excluded.time_period,
+						duration_bucket = excluded.duration_bucket,
 						updated_at = excluded.updated_at
 				`,
 				)
-				.run(id, f.name, f.status, f.tagsInput, f.metadataInput, createdAt, updatedAt);
+				.run(
+					id,
+					f.name,
+					JSON.stringify(f.status ?? []),
+					JSON.stringify(f.workflow ?? []),
+					JSON.stringify(f.triggerType ?? []),
+					JSON.stringify(f.runtimeKind ?? []),
+					JSON.stringify(f.node ?? []),
+					JSON.stringify(f.tags || []),
+					JSON.stringify(f.metadata || {}),
+					f.timePeriod ? JSON.stringify(f.timePeriod) : null,
+					f.durationBucket,
+					createdAt,
+					updatedAt,
+				);
 
 			return {
 				id,
 				name: f.name,
 				status: f.status,
-				tagsInput: f.tagsInput,
-				metadataInput: f.metadataInput,
+				workflow: f.workflow,
+				triggerType: f.triggerType,
+				runtimeKind: f.runtimeKind,
+				node: f.node,
+				tags: f.tags,
+				metadata: f.metadata,
+				timePeriod: f.timePeriod,
+				durationBucket: f.durationBucket,
 				createdAt,
 				updatedAt,
 			};
@@ -2108,7 +2147,7 @@ export class SqliteRunStore implements RunStore {
 
 	private rowToRun(row: RunRow): WorkflowRun {
 		return {
-			id: row.id,
+			id: row.id as string,
 			workflowName: row.workflow_name,
 			workflowPath: row.workflow_path,
 			triggerType: row.trigger_type,
@@ -2142,7 +2181,7 @@ export class SqliteRunStore implements RunStore {
 	private rowToNodeRun(row: NodeRunRow): NodeRun {
 		const flags = decodeNodeRunFlags(row.flags_json);
 		return {
-			id: row.id,
+			id: row.id as string,
 			runId: row.run_id,
 			nodeName: row.node_name,
 			nodeType: row.node_type,
@@ -2174,7 +2213,7 @@ export class SqliteRunStore implements RunStore {
 
 	private rowToEvent(row: EventRow): RunEvent {
 		return {
-			id: row.id,
+			id: row.id as string,
 			type: row.type as RunEventType,
 			runId: row.run_id,
 			workflowName: row.workflow_name,
@@ -2187,7 +2226,7 @@ export class SqliteRunStore implements RunStore {
 
 	private rowToLog(row: LogRow): TraceLogEntry {
 		return {
-			id: row.id,
+			id: row.id as string,
 			runId: row.run_id,
 			nodeId: row.node_id ?? undefined,
 			nodeName: row.node_name ?? undefined,
@@ -2200,25 +2239,68 @@ export class SqliteRunStore implements RunStore {
 
 	private rowToDashboard(row: DashboardRow): Dashboard {
 		return {
-			id: row.id,
-			name: row.name,
+			id: row.id as string,
+			name: row.name as string,
 			description: row.description ?? undefined,
 			isDefault: row.is_default === 1,
-			createdAt: row.created_at,
-			updatedAt: row.updated_at,
+			createdAt: row.created_at as number,
+			updatedAt: row.updated_at as number,
 			widgets: row.widgets_json ? JSON.parse(row.widgets_json) : [],
 		};
 	}
 }
 
-function rowToSavedFilter(row: SavedFilterRow): SavedFilter {
+// biome-ignore lint/suspicious/noExplicitAny: DB row
+function rowToSavedFilter(row: any): SavedFilter {
+	let status = [];
+	let workflow = [];
+	let triggerType = [];
+	let runtimeKind = [];
+	let node = [];
+	let tags = [];
+	let metadata = {};
+	let timePeriod = null;
+
+	try {
+		status = typeof row.status === "string" && row.status.startsWith("[") ? JSON.parse(row.status) : [];
+	} catch (e) {}
+	try {
+		workflow = typeof row.workflow === "string" && row.workflow.startsWith("[") ? JSON.parse(row.workflow) : [];
+	} catch (e) {}
+	try {
+		triggerType =
+			typeof row.trigger_type === "string" && row.trigger_type.startsWith("[") ? JSON.parse(row.trigger_type) : [];
+	} catch (e) {}
+	try {
+		runtimeKind =
+			typeof row.runtime_kind === "string" && row.runtime_kind.startsWith("[") ? JSON.parse(row.runtime_kind) : [];
+	} catch (e) {}
+	try {
+		node = typeof row.node === "string" && row.node.startsWith("[") ? JSON.parse(row.node) : [];
+	} catch (e) {}
+	try {
+		tags = typeof row.tags === "string" && row.tags.startsWith("[") ? JSON.parse(row.tags) : [];
+	} catch (e) {}
+	try {
+		metadata = typeof row.metadata === "string" && row.metadata.startsWith("{") ? JSON.parse(row.metadata) : {};
+	} catch (e) {}
+	try {
+		timePeriod = row.time_period ? JSON.parse(row.time_period as string) : null;
+	} catch (e) {}
+
 	return {
-		id: row.id,
-		name: row.name,
-		status: row.status,
-		tagsInput: row.tags_input,
-		metadataInput: row.metadata_input,
-		createdAt: row.created_at,
-		updatedAt: row.updated_at,
+		id: row.id as string,
+		name: row.name as string,
+		status,
+		workflow,
+		triggerType,
+		runtimeKind,
+		node,
+		tags,
+		metadata,
+		timePeriod,
+		durationBucket: (row.duration_bucket as string) || null,
+		createdAt: row.created_at as number,
+		updatedAt: row.updated_at as number,
 	};
 }
