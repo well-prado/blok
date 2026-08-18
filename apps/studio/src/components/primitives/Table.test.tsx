@@ -779,4 +779,67 @@ describe("Table", () => {
 		// added to one table only.
 		expect(Object.keys(TABLE_ROW_HEIGHT).sort()).toEqual(Object.keys(TABLE_DENSITY_CLASSES).sort());
 	});
+
+	// ── Seams Wave B/C depend on but are FORBIDDEN from editing (§12.5). Each of
+	// these was deletable with the full suite green — the exact failure R1 was
+	// supposed to end. A consumer cannot notice a seam it cannot edit has gone.
+	describe("load-bearing seams", () => {
+		it("keeps <tbody> relative so an overlay can position against it", () => {
+			// CONVENTIONS says so twice, verbatim, because E2-T7's loading overlay
+			// is `absolute inset-0` and this is the only thing it resolves against.
+			// jsdom has no layout, so T7's own test passes either way.
+			const { container } = render(
+				<Table>
+					<TableBody>
+						<TableRow>
+							<TableCell>a</TableCell>
+						</TableRow>
+					</TableBody>
+				</Table>,
+			);
+			expect(container.querySelector("tbody")).toHaveClass("relative");
+		});
+
+		it("scrolls in the container, which is what makes stickyHeader work", () => {
+			// The stickyHeader guard asserts classes on <thead> only. With no scroll
+			// owner the header is inert: overflowY computes `visible`, scrollTop
+			// cannot move, and the header never sticks to anything.
+			const { container } = render(
+				<Table stickyHeader>
+					<TableBody>
+						<TableRow>
+							<TableCell>a</TableCell>
+						</TableRow>
+					</TableBody>
+				</Table>,
+			);
+			expect(container.querySelector("table")?.parentElement).toHaveClass("overflow-auto");
+		});
+
+		it("gives <thead> an opaque background so rows cannot scroll through it", () => {
+			const { container } = render(
+				<Table stickyHeader>
+					<TableHeader>
+						<TableRow>
+							<TableHeaderCell>h</TableHeaderCell>
+						</TableRow>
+					</TableHeader>
+				</Table>,
+			);
+			expect(container.querySelector("thead")).toHaveClass("bg-raised");
+		});
+
+		it("marks header cells scope=col (§2.15 rule 1 spells the markup literally)", () => {
+			render(
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHeaderCell>h</TableHeaderCell>
+						</TableRow>
+					</TableHeader>
+				</Table>,
+			);
+			expect(screen.getByRole("columnheader")).toHaveAttribute("scope", "col");
+		});
+	});
 });

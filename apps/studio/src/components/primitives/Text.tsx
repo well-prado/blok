@@ -28,6 +28,15 @@ const inks = {
 } as const;
 
 type TextProps = React.ComponentPropsWithRef<"span"> & {
+	/**
+	 * Omit it to INHERIT the surrounding font size. That is the default on
+	 * purpose: §2.11 mandates `<Text mono numeric>` for id/duration/count cells
+	 * AND legislates cell text per density, and a `size` default of `md`
+	 * (`text-sm`) sits on the span and beats the `<td>`'s `text-xs`. A compact
+	 * row rendered its id, duration and count at 14px beside a plain cell at
+	 * 12px — three of five cells at the wrong density, on the page that
+	 * documents the ladder. Inheriting is what makes the two rules agree.
+	 */
 	size?: keyof typeof sizes;
 	ink?: keyof typeof inks;
 	/** `font-mono` — ids, hashes, payload keys. Independent of `numeric`. */
@@ -36,10 +45,10 @@ type TextProps = React.ComponentPropsWithRef<"span"> & {
 	numeric?: boolean;
 };
 
-export function Text({ className, size = "md", ink = "default", mono = false, numeric = false, ...props }: TextProps) {
+export function Text({ className, size, ink = "default", mono = false, numeric = false, ...props }: TextProps) {
 	return (
 		<span
-			className={cn(sizes[size], inks[ink], mono && "font-mono", numeric && "tabular-nums", className)}
+			className={cn(size && sizes[size], inks[ink], mono && "font-mono", numeric && "tabular-nums", className)}
 			{...props}
 		/>
 	);
