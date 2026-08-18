@@ -53,6 +53,13 @@ function withAdded(current: ReadonlySet<string>, add: readonly string[], max: nu
 	return next;
 }
 
+/**
+ * @param ids every SELECTABLE id on the page, in visual order. A row the user
+ * may not select is simply not in this array — MEASURED consequence of getting
+ * that wrong: `selectAll()` checks its checkbox, and because that checkbox is
+ * `disabled` the user can never uncheck it again. `selectRange` walks this array
+ * too, so an excluded row is also skipped by a shift-click that spans it.
+ */
 export function useTableSelection(ids: readonly string[], options?: { max?: number }): TableSelection {
 	const max = options?.max ?? Number.POSITIVE_INFINITY;
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());

@@ -146,7 +146,13 @@ describe("TableSelectAllCell", () => {
 	});
 });
 
-/** The three pieces wired the way a screen wires them (§2.13's worked example). */
+/**
+ * The three pieces wired the way a screen wires them (§2.13's worked example).
+ * `run_locked` is rendered but NOT in the hook's ids — the row is visible and its
+ * checkbox is disabled, so it must never end up selected.
+ */
+const LOCKED = "run_locked";
+
 function SelectableTable({ max }: { max?: number }) {
 	const ids = ["run_a", "run_b", "run_c"];
 	const selection = useTableSelection(ids, max === undefined ? undefined : { max });
@@ -172,6 +178,9 @@ function SelectableTable({ max }: { max?: number }) {
 						/>
 					</TableRow>
 				))}
+				<TableRow>
+					<TableSelectCell label={LOCKED} checked={selection.has(LOCKED)} disabled onToggle={() => {}} />
+				</TableRow>
 			</TableBody>
 		</Table>
 	);
@@ -226,6 +235,32 @@ describe("selection wired end to end", () => {
 		// The row BETWEEN the anchor and the click comes along — that is the whole
 		// point of `selectRange` living in the hook.
 		expect(screen.getByRole("checkbox", { name: "Select run_b" })).toBeChecked();
+	});
+
+	it("never selects a row that is not among the hook's ids", async () => {
+		const user = userEvent.setup();
+		render(<SelectableTable />);
+		const locked = screen.getByRole("checkbox", { name: `Select ${LOCKED}` });
+		expect(locked).toBeDisabled();
+
+		await user.click(screen.getByRole("checkbox", { name: "Select all 3 rows" }));
+
+		// Measured in a browser before this guard existed: with the locked row in
+		// `ids`, select-all CHECKED a disabled checkbox the user could never uncheck.
+		expect(locked).not.toBeChecked();
+		expect(screen.getByRole("checkbox", { name: "Select run_c" })).toBeChecked();
+	});
+
+	it("skips a non-selectable row when a shift-click spans it", async () => {
+		const user = userEvent.setup();
+		render(<SelectableTable />);
+
+		await user.click(screen.getByRole("checkbox", { name: "Select run_a" }));
+		await user.keyboard("{Shift>}");
+		await user.click(screen.getByRole("checkbox", { name: "Select run_c" }));
+		await user.keyboard("{/Shift}");
+
+		expect(screen.getByRole("checkbox", { name: `Select ${LOCKED}` })).not.toBeChecked();
 	});
 
 	it("refuses a selection past the cap", async () => {

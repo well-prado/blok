@@ -26,12 +26,15 @@ const RUNS: Run[] = [
 	{ id: "run_01H8Z3Q1", status: "Completed", duration: "3.02s", locked: false },
 ];
 
-const IDS = RUNS.map((run) => run.id);
+// The hook's `ids` are the SELECTABLE rows, so a locked run is excluded. Include
+// it and select-all checks a DISABLED checkbox the user can then never uncheck —
+// measured in a browser before this line existed.
+const SELECTABLE_IDS = RUNS.filter((run) => !run.locked).map((run) => run.id);
 
 function SelectableRuns({ max }: { max?: number }) {
 	// ONE model, owned by the caller (§2.14). The bulk bar and the row highlight
 	// read the same hook, so they cannot drift.
-	const selection = useTableSelection(IDS, max === undefined ? undefined : { max });
+	const selection = useTableSelection(SELECTABLE_IDS, max === undefined ? undefined : { max });
 
 	return (
 		<Demo>
@@ -47,7 +50,7 @@ function SelectableRuns({ max }: { max?: number }) {
 				<TableHeader>
 					<TableRow>
 						<TableSelectAllCell
-							total={IDS.length}
+							total={SELECTABLE_IDS.length}
 							allSelected={selection.allSelected}
 							someSelected={selection.someSelected}
 							onToggleAll={() => (selection.allSelected ? selection.clear() : selection.selectAll())}
