@@ -13,6 +13,7 @@ import {
 } from "@/components/primitives/Table";
 import type { TableDensity } from "@/components/primitives/Table";
 import { Text } from "@/components/primitives/Text";
+import { type SortColumn, useTableSort } from "@/hooks/useTableSort";
 import { Inbox } from "lucide-react";
 
 /**
@@ -49,6 +50,72 @@ const DENSITIES: { density: TableDensity; button: "xs" | "sm" | "lg"; height: nu
 	{ density: "default", button: "sm", height: TABLE_ROW_HEIGHT.default },
 	{ density: "comfortable", button: "lg", height: TABLE_ROW_HEIGHT.comfortable },
 ];
+
+type SortableRun = { id: string; workflow: string; durationMs: number | null; startedAt: string };
+
+const SORTABLE_RUNS: SortableRun[] = [
+	{ id: "run_01H8Z3K9", workflow: "process-order", durationMs: 1240, startedAt: "2026-08-17T09:12:00Z" },
+	{ id: "run_01H8Z3M2", workflow: "Send-receipt", durationMs: null, startedAt: "2026-08-17T09:14:30Z" },
+	{ id: "run_01H8Z3P7", workflow: "archive-run", durationMs: 12900, startedAt: "2026-08-17T08:59:10Z" },
+	{ id: "run_01H8Z3R1", workflow: "process-order", durationMs: 310, startedAt: "2026-08-17T09:20:45Z" },
+];
+
+// All three column kinds, so the catalog documents the whole `SortColumn` union.
+const SORT_COLUMNS: SortColumn<SortableRun, "workflow" | "duration" | "started">[] = [
+	{ key: "workflow", type: "alpha", value: (run) => run.workflow },
+	{ key: "duration", type: "number", value: (run) => run.durationMs },
+	{ key: "started", type: "custom", compare: (a, b) => a.startedAt.localeCompare(b.startedAt) },
+];
+
+/**
+ * The live sort demo. `useTableSort` owns the state here; E3 (issue 789) swaps
+ * it for URL state by passing `sort` + `onSortChange`, changing nothing in this
+ * file's markup and nothing in `Table.tsx`.
+ */
+function SortDemo() {
+	const { sortedRows, getSortProps, sort } = useTableSort(SORTABLE_RUNS, SORT_COLUMNS);
+	return (
+		<div className="flex w-full flex-col gap-2">
+			<Table aria-label="Sortable runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell>Run</TableHeaderCell>
+						<TableHeaderCell {...getSortProps("workflow")}>Workflow</TableHeaderCell>
+						<TableHeaderCell align="right" {...getSortProps("duration")}>
+							Duration
+						</TableHeaderCell>
+						<TableHeaderCell align="right" {...getSortProps("started")}>
+							Started
+						</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					{sortedRows.map((run) => (
+						<TableRow key={run.id}>
+							<TableCell>
+								<Text mono>{run.id}</Text>
+							</TableCell>
+							<TableCell>{run.workflow}</TableCell>
+							<TableCell align="right">
+								<Text mono numeric>
+									{run.durationMs === null ? "—" : `${(run.durationMs / 1000).toFixed(2)}s`}
+								</Text>
+							</TableCell>
+							<TableCell align="right">
+								<Text mono numeric>
+									{run.startedAt.slice(11, 19)}
+								</Text>
+							</TableCell>
+						</TableRow>
+					))}
+				</TableBody>
+			</Table>
+			<Text size="sm" ink="dimmed">
+				sort = {sort ? `${sort.key} ${sort.direction}` : "cleared (the incoming order)"}
+			</Text>
+		</div>
+	);
+}
 
 export default function TableCatalog() {
 	return (
@@ -171,6 +238,17 @@ export default function TableCatalog() {
 						</TableBody>
 					</Table>
 				</Demo>
+			</Variant>
+
+			{/*
+			 * Click a header, or Tab to it and press Enter or Space: the whole header
+			 * is the control, and the cycle is asc → desc → cleared. Cleared returns
+			 * the INCOMING order, so a server default is reachable without a reload.
+			 * The accessible name of each button names the column and what the next
+			 * press will do ("Duration, sort descending").
+			 */}
+			<Variant label="Live sort — click or Tab+Enter any header; asc → desc → cleared">
+				<SortDemo />
 			</Variant>
 
 			<Variant label="Sort header states — the whole header is the button, named for its column">

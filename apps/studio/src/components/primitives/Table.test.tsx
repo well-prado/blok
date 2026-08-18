@@ -69,8 +69,19 @@ describe("Table", () => {
 		expect(screen.getByRole("columnheader", { name: /Duration/ })).toHaveAttribute("aria-sort", "ascending");
 		// A non-sortable header sets nothing at all (§2.15 rule 4).
 		expect(screen.getByRole("columnheader", { name: "Status" })).not.toHaveAttribute("aria-sort");
-		// The accessible name is the COLUMN, not "Toggle sort" (§2.15 rule 5).
-		const button = screen.getByRole("button", { name: "Duration" });
+		// The accessible name is the COLUMN plus what the NEXT press does — never
+		// "Toggle sort", and never a bare column name that leaves a screen-reader
+		// user guessing which way the arrow is about to go (§2.15 rule 5, E2-T2).
+		// It is an `sr-only` span, not an `aria-label`, so the name still contains
+		// its own visible label (WCAG 2.5.3).
+		const button = screen.getByRole("button", { name: "Duration, sort descending" });
+		expect(button).not.toHaveAttribute("aria-label");
+		// The UA stylesheet's `text-transform: none` on `button` beats the `<th>`'s
+		// inherited `uppercase`, so the class is repeated on the button or a
+		// sortable column renders in title case beside uppercase siblings (§2.11).
+		// Measured live; jsdom computes no UA text-transform, so the class string
+		// is the only guard available (§8.3 point 2).
+		expect(button).toHaveClass("uppercase");
 		await userEvent.click(button);
 		expect(onSort).toHaveBeenCalledOnce();
 	});

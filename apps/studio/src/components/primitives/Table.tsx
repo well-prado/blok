@@ -216,6 +216,25 @@ type TableHeaderCellProps = React.ComponentPropsWithRef<"th"> & {
 const SORT_ICON = { asc: ChevronUp, desc: ChevronDown } as const;
 const ARIA_SORT = { asc: "ascending", desc: "descending" } as const;
 
+/**
+ * What the NEXT activation does, keyed by the current direction — the
+ * three-state cycle of `useTableSort` (asc → desc → cleared), stated in words.
+ *
+ * It is appended to the visible column name in a screen-reader-only span (the
+ * token guard reads class strings, so this sentence deliberately does not spell
+ * that utility inside backticks) rather than
+ * written into an `aria-label`: the label would REPLACE the visible text, and a
+ * name that does not contain its own visible label fails WCAG 2.5.3. So a
+ * screen-reader user hears "Duration, sort descending, button" — the column AND
+ * what pressing it will do — while the reference says "Toggle sort, button" on
+ * every column of every table (§2.15 rule 5).
+ *
+ * `aria-sort` on the `<th>` states the CURRENT direction; this states the next
+ * one. Both are needed: `aria-sort` is not announced by every AT on focus, and
+ * it never says what the control will do.
+ */
+const NEXT_SORT_ACTION = { none: "sort ascending", asc: "sort descending", desc: "clear sort" } as const;
+
 export function TableHeaderCell({
 	className,
 	children,
@@ -246,20 +265,32 @@ export function TableHeaderCell({
 			{...props}
 		>
 			{onSort ? (
-				// The WHOLE header is the button and its accessible name is the column
+				// The WHOLE header is the button and its accessible name STARTS with the column
 				// name — the W3C APG pattern, needing no `aria-label`. The reference's
 				// `aria-label="Toggle sort"` on every column is banned (§2.15 rule 5),
-				// as is its ~16px chevron-only hit target (WCAG 2.2 AA 2.5.8).
+				// as is its ~16px chevron-only hit target (WCAG 2.2 AA 2.5.8). Enter and
+				// Space come free from the real `<button>`; the sr-only span below says
+				// what the next press will DO, which `aria-sort` never states.
 				<button
 					type="button"
 					onClick={onSort}
 					className={cn(
-						"focus-ring inline-flex h-full w-full items-center gap-1 rounded-md hover:text-ink",
+						// `uppercase` is REPEATED from the `<th>` on purpose: the UA stylesheet
+						// sets `text-transform: none` on `button`, which BEATS the inherited
+						// value, so a sortable header rendered in title case next to uppercase
+						// non-sortable ones. Measured live before this line existed:
+						// `getComputedStyle(th).textTransform === "uppercase"` while
+						// `getComputedStyle(button).textTransform === "none"` on all three
+						// sortable columns. Invisible to jsdom and to the token guard (§2.11).
+						"focus-ring inline-flex h-full w-full items-center gap-1 rounded-md uppercase hover:text-ink",
 						align === "right" && "justify-end",
 						align === "center" && "justify-center",
 					)}
 				>
 					{label}
+					{/* `select-none` on every `sr-only` span, or a mouse-drag over the
+					    header copies the invisible string too (§2.12 rule 11). */}
+					<span className="sr-only select-none">, {NEXT_SORT_ACTION[sortDirection ?? "none"]}</span>
 					<SortIcon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
 				</button>
 			) : (
