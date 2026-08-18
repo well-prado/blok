@@ -53,6 +53,14 @@ describe("InfoIconTooltip", () => {
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 
+	it("defaults to the md glyph row (CONVENTIONS §2.4)", () => {
+		// Nothing rendered InfoIconTooltip WITHOUT a size prop, so its default
+		// silently sat at `sm` (14px) while every sibling default was `md` (16px)
+		// — the vertical-alignment failure §2.4 exists to prevent.
+		const { container } = render(<InfoIconTooltip content="Retry policy for this step." />);
+		expect(container.querySelector("svg")).toHaveClass("h-4");
+	});
+
 	it("applies the glyph size row", () => {
 		const { container } = render(<InfoIconTooltip size="lg" content="Retry policy for this step." />);
 		// No semantic signal distinguishes sizes, so exactly one discriminating class.

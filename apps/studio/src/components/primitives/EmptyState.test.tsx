@@ -2,7 +2,7 @@ import { EmptyState } from "@/components/primitives/EmptyState";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Inbox } from "lucide-react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("EmptyState", () => {
 	it("renders its heading and description", () => {
@@ -40,5 +40,32 @@ describe("EmptyState", () => {
 		await user.click(screen.getByRole("button", { name: "copy" }));
 		expect(await screen.findByRole("button", { name: "copied" })).toBeInTheDocument();
 		expect(await navigator.clipboard.readText()).toBe("curl -X POST /orders");
+	});
+
+	it("surfaces a copy failure instead of swallowing it", async () => {
+		// The whole reason Snippet was rewired onto `useCopy`: its previous private
+		// state machine was a bare boolean with a silent `catch {}`, so a rejected
+		// clipboard write looked identical to a successful one. The success path
+		// above passed against that broken version too — only this asserts the
+		// difference.
+		const user = userEvent.setup();
+		const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+
+		render(
+			<EmptyState
+				icon={<Inbox />}
+				title="No runs yet"
+				description="…"
+				snippets={[{ lang: "curl · http", code: "curl -X POST /orders" }]}
+			/>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "copy" }));
+		expect(await screen.findByRole("button", { name: "copy failed" })).toBeInTheDocument();
+		// The announcement, not just the label — a screen-reader user gets nothing
+		// from a button caption they never hear.
+		expect(screen.getByRole("status")).toHaveTextContent(/copy failed/i);
+
+		writeText.mockRestore();
 	});
 });

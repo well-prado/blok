@@ -462,7 +462,7 @@ export default function ButtonsCatalog() {
 			<Variant label="Variants">
 				<Button variant="primary">Primary</Button>
 				<Button variant="secondary">Secondary</Button>
-				<Button variant="danger">Danger</Button>
+				<Button variant="error">Error</Button>
 			</Variant>
 			<Variant label="Sizes">
 				<Button size="sm">Small</Button>

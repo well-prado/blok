@@ -63,7 +63,7 @@ export function Toast({ className, tone = "info", title, message, onSelect, onDi
 					type="button"
 					aria-label="Dismiss"
 					onClick={onDismiss}
-					className="focus-ring -mr-1 shrink-0 rounded-md p-1 text-ink-muted transition-colors hover:text-ink"
+					className="focus-ring -mr-1 shrink-0 rounded-md p-1 text-ink-muted transition-[color,background-color] hover:text-ink"
 				>
 					<X aria-hidden="true" className="h-3.5 w-3.5" />
 				</button>

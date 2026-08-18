@@ -103,7 +103,7 @@ export function CopyButton({
 					void copy();
 				}}
 				className={cn(
-					"focus-ring inline-flex shrink-0 items-center justify-center rounded-md transition-colors",
+					"focus-ring inline-flex shrink-0 items-center justify-center rounded-md transition-[color,background-color]",
 					"disabled:opacity-50 disabled:pointer-events-none",
 					variants[variant],
 					children === undefined ? square : box,
@@ -115,7 +115,7 @@ export function CopyButton({
 				{children}
 			</button>
 			{/* Outside the button on purpose: inside, this text would join the button's accessible name. */}
-			<output aria-live="polite" className="sr-only">
+			<output aria-live="polite" className="sr-only select-none">
 				{announcement}
 			</output>
 		</>

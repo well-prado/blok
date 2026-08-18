@@ -71,12 +71,12 @@ export function SegmentedControl({
 		>
 			{/* Always visually hidden: a `<legend>` is laid out specially and would
 			    break the flex row. Put a visible `<Label>` above the control instead. */}
-			<legend className="sr-only">{label}</legend>
+			<legend className="sr-only select-none">{label}</legend>
 			{options.map((opt) => (
 				<label
 					key={opt.value}
 					className={cn(
-						"relative flex min-w-0 items-center justify-center rounded-md font-medium text-ink-dimmed transition-colors",
+						"relative flex min-w-0 items-center justify-center rounded-md font-medium text-ink-dimmed transition-[color,background-color]",
 						"hover:text-ink has-[:checked]:bg-hover has-[:checked]:text-ink-strong",
 						"has-[:disabled]:opacity-50",
 						fullWidth && "flex-1",

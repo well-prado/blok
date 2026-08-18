@@ -37,7 +37,7 @@ export function CopyableText({ value, copyValue, mono = true, className, onClick
 					void copy();
 				}}
 				className={cn(
-					"focus-ring group inline-flex max-w-full items-center gap-1.5 rounded-md px-1 text-left transition-colors",
+					"focus-ring group inline-flex max-w-full items-center gap-1.5 rounded-md px-1 text-left transition-[color,background-color]",
 					"disabled:opacity-50 disabled:pointer-events-none",
 					mono && "font-mono",
 					tones[state],
@@ -53,7 +53,7 @@ export function CopyableText({ value, copyValue, mono = true, className, onClick
 					)}
 				/>
 			</button>
-			<output aria-live="polite" className="sr-only">
+			<output aria-live="polite" className="sr-only select-none">
 				{announcement}
 			</output>
 		</>

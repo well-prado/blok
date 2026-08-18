@@ -159,7 +159,7 @@ export function ExportMenu({
 				<button
 					type="button"
 					className={cn(
-						"inline-flex items-center rounded-md bg-control font-medium text-ink transition-colors hover:bg-hover hover:text-ink-strong",
+						"inline-flex items-center rounded-md bg-control font-medium text-ink transition-[color,background-color] hover:bg-hover hover:text-ink-strong",
 						box,
 					)}
 				>

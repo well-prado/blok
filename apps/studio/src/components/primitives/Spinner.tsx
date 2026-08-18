@@ -45,7 +45,7 @@ export function Spinner({ className, size = "md", ink = "default", label = "Load
 	return (
 		<output className={cn("inline-flex items-center", inks[ink], className)} {...props}>
 			<Loader2 aria-hidden="true" className={cn("animate-spin", sizes[size])} />
-			{label !== null && <span className="sr-only">{label}</span>}
+			{label !== null && <span className="sr-only select-none">{label}</span>}
 		</output>
 	);
 }

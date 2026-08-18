@@ -83,7 +83,7 @@ export function AccordionItem({
 				}
 				className={cn(
 					"focus-ring flex h-9 cursor-default list-none items-center gap-2 px-3 text-sm text-ink",
-					"transition-colors hover:bg-hover hover:text-ink-strong [&::-webkit-details-marker]:hidden",
+					"transition-[color,background-color] hover:bg-hover hover:text-ink-strong [&::-webkit-details-marker]:hidden",
 					disabled && "pointer-events-none opacity-50",
 				)}
 			>

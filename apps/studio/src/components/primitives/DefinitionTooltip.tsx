@@ -90,7 +90,7 @@ export function DefinitionTooltip({ term, children, side = "top", variant, class
 			// `decoration-ink-faint` is a NON-text use of ink-faint (§3.1) — it is a
 			// hairline under the word, not the word itself, which stays `text-ink`.
 			buttonClassName={cn(
-				"cursor-help underline decoration-ink-faint decoration-dashed underline-offset-4 transition-colors hover:decoration-ink-muted",
+				"cursor-help underline decoration-ink-faint decoration-dashed underline-offset-4 transition-[color,background-color,text-decoration-color] hover:decoration-ink-muted",
 				className,
 			)}
 			button={children ?? label}

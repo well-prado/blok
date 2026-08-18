@@ -42,7 +42,7 @@ export function SheetContent({ className, children, side = "right", showClose = 
 				{showClose && (
 					<SheetPrimitive.Close
 						aria-label="Close"
-						className="focus-ring absolute right-3 top-3 rounded-md p-1 text-ink-dimmed transition-colors hover:bg-hover hover:text-ink-strong"
+						className="focus-ring absolute right-3 top-3 rounded-md p-1 text-ink-dimmed transition-[color,background-color] hover:bg-hover hover:text-ink-strong"
 					>
 						<X aria-hidden="true" className="h-4 w-4" />
 					</SheetPrimitive.Close>

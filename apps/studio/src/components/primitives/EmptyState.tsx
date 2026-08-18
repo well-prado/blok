@@ -101,14 +101,14 @@ function Snippet({ snippet }: { snippet: CodeSnippet }) {
 					type="button"
 					onClick={() => void copy()}
 					className={cn(
-						"focus-ring ml-auto rounded-md border px-2 py-0.5 font-mono text-[10.5px] transition-colors",
+						"focus-ring ml-auto rounded-md border px-2 py-0.5 font-mono text-[10.5px] transition-[color,background-color]",
 						copyStyles[state],
 					)}
 				>
 					{copyLabels[state]}
 				</button>
 				{/* Outside the button: inside, this would join its accessible name. */}
-				<output aria-live="polite" className="sr-only">
+				<output aria-live="polite" className="sr-only select-none">
 					{announcement}
 				</output>
 			</div>

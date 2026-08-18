@@ -20,7 +20,8 @@ const variants = {
 	secondary: "text-ink-dimmed hover:text-ink",
 } as const;
 
-const base = "focus-ring inline-flex items-center gap-1 rounded-md underline underline-offset-2 transition-colors";
+const base =
+	"focus-ring inline-flex items-center gap-1 rounded-md underline underline-offset-2 transition-[color,background-color,text-decoration-color]";
 
 type TextLinkProps = React.ComponentPropsWithRef<"a"> & {
 	href: string;
@@ -50,7 +51,7 @@ export function TextLink({ href, className, variant = "primary", children, ...pr
 				{external && (
 					<>
 						<ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
-						<span className="sr-only">(opens in a new tab)</span>
+						<span className="sr-only select-none">(opens in a new tab)</span>
 					</>
 				)}
 			</a>

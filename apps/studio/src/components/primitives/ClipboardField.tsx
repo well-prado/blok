@@ -2,11 +2,14 @@ import { CopyButton } from "@/components/primitives/CopyButton";
 import { useOverflowFade } from "@/components/primitives/labelOverflowFade";
 import { cn } from "@/lib/utils";
 
-// Size ladder rows (`_design/CONVENTIONS.md` §2.4) — the field IS its row height,
-// so the copy button takes the matching row and the two line up.
+// Size ladder rows (`_design/CONVENTIONS.md` §2.4). The height belongs on the
+// WRAPPER, not the input: the wrapper carries the 1px border, and with
+// the box sizing applied to the inner input only, that border landed OUTSIDE the row —
+// rendering 30px/34px where the ladder says 28/32, so a ClipboardField sat 2px
+// proud of the Input beside it. The input now fills the row instead of setting it.
 const sizes = {
-	sm: { input: "h-7 px-2.5 text-xs", button: "sm" },
-	md: { input: "h-8 px-3 text-sm", button: "md" },
+	sm: { row: "h-7", input: "px-2.5 text-xs", button: "sm" },
+	md: { row: "h-8", input: "px-3 text-sm", button: "md" },
 } as const;
 
 type ClipboardFieldProps = Omit<React.ComponentPropsWithRef<"div">, "children"> & {
@@ -30,13 +33,14 @@ export function ClipboardField({
 	className,
 	...props
 }: ClipboardFieldProps) {
-	const { input, button } = sizes[size];
+	const { row, input, button } = sizes[size];
 	const fade = useOverflowFade<HTMLInputElement>(value);
 
 	return (
 		<div
 			className={cn(
 				"flex items-center rounded-md border border-line bg-control font-mono",
+				row,
 				fullWidth ? "w-full" : "max-w-fit",
 				className,
 			)}
