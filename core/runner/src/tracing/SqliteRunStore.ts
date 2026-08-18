@@ -799,7 +799,7 @@ export class SqliteRunStore implements RunStore {
 				`,
 			},
 			{
-				version: 15,
+				version: 18,
 				sql: `
 					ALTER TABLE trace_saved_filters ADD COLUMN workflow TEXT NOT NULL DEFAULT '[]';
 					ALTER TABLE trace_saved_filters ADD COLUMN trigger_type TEXT NOT NULL DEFAULT '[]';
@@ -1620,25 +1620,31 @@ export class SqliteRunStore implements RunStore {
 				.prepare(
 					`
 					INSERT INTO trace_saved_filters
-						(id, name, status, tags_input, metadata_input, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
+						(id, name, status, workflow, trigger_type, runtime_kind, node, tags_input, metadata_input, time_period, duration_bucket, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT(name) DO UPDATE SET
 						status = excluded.status,
+						workflow = excluded.workflow,
+						trigger_type = excluded.trigger_type,
+						runtime_kind = excluded.runtime_kind,
+						node = excluded.node,
 						tags_input = excluded.tags_input,
 						metadata_input = excluded.metadata_input,
+						time_period = excluded.time_period,
+						duration_bucket = excluded.duration_bucket,
 						updated_at = excluded.updated_at
 				`,
 				)
 				.run(
 					id,
 					f.name,
-					JSON.stringify(f.status),
-					JSON.stringify(f.workflow),
-					JSON.stringify(f.triggerType),
-					JSON.stringify(f.runtimeKind),
-					JSON.stringify(f.node),
-					JSON.stringify(f.tags),
-					JSON.stringify(f.metadata),
+					JSON.stringify(f.status ?? []),
+					JSON.stringify(f.workflow ?? []),
+					JSON.stringify(f.triggerType ?? []),
+					JSON.stringify(f.runtimeKind ?? []),
+					JSON.stringify(f.node ?? []),
+					JSON.stringify(f.tags || []),
+					JSON.stringify(f.metadata || {}),
 					f.timePeriod ? JSON.stringify(f.timePeriod) : null,
 					f.durationBucket,
 					createdAt,

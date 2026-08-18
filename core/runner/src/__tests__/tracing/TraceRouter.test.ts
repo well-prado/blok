@@ -2899,9 +2899,9 @@ describe("TraceRouter", () => {
 			const req = new MockRequest({
 				body: {
 					name: "premium-running",
-					status: "running",
-					tagsInput: "tier:premium",
-					metadataInput: "tier=premium",
+					status: ["running"],
+					tags: ["tier:premium"],
+					metadata: { tier: "premium" },
 				},
 			});
 			const res = new MockResponse();
@@ -2910,7 +2910,7 @@ describe("TraceRouter", () => {
 			expect(res.statusCode).toBe(201);
 			const body = res.jsonBody as any;
 			expect(body.name).toBe("premium-running");
-			expect(body.status).toBe("running");
+			expect(body.status).toEqual(["running"]);
 			expect(body.id).toMatch(/^sf_/);
 			expect(typeof body.createdAt).toBe("number");
 			expect(typeof body.updatedAt).toBe("number");
@@ -2928,18 +2928,18 @@ describe("TraceRouter", () => {
 		it("POST /saved-filters with an existing name OVERWRITES the row in place (preserves id)", () => {
 			const first = new MockResponse();
 			router.findHandler("POST", "/saved-filters")!(
-				new MockRequest({ body: { name: "tenant-A", status: "running" } }),
+				new MockRequest({ body: { name: "tenant-A", status: ["running"] } }),
 				first,
 			);
 			const firstId = (first.jsonBody as any).id;
 
 			const second = new MockResponse();
 			router.findHandler("POST", "/saved-filters")!(
-				new MockRequest({ body: { name: "tenant-A", status: "failed" } }),
+				new MockRequest({ body: { name: "tenant-A", status: ["failed"] } }),
 				second,
 			);
 			expect((second.jsonBody as any).id).toBe(firstId);
-			expect((second.jsonBody as any).status).toBe("failed");
+			expect((second.jsonBody as any).status).toEqual(["failed"]);
 		});
 
 		it("GET /saved-filters lists every saved filter newest-updated first", () => {

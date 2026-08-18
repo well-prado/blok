@@ -938,17 +938,17 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				const updated = {
 					...original,
 					id: "sf_NEW_THROWAWAY_ID", // server-side should ignore this on conflict
-					status: "failed",
+					status: ["failed"],
 					updatedAt: original.updatedAt + 1000,
 				};
 				const second = store.upsertSavedFilter(updated);
 				expect(second.id).toBe(first.id);
 				expect(second.createdAt).toBe(first.createdAt);
 				expect(second.updatedAt).toBe(original.updatedAt + 1000);
-				expect(second.status).toBe("failed");
+				expect(second.status).toEqual(["failed"]);
 				const list = store.listSavedFilters();
 				expect(list).toHaveLength(1);
-				expect(list[0]?.status).toBe("failed");
+				expect(list[0]?.status).toEqual(["failed"]);
 			});
 
 			it("listSavedFilters sorts by updatedAt DESC (most recently changed first)", () => {

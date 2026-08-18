@@ -400,6 +400,26 @@ export class PostgresRunStore implements RunStore {
 						`);
 					},
 				},
+
+				{
+					version: 11,
+					up: async () => {
+						await client.query(
+							"ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS workflow TEXT NOT NULL DEFAULT '[]'",
+						);
+						await client.query(
+							"ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS trigger_type TEXT NOT NULL DEFAULT '[]'",
+						);
+						await client.query(
+							"ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS runtime_kind TEXT NOT NULL DEFAULT '[]'",
+						);
+						await client.query(
+							"ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS node TEXT NOT NULL DEFAULT '[]'",
+						);
+						await client.query("ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS time_period TEXT");
+						await client.query("ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS duration_bucket TEXT");
+					},
+				},
 			];
 
 			for (const m of migrations) {
