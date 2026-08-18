@@ -5,6 +5,7 @@ import {
 	TableBlankRow,
 	TableBody,
 	TableCell,
+	type TableDensity,
 	TableHeader,
 	TableHeaderCell,
 	TableRow,
@@ -12,7 +13,7 @@ import {
 } from "@/components/primitives/Table";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Table", () => {
 	it("renders a named table with its header and rows", () => {
@@ -69,8 +70,19 @@ describe("Table", () => {
 		expect(screen.getByRole("columnheader", { name: /Duration/ })).toHaveAttribute("aria-sort", "ascending");
 		// A non-sortable header sets nothing at all (§2.15 rule 4).
 		expect(screen.getByRole("columnheader", { name: "Status" })).not.toHaveAttribute("aria-sort");
-		// The accessible name is the COLUMN, not "Toggle sort" (§2.15 rule 5).
-		const button = screen.getByRole("button", { name: "Duration" });
+		// The accessible name is the COLUMN plus what the NEXT press does — never
+		// "Toggle sort", and never a bare column name that leaves a screen-reader
+		// user guessing which way the arrow is about to go (§2.15 rule 5, E2-T2).
+		// It is an `sr-only` span, not an `aria-label`, so the name still contains
+		// its own visible label (WCAG 2.5.3).
+		const button = screen.getByRole("button", { name: "Duration, sort descending" });
+		expect(button).not.toHaveAttribute("aria-label");
+		// The UA stylesheet's `text-transform: none` on `button` beats the `<th>`'s
+		// inherited `uppercase`, so the class is repeated on the button or a
+		// sortable column renders in title case beside uppercase siblings (§2.11).
+		// Measured live; jsdom computes no UA text-transform, so the class string
+		// is the only guard available (§8.3 point 2).
+		expect(button).toHaveClass("uppercase");
 		await userEvent.click(button);
 		expect(onSort).toHaveBeenCalledOnce();
 	});
@@ -336,6 +348,390 @@ describe("Table", () => {
 		);
 		expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "501");
 		expect(screen.getByRole("row")).toHaveAttribute("aria-rowindex", "42");
+	});
+
+	/**
+	 * E2-T3 (issue 780) — row hover / focus / keyboard navigation.
+	 *
+	 * The paint is two class assertions (§8.3 point 2 — jsdom has no `:hover`, no
+	 * `:focus-visible` and no layout, and the live measurements are in §2.18).
+	 * Everything else here is real behaviour: jsdom DOES have focus and key
+	 * events, so the navigation itself is guarded properly rather than by class.
+	 */
+	function NavFixture({ onKeyDown }: { onKeyDown?: React.KeyboardEventHandler<HTMLTableSectionElement> } = {}) {
+		return (
+			<Table aria-label="Runs">
+				<TableBody onKeyDown={onKeyDown}>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+						<TableCell>
+							<button type="button">Replay K9</button>
+						</TableCell>
+					</TableRow>
+					{/* A blank row — E2-T7's empty state and E2-T6's spacer rows look like
+					    this. Arrow navigation must step OVER it, not stop at it. */}
+					<TableBlankRow>nothing focusable here</TableBlankRow>
+					<TableRow>
+						<TableCell>
+							{/* A redundant second link to the same record: `tabIndex={-1}` per
+							    §2.15 rule 3, so it is neither a tab stop nor an arrow target. */}
+							<a href="/runs/m2" tabIndex={-1}>
+								status chip M2
+							</a>
+						</TableCell>
+						<TableCell>
+							<a href="/runs/m2">run_01H8Z3M2</a>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							{/* An ordinary earlier link that is NOT the record's primary one —
+							    the case `data-row-primary` exists for. */}
+							<a href="/workflows/process-order">process-order</a>
+						</TableCell>
+						<TableCell>
+							<a href="/runs/p7" data-row-primary>
+								run_01H8Z3P7
+							</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>
+		);
+	}
+
+	it("moves focus between rows on ArrowDown / ArrowUp, skipping rows with nothing to focus", async () => {
+		const user = userEvent.setup();
+		render(<NavFixture />);
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+
+		await user.keyboard("{ArrowDown}");
+		// Skipped the blank row entirely, and skipped the redundant `tabIndex={-1}`
+		// chip that precedes the row's real link (§2.15 rule 3).
+		expect(screen.getByRole("link", { name: "run_01H8Z3M2" })).toHaveFocus();
+
+		await user.keyboard("{ArrowDown}");
+		// `data-row-primary` beats DOM order: the workflow link comes first in the
+		// row and is not what the row is about.
+		expect(screen.getByRole("link", { name: "run_01H8Z3P7" })).toHaveFocus();
+
+		await user.keyboard("{ArrowUp}{ArrowUp}");
+		expect(screen.getByRole("link", { name: "run_01H8Z3K9" })).toHaveFocus();
+	});
+
+	it("navigates a row whose only affordance is a button, and never a disabled one", async () => {
+		const user = userEvent.setup();
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<button type="button">Replay K9</button>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<button type="button" disabled>
+								Replay M2
+							</button>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<button type="button">Replay P7</button>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		screen.getByRole("button", { name: "Replay K9" }).focus();
+		await user.keyboard("{ArrowDown}");
+		// A row whose controls are all disabled has no destination — §2.13's
+		// "disable the CONTROLS, never the row" is what a keyboard user then meets.
+		expect(screen.getByRole("button", { name: "Replay P7" })).toHaveFocus();
+	});
+
+	it("is a progressive enhancement on Tab, not a roving tabindex (§2.15 rule 3)", async () => {
+		const user = userEvent.setup();
+		render(<NavFixture />);
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+		await user.keyboard("{ArrowDown}");
+
+		// No `<tr>` is focusable and no control's tabIndex was rewritten, so every
+		// action in every row keeps its ordinary tab stop — which is what lets
+		// E2-T4's `focus-visible:` reveal fire at all (§2.15 rule 7).
+		for (const row of screen.getAllByRole("row")) expect(row).not.toHaveAttribute("tabindex");
+		expect(screen.getByRole("button", { name: "Replay K9" })).not.toHaveAttribute("tabindex");
+		// Tab still walks the row's own controls, in DOM order.
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+		await user.tab();
+		expect(screen.getByRole("button", { name: "Replay K9" })).toHaveFocus();
+	});
+
+	it("ignores an arrow that came from a nested table's own rows", async () => {
+		const user = userEvent.setup();
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<Table aria-label="Steps">
+								<TableBody>
+									<TableRow>
+										<TableCell>
+											<a href="/steps/1">step 1</a>
+										</TableCell>
+									</TableRow>
+								</TableBody>
+							</Table>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		screen.getByRole("link", { name: "step 1" }).focus();
+		// The inner body handles its own rows; the event then bubbles to the outer
+		// one, which must recognise the row as none of its children. Without that
+		// check the outer table reads an index of -1 and jumps to its first row.
+		await user.keyboard("{ArrowDown}");
+		expect(screen.getByRole("link", { name: "step 1" })).toHaveFocus();
+	});
+
+	it("does not trap or wrap at either end, and leaves the arrow key alone there", async () => {
+		const user = userEvent.setup();
+		const onTableKeyDown = vi.fn();
+		render(
+			<Table aria-label="Runs" onKeyDown={onTableKeyDown}>
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const only = screen.getByRole("link", { name: "run_01H8Z3K9" });
+		only.focus();
+
+		await user.keyboard("{ArrowUp}{ArrowDown}");
+		expect(only).toHaveFocus();
+		// And the page still scrolls: a boundary press is NOT swallowed, which a
+		// handler that called preventDefault() up front would have done.
+		expect(onTableKeyDown).toHaveBeenCalledTimes(2);
+		for (const [event] of onTableKeyDown.mock.calls) expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("leaves the arrow keys to a control that owns them, and runs the caller's handler", async () => {
+		const user = userEvent.setup();
+		const onKeyDown = vi.fn();
+		render(
+			<Table aria-label="Runs">
+				<TableBody onKeyDown={onKeyDown}>
+					<TableRow>
+						<TableCell>
+							<input aria-label="Rename run" defaultValue="run_01H8Z3K9" />
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/m2">run_01H8Z3M2</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const field = screen.getByRole("textbox", { name: "Rename run" });
+		field.focus();
+
+		await user.keyboard("{ArrowDown}");
+		// The caret belongs to the field; stealing it is how a table breaks inline
+		// editing. A checkbox is deliberately NOT in that exemption, so E2-T5's
+		// selection column still navigates.
+		expect(field).toHaveFocus();
+		// The caller's own handler still sees every key, ours or not.
+		expect(onKeyDown).toHaveBeenCalledOnce();
+	});
+
+	it("paints the keyboard-focused row like the hovered one, and never the header row (§2.15 rule 9)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell>Run</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					<TableRow>
+						<TableCell>plain</TableCell>
+					</TableRow>
+					<TableRow isSelected>
+						<TableCell>picked</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const [headerRow, plain, picked] = screen.getAllByRole("row");
+		// `:focus-visible`, never `:focus-within` — the reference keys off `:focus`
+		// and so paints a keyboard state on a mouse click.
+		expect(plain).toHaveClass("has-[:focus-visible]:bg-hover");
+		expect(headerRow).not.toHaveClass("has-[:focus-visible]:bg-hover");
+		// Selection is the stronger signal and stays unmoved, exactly as with hover.
+		expect(picked).toHaveClass("bg-control");
+		expect(picked).not.toHaveClass("has-[:focus-visible]:bg-hover");
+	});
+
+	/**
+	 * E2-T6 (issue 783) — windowing.
+	 *
+	 * The virtualizer needs ONE thing jsdom cannot give it: the height of the
+	 * scroll container. It reads that from `offsetHeight` and then watches it with
+	 * a `ResizeObserver`, and `src/__tests__/setup.ts` provides neither — so an
+	 * unstubbed jsdom container measures 0px, the range is null, and a windowed
+	 * table renders ZERO rows (§G.5's warning, met first-hand). Stubbing the
+	 * height in this block, and nowhere else, buys a real range with real overscan
+	 * without touching the frozen setup file — the 100-row gate still keeps every
+	 * OTHER test and every catalog page on the plain path with no polyfill at all.
+	 *
+	 * Scroll position, sticky survival and focus under a real scroll are still not
+	 * observable here; those were measured in a browser (§2.18).
+	 */
+	describe("windowing", () => {
+		const VIEWPORT = 320;
+		const MANY = Array.from({ length: 150 }, (_, i) => ({ id: `run_${i}` }));
+		const FEW = MANY.slice(0, 99);
+
+		beforeEach(() => {
+			// `@tanstack/react-virtual` measures the scroll container with
+			// `offsetHeight` — NOT `getBoundingClientRect()`, which is the natural
+			// thing to stub and the thing that silently does nothing here (cost: one
+			// debugging round). jsdom reports 0 for `offsetHeight` on every element,
+			// so without this the container is 0px tall, the range is null, and a
+			// windowed table renders no rows at all.
+			vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(VIEWPORT);
+		});
+		afterEach(() => vi.restoreAllMocks());
+
+		function Windowed({ rows, density }: { rows: { id: string }[]; density?: TableDensity }) {
+			return (
+				<Table aria-label="Runs" density={density} containerClassName="max-h-64">
+					<TableHeader>
+						<TableRow>
+							<TableHeaderCell>Run</TableHeaderCell>
+						</TableRow>
+					</TableHeader>
+					<TableBody
+						rows={rows}
+						renderRow={(row) => (
+							<TableRow key={row.id}>
+								<TableCell>
+									<a href={`/runs/${row.id}`}>{row.id}</a>
+								</TableCell>
+							</TableRow>
+						)}
+					/>
+				</Table>
+			);
+		}
+
+		it("renders every row below the 100-row gate, and windows the DOM above it (§2.16 rule 2)", () => {
+			const { container, rerender } = render(<Windowed rows={FEW} />);
+			// Below the gate `count` is 0, so the virtualizer measures nothing — which is
+			// also why this suite needs no ResizeObserver polyfill.
+			expect(container.querySelectorAll("tbody tr")).toHaveLength(99);
+
+			rerender(<Windowed rows={MANY} />);
+			const rendered = container.querySelectorAll("tbody tr");
+			// Two of these are the spacers. The point is the count, not its exact value:
+			// delete the gate or the window and 150 rows come back.
+			expect(rendered.length).toBeLessThan(30);
+			expect(rendered.length).toBeGreaterThan(2);
+		});
+
+		it("keeps aria-rowcount and aria-rowindex honest under windowing, and absent without it (§2.15 rule 8)", () => {
+			const { rerender } = render(<Windowed rows={FEW} />);
+			// The DOM holds every row, so the DOM is the truth and the attributes would
+			// only be a second place to be wrong.
+			expect(screen.getByRole("table")).not.toHaveAttribute("aria-rowcount");
+			for (const row of screen.getAllByRole("row")) expect(row).not.toHaveAttribute("aria-rowindex");
+
+			rerender(<Windowed rows={MANY} />);
+			// Data rows + 1 for the header row.
+			expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "151");
+			// The header row is index 1, so data row i (0-based) is i + 2 — measured
+			// against the ABSOLUTE index, which is the whole point: a windowed row must
+			// not report its position within the window.
+			const first = screen.getByRole("link", { name: "run_0" }).closest("tr");
+			expect(first).toHaveAttribute("aria-rowindex", "2");
+			const third = screen.getByRole("link", { name: "run_2" }).closest("tr");
+			expect(third).toHaveAttribute("aria-rowindex", "4");
+
+			// And it goes away again when the data shrinks past the gate.
+			rerender(<Windowed rows={FEW} />);
+			expect(screen.getByRole("table")).not.toHaveAttribute("aria-rowcount");
+		});
+
+		it("windows with two aria-hidden spacer rows whose height comes from the density ladder (§2.16 rules 1, 3)", () => {
+			const { container } = render(<Windowed rows={MANY} density="compact" />);
+			const spacers = container.querySelectorAll<HTMLTableRowElement>("tbody tr[aria-hidden]");
+			// Two, always: above the window and below it. Never absolute positioning —
+			// that stops the element being a real <table> and kills the sticky <thead>.
+			expect(spacers).toHaveLength(2);
+			for (const spacer of spacers) {
+				expect(spacer).not.toHaveAttribute("aria-rowindex");
+				// Hidden AND unreachable, so `noAriaHiddenOnFocusable` is satisfied
+				// honestly and arrow navigation still steps over it.
+				expect(spacer).toHaveAttribute("tabindex", "-1");
+			}
+			// The scroll height is the ladder's row height × the row count — NOT a
+			// literal. Written as `compact` (28px) precisely so a hard-coded 40 fails.
+			const rendered = container.querySelectorAll("tbody tr").length - 2;
+			const top = Number.parseInt(spacers[0]?.style.height ?? "", 10);
+			const bottom = Number.parseInt(spacers[1]?.style.height ?? "", 10);
+			expect(top + bottom + rendered * TABLE_ROW_HEIGHT.compact).toBe(MANY.length * TABLE_ROW_HEIGHT.compact);
+		});
+
+		it("calls renderRow only for the rows it mounts, with each row's ABSOLUTE index", () => {
+			const renderRow = vi.fn((row: { id: string }, _index: number) => (
+				<TableRow key={row.id}>
+					<TableCell>{row.id}</TableCell>
+				</TableRow>
+			));
+			render(
+				<Table aria-label="Runs" containerClassName="max-h-64">
+					<TableBody rows={MANY} renderRow={renderRow} />
+				</Table>,
+			);
+			// Windowing that still builds 150 elements has bought nothing.
+			expect(renderRow.mock.calls.length).toBeLessThan(30);
+			// And the second argument is the row's position in `rows`, never its
+			// position in the window — a caller that numbers its rows, stripes them or
+			// looks anything up by index would otherwise silently repeat the first
+			// screenful for the whole table.
+			const indexes = renderRow.mock.calls.map(([, index]) => index);
+			expect(indexes).toEqual(indexes.map((_, i) => (indexes[0] ?? 0) + i));
+			expect(MANY[indexes[0] ?? 0]).toBe(renderRow.mock.calls[0]?.[0]);
+		});
+
+		it("still moves focus between windowed rows with the arrow keys (E2-T3 survives E2-T6)", async () => {
+			const user = userEvent.setup();
+			render(<Windowed rows={MANY} />);
+			screen.getByRole("link", { name: "run_0" }).focus();
+			await user.keyboard("{ArrowDown}");
+			// The destination is resolved from the DOM at keypress time, so a windowed
+			// row is no different from a composed one — and the spacer above it is
+			// stepped over rather than landed on.
+			expect(screen.getByRole("link", { name: "run_1" })).toHaveFocus();
+			await user.keyboard("{ArrowUp}");
+			expect(screen.getByRole("link", { name: "run_0" })).toHaveFocus();
+		});
 	});
 
 	// The one non-trivial invariant in this file. E2-T6 reads TABLE_ROW_HEIGHT for
