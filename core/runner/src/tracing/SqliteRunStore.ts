@@ -2244,7 +2244,8 @@ export class SqliteRunStore implements RunStore {
 	}
 }
 
-function rowToSavedFilter(row: Record<string, unknown>): SavedFilter {
+// biome-ignore lint/suspicious/noExplicitAny: DB row
+function rowToSavedFilter(row: any): SavedFilter {
 	let status = [];
 	let workflow = [];
 	let triggerType = [];
