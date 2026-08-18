@@ -66,7 +66,7 @@ function SelectableRuns({ max }: { max?: number }) {
 							{/* A row that cannot be selected disables its CONTROL. There is no
 							    disabled row: a `<tr>` is a container, not a control (§2.13). */}
 							<TableSelectCell
-								label={run.id}
+								rowLabel={run.id}
 								checked={selection.has(run.id)}
 								disabled={run.locked}
 								onToggle={(extend) => selection.toggle(run.id, extend)}
@@ -113,19 +113,19 @@ export default function TableSelectionCatalog() {
 						</TableHeader>
 						<TableBody>
 							<TableRow>
-								<TableSelectCell label="the unselected row" checked={false} onToggle={() => {}} />
+								<TableSelectCell rowLabel="the unselected row" checked={false} onToggle={() => {}} />
 								<TableCell>unchecked</TableCell>
 							</TableRow>
 							<TableRow isSelected>
-								<TableSelectCell label="the selected row" checked onToggle={() => {}} />
+								<TableSelectCell rowLabel="the selected row" checked onToggle={() => {}} />
 								<TableCell>checked — the row takes the opaque selected surface</TableCell>
 							</TableRow>
 							<TableRow>
-								<TableSelectCell label="the locked row" checked={false} disabled onToggle={() => {}} />
+								<TableSelectCell rowLabel="the locked row" checked={false} disabled onToggle={() => {}} />
 								<TableCell>disabled</TableCell>
 							</TableRow>
 							<TableRow isSelected>
-								<TableSelectCell label="the locked selected row" checked disabled onToggle={() => {}} />
+								<TableSelectCell rowLabel="the locked selected row" checked disabled onToggle={() => {}} />
 								<TableCell>disabled + checked</TableCell>
 							</TableRow>
 						</TableBody>

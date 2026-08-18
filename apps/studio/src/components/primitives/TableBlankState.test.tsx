@@ -53,6 +53,18 @@ describe("TableNoResults", () => {
 		expect(screen.getByRole("heading", { level: 3, name: "No runs match" })).toBeInTheDocument();
 		expect(screen.getByText("Try a wider time range.")).toBeInTheDocument();
 	});
+
+	it("ships a default icon, so the state is not a wall of text", () => {
+		render(
+			<InTable>
+				<TableNoResults />
+			</InTable>,
+		);
+		// The default `SearchX` is shipped behaviour and nothing else asserted it:
+		// deleting it left the suite green. Lucide renders an <svg>, so its presence
+		// is the cheapest honest signal.
+		expect(screen.getByRole("row").querySelector("svg")).toBeInTheDocument();
+	});
 });
 
 describe("TableEmpty", () => {
@@ -113,6 +125,25 @@ describe("TableEmpty", () => {
 		await userEvent.tab();
 		expect(create).not.toHaveFocus();
 	});
+
+	it("passes EmptyState's WHOLE prop bag through, which is what lets E11 swap content with zero E2 edits", () => {
+		render(
+			<InTable>
+				<TableEmpty
+					icon={<Inbox aria-hidden="true" className="h-6 w-6" />}
+					title="No runs yet"
+					description="none"
+					snippets={[{ lang: "curl · http", code: "blokctl run" }]}
+					docLink={{ href: "https://blok.dev/docs/runs", label: "Runs docs" }}
+				/>
+			</InTable>,
+		);
+		// §2.13's split test. Narrowing the props to {icon,title,description,action}
+		// left the whole suite green — `snippets` and `docLink` are exactly the two
+		// E11-T4 needs, and only a passthrough type carries them.
+		expect(screen.getByRole("link", { name: "↗ Runs docs" })).toHaveAttribute("href", "https://blok.dev/docs/runs");
+		expect(screen.getByText("blokctl run")).toBeInTheDocument();
+	});
 });
 
 describe("TableLoadingOverlay", () => {
@@ -142,7 +173,9 @@ describe("TableLoadingOverlay", () => {
 		// because an absolutely positioned `<tr>`'s `<td>` shrink-wraps out of table
 		// layout (measured: row 742 x 120.5, cell 73.3 x 20 in the corner).
 		const row = screen.getByRole("row");
-		expect(row).toHaveClass("absolute", "inset-0");
+		// `bg-raised/80` is the scrim — the reason the rows underneath read as
+		// "refreshing" rather than "interactive". Deleting it left the suite green.
+		expect(row).toHaveClass("absolute", "inset-0", "bg-raised/80");
 		const content = row.querySelector("td > div");
 		expect(content).toHaveClass("absolute", "inset-0", "items-center", "justify-center");
 	});

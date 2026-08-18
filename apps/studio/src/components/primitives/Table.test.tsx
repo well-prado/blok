@@ -529,6 +529,37 @@ describe("Table", () => {
 		for (const [event] of onTableKeyDown.mock.calls) expect(event.defaultPrevented).toBe(false);
 	});
 
+	it("lets the caller's own handler opt out of row navigation with preventDefault()", async () => {
+		const user = userEvent.setup();
+		render(
+			<Table aria-label="Runs">
+				<TableBody onKeyDown={(event) => event.preventDefault()}>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/m2">run_01H8Z3M2</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const first = screen.getByRole("link", { name: "run_01H8Z3K9" });
+		first.focus();
+
+		await user.keyboard("{ArrowDown}");
+		// §2.15 rule 3's shipped note: "A caller's own `onKeyDown` on `<TableBody>`
+		// runs first and can opt out with `preventDefault()`." That is the whole
+		// escape hatch for a screen that wants the arrows for something else, and it
+		// is `moveRowFocus`'s `event.defaultPrevented` bail — which nothing else in
+		// the suite reaches, because every other test wants navigation to happen.
+		expect(first).toHaveFocus();
+		expect(screen.getByRole("link", { name: "run_01H8Z3M2" })).not.toHaveFocus();
+	});
+
 	it("leaves the arrow keys to a control that owns them, and runs the caller's handler", async () => {
 		const user = userEvent.setup();
 		const onKeyDown = vi.fn();

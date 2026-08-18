@@ -20,7 +20,7 @@ describe("TableSelectCell", () => {
 	it("names the checkbox after its row", () => {
 		render(
 			<InTable>
-				<TableSelectCell label="run_01H8Z3K9" checked={false} onToggle={vi.fn()} />
+				<TableSelectCell rowLabel="run_01H8Z3K9" checked={false} onToggle={vi.fn()} />
 			</InTable>,
 		);
 		// The reference's row checkboxes announce as "checkbox, not checked" with no
@@ -34,7 +34,7 @@ describe("TableSelectCell", () => {
 		const user = userEvent.setup();
 		render(
 			<InTable>
-				<TableSelectCell label="run_a" checked={false} onToggle={onToggle} />
+				<TableSelectCell rowLabel="run_a" checked={false} onToggle={onToggle} />
 			</InTable>,
 		);
 
@@ -52,7 +52,7 @@ describe("TableSelectCell", () => {
 		const user = userEvent.setup();
 		render(
 			<InTable>
-				<TableSelectCell label="run_a" checked={false} onToggle={onToggle} />
+				<TableSelectCell rowLabel="run_a" checked={false} onToggle={onToggle} />
 			</InTable>,
 		);
 		const checkbox = screen.getByRole("checkbox");
@@ -71,7 +71,7 @@ describe("TableSelectCell", () => {
 		const user = userEvent.setup();
 		render(
 			<InTable>
-				<TableSelectCell label="run_a" checked={false} onToggle={onToggle} disabled />
+				<TableSelectCell rowLabel="run_a" checked={false} onToggle={onToggle} disabled />
 			</InTable>,
 		);
 		const checkbox = screen.getByRole("checkbox");
@@ -99,9 +99,12 @@ describe("TableSelectAllCell", () => {
 			</InHeader>,
 		);
 		// It must NOT go through `hiddenLabel`, which would put the control itself
-		// inside an `sr-only` span.
+		// inside an `sr-only` span. `toBeVisible()` CANNOT see that regression —
+		// jsdom loads no stylesheet, so `sr-only` hides nothing there and the
+		// assertion stayed green through the mutation. The structural check is the
+		// guard: the input must have no `sr-only` ancestor.
 		const checkbox = screen.getByRole("checkbox", { name: "Select all 3 rows" });
-		expect(checkbox).toBeVisible();
+		expect(checkbox.closest(".sr-only")).toBeNull();
 		expect(checkbox).not.toBeChecked();
 	});
 
@@ -172,14 +175,14 @@ function SelectableTable({ max }: { max?: number }) {
 				{ids.map((id) => (
 					<TableRow key={id} isSelected={selection.has(id)}>
 						<TableSelectCell
-							label={id}
+							rowLabel={id}
 							checked={selection.has(id)}
 							onToggle={(extend) => selection.toggle(id, extend)}
 						/>
 					</TableRow>
 				))}
 				<TableRow>
-					<TableSelectCell label={LOCKED} checked={selection.has(LOCKED)} disabled onToggle={() => {}} />
+					<TableSelectCell rowLabel={LOCKED} checked={selection.has(LOCKED)} disabled onToggle={() => {}} />
 				</TableRow>
 			</TableBody>
 		</Table>

@@ -199,7 +199,23 @@ export function TableHeader({ className, ...props }: React.ComponentPropsWithRef
 type TableBodyProps<T> = Omit<React.ComponentPropsWithRef<"tbody">, "children"> &
 	(
 		| { children: ReactNode; rows?: never; renderRow?: never }
-		| { rows: readonly T[]; renderRow: (row: T, index: number) => ReactNode; children?: never }
+		/**
+		 * `children` is ALLOWED alongside `rows`, and it is the empty fallback:
+		 * whatever you would have rendered had there been no records — E2-T7's
+		 * `<TableEmpty>` / `<TableNoResults>`. It is rendered instead of the rows
+		 * when `rows` is empty, and ignored otherwise.
+		 *
+		 * Found at the E2 integration merge, and it crosses issue 783 and issue 784:
+		 * the two branches were mutually exclusive, so a screen using the windowing
+		 * seam could not put a blank state inside `<TableBody>` at all
+		 * (`tsc`: "Type '{ id: string; }[]' is not assignable to type 'undefined'").
+		 * Its only way out was to branch on `<TableBody>` itself — which is §2.13's
+		 * "callers branch outside today" defect moved one element inwards, and it
+		 * costs the header, the column widths and the sticky behaviour nothing only
+		 * by luck. Every list screen has an empty state, so this is the common path,
+		 * not an edge.
+		 */
+		| { rows: readonly T[]; renderRow: (row: T, index: number) => ReactNode; children?: ReactNode }
 	);
 
 /**
@@ -402,10 +418,17 @@ export function TableBody<T>({ className, children, rows, renderRow, onKeyDown, 
 			{...props}
 		>
 			{/*
-			 * Destructuring a union breaks TS narrowing, so both halves are tested —
-			 * `rows &&` alone would leave `renderRow` possibly undefined.
+			 * `rows &&` now narrows the union on its own — `children` stopped being
+			 * `never` in the rows branch, so `rows` truthy identifies that branch and
+			 * `renderRow` is known-defined. The old `&& renderRow` guard became a
+			 * `TS2774` ("this condition will always return true") the moment the
+			 * fallback landed, which is a pleasant way to learn the narrowing improved.
+			 *
+			 * `rows.length > 0` is what lets a windowed table carry a blank state: with
+			 * no records, `children` renders. A caller with no blank state passes none
+			 * and gets the empty `<tbody>` it had before.
 			 */}
-			{rows && renderRow
+			{rows && rows.length > 0
 				? useVirtual
 					? windowRows(rows, renderRow, items, virtualizer.getTotalSize())
 					: rows.map(renderRow)

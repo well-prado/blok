@@ -30,14 +30,22 @@ function isExtend(event: React.ChangeEvent<HTMLInputElement>): boolean {
 }
 
 export function TableSelectCell({
-	label,
+	rowLabel,
 	checked,
 	onToggle,
 	disabled = false,
 	className,
 }: {
-	/** Names the ROW, not the control: "run_01H8Z3K9". Becomes "Select run_01H8Z3K9". */
-	label: string;
+	/**
+	 * Names the ROW, not the control: "run_01H8Z3K9". Becomes "Select run_01H8Z3K9".
+	 *
+	 * `rowLabel`, not `label`, and the name is the point (integration, §2.13a):
+	 * `TableRowActions` calls the identical concept `rowLabel`, `Checkbox`'s own
+	 * `label` is a ReactNode, and `TableLoadingOverlay`'s `label` is a status
+	 * string. Two slot components naming one concept two ways is exactly the
+	 * §2.10 failure the prop vocabulary exists to prevent.
+	 */
+	rowLabel: string;
 	checked: boolean;
 	/** `extend` is true for shift-click / shift-space — hand it to `toggle(id, extend)`. */
 	onToggle: (extend: boolean) => void;
@@ -56,7 +64,7 @@ export function TableSelectCell({
 				// `select-none` is REQUIRED, not stylistic: an `sr-only` twin stays
 				// selectable and a mouse-drag copies both strings (§2.12 rule 11,
 				// enforced by tokens.test.ts).
-				label={<span className="sr-only select-none">Select {label}</span>}
+				label={<span className="sr-only select-none">Select {rowLabel}</span>}
 			/>
 		</TableCell>
 	);
