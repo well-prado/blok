@@ -132,6 +132,212 @@ describe("Table", () => {
 		expect(screen.getByRole("cell", { name: "compact" })).toBeInTheDocument();
 	});
 
+	/**
+	 * Everything below this line is a SEAM GUARD, not a style test. Each behaviour
+	 * here is depended on by a task that is forbidden from editing `Table.tsx`
+	 * (§12.5), so if one is deleted there is nobody downstream who can notice.
+	 * Every one of these was proven to fail on its own revert.
+	 *
+	 * §8.3 point 2 sanctions `toHaveClass` on ONE discriminating utility where
+	 * nothing semantic distinguishes the states — which is the case for every
+	 * paint-level seam here.
+	 */
+
+	it("sticks the header to the scroll container only when asked (§2.12 rules 6-8)", () => {
+		function Fixture({ sticky }: { sticky: boolean }) {
+			return (
+				<Table aria-label="Runs" stickyHeader={sticky}>
+					<TableHeader data-testid="head">
+						<TableRow>
+							<TableHeaderCell>Run</TableHeaderCell>
+						</TableRow>
+					</TableHeader>
+				</Table>
+			);
+		}
+		const { rerender } = render(<Fixture sticky={false} />);
+		expect(screen.getByTestId("head")).not.toHaveClass("sticky");
+
+		rerender(<Fixture sticky />);
+		const head = screen.getByTestId("head");
+		// `top-0` and `z-20` are the position; the `after:` hairline is the part
+		// `border-b` cannot do under `border-collapse: collapse` (§2.12 rule 8).
+		expect(head).toHaveClass("sticky", "top-0", "z-20", "after:bg-line");
+	});
+
+	it("ships group/row, an opaque base background and the row separator on DATA rows (§2.12)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>run_01H8Z3K9</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const row = screen.getByRole("row");
+		// `group/row` is the hook E2-T4's action trigger hangs `group-hover/row:`
+		// off (§2.15 rule 7) and it can only be added here.
+		// `bg-raised` is what makes a sticky cell's `bg-inherit` resolve to an
+		// opaque color (§2.12 rules 2-3), and the separator is the row's, not the
+		// cell's.
+		expect(row).toHaveClass("group/row", "bg-raised", "border-b", "last:border-b-0");
+	});
+
+	it("does NOT make the header row hover or act as a group (the header is not a data row)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell>Run</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					<TableRow>
+						<TableCell>run_01H8Z3K9</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const [headerRow, dataRow] = screen.getAllByRole("row");
+		// Measured live before this fix: the header lit up 17,17,19 → 31,31,35 on a
+		// real mouse hover, and a `group-hover/row:` reveal would fire from the
+		// header — where E2-T5's select-all cell lives.
+		expect(headerRow).not.toHaveClass("group/row");
+		expect(headerRow).not.toHaveClass("hover:bg-hover");
+		expect(dataRow).toHaveClass("group/row", "hover:bg-hover");
+	});
+
+	it("paints hover and selection on the row, selection winning (§2.12 rules 1, 4, 5)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>plain</TableCell>
+					</TableRow>
+					<TableRow isSelected>
+						<TableCell>picked</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const [plain, picked] = screen.getAllByRole("row");
+		expect(plain).toHaveClass("hover:bg-hover");
+		// Opaque token, and NOT stacked with a hover variant: equal specificity
+		// would leave the winner up to Tailwind's emission order.
+		expect(picked).toHaveClass("bg-control");
+		expect(picked).not.toHaveClass("hover:bg-hover");
+	});
+
+	it("gives a sticky cell bg-inherit so it tracks the row's own state (§2.12 rule 3)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>scrolls</TableCell>
+						<TableCell isSticky>pinned</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		// Its own token would occlude the row state; no background at all lets
+		// scrolled content pass through it. Verified in a browser (§2.18).
+		expect(screen.getByRole("cell", { name: "pinned" })).toHaveClass("sticky", "right-0", "z-10", "bg-inherit");
+		expect(screen.getByRole("cell", { name: "scrolls" })).not.toHaveClass("bg-inherit");
+	});
+
+	it("hides a hiddenLabel header's text visually while keeping it named and unselectable", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell hiddenLabel>Actions</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+			</Table>,
+		);
+		// The name survives (that is the point of the prop) …
+		const header = screen.getByRole("columnheader", { name: "Actions" });
+		// … in an `sr-only` span that also carries `select-none`, or a mouse-drag
+		// over the column copies the invisible string too (§2.12 rule 11).
+		const label = header.querySelector("span");
+		expect(label).toHaveClass("sr-only", "select-none");
+		expect(label).toHaveTextContent("Actions");
+	});
+
+	it("aligns cells and header cells through the align prop", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell align="right">Duration</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					<TableRow>
+						<TableCell align="right">1.24s</TableCell>
+						<TableCell>run_01H8Z3K9</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		expect(screen.getByRole("columnheader", { name: "Duration" })).toHaveClass("text-right");
+		expect(screen.getByRole("cell", { name: "1.24s" })).toHaveClass("text-right");
+		// The default is left, not "unset" — a numeric column that forgets `align`
+		// must not silently inherit whatever the last cell did.
+		expect(screen.getByRole("cell", { name: "run_01H8Z3K9" })).toHaveClass("text-left");
+	});
+
+	it("has no disabled prop, and a row's controls stay operable (§2.6)", async () => {
+		const onClick = vi.fn();
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					{/*
+					 * The guard for a DELETED prop. `disabled` on a row rendered
+					 * `aria-disabled` + `opacity-50` + `pointer-events-none`: announced as
+					 * unavailable, still tabbable, still fired on Enter. Re-adding it makes
+					 * this directive unused, and `tsc -b` (run by `bun run build`) fails
+					 * with "Unused '@ts-expect-error' directive".
+					 */}
+					{/* @ts-expect-error — TableRow has no `disabled` prop, deliberately. */}
+					<TableRow disabled>
+						<TableCell>
+							<button type="button" onClick={onClick}>
+								Replay
+							</button>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const row = screen.getByRole("row");
+		expect(row).not.toHaveAttribute("aria-disabled");
+		expect(row).not.toHaveClass("opacity-50");
+		// Nothing half-disables the button, so nothing lies about it.
+		await userEvent.tab();
+		expect(screen.getByRole("button", { name: "Replay" })).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		expect(onClick).toHaveBeenCalledOnce();
+	});
+
+	it("forwards the aria attributes windowing will need (§2.15 rule 8, §2.16 rule 5)", () => {
+		// E2-T6 turns `aria-rowcount` on at the `<table>` and `aria-rowindex` on
+		// each rendered row; both ride the prop spread rather than a dedicated prop.
+		// If either spread is dropped, windowing silently ships wrong row counts.
+		render(
+			<Table aria-label="Runs" aria-rowcount={501}>
+				<TableBody>
+					<TableRow aria-rowindex={42}>
+						<TableCell>run_01H8Z3K9</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "501");
+		expect(screen.getByRole("row")).toHaveAttribute("aria-rowindex", "42");
+	});
+
 	// The one non-trivial invariant in this file. E2-T6 reads TABLE_ROW_HEIGHT for
 	// `estimateSize` and E16-T5 may read it too, so the number and the class it is
 	// supposed to describe must not drift apart. Edit either alone and this fails.

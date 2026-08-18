@@ -302,6 +302,7 @@ Sticky headers:
 9. **Z-index is fixed and small: sticky header `z-20` · sticky column `z-10` · everything else unset.** Radix portals stay at `z-50` (§4.3), so a menu opened from a sticky action cell still renders above both. **Measured at the crossing: with the container scrolled to `scrollTop 200 / scrollLeft 128` (its maximum), `document.elementFromPoint()` at the top-right corner returns the `<th>`, inside the sticky `<thead>`.** The header wins where the two cross.
 10. **Never `transition-colors` on a `<tr>` or `<td>`.** Tailwind v4 folds `outline-color` into it and `.focus-ring` then fades in from the element's own text color — the E1 defect, and a hovered row is precisely the element that wants a color transition *and* carries a focus ring. Use `transition-[background-color]`. This is enforced: `src/__tests__/tokens.test.ts` fails any line in `components/primitives/` containing `transition-colors`.
 11. **Every `sr-only` span you write in `components/primitives/` MUST also carry `select-none`.** Same guard file, same enforcement. Selection cells and hidden header labels are the two places E2 will write `sr-only`, and both are inside the guard's scope.
+12. **The header row is NOT a data row, and `TableRow` knows which it is from context.** *(Added by the Wave-A review; numbered 12 so every existing "§2.12 rule 11" cross-reference still points at the `sr-only` rule.)* `TableRow` is the only row component — the caller writes it inside `<thead>` and `<tbody>` alike — so the naive version shipped `group/row` and `hover:bg-hover` into the header. **Measured before the fix: the header background went `rgb(17,17,19)` → `rgb(31,31,35)` on a real mouse hover**, and every `group-hover/row:` reveal (rule 7 of §2.15) would have fired from the header, which is exactly where #782's select-all cell lives. `TableHeader` therefore provides an internal `inHeader` context flag and `TableRow` suppresses **`group/row`, the hover paint and the selected paint** when it is set; the base surface and the separator stay. A *flag*, not a separate `TableHeaderRow` export, because the caller cannot forget a flag it never writes, and no existing markup changed. Guarded in `Table.test.tsx` ("does NOT make the header row hover or act as a group") and re-measured live after the fix.
 
 ---
 
@@ -335,7 +336,7 @@ export function TableBody<T>(props: Omit<React.ComponentPropsWithRef<"tbody">, "
 
 export function TableRow(props: React.ComponentPropsWithRef<"tr"> & {
 	isSelected?: boolean;          // opaque selected background + data-selected="true"
-	disabled?: boolean;            // §2.6 non-native recipe: aria-disabled + opacity-50 + pointer-events-none
+	// NO `disabled`. See "There is no disabled row" below.
 }): React.JSX.Element;
 
 export function TableHeaderCell(props: React.ComponentPropsWithRef<"th"> & {
@@ -356,6 +357,16 @@ export function TableBlankRow(props: React.ComponentPropsWithRef<"tr"> & {
 
 export function useTableDensity(): TableDensity;
 ```
+
+### There is no disabled row — DECIDED by the Wave-A review
+
+T1 first shipped `<TableRow disabled>` as §2.6's non-native recipe (`aria-disabled` + `opacity-50` + `pointer-events-none`). **It was a lie and the prop is deleted.** Proven in jsdom — `userEvent.tab()` landed on a `<button>` inside the "disabled" row and `{Enter}` fired its `onClick` — and live, where the row computed `pointer-events: none` (mouse only), no `disabled`, no `inert`, and `.focus()` still worked. A screen-reader user was told the row was unavailable, a sighted user saw 50% opacity, and the row worked anyway: exactly what §2.6's last bullet forbids, because the recipe's mandatory third part (an early `return` in the handler) does not exist for a container that owns no handler.
+
+**A `<tr>` is a container, not a control. Disable the CONTROLS inside it** — `<Button disabled>`, `<Checkbox disabled>` — which are natively disable-able and therefore honest. `/catalog/table`'s row-states demo shows that form.
+
+`inert` was the alternative and was rejected: it also strips the row's *content* from the accessibility tree, so a screen-reader user cannot read a row they can see. If a screen genuinely needs "this row is not actionable right now", it is a new ticket for the row owner (E2-T3, who owns row focus), not a prop resurrected here.
+
+**Guarded twice, both proven on revert**: `Table.test.tsx` carries a `@ts-expect-error` on `<TableRow disabled>` — re-adding the prop makes the directive unused and `tsc -b` fails with `TS2578` — and the same test asserts the row has no `aria-disabled`, no `opacity-50`, and that a button inside it takes Tab focus and fires on Enter.
 
 **`onSort` is what turns sorting on, not `sortDirection`.** `aria-sort` is emitted only when `onSort` is present; `sortDirection` alone renders a plain header with no button and no `aria-sort`, because a sort affordance nobody can activate is a lie. Pass both.
 
@@ -538,11 +549,19 @@ export function useTableSelection(
 
 1. **Real `<table>` semantics. Never `role="grid"`, never a div-table.** `<table>/<thead>/<tbody>/<tr>/<th scope="col">/<td>`. `role="grid"` obliges full two-dimensional cell navigation with a roving tabindex and `aria-colindex` — a far larger contract than #780 asks for. The moment E2 may reach for `grid` is the moment a screen needs cell-level selection without checkboxes; that is a new ticket, not an improvisation.
 2. **Every `<Table>` has an accessible name** — `aria-label`, `aria-labelledby` pointing at the visible page/section heading, or a `<caption>`. `<Table>` extends `ComponentPropsWithRef<"table">`, so this costs nothing; a table with no name is announced as "table" and nothing else.
-3. **Focus lives on ONE interactive element per row. The `<tr>` is never `tabIndex={0}`.** The row's primary link/button carries `tabIndex={0}`; every other link inside the row carries `tabIndex={-1}` — reachable by mouse and by the screen-reader virtual cursor, not by Tab. One Tab stop per row. This is the one part of the reference's keyboard model that is genuinely good; keep it. Row-level ↑/↓ (#780) moves focus **between those primary elements** and is a progressive enhancement on top of Tab, never the only path.
+3. **REWRITTEN by the Wave-A review — one tab stop per distinct ACTION, not one per row. The `<tr>` is never `tabIndex={0}`.**
+
+   > The original rule said "one Tab stop per row; every other link is `tabIndex={-1}`", which **contradicted rule 7** ("action triggers keyboard-reachable at all times, revealed via `focus-visible:`"): a `tabIndex={-1}` button is not keyboard reachable and can never fire its own `focus-visible:opacity-100`. #780, #781 and #782 all read both rules. **This is the resolution; where any other text disagrees, this wins.**
+
+   - **Every control in a row that does something DIFFERENT is a real, ordinary tab stop.** A row composed per §2.13 therefore has **exactly three**: the select checkbox, the row's primary link, the action-menu trigger. That is correct and intended — it is the same count a keyboard user gets from any list of records, and it is what makes rule 7 possible at all.
+   - **`tabIndex={-1}` is only for a REDUNDANT control: a second link to the destination the row's primary link already goes to** (a status chip, an id chip, a "view" affordance in another cell). It stays mouse- and virtual-cursor-reachable and costs no extra Tab press. Redundancy is the test, not cell count.
+   - **The `<tr>` itself is never focusable and there is no roving tabindex.** A roving model implies `role="grid"` and full 2-D cell navigation, banned by rule 1.
+   - **Row-level ↑/↓ (#780) moves focus between rows' primary links and is a progressive enhancement layered on Tab** — never the only path to anything, and it never removes a tab stop that rule 7 requires.
+   - Consequence for #781/#782, stated so neither has to infer it: the action trigger and the checkbox ship **no `tabIndex` at all** (a `<button>`/`<input>` is focusable by default), and the reveal is `opacity` keyed on `group-hover/row:`, `group-focus-within/row:` **and its own `focus-visible:`** — which now genuinely fires.
 4. **`aria-sort` on every sortable `<th>`** — `ascending` / `descending` / `none`. **At most one column may be non-`none`.** Non-sortable headers set nothing at all.
 5. **The whole header content is the sort button, and its accessible name is the column name.** `<th aria-sort><button>Duration<ChevronIcon aria-hidden/></button></th>` — the W3C APG pattern, and it needs no `aria-label`. **`aria-label="Toggle sort"` is BANNED**: the reference puts that identical name on every sortable column, so a screen-reader user hears "Toggle sort, button" N times with no idea which column. **A chevron-only hit target is also banned** — the reference's is ~16px, below WCAG 2.2 AA 2.5.8's 24×24 minimum, and their own code comment admits clicking the header text does nothing. **Measured on `/catalog/table`: the shipped sort button is 173.8 × 32px (`h-full w-full`), its accessible name is `"Ascending"` (the column text), and it carries no `aria-label`.**
 6. **Selection is conveyed by real checkboxes, NOT by `aria-selected`.** `data-selected="true"` on the `<tr>` is the styling and testing hook only. **Every row checkbox has an accessible name that identifies its row** (`label={<span className="sr-only select-none">Select run {id}</span>}`); the header checkbox is `Select all {n} rows` and sets the DOM `indeterminate` **property** when partially selected. Blok gets this for free because `primitives/Checkbox.tsx` makes `label` required — an accidental structural win over the reference, whose row checkboxes announce as "checkbox, not checked". Keep it.
-7. **Row-action triggers are keyboard reachable at all times.** Reveal-on-hover MUST be implemented with `opacity` and MUST also reveal on `group-focus-within` and `focus-visible`. **`hidden` / `display:none` is banned for hover-revealed actions** — it removes the control from the tab order, which is the reference's bug and fails §9. T1 therefore ships `group/row` on the `<tr>` so slot components in other files can hang `group-hover/row:` and `group-focus-within/row:` off it.
+7. **Row-action triggers are keyboard reachable at all times** — i.e. they are one of rule 3's three tab stops, which is what lets their own `focus-visible:` fire. Reveal-on-hover MUST be implemented with `opacity` and MUST also reveal on `group-focus-within` and `focus-visible`. **`hidden` / `display:none` is banned for hover-revealed actions** — it removes the control from the tab order, which is the reference's bug and fails §9. T1 therefore ships `group/row` on the `<tr>` so slot components in other files can hang `group-hover/row:` and `group-focus-within/row:` off it.
 8. **`aria-rowcount` / `aria-rowindex` are set if and ONLY if the DOM does not hold every row** — i.e. under virtualization. Then: `aria-rowcount` on the `<table>` = data rows **+ 1 for the header**; `aria-rowindex` on each rendered `<tr>` = its absolute 0-based data index **+ 2** (the header row is index 1); the windowing spacer rows carry `aria-hidden="true"` and **no** index. **Non-virtualized and server-paginated tables set neither** — the DOM is already the truth, and page-local indices under a global count is the worst of both. The reference's own virtualized surface (`TreeView`) sets no `aria-setsize`/`aria-posinset` at all; there is nothing to copy, so do it properly.
 9. **The row focus highlight uses `:focus-visible` / `:focus-within`, never bare `:focus`.** The reference keys off `:focus`, so a mouse click paints a keyboard-focus state. **Verified with a real `Tab` keypress: the sort button matches `:focus-visible` and computes `outline: 1px solid rgb(77,217,138) offset -1px` — `.focus-ring`, not a bespoke ring.**
 10. **Every icon-only row action carries an `aria-label` naming both the action and the row** (`Actions for run run_01H…`), never just the action.
@@ -575,7 +594,17 @@ export function TableBody<T>({ rows, renderRow, children, className, ...props }:
 }
 ```
 
-T6 replaces **that one expression** and nothing else in the codebase. Rules for when it does:
+> **CORRECTION (Wave-A review) — the old sentence "T6 replaces that one expression and nothing else in the codebase" was FALSE, and T6 is who it misled.** Rule 5 below plus §2.15 rule 8 make `aria-rowcount` and `aria-rowindex` mandatory the moment windowing turns on, and **`aria-rowcount` belongs on the `<table>`**, which `TableBody` cannot reach. The promise that actually holds, and the one that matters, is the caller-facing one:
+>
+> **No caller changes. No `renderRow` changes. No file outside `Table.tsx` changes.** T6's blast radius is:
+>
+> 1. **`TableBody`'s one expression** — the windowed render plus the two spacer `<tr>`s (rule 1).
+> 2. **`aria-rowindex`, injected inside `TableBody`** by cloning what `renderRow` returned: `cloneElement(renderRow(row, i) as ReactElement, { "aria-rowindex": i + 2 })`. Reachable from `TableBody` alone, so the caller's `renderRow` stays untouched. **`TableRow` spreads its props, and a test guards that spread**, so the attribute lands on the `<tr>`.
+> 3. **`aria-rowcount` on `Table`** — the one component beyond `TableBody` that T6 edits. `<Table aria-rowcount={n}>` already rides `ComponentPropsWithRef<"table">`'s spread today (**same guarded test**), so a caller that knows its total can set it; but because the 100-row gate is internal, T6 makes it automatic by lifting the count `TableBody` computes into `TableContext` and reading it in `Table`.
+>
+> **The seam was deliberately NOT widened further.** Shipping that state plumbing in T1 would be machinery for a feature §2.16 rule 6 says nothing needs yet — and it would be untestable until windowing exists. What T1 shipped instead is the cheap half: both attributes pass through by spread, and `Table.test.tsx` fails if either spread is dropped. §12.5's T6 row is corrected to `Table.tsx` — `TableBody` internals **plus `aria-rowcount` on `Table`**.
+
+T6 replaces that expression, per the corrected blast radius above. Rules for when it does:
 
 1. **Window with two spacer `<tr>`s, never absolute positioning.**
    ```tsx
@@ -636,6 +665,21 @@ type TextProps = React.ComponentPropsWithRef<"span"> & {
 | focus ring on a real `Tab` | `:focus-visible` true, `outline: 1px solid rgb(77,217,138) offset -1px`, hit target 173.8 × 32 | holds |
 | `aria-sort` discipline across the page | exactly 3 present (`ascending`/`descending`/`none`), 0 on non-sortable headers | holds |
 | `sr-only` header labels are unselectable | all four compute `user-select: none` | §2.12 rule 11 holds |
+
+**Re-measured after the Wave-A review fixes** (same viewport, same page; the header-hover row is the defect R2 named):
+
+| claim | measurement | verdict |
+|---|---|---|
+| the header row no longer hovers | header `<tr>` genuinely `:hover` for 4 samples over 450ms, background `rgb(17,17,19)` at every sample (was `rgb(17,17,19)` → `rgb(31,31,35)`) | **§2.12 rule 12 fixed** |
+| a DATA row still hovers | hovered `<tr>` `rgb(31,31,35)`, its sticky `<td>` `rgb(31,31,35)`, sibling row and its sticky `<td>` both `rgb(17,17,19)`, plain `<td>` `rgba(0,0,0,0)` | rule 3 intact after the fix |
+| selection still beats hover | selected row `rgb(39,39,42)` with a neighbour hovered | intact |
+| sticky `<thead>` survives the new context provider | container 0 → 300px: `<thead>` moved 0px, rows moved −300px; `position: sticky`, `z-index: 20`, `border-bottom-width: 0px`; `::after` `content:""` `absolute` `1px` `rgb(39,39,42)` 736px | intact |
+| z-order at the crossing | scrolled to `scrollTop 200 / scrollLeft 128` (max), `elementFromPoint` top-right → `TH` inside `<thead>` | intact |
+| the ladder | rows `[28,28,28] / [40,40,40] / [44,44,44]`, headers 28 / 32 / 36 | unchanged |
+| no row lies about being disabled | `document.querySelectorAll("tr[aria-disabled]").length === 0`; the demo's `<Button disabled>` computes `disabled: true`, `pointer-events: none`, `opacity: 0.5` | **R3 fixed** |
+| `sr-only` labels still unselectable | all four compute `user-select: none` | intact |
+
+> **Measurement trap, cost 15 minutes:** the preview pane throttles `requestAnimationFrame`, so a `transition-[background-color]` does **not** advance inside a single `javascript_exec` call no matter how long you `await sleep()`. The first read after a hover returns the *start* color and looks like a broken hover. **Read the computed background in a SECOND tool call.** Every "no hover" reading in this table was re-confirmed that way.
 
 ---
 
@@ -1053,7 +1097,7 @@ E2-T1 appended a `Text` section to the existing `src/catalog/typography.tsx` (Wa
 | **T7 #784** Wave B | `primitives/TableBlankState.tsx` + test | `table-blank-states` |
 | **T2 #779** Wave C | `hooks/useTableSort.ts` + test; **edits** `Table.tsx` (header cell only) | appends to `table` |
 | **T3 #780** Wave C | **edits** `Table.tsx` (row focus/keyboard only) | appends to `table` |
-| **T6 #783** Wave C | **edits** `Table.tsx` (`TableBody` internals only) | appends to `table` |
+| **T6 #783** Wave C | **edits** `Table.tsx` (`TableBody` internals **plus `aria-rowcount` on `Table`** — §2.16's corrected blast radius) | appends to `table` |
 
 **Each Wave-B task gets its own catalog slug.** That is the E1 glob mechanism and it is the only reason three agents can ship catalog pages with zero conflicts. `slugOf`/`labelOf` handle hyphens (`table-actions` → "Table actions") and slug-sorting keeps them adjacent to `table`. Do **not** append to `src/catalog/table.tsx` during Wave B.
 

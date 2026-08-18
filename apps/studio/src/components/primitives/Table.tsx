@@ -58,6 +58,19 @@ type Alignment = keyof typeof alignments;
 type TableContextValue = { density: TableDensity; stickyHeader: boolean };
 const TableContext = createContext<TableContextValue>({ density: "default", stickyHeader: false });
 
+/**
+ * True inside `<TableHeader>`. `TableRow` is the ONLY row component — the caller
+ * writes `<TableRow>` in `<thead>` and in `<tbody>` alike — so without this flag
+ * the header row ships `group/row` and `hover:bg-hover` and hovers like a data
+ * row (measured: header background 17,17,19 → 31,31,35). Worse, a slot component
+ * hanging `group-hover/row:` off the row (§2.15 rule 7) would then reveal from
+ * the header, which is where the select-all cell lives.
+ *
+ * A flag rather than a separate `TableHeaderRow` export: the caller cannot forget
+ * to use it, and no existing markup changes.
+ */
+const TableInHeaderContext = createContext(false);
+
 /** The read path for density from any descendant, including one in another file. */
 export function useTableDensity(): TableDensity {
 	return useContext(TableContext).density;
@@ -99,19 +112,21 @@ export function Table({
 export function TableHeader({ className, ...props }: React.ComponentPropsWithRef<"thead">) {
 	const { stickyHeader } = useContext(TableContext);
 	return (
-		<thead
-			className={cn(
-				"bg-raised",
-				// The hairline is an `after:` pseudo-element, NOT `border-b`: Preflight
-				// sets `border-collapse: collapse`, and under the collapsed model the
-				// border belongs to the merged grid, so it does not travel with the
-				// scrolled `<thead>` (§2.12 rule 8). `sticky` is a positioned value, so
-				// it is the containing block for the absolute pseudo-element.
-				stickyHeader && "sticky top-0 z-20 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-line",
-				className,
-			)}
-			{...props}
-		/>
+		<TableInHeaderContext.Provider value={true}>
+			<thead
+				className={cn(
+					"bg-raised",
+					// The hairline is an `after:` pseudo-element, NOT `border-b`: Preflight
+					// sets `border-collapse: collapse`, and under the collapsed model the
+					// border belongs to the merged grid, so it does not travel with the
+					// scrolled `<thead>` (§2.12 rule 8). `sticky` is a positioned value, so
+					// it is the containing block for the absolute pseudo-element.
+					stickyHeader && "sticky top-0 z-20 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-line",
+					className,
+				)}
+				{...props}
+			/>
+		</TableInHeaderContext.Provider>
 	);
 }
 
@@ -145,33 +160,42 @@ export function TableBody<T>({ className, children, rows, renderRow, ...props }:
 type TableRowProps = React.ComponentPropsWithRef<"tr"> & {
 	/** Presentational only. `<Table>` never owns selection (§2.14). */
 	isSelected?: boolean;
-	disabled?: boolean;
 };
 
-export function TableRow({ className, isSelected = false, disabled = false, ...props }: TableRowProps) {
+/**
+ * There is deliberately NO `disabled` prop (§2.13). A `<tr>` is a container, not
+ * a control: the earlier `aria-disabled` + `opacity-50` + `pointer-events-none`
+ * recipe told assistive tech the row was unavailable while every button inside it
+ * stayed in the tab order and fired on Enter — §2.6's "aria-disabled alone is not
+ * a disabled state". Disable the CONTROLS in the row, which are natively
+ * disable-able. See the `at-ts-expect-error` guard in `Table.test.tsx`.
+ */
+export function TableRow({ className, isSelected = false, ...props }: TableRowProps) {
+	const inHeader = useContext(TableInHeaderContext);
 	return (
 		<tr
 			// The styling and TESTING hook. Selection is conveyed to assistive tech
 			// by the row's real checkbox, never by `aria-selected` (§2.15 rule 6).
 			data-selected={isSelected ? "true" : undefined}
-			// A `<tr>` is not natively disable-able, so §2.6's non-native recipe.
-			aria-disabled={disabled || undefined}
 			className={cn(
+				"border-b border-line bg-raised last:border-b-0",
 				// `group/row` ships HERE because slot components in other files hang
 				// `group-hover/row:` and `group-focus-within/row:` off it and cannot
-				// add it later (§2.15 rule 7).
+				// add it later (§2.15 rule 7) — but NOT on the header row, or every
+				// reveal fires from the header too, which is where the select-all cell
+				// lives. The header is not a data row and must not hover like one
+				// (measured before this flag existed: 17,17,19 → 31,31,35).
 				//
 				// `transition-[background-color]`, never `transition-colors`: Tailwind
 				// v4 folds `outline-color` into that shortcut, so `.focus-ring` on a
 				// descendant fades in from the element's own text color — the E1 defect,
 				// and a hovered row is exactly the element that wants both.
-				"group/row border-b border-line bg-raised transition-[background-color] last:border-b-0",
+				!inHeader && "group/row transition-[background-color]",
 				// A ternary, not variant stacking: `hover:` and `data-[…]:` have equal
 				// specificity, so which wins depends on Tailwind's emission order
 				// (§2.12 rule 5). Both states are OPAQUE tokens (rule 4) — a `/10` wash
 				// composites twice under a `bg-inherit` sticky cell.
-				isSelected ? "bg-control" : "hover:bg-hover",
-				disabled && "pointer-events-none opacity-50",
+				!inHeader && (isSelected ? "bg-control" : "hover:bg-hover"),
 				className,
 			)}
 			{...props}

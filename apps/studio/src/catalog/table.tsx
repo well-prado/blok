@@ -202,7 +202,13 @@ export default function TableCatalog() {
 				</Demo>
 			</Variant>
 
-			<Variant label="Row states — selection is opaque and beats hover; disabled is the §2.6 non-native recipe">
+			{/*
+			 * There is no disabled row. A `<tr>` is a container, not a control: the
+			 * row-level recipe announced "unavailable" while the buttons inside it
+			 * stayed tabbable and fired on Enter. Disable the controls instead — the
+			 * third row here does exactly that.
+			 */}
+			<Variant label="Row states — selection is opaque and beats hover; the header row does NOT hover">
 				<Demo>
 					<Table aria-label="Row states example">
 						<TableHeader>
@@ -224,11 +230,20 @@ export default function TableCatalog() {
 								</TableCell>
 								<TableCell>isSelected — data-selected=&quot;true&quot;, no hover change</TableCell>
 							</TableRow>
-							<TableRow disabled>
+							<TableRow>
 								<TableCell>
 									<Text mono>run_01H8Z3P7</Text>
 								</TableCell>
-								<TableCell>disabled</TableCell>
+								<TableCell>
+									{/* `display:flex` on a `<td>` drops it out of table layout and the
+									    `h-*` row height with it — the flex box goes inside. */}
+									<div className="flex items-center gap-2">
+										<Button size="sm" variant="secondary" disabled>
+											Replay
+										</Button>
+										unavailable action — the CONTROL is disabled, never the row
+									</div>
+								</TableCell>
 							</TableRow>
 						</TableBody>
 					</Table>
