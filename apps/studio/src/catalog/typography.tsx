@@ -2,6 +2,7 @@ import { CatalogPage, Variant } from "@/components/catalog/CatalogPage";
 import { Header1, Header2, Header3 } from "@/components/primitives/Headers";
 import { InlineCode } from "@/components/primitives/InlineCode";
 import { Paragraph } from "@/components/primitives/Paragraph";
+import { Text } from "@/components/primitives/Text";
 import { TextLink } from "@/components/primitives/TextLink";
 
 export default function TypographyCatalog() {
@@ -95,6 +96,44 @@ export default function TypographyCatalog() {
 					<TextLink href="mailto:hi@blok.dev" variant="secondary">
 						mailto (treated as external)
 					</TextLink>
+				</div>
+			</Variant>
+
+			{/*
+			 * `Text` was assigned to E1-T4 by CONVENTIONS §12.1 and never shipped;
+			 * E2-T1 built it because table cells need mono and tabular numerals
+			 * (§2.17, and the §12.1 correction). It is `Paragraph` with a <span>
+			 * and two orthogonal booleans.
+			 */}
+			<Variant label="Text — mono and numeric, two independent flags">
+				<div className="flex flex-col gap-3">
+					<Paragraph size="sm" ink="dimmed">
+						An id is mono without numeric; a right-aligned count is numeric without mono; a duration is usually both.
+					</Paragraph>
+					<Text mono>mono · run_01H8Z3K9WQ4M7RXF</Text>
+					<Text numeric>numeric · 1,204 runs — tabular-nums keeps a column of these aligned</Text>
+					<Text mono numeric>
+						mono numeric · 1.24s
+					</Text>
+					<Text>neither · plain inline text on the §2.4a ladder</Text>
+					<div className="flex flex-col">
+						<Text numeric>11111</Text>
+						<Text numeric>99999</Text>
+						<Text>11111</Text>
+						<Text>99999</Text>
+					</div>
+				</div>
+			</Variant>
+
+			<Variant label="Text sizes and ink — the same two axes as Paragraph, no variant, no tone">
+				<div className="flex flex-col gap-3">
+					<Text size="lg">size=&quot;lg&quot; · 16px</Text>
+					<Text size="md">size=&quot;md&quot; (default) · 14px</Text>
+					<Text size="sm">size=&quot;sm&quot; · 12px</Text>
+					<Text ink="strong">ink=&quot;strong&quot;</Text>
+					<Text ink="default">ink=&quot;default&quot; (default)</Text>
+					<Text ink="dimmed">ink=&quot;dimmed&quot;</Text>
+					<Text ink="muted">ink=&quot;muted&quot;</Text>
 				</div>
 			</Variant>
 
