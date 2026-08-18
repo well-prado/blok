@@ -219,3 +219,52 @@ limitation as E1.
 3. **May the blank state move inside `<TableBody>`?** It changes how callers branch; the dossier
    proposes a §6.0-style shim so no route file changes.
 4. **`Text.tsx`** (§7.6) — fold into E2-T1, or file as an E1 follow-up?
+
+---
+
+## 9. WAVE A STATUS — built, reviewed, **NOT merged**
+
+Branch `feat/e2-t1-table` @ `4b9f8d5b` (pushed to origin, 2 commits over main). Contract additions
+(§2.10 amendment + §2.11–§2.16) are IN that branch's CONVENTIONS.md. Full findings:
+workflow run `wf_6050af59-59e` journal.
+
+All three adversarial lenses returned **FIX_FIRST**. The slots ARE sufficient — the Wave-B reviewer
+wrote a throwaway consumer for each of #781/#782/#784 and confirmed no two share a file — so the
+parallel structure holds. Fix these five, then merge and fan out.
+
+**R1 — Seven load-bearing behaviours have no guard.** Each was reverted in a scratch worktree and
+the suite stayed **130/130 green**: `stickyHeader` (the headline feature, deleted outright),
+`group/row` + base row background + `border-b`, `TableCell isSticky`'s `bg-inherit`, `hiddenLabel`'s
+sr-only span, `aria-disabled` on TableRow, `align`, and the hover/selected paint. Worse here than in
+E1: §12.5 forbids Wave B from editing `Table.tsx`, so those agents cannot notice a seam they depend
+on has been deleted. Fix: ~5 assertions in the existing `Table.test.tsx` (§8.3.2 sanctions
+`toHaveClass` on one discriminating utility when nothing semantic distinguishes), each shown failing
+on revert.
+
+**R2 — The header row hovers like a data row.** `TableRow` is the only row component, so `<thead>`'s
+`<tr>` ships `group/row … hover:bg-hover`. Measured live: header background `rgb(17,17,19)` →
+`rgb(31,31,35)` on real mouse hover. #781's `group-hover/row:opacity-100` would fire from the header
+— which is where #782's select-all cell lives. Fix in T1 (a `TableHeaderRow`, or an `inHeader` flag
+on the context that suppresses `group/row` + `hover:`). BLOCKING only because Wave B cannot touch
+this file.
+
+**R3 — `<TableRow disabled>` is a lie.** Proven in jsdom (`userEvent.tab()` lands on a button inside
+a disabled row; `{Enter}` fires its onClick) and live (computes `tabIndex 0`, `pointer-events: none`
+= mouse only, no `disabled`/`inert`; `.focus()` succeeds and the handler runs). A screen-reader user
+is told it is unavailable, a sighted user sees 50% opacity, and it works anyway — what §2.6 forbids.
+Fix: delete the prop (nothing uses it) or render `inert` (React 19 supports the boolean attribute).
+
+**R4 — §2.16's central promise is false, and T6 is who it misleads.** It says T6 "replaces that one
+expression and nothing else", but §2.16 rule 5 + §2.15 rule 8 make `aria-rowcount`/`aria-rowindex`
+mandatory once windowing is on, and neither is reachable from `TableBody`'s internals: `aria-rowcount`
+belongs on the `<table>` (rendered by `Table`), `aria-rowindex` on rows the CALLER's `renderRow`
+creates. Either widen the seam or correct the promise.
+
+**R5 — §2.15 rules 3 and 7 contradict each other**, on the one axis #780/#781/#782 all share. Rule 3:
+one tab stop per row, everything else `tabIndex={-1}`. Rule 7: action triggers keyboard-reachable at
+all times, revealed via `focus-visible:`. A row per §2.13 has three tab stops, and a `tabIndex={-1}`
+action button can never fire its own `focus-visible:opacity-100`. Resolve BEFORE fan-out — this is
+the "four meanings for `variant`" failure caught early this time.
+
+**Then:** merge Wave A to main (PR with `Closes #778`), and dispatch Wave B (#781, #782, #784) in
+parallel per §5, followed by Wave C (#779 → #780 → #783).
