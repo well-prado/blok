@@ -268,3 +268,35 @@ the "four meanings for `variant`" failure caught early this time.
 
 **Then:** merge Wave A to main (PR with `Closes #778`), and dispatch Wave B (#781, #782, #784) in
 parallel per §5, followed by Wave C (#779 → #780 → #783).
+
+### 9.1 RESOLVED on `fix/e2-t1-review` (branched from `feat/e2-t1-table`)
+
+All five repaired. Every guard was proven by mutating the source, running the suite, and restoring —
+no guard here was accepted on a reading of the diff.
+
+- **R1** — nine seam guards added to `Table.test.tsx` (16 tests, was 7), each failing on its own
+  revert: `stickyHeader`, `group/row`, the base row `bg-raised` + `border-b`, `TableCell`'s
+  `bg-inherit`, `hiddenLabel`'s `sr-only select-none` span, `align` on `<td>` **and** `<th>`, the
+  hover/selected ternary, the header-row suppression, and the aria prop spread.
+- **R2** — `TableHeader` provides an internal `inHeader` context flag; `TableRow` drops `group/row`,
+  the hover paint and the selected paint inside `<thead>`. A flag, not a `TableHeaderRow` export, so
+  no caller can forget it and no existing markup changed. CONVENTIONS §2.12 **rule 12** — numbered 12
+  so every existing "§2.12 rule 11" cross-reference still points at the `sr-only` rule. Live: the
+  header `<tr>` is genuinely `:hover` and stays `rgb(17,17,19)`.
+- **R3** — the `disabled` prop is **deleted**, not repaired. `inert` was rejected: it also strips the
+  row's content from the accessibility tree, so a screen-reader user cannot read a row they can see.
+  Guarded twice — a `@ts-expect-error` that makes `tsc -b` fail `TS2578` if the prop returns, plus
+  runtime assertions that the row has no `aria-disabled` and that a button inside it takes Tab focus
+  and fires on Enter. `/catalog/table` demos a disabled **control** instead. §2.13 records it.
+- **R4** — the promise is **corrected**; the seam is NOT widened with speculative state machinery.
+  §2.16 now states T6's real blast radius (TableBody's expression · `aria-rowindex` via
+  `cloneElement` inside TableBody · `aria-rowcount` on `Table`) and keeps the promise that actually
+  mattered: no caller changes, no `renderRow` changes, nothing outside `Table.tsx`. §12.5's T6 row
+  updated to match. Both attributes ride the existing prop spread, which a test now guards.
+- **R5** — §2.15 rule 3 rewritten as ONE rule: a tab stop per *distinct action* (a §2.13 row has
+  three — checkbox, primary link, action trigger), `tabIndex={-1}` only for a link redundant with the
+  row's own primary destination, never a roving tabindex, ↑/↓ layered on top. Rule 7 cross-references
+  it. #780/#781/#782 now read one answer.
+
+Verified: studio suite **673/673**, `tsc -b` + `vite build` clean, `biome check` clean, plus the live
+re-measurements recorded in CONVENTIONS §2.18 (including the rAF-throttling measurement trap).

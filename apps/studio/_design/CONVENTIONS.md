@@ -12,6 +12,13 @@
 > actually produced; §12.2's `shortcut` entry is CORRECTED. Those four sections are the prop and
 > elevation contract every later epic inherits. Where an older paragraph in this document still says
 > `variant` for something §2.10 now calls `tone`, `ink` or `size`, §2.10 wins.
+>
+> **Post-E2-T1 amendment (Wave A, `feat/e2-t1-table`).** §2.10a adds a FIFTH reserved axis, `density`,
+> and §2.11–§2.18 are NEW: the table density ladder, the surface/row-state model, the row-slot
+> contract that lets #781/#782/#784 ship without touching `Table.tsx`, selection ownership, the a11y
+> baseline, the virtualization seam, the `Text` primitive, and §2.18's browser measurements. §7.3 and
+> §12.5 are new; §12.1a corrects §12.1's `Text.tsx` row. Where an older paragraph says `variant` for
+> something §2.10a now calls `density`, §2.10a wins.
 
 ---
 
@@ -64,7 +71,9 @@ import { cn } from "@/lib/utils";
 
 const variants = {
 	default: "bg-control text-ink border border-line",
-	danger: "bg-status-failed/10 text-status-failed-ink border border-status-failed/30",
+	// `error`, never `danger` — §2.10 rule 4. This template said `danger` until E2-T1
+	// re-grepped the document after the rename, which is the check §2.3 of E2-PREP asks for.
+	error: "bg-status-failed/10 text-status-failed-ink border border-status-failed/30",
 } as const;
 
 const sizes = {
@@ -191,9 +200,9 @@ Studio is React 19 with no SSR. `forwardRef` is deprecated. Declare `ref` as a p
 - These are the only three shadow classes a primitive may use. No `shadow-sm`, no `shadow-2xl`, no arbitrary `shadow-[…]`, and no shadow at all on an in-flow element — a card sitting on `bg-canvas` separates with `bg-raised` + `border-line`, not with a shadow.
 - Adding a fourth tier requires adding a row here first.
 
-### 2.10 The prop vocabulary — FOUR axes, one word each
+### 2.10 The prop vocabulary — FOUR axes, one word each (**FIVE as of §2.10a**)
 
-This is the rule the wave-B merge existed to produce. Four independent axes, four reserved prop names. **A prop name means the same thing in every primitive, or the design system is seven dialects.**
+This is the rule the wave-B merge existed to produce. Four independent axes, four reserved prop names. **A prop name means the same thing in every primitive, or the design system is seven dialects.** E2 added a fifth, `density`, for data grids only — read §2.10a with this section.
 
 | prop | axis | legal values | default |
 |---|---|---|---|
@@ -213,6 +222,660 @@ Rules:
 6. **No compatibility aliases.** This is pre-release. One name, everywhere, or the rename did not happen.
 
 Also reserved by convention and not to be reused for something else: `spacing` (opt-in margin, §2.3), `isLoading`, `disabled`, `className`.
+
+### 2.10a AMENDMENT (E2) — the prop vocabulary is now FIVE axes
+
+> **E2 amendment.** §2.10 shipped four reserved axes. Data grids need a fifth, and the E2 research proved that overloading an existing one reproduces exactly the failure §2.10 exists to prevent: trigger.dev's `Table.tsx` fuses density, surface and font-family into a single `variant` key with values `bright` / `bright/no-hover` / `dimmed` / `compact/mono`. Add this row to §2.10's table:
+
+| prop | axis | legal values | default |
+|---|---|---|---|
+| `density` | **scale of a data grid** — how much vertical room does one record get | `compact` · `default` · `comfortable` (§2.11) | `default` |
+
+Rules, in addition to §2.10's existing six:
+
+7. **`density` is not `size`, and no component may take both.** A `size="md"` control is 32px tall; a `density="default"` table row is 40px — **both measured in a browser on `/catalog/table`**. §2.10 rule 1 forbids a primitive redefining a key, so reusing `size` for row scale would be that redefinition. `<Table>` therefore ships **no `size` prop at all**; a component that has both a box scale and a row scale does not exist and must not be invented.
+8. **`density` never carries color, hover behaviour, surface, or font family.** Those are §2.12. A `density` value that changes a background is the reference's bug, re-imported.
+9. **`density` is read from context, never prop-drilled.** `<Table density>` is the only place it is written; every descendant reads `useTableDensity()` (§2.13). A slot component in another agent's file must be able to style itself to the current density without a prop chain through three components.
+
+---
+
+## 2.11 The table density ladder — THREE rows
+
+> **DECIDED. Exactly these three keys with exactly these values. `default` is the default.**
+> Every number in the "row height" column was **measured** with `getBoundingClientRect()` on `/catalog/table` — see §2.18.
+
+| `density` | `<td>` | `<th>` | cell text | header text | fits a control of `size` | row height |
+|---|---|---|---|---|---|---|
+| `compact` | `h-7 px-2 align-middle` | `h-7 px-2` | `text-xs` | `text-xs` | `xs` (24px) | **28** |
+| `default` | `h-10 px-3 align-middle` | `h-8 px-3` | `text-sm` | `text-xs` | `sm` (28px) · `md` (32px) | **40** |
+| `comfortable` | `h-11 px-4 align-middle` | `h-9 px-4` | `text-sm` | `text-xs` | `lg` (36px) | **44** |
+
+- **The row height is `h-*` on the `<td>`. A `py-*` on a `<td>` inside `<Table>` is a review failure.** `height` on a table cell is a *minimum* — **measured: a `default` row with three lines of text in one cell grows 40px → 60.5px and returns to 40px**, which is what you want — and it is a single integer `estimateSize()` can return (§2.16). Padding-derived heights are how six Studio screens ended up with six row heights (`E2-RESEARCH` §E.2).
+- **The heights are exported as data, not only as classes:**
+  ```ts
+  export const TABLE_ROW_HEIGHT: Record<TableDensity, number> = { compact: 28, default: 40, comfortable: 44 };
+  ```
+  T1 ships this map next to the class table (`TABLE_DENSITY_CLASSES`, exported for exactly this reason). #783 consumes it for `estimateSize`; #862 may read it. **A test asserts the map and the class table cannot drift** — `Table.test.tsx` parses the `h-N` out of each density's `td` string and asserts `N * 4 === TABLE_ROW_HEIGHT[key]`, and separately asserts a fixed `h-*` exists at all. Change one and not the other and the suite fails.
+- **The fit invariant.** A control of the paired `size` MUST drop into a cell without changing the row height. **Measured on `/catalog/table`: `xs` button 24px in a 28px row, `sm` button 28px in a 40px row, `lg` button 36px in a 44px row — every row stayed at its ladder height.** `/catalog/table` renders one table per density containing a `<Button>` of the paired size; **if the row grows, the ladder is wrong and you report it rather than adjusting the button.**
+- **`default` is pixel-compatible with what Studio ships today** (`px-3`, ~40px rows in `RunsTable`, `queues.tsx`, `deployments.tsx`), so the §G.10 migration is visually a no-op.
+- **Header text is `text-xs font-medium uppercase tracking-wider text-ink-dimmed` at every density**; only the padding scales (measured header rows: 28 / 32 / 36px). This is a **deliberate divergence** from the reference, whose header is larger and brighter than its data (`text-sm text-text-bright` over `text-xs text-text-dimmed`). Four of Studio's six existing tables already use the small-caps dimmed header: the data is the content, the header is the label. **Do not re-litigate this per table.**
+- **`font-mono` is NOT a density.** The reference's `compact/mono` smuggles a type family into the scale axis. In Studio, monospace is a per-column decision made with the `Text` primitive (§2.17): `<Text mono numeric>` on id / duration / count cells. **`numeric` (→ `tabular-nums`) is MANDATORY on every column of numbers**; proportional digits make a numeric column unreadable.
+- **#862 (E16-T5) is the density toggle and this ladder is its substrate.** It persists the chosen key with the existing `usePersistentState` hook (`src/hooks/usePersistentState.ts`) and passes it to `<Table density>`. It **MUST NOT** introduce its own scale, its own key names, a fourth row, or a second source of row heights.
+- Adding a fourth row requires adding it to this table first.
+
+---
+
+## 2.12 The table surface and row-state model — ONE table surface, opaque states
+
+> Density is scale. This section is everything density is **not**: surface, hover, selection, separators, stickiness. **There is exactly one table surface. A table that wants a different one sets it with `className`; it does not get a variant.**
+
+| element | classes |
+|---|---|
+| container `<div>` | `overflow-auto rounded-md border border-line bg-raised` |
+| `<thead>` | `bg-raised` (+ sticky treatment, below) |
+| `<tr>` (body, base) | `bg-raised border-b border-line last:border-b-0` |
+| `<tr>` hovered, unselected | `hover:bg-hover` |
+| `<tr>` selected | `bg-control` (no hover change — selection is the stronger signal) |
+| `<td isSticky>` | `sticky right-0 bg-inherit z-10` |
+
+Five MUST rules, each with its reason:
+
+1. **The hover / selected background goes on the `<tr>`, never per-cell.** The reference paints it on every `<td>` and pays ~450 characters of `::before`/`::after` patching per cell for it (`E2-RESEARCH` §A.7). A `<tr>` background paints correctly in every browser Studio targets — **measured: a hovered row computes `rgb(31,31,35)` (`--color-hover`) on the `<tr>` while its plain `<td>`s stay `rgba(0,0,0,0)`, so the row paints through them.**
+2. **The `<tr>` carries an explicit opaque base background (`bg-raised`) even though the container is already `bg-raised`.** This is not redundant: it is what makes rule 3 work.
+3. **A sticky cell takes `bg-inherit`, never its own background token.** `background-color: inherit` on a `<td>` resolves to the `<tr>`'s *computed* value, so the sticky column tracks base / hover / selected for free, with one class and no duplicated state table. A sticky cell with its own token occludes the row state; a sticky cell with no background lets content scroll through it. **VERIFIED in a browser (§2.18): with a real mouse hover, `getComputedStyle(stickyTd).backgroundColor` reads `rgb(31, 31, 35)` on the hovered row and `rgb(17, 17, 19)` on its two unhovered siblings — identical to each row's own `<tr>` value in all three cases.**
+4. **Every row-state background MUST be an opaque token.** No `bg-accent/10`, no `/10` wash of anything, for a row. A translucent row state composites twice under a `bg-inherit` sticky cell and lets horizontally-scrolled content bleed through it. Selection is *also* conveyed by the row's checked checkbox (§2.15 rule 6), so the background does not have to carry accent semantics.
+5. **State is chosen with a JS ternary, not with variant stacking.**
+   ```tsx
+   className={cn("bg-raised border-b border-line last:border-b-0", isSelected ? "bg-control" : "hover:bg-hover", className)}
+   ```
+   `hover:` and `data-[…]:` variants have equal specificity, so which wins depends on Tailwind's emission order, not on your class string. Do not bet the selected state on that. **Measured: a selected row under a real mouse hover stays `rgb(39,39,42)` (`--color-control`) — selection beats hover, as intended.**
+
+Sticky headers:
+
+6. **`<Table stickyHeader>` sticks the `<thead>` to the table's OWN container, which owns both scroll axes.** The container is always `overflow-auto`; `stickyHeader` never changes it. The reference flips to `overflow-visible` and hands vertical scrolling to an unnamed ancestor, producing two competing scroll owners with no type to enforce which is which (`E2-RESEARCH` §A.4). **Blok has one scroll owner, always.**
+7. **`stickyHeader` requires the caller to bound the container's height** via `containerClassName` (e.g. `max-h-[60vh]`). An unbounded container never scrolls, so the header never sticks and the prop silently does nothing. Documented on the prop and demonstrated in `/catalog/table`.
+8. **The sticky header's bottom hairline is an `after:` pseudo-element, never `border-b`.** Tailwind Preflight sets `border-collapse: collapse` (**confirmed: `getComputedStyle(table).borderCollapse === "collapse"`**); under the collapsed border model the border belongs to the merged grid, not to the sticky box, so it does not travel with the scrolled `<thead>`:
+   ```tsx
+   "sticky top-0 z-20 bg-raised after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-line"
+   ```
+   **Measured after scrolling the container 300px: the `<thead>` moved 0px while the rows moved −300px, and `::after` computes to `content:""; position:absolute; height:1px; background:rgb(39,39,42)` (`--color-line`) spanning 730px, with `border-bottom-width: 0px` on the `<thead>` itself.**
+9. **Z-index is fixed and small: sticky header `z-20` · sticky column `z-10` · everything else unset.** Radix portals stay at `z-50` (§4.3), so a menu opened from a sticky action cell still renders above both. **Measured at the crossing: with the container scrolled to `scrollTop 200 / scrollLeft 128` (its maximum), `document.elementFromPoint()` at the top-right corner returns the `<th>`, inside the sticky `<thead>`.** The header wins where the two cross.
+10. **Never `transition-colors` on a `<tr>` or `<td>`.** Tailwind v4 folds `outline-color` into it and `.focus-ring` then fades in from the element's own text color — the E1 defect, and a hovered row is precisely the element that wants a color transition *and* carries a focus ring. Use `transition-[background-color]`. This is enforced: `src/__tests__/tokens.test.ts` fails any line in `components/primitives/` containing `transition-colors`.
+11. **Every `sr-only` span you write in `components/primitives/` MUST also carry `select-none`.** Same guard file, same enforcement. Selection cells and hidden header labels are the two places E2 will write `sr-only`, and both are inside the guard's scope.
+12. **The header row is NOT a data row, and `TableRow` knows which it is from context.** *(Added by the Wave-A review; numbered 12 so every existing "§2.12 rule 11" cross-reference still points at the `sr-only` rule.)* `TableRow` is the only row component — the caller writes it inside `<thead>` and `<tbody>` alike — so the naive version shipped `group/row` and `hover:bg-hover` into the header. **Measured before the fix: the header background went `rgb(17,17,19)` → `rgb(31,31,35)` on a real mouse hover**, and every `group-hover/row:` reveal (rule 7 of §2.15) would have fired from the header, which is exactly where #782's select-all cell lives. `TableHeader` therefore provides an internal `inHeader` context flag and `TableRow` suppresses **`group/row`, the hover paint and the selected paint** when it is set; the base surface and the separator stay. A *flag*, not a separate `TableHeaderRow` export, because the caller cannot forget a flag it never writes, and no existing markup changed. Guarded in `Table.test.tsx` ("does NOT make the header row hover or act as a group") and re-measured live after the fix.
+
+---
+
+## 2.13 The table row-slot contract
+
+> **This is E2's equivalent of E1's catalog glob: the single mechanism that makes the parallel wave possible.**
+> **#781, #782 and #784 MUST NOT edit `Table.tsx`. If you think you need to, you are wrong — re-read this section, then escalate.** `Table.tsx` is owned by T1 in Wave A and by the sequenced Wave-C tasks after that, and by nobody else, ever.
+
+**The slot mechanism is composition, not slot props.** The reference proves it: `TaskRunsTable` composes `<TableCell>` + `<Checkbox>` and its own action cell, and `Table.tsx` knows nothing about selection or actions. Slot props would put three agents back in one file.
+
+### What T1 (#778) SHIPPED — the whole public surface, and nothing task-specific
+
+```tsx
+// apps/studio/src/components/primitives/Table.tsx
+export type TableDensity = "compact" | "default" | "comfortable";
+export const TABLE_ROW_HEIGHT: Record<TableDensity, number>;
+export const TABLE_DENSITY_CLASSES: Record<TableDensity, { td: string; th: string; text: string }>;
+
+export function Table(props: React.ComponentPropsWithRef<"table"> & {
+	density?: TableDensity;        // default "default"
+	stickyHeader?: boolean;        // default false
+	containerClassName?: string;   // the scroll container; where you bound the height
+}): React.JSX.Element;
+
+export function TableHeader(props: React.ComponentPropsWithRef<"thead">): React.JSX.Element;
+
+export function TableBody<T>(props: Omit<React.ComponentPropsWithRef<"tbody">, "children"> & (
+	| { children: React.ReactNode; rows?: never; renderRow?: never }
+	// `children` alongside `rows` is the EMPTY FALLBACK — see §2.13a. Widened at the
+	// E2 integration merge; T1 shipped `children?: never` here.
+	| { rows: readonly T[]; renderRow: (row: T, index: number) => React.ReactNode; children?: React.ReactNode }
+)): React.JSX.Element;
+
+export function TableRow(props: React.ComponentPropsWithRef<"tr"> & {
+	isSelected?: boolean;          // opaque selected background + data-selected="true"
+	// NO `disabled`. See "There is no disabled row" below.
+}): React.JSX.Element;
+
+export function TableHeaderCell(props: React.ComponentPropsWithRef<"th"> & {
+	align?: "left" | "center" | "right";
+	hiddenLabel?: boolean;                    // children into an `sr-only select-none` span
+	sortDirection?: "asc" | "desc" | null;    // T1 ships prop + aria-sort + markup; #779 fills in behaviour
+	onSort?: () => void;                      // presence makes the header a real <button>
+}): React.JSX.Element;
+
+export function TableCell(props: React.ComponentPropsWithRef<"td"> & {
+	align?: "left" | "center" | "right";
+	isSticky?: boolean;            // sticky right column: `sticky right-0 bg-inherit z-10`
+}): React.JSX.Element;
+
+export function TableBlankRow(props: React.ComponentPropsWithRef<"tr"> & {
+	colSpan?: number;              // default 1000 — see below
+}): React.JSX.Element;
+
+export function useTableDensity(): TableDensity;
+```
+
+### There is no disabled row — DECIDED by the Wave-A review
+
+T1 first shipped `<TableRow disabled>` as §2.6's non-native recipe (`aria-disabled` + `opacity-50` + `pointer-events-none`). **It was a lie and the prop is deleted.** Proven in jsdom — `userEvent.tab()` landed on a `<button>` inside the "disabled" row and `{Enter}` fired its `onClick` — and live, where the row computed `pointer-events: none` (mouse only), no `disabled`, no `inert`, and `.focus()` still worked. A screen-reader user was told the row was unavailable, a sighted user saw 50% opacity, and the row worked anyway: exactly what §2.6's last bullet forbids, because the recipe's mandatory third part (an early `return` in the handler) does not exist for a container that owns no handler.
+
+**A `<tr>` is a container, not a control. Disable the CONTROLS inside it** — `<Button disabled>`, `<Checkbox disabled>` — which are natively disable-able and therefore honest. `/catalog/table`'s row-states demo shows that form.
+
+`inert` was the alternative and was rejected: it also strips the row's *content* from the accessibility tree, so a screen-reader user cannot read a row they can see. If a screen genuinely needs "this row is not actionable right now", it is a new ticket for the row owner (E2-T3, who owns row focus), not a prop resurrected here.
+
+**Guarded twice, both proven on revert**: `Table.test.tsx` carries a `@ts-expect-error` on `<TableRow disabled>` — re-adding the prop makes the directive unused and `tsc -b` fails with `TS2578` — and the same test asserts the row has no `aria-disabled`, no `opacity-50`, and that a button inside it takes Tab focus and fires on Enter.
+
+**`onSort` is what turns sorting on, not `sortDirection`.** `aria-sort` is emitted only when `onSort` is present; `sortDirection` alone renders a plain header with no button and no `aria-sort`, because a sort affordance nobody can activate is a lie. Pass both.
+
+Six items in that list are load-bearing for other tickets and are in T1's first PR, even though T1 has no use for some of them:
+
+1. **`<TableCell isSticky>`** — #781's action column.
+2. **`<TableRow isSelected>`** — #782's row highlight is a prop, not a class the consumer computes. It also sets `data-selected="true"` so tests assert a semantic signal rather than a Tailwind string (§8.3).
+3. **`<TableBlankRow>`** — #784's body slot.
+4. **`<TableHeaderCell sortDirection onSort>`** — #779's seam. T1 ships the markup, `aria-sort`, and the three chevron states; it wires no state.
+5. **`useTableDensity()`** — a slot component in another agent's file styles itself to the current density without importing internals and without a prop drill.
+6. **`<TableBody rows renderRow>`** — #783's windowing seam (§2.16).
+
+**`colSpan` defaults to `1000`.** HTML clamps `colspan` at 1000 and empty trailing columns have zero width, so a blank row spans the full table with no hand-counting. The reference hand-counts `colSpan={showRegion ? 16 : 15}` in **four places in one file** — a defect farm. **This behaviour is invisible to jsdom; it was measured in a browser (§2.18) and the default STANDS**: under `table-layout: auto` the blank table measures `tableWidth 736 / headerRowWidth 736 / blankCellWidth 736 / scrollWidth 736`, `container.scrollWidth === container.clientWidth` (no horizontal overflow), the three header cells still divide the full width (175.48 + 250.73 + 309.80 = 736), and a sibling table on the same page with no blank row measures the same 736. The 997 surplus columns are genuinely zero-width.
+
+> **AMENDMENT forced by that measurement — the one caveat.** Under **`table-layout: fixed`** the default is NOT safe: the same table re-measured with `tableLayout = "fixed"` keeps its 736px outer width but collapses every real header cell to **0.73px** (= 736 / 1000), because the fixed algorithm divides the width across all 1000 declared columns. **A `<Table>` that sets `table-layout: fixed` MUST pass an explicit `colSpan` on its `TableBlankRow`.** Studio sets `auto` everywhere today (Preflight does not set `fixed`), which is why the default is kept rather than made required.
+
+**`Table.tsx` MUST NOT import `@tanstack/react-router`.** Unlike the reference, `TableCell` takes no `to` prop and there is no row-level link component in `Table.tsx`. Row navigation is the caller's: it wraps cell content in whatever link it wants. See §7.3 for why this is a rule and not a preference.
+
+`renderRow` MUST return an element carrying a stable `key` — `TableBody` calls `rows.map(renderRow)` and adds no key of its own.
+
+### Worked example — #781 row actions (`primitives/TableRowActions.tsx`, new file, zero edits to `Table.tsx`)
+
+```tsx
+import { TableCell, useTableDensity } from "@/components/primitives/Table";
+import { SimpleDropdownMenu, type DropdownMenuEntry } from "@/components/primitives/DropdownMenu";
+import { cn } from "@/lib/utils";
+import { MoreVertical } from "lucide-react";
+
+const triggerSize = { compact: "h-6 w-6", default: "h-7 w-7", comfortable: "h-7 w-7" } as const;
+
+export function TableRowActions({ items, rowLabel }: { items: DropdownMenuEntry[]; rowLabel: string }) {
+	const density = useTableDensity();
+	return (
+		<TableCell isSticky align="right" className="w-px">
+			<SimpleDropdownMenu
+				items={items}
+				trigger={
+					// §2.15 rule 7: ALWAYS rendered and always focusable. Opacity, never `hidden`.
+					<button
+						type="button"
+						aria-label={`Actions for ${rowLabel}`}
+						className={cn(
+							"focus-ring inline-flex items-center justify-center rounded-md text-ink-dimmed",
+							"opacity-0 transition-[opacity] group-hover/row:opacity-100 focus-visible:opacity-100 group-focus-within/row:opacity-100",
+							triggerSize[density],
+						)}
+					>
+						<MoreVertical aria-hidden="true" className="h-4 w-4" />
+					</button>
+				}
+			/>
+		</TableCell>
+	);
+}
+```
+`group/row` is on the `<tr>` and is shipped by T1 (§2.15 rule 7 depends on it). `TableRowActions` renders inside a `<TableRow>` the caller composes; nothing in `Table.tsx` knows this component exists.
+
+### Worked example — #782 checkbox cell (`primitives/TableSelectCell.tsx`, new file, zero edits)
+
+```tsx
+import { Checkbox } from "@/components/primitives/Checkbox";
+import { TableCell, TableHeaderCell } from "@/components/primitives/Table";
+
+export function TableSelectCell({ rowLabel, checked, onToggle }: {
+	// `rowLabel`, NOT `label` — see §2.13a. This example said `label` until the
+	// integration merge, and that is how the two names got shipped.
+	rowLabel: string; checked: boolean; onToggle: (extend: boolean) => void;
+}) {
+	return (
+		<TableCell className="w-px pr-0">
+			<Checkbox
+				size="sm"
+				checked={checked}
+				onChange={onToggle}
+				// `select-none` is REQUIRED, not stylistic — tokens.test.ts fails without it (§2.12 rule 11).
+				label={<span className="sr-only select-none">Select {rowLabel}</span>}
+			/>
+		</TableCell>
+	);
+}
+
+export function TableSelectAllCell({ total, allSelected, someSelected, onToggleAll }: {
+	total: number; allSelected: boolean; someSelected: boolean; onToggleAll: () => void;
+}) {
+	return (
+		// NOTE, corrected at the integration merge: `hiddenLabel` is WRONG here and
+		// the shipped component does not use it — it wraps the CHILDREN in an
+		// `sr-only` span, which would hide the checkbox itself. The accessible name
+		// comes from the checkbox's own label. §2.13a records how the guard for this
+		// was hollow.
+		<TableHeaderCell className="w-px pr-0">
+			<Checkbox
+				size="sm"
+				checked={allSelected}
+				// `indeterminate` is a DOM PROPERTY, not a JSX attribute — React 19 forwards it as an
+				// unknown attribute and it does nothing. Set it through the ref.
+				ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+				onChange={onToggleAll}
+				label={<span className="sr-only select-none">Select all {total} rows</span>}
+			/>
+		</TableHeaderCell>
+	);
+}
+```
+The row highlight is `<TableRow isSelected={…}>`, already shipped by T1. **Zero edits to `Table.tsx`.**
+
+### Worked example — #784 blank body (`primitives/TableBlankState.tsx`, new file, zero edits)
+
+```tsx
+import { EmptyState } from "@/components/primitives/EmptyState";
+import { TableBlankRow } from "@/components/primitives/Table";
+import { Spinner } from "@/components/primitives/Spinner";
+import type { ReactNode } from "react";
+
+/** "Nothing has ever been here." Content is E11's; the table shape is E2's. */
+export function TableEmpty({ icon, title, description, action }: {
+	icon: ReactNode; title: string; description: ReactNode; action?: ReactNode;
+}) {
+	return (
+		<TableBlankRow>
+			<EmptyState icon={icon} title={title} description={description} action={action} />
+		</TableBlankRow>
+	);
+}
+
+/** "Your filters excluded everything." Distinct state, distinct copy, distinct action. */
+export function TableNoResults({ onClearFilters }: { onClearFilters?: () => void }) { /* … */ }
+
+/** An overlay row; `<TableBody>` is `relative` precisely so this can position over it. */
+export function TableLoadingOverlay() {
+	return (
+		<TableBlankRow className="absolute inset-0 flex items-center justify-center gap-2 bg-raised/80">
+			<Spinner size="sm" /> <span className="text-sm text-ink-dimmed">Loading…</span>
+		</TableBlankRow>
+	);
+}
+```
+
+**The blank row lives INSIDE `<TableBody>`, not beside the table.** Studio's callers branch outside today (`runs.length > 0 ? <RunsTable/> : <EmptyState/>`), which throws away the header, the column widths and the sticky behaviour, and makes the page jump on the empty→populated transition. Inside is the reference's choice and it is right. Callers are migrated by the §G.10 shim PR after Wave C — **no route file changes during E2.**
+
+### Empty vs no-results — who owns what
+
+**E2 owns the table-shaped presentation; E11 owns the content.** #784 ships `TableBlankState.tsx`, a thin wrapper putting an `EmptyState` inside a `TableBlankRow`. It **MUST NOT** create a second empty-state component, restyle `EmptyState`, or invent product copy. **E11-T4 (#839)** later swaps the copy, icons and doc links **with zero changes to any E2 file** — that is the test of whether the split was done right. Three states, named once so nobody invents a fourth:
+
+| state | when | component |
+|---|---|---|
+| `empty` | nothing has ever been here | `<TableEmpty>` |
+| `no-results` | filters excluded everything | `<TableNoResults>` |
+| `loading` | fetch in flight over an existing shape | `<TableLoadingOverlay>` |
+
+---
+
+## 2.13a What the E2 INTEGRATION merge legislated
+
+> Written while merging `feat/e2-t1-table` + T2/T3/T4/T5/T6/T7 into `feat/e2-table-system`.
+> The six branches merged with **zero conflicts** (a 4-parent octopus; T2 and T3 arrived
+> transitively under T6, which was stacked on them). Everything below is a divergence or a
+> gap that only became visible once all six were in one tree — none of it is a criticism of a
+> branch that could not see the other five.
+
+1. **The row-identity prop is `rowLabel`, in every slot component, always.** Two agents
+   shipped one concept under two names — `TableRowActions({ rowLabel })` and
+   `TableSelectCell({ label })` — because §2.13's two worked examples spelled it both ways.
+   That is precisely §2.10's "a prop name means the same thing in every primitive, or the
+   design system is seven dialects", and `label` was the wrong survivor three times over:
+   `Checkbox`'s own `label` is a `ReactNode`, `TableLoadingOverlay`'s `label` is a status
+   string, and neither names a row. **Renamed to `rowLabel`; both worked examples above are
+   corrected.** No alias (§2.10 rule 6).
+
+2. **`<TableBody rows renderRow>` takes `children` as its EMPTY FALLBACK.** The two union
+   branches were mutually exclusive, so a table on the windowing seam could not put a blank
+   state inside `<TableBody>` at all — `tsc` refused it outright
+   (`Type '{ id: string; }[]' is not assignable to type 'undefined'`). Its only way out was to
+   branch on `<TableBody>` itself, which is the "callers branch outside today" defect §2.13
+   exists to end, moved one element inwards. Every list screen has an empty state, so this is
+   the common path. `children` now renders when `rows` is empty and is ignored otherwise; a
+   caller with no blank state passes none and gets the empty `<tbody>` it had before. This is
+   the ONE crossing of issue 783 and issue 784, and neither ticket could see it.
+   > Side effect worth knowing: with `children` no longer `never` in the rows branch, `rows &&`
+   > narrows the union on its own, and the old `&& renderRow` guard became a `TS2774`.
+
+3. **A row-action menu owns ArrowDown, and row navigation yields to it.** A Radix menu
+   trigger opens on ↓ (the APG menu-button pattern). `moveRowFocus` must not also step a row,
+   or the user opens a menu on one record while focus flies to the next. It does not — but
+   **not** because of the `event.defaultPrevented` bail: deleting that line leaves the crossing
+   green, because Radix pulls focus into the open menu regardless. What the bail actually
+   holds is §2.15 rule 3's documented opt-out ("a caller's own `onKeyDown` on `<TableBody>`
+   runs first and can opt out with `preventDefault()`"), which **nothing in the suite guarded**
+   until integration. It is guarded now, in `Table.test.tsx`.
+
+4. **`rowFocusTarget`'s link-first preference is only observable in a row whose action cell
+   precedes its link.** In the natural layout the record link is already the first focusable,
+   so DOM order answers the question and no test can tell the preference from a plain
+   first-focusable scan. The crossing fixture in `Table.integration.test.tsx` reverses one row
+   for exactly this reason. **A fixture that cannot fail is the §2.1 defect wearing a test's
+   clothes** — this one had to be rebuilt twice before it discriminated.
+
+5. **The crossings live in `src/components/primitives/Table.integration.test.tsx`.** One
+   `describe` per pair of tickets, and it is where a future cross-cutting behaviour goes.
+   Anything layout-dependent is still browser-measured — §2.18's integration table.
+
+6. **Studio still has a second selection model, and it is legacy, not a divergence.**
+   `src/components/runs/RunsTable.tsx` keeps its own `useState<Set<string>>`. §12.5 forbids E2
+   from migrating call sites; the §G.10 shim PR moves it onto `useTableSelection`. It is named
+   here so the next reader does not report it as a dialect break.
+
+7. **Six catalog pages, one shape.** All six open with `<CatalogPage>` + `<Variant label>` and
+   all six define the same three-line full-width `Demo` wrapper (five of them character for
+   character). That is convergence, not divergence, and the duplication is the price §12.5's
+   file isolation paid for six conflict-free merges. **Not extracted**: hoisting it into
+   `components/catalog/CatalogPage.tsx` is a shared-file edit that buys ~15 lines.
+
+---
+
+## 2.14 Selection-state ownership
+
+> **DECIDED: a hook, owned by the caller. No context, no table-owned state.**
+
+```ts
+// apps/studio/src/hooks/useTableSelection.ts   — #782 owns this file
+export function useTableSelection(
+	ids: readonly string[],           // every id currently on the page, in VISUAL order
+	options?: { max?: number },
+): {
+	selected: ReadonlySet<string>;
+	has: (id: string) => boolean;
+	toggle: (id: string) => void;
+	selectRange: (fromId: string, toId: string) => void;   // shift-click / shift-arrow
+	selectAll: () => void;
+	clear: () => void;
+	allSelected: boolean;
+	someSelected: boolean;            // → the header checkbox's `indeterminate`
+	atMax: boolean;                   // → the visible cap message
+};
+```
+
+- **`<Table>` never owns selection. `<TableRow isSelected>` is a pure presentational prop.** #780's keyboard nav and #782's bulk bar read the same hook, so they cannot diverge: **the hook is the model.**
+- **It lives in `src/hooks/`, not `components/primitives/`** — matching `usePersistentState.ts`, `useSavedFilters.ts`, `useRuns.ts`. A hook is not a primitive. Same rule for #779's `useTableSort`: `src/hooks/useTableSort.ts`. Colocate the test (`useTableSelection.test.ts`), as `usePersistentState.test.ts` already does.
+- **No context.** Studio's `src/components/runs/BulkActionToolbar.tsx` already takes `selectedIds` as a prop and renders as a **sibling** of the table; the caller already holds the state, so a provider would wrap only its own children. The reference uses a context (`SelectedItemsProvider`) solely because its bulk UI is a resizable side panel two components away — and pays for it with `useSelectedItems(enabled)` returning `{}` cast to the context type when disabled, which is an `any` in all but name and is forbidden here. If a future screen genuinely needs selection three levels away, it lifts this hook into a context **at that call site**. That is not a reason to ship one now.
+- **`selectRange` belongs in the hook**, because it is the one operation the caller cannot do trivially: it needs the ordered `ids` array the hook already closed over. **Do not hand-roll the reference's `navigateCheckboxes` ref-array** — it has an acknowledged off-by-one (its own comment says so) and a wrong dependency array.
+- **`max` is a hard cap: exceeding it is a no-op plus a visible message.** The reference `console.warn`s and silently truncates the set, which means the user sees a selection they do not have.
+- **#782 extends Blok's `BulkActionToolbar`, not trigger.dev's UI.** There is no bulk-action bar in the reference at all (selection there drives a count `Badge` plus a resizable side panel). `BulkActionToolbar.tsx` is #782's file for the duration of the wave. Its `selectedIds: Set<string>` prop **MUST be widened to `ReadonlySet<string>`** so the hook's return type flows in — a type-only, source-compatible change, and it is the **only** edit outside `primitives/`, `hooks/` and `catalog/` that any Wave-B agent may make.
+
+---
+
+## 2.15 Table accessibility baseline — MUST rules
+
+> Every rule is a MUST. §9 applies on top. Rules 4, 5, 6 and 7 each make one of the four real a11y defects in the reference structurally impossible.
+
+1. **Real `<table>` semantics. Never `role="grid"`, never a div-table.** `<table>/<thead>/<tbody>/<tr>/<th scope="col">/<td>`. `role="grid"` obliges full two-dimensional cell navigation with a roving tabindex and `aria-colindex` — a far larger contract than #780 asks for. The moment E2 may reach for `grid` is the moment a screen needs cell-level selection without checkboxes; that is a new ticket, not an improvisation.
+2. **Every `<Table>` has an accessible name** — `aria-label`, `aria-labelledby` pointing at the visible page/section heading, or a `<caption>`. `<Table>` extends `ComponentPropsWithRef<"table">`, so this costs nothing; a table with no name is announced as "table" and nothing else.
+3. **REWRITTEN by the Wave-A review — one tab stop per distinct ACTION, not one per row. The `<tr>` is never `tabIndex={0}`.**
+
+   > The original rule said "one Tab stop per row; every other link is `tabIndex={-1}`", which **contradicted rule 7** ("action triggers keyboard-reachable at all times, revealed via `focus-visible:`"): a `tabIndex={-1}` button is not keyboard reachable and can never fire its own `focus-visible:opacity-100`. #780, #781 and #782 all read both rules. **This is the resolution; where any other text disagrees, this wins.**
+
+   - **Every control in a row that does something DIFFERENT is a real, ordinary tab stop.** A row composed per §2.13 therefore has **exactly three**: the select checkbox, the row's primary link, the action-menu trigger. That is correct and intended — it is the same count a keyboard user gets from any list of records, and it is what makes rule 7 possible at all.
+   - **`tabIndex={-1}` is only for a REDUNDANT control: a second link to the destination the row's primary link already goes to** (a status chip, an id chip, a "view" affordance in another cell). It stays mouse- and virtual-cursor-reachable and costs no extra Tab press. Redundancy is the test, not cell count.
+   - **The `<tr>` itself is never focusable and there is no roving tabindex.** A roving model implies `role="grid"` and full 2-D cell navigation, banned by rule 1.
+   - **Row-level ↑/↓ (#780) moves focus between rows' primary links and is a progressive enhancement layered on Tab** — never the only path to anything, and it never removes a tab stop that rule 7 requires.
+   - Consequence for #781/#782, stated so neither has to infer it: the action trigger and the checkbox ship **no `tabIndex` at all** (a `<button>`/`<input>` is focusable by default), and the reveal is `opacity` keyed on `group-hover/row:`, `group-focus-within/row:` **and its own `focus-visible:`** — which now genuinely fires.
+
+   > **SHIPPED by E2-T3 (issue 780) — plain tab order, arrows layered on top, and one attribute is the whole API.** `TableBody` delegates a single `onKeyDown`; ↑/↓ move focus to the next/previous row's primary control. **No `<tr>` is focusable, no `tabIndex` is ever written or rewritten, and no control loses its tab stop** — the rule-3 model is implemented, not reinterpreted. A roving tabindex was rejected because rule 1 bans the `role="grid"` contract it implies and because it would delete exactly the tab stops rule 7 requires.
+   >
+   > The destination inside the next row is resolved from the DOM at keypress time (never from a ref array collected at render — that is the reference's `navigateCheckboxes` and it has an acknowledged off-by-one), in this order:
+   > 1. **`data-row-primary`** — the caller's marker, for when the record's own link is not the row's first link. One attribute on the anchor; no prop, no registration, and E2-T6 windowing cannot invalidate it.
+   > 2. the first ordinary link (`a[href]` **not** `tabindex="-1"`, so rule 3's redundant links are skipped);
+   > 3. any enabled focusable control, so a row of buttons still navigates.
+   >
+   > Rows with nothing focusable — a `TableBlankRow`, E2-T6's spacer rows — are **stepped over**, not stopped at. At the first and last row the handler **does not call `preventDefault()`**, so the arrow still scrolls the page: no trap, no wrap. Keys are left alone entirely when the focused control owns them (`<select>`, `<textarea>`, a text `<input>`, `contenteditable`) or when a modifier is held; a **checkbox and a radio are deliberately not exempt**, so E2-T5's selection column arrows onward like everything else. A caller's own `onKeyDown` on `<TableBody>` runs first and can opt out with `preventDefault()` — **and so does any control that already owns ↓, which in practice means a Radix menu trigger: E2-T4's action button opens its menu and the row does not move** (§2.13a item 3, where the guard for that `defaultPrevented` bail finally landed).
+   > **No `aria-rowindex` is claimed** — rule 8 forbids it while the DOM holds every row, so a screen reader announces row position from the table itself, and arrow navigation adds nothing to announce.
+4. **`aria-sort` on every sortable `<th>`** — `ascending` / `descending` / `none`. **At most one column may be non-`none`.** Non-sortable headers set nothing at all.
+5. **The whole header content is the sort button, and its accessible name is the column name PLUS what the next press will do.** `<th aria-sort><button>Duration<span class="sr-only select-none">, sort descending</span><ChevronIcon aria-hidden/></button></th>` — the W3C APG pattern, and it needs no `aria-label`. **`aria-label="Toggle sort"` is BANNED**: the reference puts that identical name on every sortable column, so a screen-reader user hears "Toggle sort, button" N times with no idea which column. **A chevron-only hit target is also banned** — the reference's is ~16px, below WCAG 2.2 AA 2.5.8's 24×24 minimum, and their own code comment admits clicking the header text does nothing. **Measured on `/catalog/table`: the shipped sort button is 173.8 × 32px (`h-full w-full`) and carries no `aria-label`.**
+
+   > **STRENGTHENED by E2-T2 (issue 779).** T1 shipped the name as the bare column text; the ticket requires it to state the column **and the next action**, because `aria-sort` announces the CURRENT direction and never says what activating the control will do. The next-action phrase is a **screen-reader-only span inside the button** (`, sort ascending` / `, sort descending` / `, clear sort`, keyed off `sortDirection`), never an `aria-label` — a label REPLACES the visible text, and a name that does not contain its own visible label fails WCAG 2.5.3. Names now read `Duration, sort descending`. **Measured live: the span is 1px wide, computes `user-select: none`, and the header row stayed 32px with data rows at 40px, so the name costs no layout.**
+   >
+   > **One trap, found by measuring and now guarded:** the UA stylesheet sets `text-transform: none` on `button`, which BEATS the `uppercase` inherited from the `<th>` — so a sortable header rendered in title case beside uppercase non-sortable ones (measured: `th` `uppercase`, `button` `none`, on all three sortable columns), silently violating §2.11's header-text rule. The button therefore repeats `uppercase` in its own class list. jsdom computes no UA `text-transform`, so the guard in `Table.test.tsx` is a class assertion (§8.3 point 2).
+6. **Selection is conveyed by real checkboxes, NOT by `aria-selected`.** `data-selected="true"` on the `<tr>` is the styling and testing hook only. **Every row checkbox has an accessible name that identifies its row** (`label={<span className="sr-only select-none">Select run {id}</span>}`); the header checkbox is `Select all {n} rows` and sets the DOM `indeterminate` **property** when partially selected. Blok gets this for free because `primitives/Checkbox.tsx` makes `label` required — an accidental structural win over the reference, whose row checkboxes announce as "checkbox, not checked". Keep it.
+7. **Row-action triggers are keyboard reachable at all times** — i.e. they are one of rule 3's three tab stops, which is what lets their own `focus-visible:` fire. Reveal-on-hover MUST be implemented with `opacity` and MUST also reveal on `group-focus-within` and `focus-visible`. **`hidden` / `display:none` is banned for hover-revealed actions** — it removes the control from the tab order, which is the reference's bug and fails §9. T1 therefore ships `group/row` on the `<tr>` so slot components in other files can hang `group-hover/row:` and `group-focus-within/row:` off it.
+8. **`aria-rowcount` / `aria-rowindex` are set if and ONLY if the DOM does not hold every row** — i.e. under virtualization. Then: `aria-rowcount` on the `<table>` = data rows **+ 1 for the header**; `aria-rowindex` on each rendered `<tr>` = its absolute 0-based data index **+ 2** (the header row is index 1); the windowing spacer rows carry `aria-hidden="true"` and **no** index. **Non-virtualized and server-paginated tables set neither** — the DOM is already the truth, and page-local indices under a global count is the worst of both. The reference's own virtualized surface (`TreeView`) sets no `aria-setsize`/`aria-posinset` at all; there is nothing to copy, so do it properly.
+9. **The row focus highlight uses `:focus-visible`, never bare `:focus` and — as of E2-T3 — never `:focus-within` either.** The reference keys off `:focus`, so a mouse click paints a keyboard-focus state. **Verified with a real `Tab` keypress: the sort button matches `:focus-visible` and computes `outline: 1px solid rgb(77,217,138) offset -1px` — `.focus-ring`, not a bespoke ring.**
+
+   > **NARROWED by E2-T3 (issue 780).** The row paints with `has-[:focus-visible]:bg-hover` — the same token as `hover:`, so the row a keyboard user stands in reads exactly like the one under the mouse, and a sticky cell's `bg-inherit` picks it up for free. `:focus-within` was the obvious alternative and is **banned**: it fires on a mouse click too, which is the reference's bug in a newer spelling (`group-has-[[tabindex='0']:focus]`). **Proven live, and it needed the §2.18 transition trap to see it: after clicking a row's button and moving the mouse away, the row matches `:focus-within` but NOT `:has(:focus-visible)`, and its background returns to `rgb(17,17,19)` — on the SECOND read.** Selection still wins over both (a selected row with keyboard focus inside measured `rgb(39,39,42)`). The focus RING stays on the control; the row background is a locator, not a focus indicator.
+10. **Every icon-only row action carries an `aria-label` naming both the action and the row** (`Actions for run run_01H…`), never just the action.
+
+### Sort and filter URL state — decided now so E3 cannot re-litigate it
+
+**Sort state belongs in the URL, alongside the filters, and E3 (#789) owns the wiring.** Consequences, binding on E2:
+
+- **`<TableHeaderCell sortDirection onSort>` stays purely presentational and fully controlled.** It owns no state, ever.
+- **#779 ships `src/hooks/useTableSort.ts` as the DEFAULT LOCAL owner** of sort state. E3 later replaces that hook with URL-derived state **at the call site**, touching zero E2 files. **SHIPPED — the seam is a third argument, not a fork:** `useTableSort(rows, columns, { sort, onSortChange })`. Passing `sort` (including as `null`) makes the hook controlled and it keeps no state of its own; omitting it keeps the state local. E3 passes URL-derived state and its setter, and changes nothing else. **Single column only** — that is what `?sort=&dir=` and §2.15 rule 4 describe; multi-column sort is a new ticket with a different URL contract, not a flag.
+- **The URL contract is `?sort=<columnKey>&dir=asc|desc`.** Both params absent ⇒ cleared ⇒ the server/default order. `sort` present with `dir` absent ⇒ `asc`. E3 does not invent different names; E2 does not invent different names.
+- Copy the reference's `useTableSort` semantics, which are good: three-state cycle **`asc → desc → cleared`** (cleared returns the *incoming* row order, so a server default is reachable without a reload); **stable sort** via index decoration; **nulls last in both directions**; `localeCompare(…, { sensitivity: "base" })` for text. Keep the comparator exported as a **pure function** so ordering is unit-testable without rendering.
+
+---
+
+## 2.16 The virtualization seam — built in T1, FILLED IN by E2-T6 (issue 783)
+
+> **DECIDED (founder): T1 builds the seam, #783 fills it in later. `@tanstack/react-virtual@^3.11.0` is already a dependency; T6 adds no package.**
+> **SHIPPED.** Windowing is live in `TableBody`. Measured on `/catalog/table-virtualization` with 1,000 rows — see §2.18. The blast radius held exactly as the correction below predicted: `Table.tsx` and one new catalog page, nothing else.
+
+The seam is the `rows` + `renderRow` branch of `<TableBody>` (§2.13). T1 shipped exactly this and nothing more:
+
+```tsx
+export function TableBody<T>({ rows, renderRow, children, className, ...props }: TableBodyProps<T>) {
+	return (
+		// `relative` is load-bearing: #784's loading overlay positions against it.
+		<tbody className={cn("relative", className)} {...props}>
+			{rows && renderRow ? rows.map(renderRow) : children}
+		</tbody>
+	);
+}
+```
+
+> **CORRECTION (Wave-A review) — the old sentence "T6 replaces that one expression and nothing else in the codebase" was FALSE, and T6 is who it misled.** Rule 5 below plus §2.15 rule 8 make `aria-rowcount` and `aria-rowindex` mandatory the moment windowing turns on, and **`aria-rowcount` belongs on the `<table>`**, which `TableBody` cannot reach. The promise that actually holds, and the one that matters, is the caller-facing one:
+>
+> **No caller changes. No `renderRow` changes. No file outside `Table.tsx` changes.** T6's blast radius is:
+>
+> 1. **`TableBody`'s one expression** — the windowed render plus the two spacer `<tr>`s (rule 1).
+> 2. **`aria-rowindex`, injected inside `TableBody`** by cloning what `renderRow` returned: `cloneElement(renderRow(row, i) as ReactElement, { "aria-rowindex": i + 2 })`. Reachable from `TableBody` alone, so the caller's `renderRow` stays untouched. **`TableRow` spreads its props, and a test guards that spread**, so the attribute lands on the `<tr>`.
+> 3. **`aria-rowcount` on `Table`** — the one component beyond `TableBody` that T6 edits. `<Table aria-rowcount={n}>` already rides `ComponentPropsWithRef<"table">`'s spread today (**same guarded test**), so a caller that knows its total can set it; but because the 100-row gate is internal, T6 makes it automatic by lifting the count `TableBody` computes into `TableContext` and reading it in `Table`.
+>
+> **The seam was deliberately NOT widened further.** Shipping that state plumbing in T1 would be machinery for a feature §2.16 rule 6 says nothing needs yet — and it would be untestable until windowing exists. What T1 shipped instead is the cheap half: both attributes pass through by spread, and `Table.test.tsx` fails if either spread is dropped. §12.5's T6 row is corrected to `Table.tsx` — `TableBody` internals **plus `aria-rowcount` on `Table`**.
+
+T6 replaces that expression, per the corrected blast radius above. Rules for when it does:
+
+1. **Window with two spacer `<tr>`s, never absolute positioning.**
+   ```tsx
+   <tr aria-hidden="true" style={{ height: paddingTop }} />
+   {items.map((vi) => renderRow(rows[vi.index], vi.index))}
+   <tr aria-hidden="true" style={{ height: paddingBottom }} />
+   ```
+   **The reason is not stylistic.** You cannot put a translated `<div>` inside `<tbody>`; doing it stops the element being a real `<table>`, which kills `<th scope="col">` semantics AND kills the sticky `<thead>`, which sticks to the scroll container rather than to the rows. The reference's `TreeView` uses the two-div sandwich precisely because it is not a table — that technique does not transfer.
+   The inline `style={{ height }}` is a computed pixel value, not a color; it is deliberately outside the token guard's remit and a reviewer must not flag it.
+   > **AMENDED as shipped: the spacers also carry `tabIndex={-1}`.** Biome classes a `<tr>` as an interactive element, so `<tr aria-hidden="true">` alone trips `a11y/noAriaHiddenOnFocusable` — and §9 forbids suppressing an a11y rule. `tabIndex={-1}` is that rule's own documented remedy (hidden AND unreachable); it adds no tab stop, and §2.15 rule 3's "the `<tr>` is never focusable" is about data rows and roving tabindex, which this is not. E2-T3's `FOCUSABLE` selector already excludes `[tabindex="-1"]`, so arrow navigation steps over a spacer exactly as before. Writing `aria-hidden` bare also passes the linter — the rule only matches the literal string `"true"` — but that is a hole in the matcher rather than a remedy, and using it would be smuggling.
+2. **Threshold-gate at 100 rows, exactly like `src/components/trace/StepRail.tsx`:** `count: useVirtual ? rows.length : 0` where `useVirtual = rows.length >= 100`. This is not an optimisation — **it is what makes the table testable at all.** `src/__tests__/setup.ts` has no `ResizeObserver` polyfill, `@tanstack/react-virtual` needs one, and a virtualized table in jsdom renders **zero rows**. Below the threshold the virtualizer measures nothing and the plain path runs. StepRail's tests pass for exactly this reason.
+   > **CORRECTED by E2-T6, having built it: a `/catalog/*` demo MAY exceed 100 rows, and `table-virtualization` does (1,000).** The old sentence said the frozen `catalog.test.tsx` "starts failing on `ResizeObserver`". It does not: `@tanstack/react-virtual` checks `if (!targetWindow.ResizeObserver) return` before observing, so in jsdom a windowed table renders its two spacers, no rows, and **throws nothing** — the page still renders its `<h1>` and the frozen test still passes (verified, 14/14). What the missing polyfill actually costs is *assertability*, not safety. **The gate stays** — it is what keeps every other table on the plain path — but the reason is performance and testability, not a crash.
+   > **Testing a windowed table in jsdom needs ONE stub, and it is not the obvious one:** the virtualizer measures the scroll container with **`offsetHeight`**, not `getBoundingClientRect()`. jsdom reports 0 for `offsetHeight` on every element, so an unstubbed container is 0px tall, the range is `null`, and the body renders no rows at all. `vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")` inside the one describe block that needs it buys a real range with real overscan and leaves `setup.ts` alone. Stubbing `getBoundingClientRect` instead looks right and does nothing (cost: one debugging round).
+3. **`estimateSize` returns `TABLE_ROW_HEIGHT[density]`** (§2.11). That is the second reason the ladder is a fixed `h-*` per density and not derived padding: a padding-derived height is not a number you can hand to `estimateSize`. **Note the measured caveat: `h-*` is a MINIMUM, so a row with wrapping content is taller than `TABLE_ROW_HEIGHT` (40 → 60.5px measured). `@tanstack/react-virtual` re-measures rendered rows, so `estimateSize` only has to be right for the un-rendered ones — but a table with routinely-wrapping cells will scroll-jump, and that is a reason to keep cell content on one line, not a reason to change the ladder.**
+4. **Do not virtualize horizontally.** Column virtualization buys nothing at 16 columns and breaks sticky columns and `colSpan`.
+5. **`aria-rowcount` / `aria-rowindex` become mandatory the moment windowing turns on**, per §2.15 rule 8, and the spacer rows carry `aria-hidden="true"` and no index.
+6. **Nothing in Studio needs this today** and that is fine. Every current table is paginated; the reference does not virtualize tables at all; the log stream (E10) is the only genuinely unbounded list. The seam costs six lines and prevents a rendering-model rewrite after five features have landed on the old model. The implementation waits for a screen that actually renders >100 rows.
+
+### What E2-T6 decided while filling it in — six things a reviewer should check, not re-derive
+
+7. **The scroll element is found with `bodyRef.current.closest("[data-table-scroll]")`, NOT passed down the context.** The virtualizer reads `getScrollElement()` inside a **layout effect**, and React attaches a parent's refs only AFTER its children's layout effects have run — so a container ref on `TableContext` is still `null` when `TableBody` first looks, and the table paints once with no rows before some later re-render fixes it. `TableBody`'s own `<tbody>` ref *is* attached by then, so the lookup walks up from there. `closest` also does the right thing for a table nested inside a cell: it finds that table's own container. `Table` marks the container with `data-table-scroll="true"`; that attribute is a contract inside `Table.tsx` and nothing outside it may rely on it.
+   The `<tbody>` ref is **composed**, not replaced: `ref` rides `ComponentPropsWithRef<"tbody">`, so a caller may already have one, and the callback returns theirs to preserve React 19's ref-cleanup contract.
+8. **`aria-rowcount` travels UP via a `setRowCount` on the context; `aria-rowindex` is cloned onto the row inside `TableBody`.** Exactly the plumbing the correction above described. `<table aria-rowcount={rowCount} …{...props}>` puts the local value BEFORE the spread on purpose, so a caller that knows a total the table cannot (a server-side count) still wins.
+9. **No `scrollMargin`; `overscan: 8` absorbs the header offset instead.** The virtualizer measures the container, so it believes the rows start at scroll offset 0 when they actually start below the `<thead>` (28–36px, §2.11). `scrollMargin` is the exact fix and costs a layout read in an effect; eight rows of overscan is ≥ 224px against a ≤ 36px error. **Measured: at `scrollTop 20000` the row sitting under the sticky header is `aria-rowindex 502`, and `20000 / 40 + 2 = 502` exactly.** Revisit only if a header ever grows taller than the overscan.
+10. **No dynamic row measurement.** `estimateSize` is trusted and `virtualizer.measureElement` is not attached, because attaching it means cloning a `ref` onto the caller's element and clobbering any ref it already set. §2.11's `h-*` is a MINIMUM, so a table with routinely-wrapping cells will scroll-jump — that is a reason to keep cell content on one line (rule 3 already says so), not a reason to grow the API.
+11. **Keyboard navigation crosses the window; a mouse scroll can drop focus.** E2-T3's ↑/↓ resolves its destination from the DOM at keypress time, and `focus()` scrolls the row into view, which advances the window before the next press — **measured: 140 consecutive `ArrowDown` presses moved focus from row 2 to row 142 with no drops, and 100 `ArrowUp` came back to 42.** The one honest limit: if you scroll the focused row out of the window **with the mouse**, its element is unmounted and focus falls back to `<body>` (**measured**). That is inherent to windowing — the reference dodges it by never letting focus land on a virtualized node at all — and it is why no row is a tab stop.
+12. **An unbounded container degrades to rendering everything, not to rendering nothing.** Windowing needs the same bounded `containerClassName` height `stickyHeader` needs (§2.12 rule 7). Without it the container reports its full content height, the range covers every row, and the table is correct but unwindowed.
+
+---
+
+## 2.17 `Text` — the mono / numeric text primitive
+
+> **CORRECTION to §12.1: `Text.tsx` was assigned to E1-T4 and never shipped. It was built by E2-T1 (#778), because table cells need it and nothing else in the system provides it.** §12.1's ownership row is corrected below.
+
+`src/components/primitives/Text.tsx` — a `<span>` on §2.4a's TEXT ladder and §2.10's `ink` axis, with two orthogonal booleans:
+
+```tsx
+type TextProps = React.ComponentPropsWithRef<"span"> & {
+	size?: "sm" | "md" | "lg";                         // §2.4a text ladder; default "md"
+	ink?: "default" | "strong" | "dimmed" | "muted";   // §2.10; default "default"
+	mono?: boolean;                                    // font-mono — ids, hashes, payload keys
+	numeric?: boolean;                                 // tabular-nums — MANDATORY on numeric columns
+};
+```
+
+- **No `variant`, no `tone`.** Scale is `size`, color is `ink` (§2.10 rules 2 and 3). It copies `primitives/Paragraph.tsx`'s two-table shape verbatim; this is the same component with a different element and two flags.
+- **No `spacing`.** It is inline text, not a block (§2.3).
+- `mono` and `numeric` are independent: an id is `mono` without `numeric`; a right-aligned count is `numeric` without `mono`; a duration is usually both.
+- `InlineCode` is not a substitute — it is a bordered code chip. `CopyableText`'s `mono` prop is not a substitute — it is a button.
+
+---
+
+## 2.18 What E2-T1 MEASURED in a browser, and what a reviewer should re-measure
+
+> jsdom has no layout, no scroll and no sticky. Every claim in §2.11–§2.16 that depends on any of those was measured live on `/catalog/table` (Vite dev server, Chrome, viewport 1280×900) with `getBoundingClientRect()`, `getComputedStyle()`, `elementFromPoint()`, a real mouse hover and a real `Tab` keypress. **A reviewer re-running these must set the viewport explicitly — an unsized browser pane reports `window.innerWidth === 0` and every width measurement is then meaningless while heights still look correct.**
+
+| claim | measurement | verdict |
+|---|---|---|
+| row heights are 28 / 40 / 44 | `[28,28,28] / [40,40,40] / [44,44,44]`; header rows 28 / 32 / 36 | ladder correct as written |
+| the fit invariant | `xs` button 24px, `sm` 28px, `lg` 36px — no row grew | holds |
+| `h-*` on a `<td>` is a MINIMUM | one cell given three lines: row 40 → 60.5 → 40 | holds; no `min-h-*` needed |
+| `border-b` on `<tr>` under `border-collapse: collapse` | `1px solid rgb(39,39,42)`; `last:border-b-0` → `0px` | holds |
+| `bg-inherit` sticky cell tracks row state | hovered row `<tr>` and sticky `<td>` both `rgb(31,31,35)`; siblings both `rgb(17,17,19)`; plain `<td>`s `rgba(0,0,0,0)` | **§2.12 rule 3 confirmed; no fallback needed** |
+| selection beats hover | selected row under real hover stays `rgb(39,39,42)` | ternary correct |
+| sticky `<thead>` actually sticks | container scrolled 300px: rows −300px, `<thead>` 0px | holds |
+| the `after:` hairline survives `border-collapse` | `content:""`, `absolute`, `1px`, `rgb(39,39,42)`, 730px wide; `<thead>` `border-bottom-width: 0px` | holds |
+| z-order where the two stickies cross | scrolled to `top 200 / left 128` (max), `elementFromPoint` at the top-right returns the `<th>` inside the sticky `<thead>` (z-20 over z-10) | holds |
+| `colSpan={1000}` does not widen the table | `table 736 / headerRow 736 / blankCell 736 / scrollWidth 736`; no horizontal overflow; identical to a blank-row-free sibling | **default STANDS** |
+| …under `table-layout: fixed` | header cells collapse to `0.73px` each | **caveat added to §2.13** |
+| focus ring on a real `Tab` | `:focus-visible` true, `outline: 1px solid rgb(77,217,138) offset -1px`, hit target 173.8 × 32 | holds |
+| `aria-sort` discipline across the page | exactly 3 present (`ascending`/`descending`/`none`), 0 on non-sortable headers | holds |
+| `sr-only` header labels are unselectable | all four compute `user-select: none` | §2.12 rule 11 holds |
+
+**Re-measured after the Wave-A review fixes** (same viewport, same page; the header-hover row is the defect R2 named):
+
+| claim | measurement | verdict |
+|---|---|---|
+| the header row no longer hovers | header `<tr>` genuinely `:hover` for 4 samples over 450ms, background `rgb(17,17,19)` at every sample (was `rgb(17,17,19)` → `rgb(31,31,35)`) | **§2.12 rule 12 fixed** |
+| a DATA row still hovers | hovered `<tr>` `rgb(31,31,35)`, its sticky `<td>` `rgb(31,31,35)`, sibling row and its sticky `<td>` both `rgb(17,17,19)`, plain `<td>` `rgba(0,0,0,0)` | rule 3 intact after the fix |
+| selection still beats hover | selected row `rgb(39,39,42)` with a neighbour hovered | intact |
+| sticky `<thead>` survives the new context provider | container 0 → 300px: `<thead>` moved 0px, rows moved −300px; `position: sticky`, `z-index: 20`, `border-bottom-width: 0px`; `::after` `content:""` `absolute` `1px` `rgb(39,39,42)` 736px | intact |
+| z-order at the crossing | scrolled to `scrollTop 200 / scrollLeft 128` (max), `elementFromPoint` top-right → `TH` inside `<thead>` | intact |
+| the ladder | rows `[28,28,28] / [40,40,40] / [44,44,44]`, headers 28 / 32 / 36 | unchanged |
+| no row lies about being disabled | `document.querySelectorAll("tr[aria-disabled]").length === 0`; the demo's `<Button disabled>` computes `disabled: true`, `pointer-events: none`, `opacity: 0.5` | **R3 fixed** |
+| `sr-only` labels still unselectable | all four compute `user-select: none` | intact |
+
+**Measured by E2-T2 (issue 779) on the same page and viewport**, after adding the live-sort demo. A real mouse activation and a real `Tab`; the cycle's Enter/Space path is guarded in jsdom instead, see the trap below.
+
+| claim | measurement | verdict |
+|---|---|---|
+| the sort button's name states the column AND the next action | `Duration, sort ascending` → after one click `Duration, sort descending` → `Duration, clear sort`; no `aria-label` on any of them | §2.15 rule 5 as strengthened |
+| the next-action span costs no layout and cannot be mouse-copied | span 1px wide, `user-select: none`; header row 32px, data rows `[40,40,40,40]` — unchanged | holds |
+| the whole header is the hit target | `153.67 × 32` and `175.64 × 32` (`h-full w-full`), far above WCAG 2.2 AA 2.5.8's 24×24 | holds |
+| a real `Tab` reaches the sort button | after clicking one header, one `Tab` moved focus to the next column's button: `:focus-visible` true, `outline: 1px solid rgb(77,217,138) offset -1px` | `.focus-ring`, not a bespoke ring |
+| at most one non-`none` column per table | clicking Workflow then Duration left `[null, none, descending, none]` — the previous column reset rather than keeping a stale arrow | §2.15 rule 4 holds |
+| the third press CLEARS to the incoming order | all three headers `none`, rows back to `K9, M2, P7, R1`, caption reads "cleared (the incoming order)" | holds |
+| nulls sort last in both directions | duration `desc` → `12.90s, 1.24s, 0.31s, —` | holds |
+| the sortable header is uppercase like its siblings | `th` `uppercase` vs `button` `none` **before** the fix; `uppercase` after | defect found live, fixed, guarded |
+
+> **Second measurement trap, and it is not a defect in the page:** this browser harness's `key` action delivers a **trusted** `keydown`/`keyup` to the focused element but the browser generates **no click** from it, so Enter/Space activation cannot be measured here. Proven with a control experiment — a plain `<button>Replay</button>` elsewhere on the same page, same trusted Enter, `click` listener never fired either. **Keyboard activation is therefore guarded in jsdom** (`useTableSort.test.tsx` cycles the whole asc → desc → cleared sequence with `user.tab()` + `{Enter}` + Space) and comes from the real `<button>` by spec. Do not "fix" a live Enter that appears dead until you have run that control.
+
+**Measured by E2-T3 (issue 780) on `/catalog/table-keyboard`**, viewport 1280×900, with real `Tab` and real `ArrowDown`/`ArrowUp` keypresses (the harness delivers `key: "ArrowDown"`; `"Down"` is a different, unhandled key — see the trap below).
+
+| claim | measurement | verdict |
+|---|---|---|
+| a real `Tab` reaches a row's link and the ROW lights up | link `:focus-visible` true, `outline: rgb(77,217,138) solid 1px`; its `<tr>` `rgb(31,31,35)` (`--color-hover`) while the sibling row stays `rgb(17,17,19)` | §2.15 rule 9 as narrowed |
+| ↑/↓ walk the rows | `run_01H8Z3K9` → `M2` → … → `R1` (row index 0→3) and back; `:focus-visible` true at every stop | holds |
+| the arrows never take a tab stop away | after arrowing into row 1, one `Tab` moved to **that same row's** Replay button (`:focus-visible`, ring present); no `<tr>` has `tabindex` | rule 3's model, implemented |
+| ↓ from a row's ACTION button goes to the next row's PRIMARY link | Replay (row 1) → `run_01H8Z3P7` link (row 2, cell 0) | as documented |
+| `data-row-primary` beats DOM order | in the second table ↓ landed on the marked run link in **cell 1**, not the workflow link in cell 0 | holds |
+| no trap and no wrap at the ends | ↓ on the last row left focus on `run_01H8Z3R1`; a bubble-phase listener read `defaultPrevented === false` | holds |
+| a row with no control is stepped over | ↓ from the selected row (the last focusable one) left focus where it was; the control-free third row never took it | holds |
+| selection beats keyboard focus | selected row with focus inside: `rgb(39,39,42)` (`--color-control`), siblings `rgb(17,17,19)` | §2.12 rule 5 intact |
+| a MOUSE click does not paint the focus state | after clicking Replay and moving the pointer away: `:focus-within` **true**, `:has(:focus-visible)` **false**, row back to `rgb(17,17,19)` | `:focus-within` correctly rejected |
+| row navigation does not fight E2-T2's sort | on `/catalog/table`, clicking a sort header then pressing ↓ left focus on the header button and `aria-sort` at `[null,"ascending","none","none"]` | header cells live in `<thead>`; the handler is on `<tbody>` |
+
+> **Third harness trap, and it is not a defect in the page:** this browser's synthetic keys deliver a **trusted** `keydown`, but the browser performs **no default scroll** for them. So "the page scrolled at the boundary" is NOT measurable here — the measurable claim is `defaultPrevented === false`, which is what the table above quotes. **Proven with a control experiment**, exactly as E2-T2's Enter trap was: with focus on `<body>` and no table involved at all, three trusted `ArrowDown` presses moved the scroll container (`scrollHeight 1142 / clientHeight 876`) by **0px**. Also note the harness's `key` names: `"ArrowDown"` works, `"Down"` arrives as `event.key === "Down"` and matches nothing — an arrow that "does not work" is that before it is a bug.
+
+**Measured by E2-T6 (issue 783) on `/catalog/table-virtualization`**, viewport 1280×900, on the 1,000-row demo (`density="default"`, `stickyHeader`, `containerClassName="max-h-[60vh]"` → container `clientHeight 538`). Row-count claims are `querySelectorAll` counts; the keyboard claims are real `ArrowDown` / `ArrowUp` / `Tab` presses.
+
+| claim | measurement | verdict |
+|---|---|---|
+| the DOM really is windowed | 1,000 rows in → **24 `<tr>` at rest** (22 data + 2 spacers), 32–33 while scrolling; `container.scrollHeight 40032` = 1000 × 40 + a 32px header | holds |
+| the spacers carry the scroll height | at top `["0px","39120px"]`; at `scrollTop 20000` `["19680px","19120px"]`; at max scroll `["39160px","0px"]` | rule 1 as written |
+| `aria-rowcount` is honest | `1001` on the `<table>` = 1000 data rows + the header | §2.15 rule 8 |
+| `aria-rowindex` is ABSOLUTE, not window-local | first rendered row `2`; at `scrollTop 20000` the window is `494…523`; the last row at max scroll is `1001` | holds; no off-by-one |
+| the estimate matches reality | the row under the sticky header at `scrollTop 20000` is index `502`, and `20000/40 + 2 = 502` | `estimateSize` correct without `scrollMargin` |
+| rows are the ladder's height | rendered rows `[40, 40, 40]` | §2.11 intact under windowing |
+| the sticky `<thead>` survives windowing | after scrolling to 20000: `thead` moved **0px**, sits 1px from the container top, `position: sticky`, `z-index: 20`, `border-bottom-width: 0px`, `::after` = `content:""` `absolute` `1px` `rgb(39,39,42)` | §2.12 rules 6–8 intact |
+| scroll performance | 60 rAF frames each scrolling 400px and forcing a layout read: **median 1.7 ms, max 3.6 ms** per frame; DOM stayed 24–32 rows across 24,000px | well inside a 16.7 ms budget |
+| the bottom is reachable and exact | at max scroll (`39494`) the last row is `aria-rowindex 1001`, its bottom is flush with the container's, bottom spacer `0px`, no residual gap | holds |
+| keyboard nav crosses the window | 40 presses: row 2 → **42**; 100 more: → **142** (140 presses, 140 rows, no drops); 100 `ArrowUp`: back to **42** | §2.15 rule 3 survives E2-T6 |
+| the focused row still lights up and rings | focused link `:focus-visible` true, `outline: rgb(77,217,138) solid 1px`; its `<tr>` `rgb(31,31,35)` (`--color-hover`); the row was scrolled into view | §2.15 rule 9 intact |
+| Tab still walks the row's own controls | one `Tab` from row 42's link → row 43's link, `:focus-visible`; **no `<tr>` has `tabindex`** except the two spacers, which are `-1` | not a roving tabindex |
+| a mouse scroll past the focused row drops focus | focus on row 43, container scrolled to 30000 → `document.activeElement` is `BODY` | inherent to windowing; documented, §2.16 rule 11 |
+| the gate is real, live | the 99-row demo on the same page: **99 `<tr>` in the DOM, 0 spacers, no `aria-rowcount`, no `aria-rowindex`** | §2.16 rule 2 |
+
+> **Fourth harness trap, and it is not a defect in the page:** a `javascript_exec` call that sets `scrollTop` and then reads the DOM in the SAME call reads the PREVIOUS window — the virtualizer re-renders on the next frame. The first attempt here reported a row index from 24,000px away and looked like a windowing bug. **Scroll in one tool call, measure in the next** — the same shape as E2-T2's rAF-throttling trap above, for a different reason.
+
+**Measured at the E2 INTEGRATION merge**, viewport 1280×900, on the merged tree — the halves of
+the matrix that cross two tickets and that no single agent could reach. Read the harness trap
+below FIRST; the first six readings taken here were all invalid because of it.
+
+| crossing | measurement | verdict |
+|---|---|---|
+| sticky header × windowing (783 × T1) | `/catalog/table-virtualization` at `scrollTop 20000`: `<thead>` sits **1px** from the container top, `position: sticky`, `z-index: 20`, `border-bottom-width: 0px`, `::after` = `content:""` `absolute` `1px` `rgb(39,39,42)` `736px`; `elementFromPoint` at the header's right edge returns `TH in thead` | header survives windowing |
+| the estimate under windowing | the row under the sticky header is `aria-rowindex 502`, and `20000/40 + 2 = 502`; window `494…523`, spacers `19680px / 19120px`, 32 `<tr>` in the DOM against 1,000 rows | `estimateSize` correct, no `scrollMargin` |
+| density × windowing (T1 × 783) | rendered rows `[40,40,40,40]` = `TABLE_ROW_HEIGHT.default`; the `compact` case is guarded in jsdom by the spacer-arithmetic test, which is written in `TABLE_ROW_HEIGHT.compact` so a hard-coded 40 fails | ladder feeds the virtualizer |
+| keyboard nav × windowing (780 × 783) | ↓ walked focus **498 → 628** (130 rows) while the window advanced **494 → 610…640**; the focused row stayed mounted at every stop and focus never fell to `<body>` | arrows cross the window |
+| row focus paint, real `Tab` | focused link `:focus-visible` true, `outline: rgb(77,217,138) solid 1px`; its `<tr>` `rgb(31,31,35)`, all three siblings `rgb(17,17,19)` | §2.15 rule 9 intact |
+| selection beats keyboard focus | the selected row with `:has(:focus-visible)` true measures `rgb(39,39,42)`, siblings `rgb(17,17,19)` | §2.12 rule 5 intact |
+| row actions × selection | on `/catalog/table-actions`, sticky action cells compute `rgb(17,17,19)` on base rows and `rgb(39,39,42)` on selected ones | `bg-inherit` tracks selection |
+| the action trigger is never `display:none` | 28 triggers on the page, all `display: inline-flex`, all `opacity: 0` at rest, none carrying `tabindex`, hit targets `24×24` and `28×28` | §2.15 rule 7, and above WCAG 2.5.8 |
+| the select-all control is not inside `sr-only` | `/catalog/table-selection`: 18 checkboxes, **0** with an `.sr-only` ancestor, all with non-zero boxes, none with `tabindex`; all 15 `sr-only` spans compute `user-select: none` | the B1 repair, live |
+| blank body × the header | `/catalog/table-blank-states`: all 7 tables keep **3 `<th>`** with a blank body in place; `colspan` is `1000` or the explicit `3` | §2.13's whole reason |
+| the loading overlay's geometry | row **742 × 120.5**, inner content **742 × 120.5** (identical, i.e. centred on the ROW not the shrink-wrapped cell), scrim `oklab(… / 0.8)` | matches E2-T7's measurement |
+| the ladder, whole page | `/catalog/table`: one `<h1>`, 11 tables, rows `28 / 40 / 44`, headers `28 / 32 / 36`, `aria-sort` never more than one non-`none` per table, sort names read `Workflow, sort ascending` | unchanged by the merge |
+
+> **FIFTH harness trap, and it invalidated six readings before it was spotted — it is stronger
+> than the note below it.** When the Browser pane is HIDDEN, `document.visibilityState` is
+> `"hidden"` and `requestAnimationFrame` is not throttled, it is **SUSPENDED**: measured **0
+> frames in 600ms**. Two things follow, and both look exactly like page defects:
+> 1. **Scroll events are never dispatched.** `el.scrollTop = 20000` succeeds and reads back
+>    20000, but a listener registered on that very element counted **0** scroll events, so the
+>    virtualizer never recomputes. The first reading here was "the window is stuck at rows
+>    2–23 at `scrollTop 20000`" — which is a windowing bug, except it was not.
+> 2. **CSS transitions never advance**, so every `transition-[background-color]` reads its
+>    START value forever. A second tool call does not help, because there is no frame in
+>    between; the note below assumes throttling and is optimistic.
+>
+> **Workarounds, both of which measure the real code:** dispatch the event the frame loop
+> would have — `el.scrollTop = N; el.dispatchEvent(new Event("scroll"))` — after which the
+> window advanced to `494…523` and every number above matched E2-T6's; and set
+> `element.style.transition = "none"` before reading a background, which lands the recalc on
+> the target value. Both are measurement aids, not page changes. **A synthetic `KeyboardEvent`
+> is also not enough for `:focus-visible`** — it is untrusted, so the heuristic never arms and
+> the ring reads absent; the harness's own `key` action delivers a trusted press and does.
+>
+> One more, unrelated to visibility: a catalog page is a **lazy** `import.meta.glob` chunk, so
+> the first read after navigating sees the shell with **zero tables and no `<h1>`**. Read
+> twice. Three pages here looked broken for exactly that reason.
+
+> **Measurement trap, cost 15 minutes:** the preview pane throttles `requestAnimationFrame`, so a `transition-[background-color]` does **not** advance inside a single `javascript_exec` call no matter how long you `await sleep()`. The first read after a hover returns the *start* color and looks like a broken hover. **Read the computed background in a SECOND tool call.** Every "no hover" reading in this table was re-confirmed that way.
 
 ---
 
@@ -488,6 +1151,21 @@ export default function ButtonsCatalog() {
 - **No data fetching.** Never import `@/lib/api` and never call a `useX()` hook that fetches. Catalog pages are lazily chunked; a static import of `api.ts` from a lazy chunk creates a static/dynamic conflict and worsens bundle chunking (there is already one such warning in this app — do not add a second).
 - Presentational imports only.
 - Your slug is assigned in §12. **Do not create a page for a slug you were not assigned** — two agents creating `src/catalog/badges.tsx` is a real conflict on a supposedly-unshared file.
+- **A table demo does not fill the width by default.** `<Variant>`'s inner container is `flex flex-wrap items-center gap-3`, so a bare `<table>` becomes a centred flex item. Wrap it: `<div className="w-full">…</div>`.
+
+### 7.3 A primitive that needs the router degrades itself; catalog pages never gate on router presence
+
+> **Resolves the E1 trap recorded in `E2-PREP` §2.7.**
+
+`src/__tests__/catalog.test.tsx` is FROZEN and renders every catalog page **bare, with no `RouterProvider`**. A TanStack `<Link>` in a catalog demo therefore crashes the whole suite. E1's workaround put the gate in the *page* (`src/catalog/buttons.tsx:15`, `const hasRouter = Boolean(useRouter({ warn: false }))`), which is the wrong place: it makes every future page author repeat it, and it silently drops a section from the catalog.
+
+**The rule, and the fix already shipped in `primitives/TextLink.tsx`:**
+
+1. **A primitive that renders a router `<Link>` MUST degrade to a plain `<a href>` when `useRouter({ warn: false })` returns undefined.** `TextLink.tsx:45` is the reference implementation — copy its shape.
+2. **A catalog page MUST NOT gate a section on router presence.** If a demo needs a link, it uses a primitive that already degrades. No new `hasRouter` constants.
+3. **Concretely for E2: `Table.tsx` imports no router at all** (§2.13). `TableCell` has no `to` prop; row navigation is the caller's. `/catalog/table` therefore needs no gate and shows every variant unconditionally. **E2 never trips this trap.**
+4. **E1 residue, explicitly OUT of E2's scope:** `LinkButton` is `createLink(LinkButtonBase)` and still crashes without a router, so `src/catalog/buttons.tsx` keeps its gate. Retrofitting `LinkButton` with `TextLink`'s degradation and deleting that gate is a **separate E1 follow-up ticket**, not an E2 diff — `createLink`'s prop typing (`to`/`params`/`search`/`activeProps` against the generated route tree) is a real typing cost and this repo forbids `any`. **No E2 agent may take it on as a drive-by.**
+5. Corollary for the frozen test's other edge: `getByRole("heading", { level: 1 })` throws on **multiple** matches as well as zero. `CatalogPage` renders the page's one `<h1>`; `EmptyState` renders an `<h3>` and is safe. **A table demo or blank-state demo must not add a second `<h1>`.**
 
 ---
 
@@ -585,7 +1263,7 @@ Also note the reference's `Button` uses a nested `group/button` architecture (un
 | Task | Primitives you own (`components/primitives/`) | Catalog slug (`src/catalog/`) | Radix |
 |---|---|---|---|
 | **E1-T3 buttons** | `Buttons.tsx` → `Button`, `LinkButton`, `ButtonContent` | `buttons.tsx` | none |
-| **E1-T4 typography** | `Headers.tsx` → `Header1/2/3`; `Paragraph.tsx`; `Text.tsx` (mono/numeric) | `typography.tsx` | none |
+| **E1-T4 typography** | `Headers.tsx` → `Header1/2/3`; `Paragraph.tsx`. ~~`Text.tsx` (mono/numeric)~~ — **did not ship; reassigned to E2-T1, see §12.1a** | `typography.tsx` | none |
 | **E1-T5 forms** | `Input.tsx`, `TextArea.tsx`, `Label.tsx`, `Checkbox.tsx` (native), `Switch.tsx` (Radix), `Select.tsx` (native) | `forms.tsx` | switch |
 | **E1-T6 feedback** | `Badge.tsx` (incl. status), `Callout.tsx`, `EmptyState.tsx`, `Toast.tsx` | `feedback.tsx` | none |
 | **E1-T7 tooltips** | `Tooltip.tsx` → compound parts + `SimpleTooltip` | `tooltips.tsx` | tooltip |
@@ -593,6 +1271,48 @@ Also note the reference's `Button` uses a nested `group/button` architecture (un
 | **E1-T9 clipboard** | `CopyButton.tsx`, `CopyableText.tsx` | `clipboard.tsx` | none |
 
 `foundation.tsx` is taken — it is the foundation PR's token swatch page.
+
+### 12.1a CORRECTION — `Text.tsx` moved to E2-T1
+
+| Task | Primitives | Catalog slug |
+|---|---|---|
+| ~~**E1-T4 typography**~~ | ~~`Text.tsx` (mono/numeric)~~ → **did not ship** and is reassigned | `typography.tsx` |
+| **E2-T1 (#778)** | `Table.tsx`, **`Text.tsx`** | `table.tsx`, plus two `<Variant>` blocks appended to `typography.tsx` |
+
+E2-T1 appended a `Text` section to the existing `src/catalog/typography.tsx` (Wave A is a single agent, so there is no conflict) so the primitive is not shipped uncatalogued.
+
+### 12.5 E2 ownership, slugs, and the forbidden-file list
+
+#### Ownership
+
+| task | owns (new files unless noted) | catalog slug |
+|---|---|---|
+| **T1 #778** Wave A | `primitives/Table.tsx` + test, `primitives/Text.tsx` + test; **edits** `_design/CONVENTIONS.md`, `src/catalog/typography.tsx` | `table` |
+| **T4 #781** Wave B | `primitives/TableRowActions.tsx` + test | `table-actions` |
+| **T5 #782** Wave B | `hooks/useTableSelection.ts` + test, `primitives/TableSelectCell.tsx` + test, `primitives/BulkActionBar.tsx` + test; **type-only widening** of `components/runs/BulkActionToolbar.tsx`'s `selectedIds` to `ReadonlySet<string>` | `table-selection` |
+| **T7 #784** Wave B | `primitives/TableBlankState.tsx` + test | `table-blank-states` |
+| **T2 #779** Wave C | `hooks/useTableSort.ts` + test; **edits** `Table.tsx` (header cell only) | appends to `table` |
+| **T3 #780** Wave C | **edits** `Table.tsx` (row focus/keyboard only) | ~~appends to `table`~~ → **`table-keyboard`, its own file** |
+| **T6 #783** Wave C | **edits** `Table.tsx` (`TableBody` internals **plus `aria-rowcount` on `Table`** — §2.16's corrected blast radius) | ~~appends to `table`~~ → **`table-virtualization`, its own file** |
+| **Integration merge** | `primitives/Table.integration.test.tsx` (new — the crossings, §2.13a); the `rowLabel` rename; `TableBody`'s empty fallback; four missing guards | no new page — the six existing ones are the walk |
+
+**Each Wave-B task gets its own catalog slug.** That is the E1 glob mechanism and it is the only reason three agents can ship catalog pages with zero conflicts. `slugOf`/`labelOf` handle hyphens (`table-actions` → "Table actions") and slug-sorting keeps them adjacent to `table`. Do **not** append to `src/catalog/table.tsx` during Wave B.
+
+> **CORRECTION (E2-T6).** Same call, same reason: T2's append had already rewritten `src/catalog/table.tsx` and T3 had moved out of it, so **T6 ships `src/catalog/table-virtualization.tsx`**. It is also the only page in the catalog that deliberately exceeds the 100-row gate, which §2.16 rule 2 now sanctions explicitly.
+>
+> **CORRECTION (E2-T3).** The same reasoning applies to a Wave-C task whenever another branch is in flight, so **T3 ships `src/catalog/table-keyboard.tsx` rather than appending to `table`**: T2 had already rewritten parts of `src/catalog/table.tsx`, and T6 is queued to touch it next. A new file costs nothing (the glob registers it, the nav is derived) and removes the only merge conflict the task could have had. T2's append stands as shipped — it landed while it was the only branch in that file.
+
+#### Forbidden-file list — hand this to every Wave-B agent verbatim
+
+**`src/components/primitives/Table.tsx`** · `src/components/primitives/Text.tsx` · `src/app.css` · `package.json` · `vite.config.ts` · `vitest.config.ts` · `tsconfig.json` · `biome.json` · `index.html` · `src/lib/utils.ts` · `src/lib/constants.ts` · `src/lib/catalogPages.ts` · `src/components/catalog/CatalogPage.tsx` · `src/routes/**` (including `src/routes/catalog/*`) · `src/routeTree.gen.ts` · `src/components/layout/Sidebar.tsx` · anything under `src/__tests__/` · `_design/CONVENTIONS.md` · **each other's files listed in the ownership table above.**
+
+Also forbidden to every E2 agent, all waves: adding a dependency; light mode; `biome-ignore lint/a11y/*`; migrating call sites in `routes/`, `runs/`, `trace/`, `dashboard/`, `layout/` (the §G.10 shim PR does that, after Wave C); deleting `@tanstack/react-table` from `package.json` (one consumer remains — reconcile PR or a follow-up ticket).
+
+`git diff --name-only` at the end of a Wave-B branch shows **only** that row's files. If `Table.tsx` appears, the contract is broken and the branch is rejected regardless of whether it works.
+
+#### One live trap for every agent writing in `components/primitives/` or `src/catalog/`
+
+`tokens.test.ts`'s hex-literal check is `/#[0-9a-fA-F]{3,8}\b/` and it does **not** limit itself to class strings — so a GitHub issue reference in a comment (`#778`, `#862`, `#1234`) is read as a hex literal and fails the file. **Write `E2-T1` / `E16-T5`, or "issue 778", not `#778`, inside those directories.** Narrowing the regex means editing a frozen guard, so it is a separate ticket, not a drive-by.
 
 ### 12.2 Out of scope — per task, to stop scope bleed
 

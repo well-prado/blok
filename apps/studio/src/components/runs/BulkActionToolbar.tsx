@@ -1,8 +1,9 @@
+import { BulkActionBar } from "@/components/primitives/BulkActionBar";
+import { Button } from "@/components/primitives/Buttons";
 import { exportRunCsv, exportRunJson, replayRun } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import type { WorkflowRun } from "@/types";
 import { useNavigate } from "@tanstack/react-router";
-import { Download, GitCompareArrows, Loader2, RotateCcw, X } from "lucide-react";
+import { Download, GitCompareArrows, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -29,9 +30,21 @@ import { useState } from "react";
  * viewport). Operators told us they hate UIs that obscure data with
  * floating chrome — sticky-top is the same modality without the
  * occlusion.
+ *
+ * E2-T5 kept every one of those behaviours and replaced only the chrome:
+ * the count/note/clear frame is now `primitives/BulkActionBar` and the
+ * buttons are `primitives/Buttons`, so this file no longer hand-rolls raw
+ * `zinc-*`/`blok-green-*` colors or uses `title=` as a label (banned by
+ * `_design/CONVENTIONS.md` §9). Same export, same props, same visible text —
+ * `RunsTable.tsx` changes nothing (§6.0).
  */
 type Props = {
-	selectedIds: Set<string>;
+	/**
+	 * Widened from `Set<string>` so `useTableSelection`'s `selected`
+	 * (`ReadonlySet<string>`, §2.14) flows straight in. Type-only and
+	 * source-compatible: every existing caller still passes a `Set`.
+	 */
+	selectedIds: ReadonlySet<string>;
 	runs: WorkflowRun[];
 	onClear: () => void;
 };
@@ -103,87 +116,48 @@ export function BulkActionToolbar({ selectedIds, runs, onClear }: Props) {
 	}
 
 	return (
-		<div className="rounded-lg border border-blok-green-500/30 bg-blok-green-500/10 px-3 py-2 flex items-center gap-3 mb-4">
-			<span className="font-mono text-[11px] text-blok-green-500 font-semibold">{selectedIds.size} selected</span>
-			{replayable.length < selectedIds.size && (
-				<span className="font-mono text-[10.5px] text-zinc-500">
-					· {selectedIds.size - replayable.length} non-HTTP, replay-skip
-				</span>
-			)}
-
-			<div className="ml-auto flex items-center gap-2">
-				{progress && (
-					<span className="font-mono text-[11px] text-zinc-400">
-						{progress.done} / {progress.total} replayed
-					</span>
-				)}
-				{error && <span className="font-mono text-[11px] text-status-failed">{error}</span>}
-
-				<ToolbarButton
-					onClick={handleReplay}
-					disabled={!canReplay}
-					title={
-						canReplay
-							? `Replay ${replayable.length} HTTP-triggered runs`
-							: status === "running"
-								? "Replay in progress…"
-								: "No HTTP-triggered runs in selection"
-					}
-				>
-					{status === "running" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-					Replay {replayable.length > 0 && replayable.length}
-				</ToolbarButton>
-
-				{canCompare && (
-					<ToolbarButton onClick={handleCompare} title="Compare the two selected runs side-by-side">
-						<GitCompareArrows className="w-3 h-3" />
-						Compare
-					</ToolbarButton>
-				)}
-
-				<ToolbarButton onClick={() => handleExport("json")} title="Download a JSON file per selected run (up to 20)">
-					<Download className="w-3 h-3" />
-					JSON
-				</ToolbarButton>
-				<ToolbarButton onClick={() => handleExport("csv")} title="Download a CSV file per selected run (up to 20)">
-					<Download className="w-3 h-3" />
-					CSV
-				</ToolbarButton>
-
-				<button
-					type="button"
-					onClick={onClear}
-					className="p-1 rounded text-zinc-500 hover:text-zinc-100 hover:bg-hover transition-colors"
-					title="Clear selection · Esc"
-					aria-label="Clear selection"
-				>
-					<X className="w-3.5 h-3.5" />
-				</button>
-			</div>
-		</div>
-	);
-}
-
-function ToolbarButton({
-	children,
-	onClick,
-	disabled,
-	title,
-}: { children: React.ReactNode; onClick: () => void; disabled?: boolean; title?: string }) {
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			disabled={disabled}
-			title={title}
-			className={cn(
-				"inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11.5px] font-medium border transition-colors",
-				disabled
-					? "bg-raised border-zinc-800 text-zinc-600 cursor-not-allowed"
-					: "bg-raised border-zinc-800 text-zinc-200 hover:bg-hover hover:text-zinc-100",
-			)}
+		<BulkActionBar
+			className="mb-4"
+			count={selectedIds.size}
+			onClear={onClear}
+			note={
+				replayable.length < selectedIds.size && (
+					<span>· {selectedIds.size - replayable.length} non-HTTP, replay-skip</span>
+				)
+			}
 		>
-			{children}
-		</button>
+			{/* `<output>` rather than `role="status"` on a span: same implicit role, native
+			    element, and biome's useSemanticElements rejects the role form (§9 forbids
+			    suppressing it). Both were unannounced plain spans before. */}
+			{progress && (
+				<output className="text-xs tabular-nums text-ink-dimmed">
+					{progress.done} / {progress.total} replayed
+				</output>
+			)}
+			{error && <output className="text-xs text-status-failed-ink">{error}</output>}
+
+			<Button
+				size="sm"
+				onClick={handleReplay}
+				disabled={!canReplay}
+				isLoading={status === "running"}
+				leadingIcon={<RotateCcw />}
+			>
+				Replay {replayable.length > 0 && replayable.length}
+			</Button>
+
+			{canCompare && (
+				<Button size="sm" onClick={handleCompare} leadingIcon={<GitCompareArrows />}>
+					Compare
+				</Button>
+			)}
+
+			<Button size="sm" onClick={() => handleExport("json")} leadingIcon={<Download />}>
+				JSON
+			</Button>
+			<Button size="sm" onClick={() => handleExport("csv")} leadingIcon={<Download />}>
+				CSV
+			</Button>
+		</BulkActionBar>
 	);
 }
