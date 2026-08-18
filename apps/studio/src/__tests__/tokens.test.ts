@@ -64,7 +64,14 @@ const TEXT_FORBIDDEN =
 /** Utility class names using a color-capable prefix, with their resolved token name. */
 function unknownTokens(line: string): string[] {
 	const out: string[] = [];
-	for (const m of line.matchAll(/\b(text|bg|border)-([A-Za-z0-9][\w.\/[\]#%()-]*)/g)) {
+	// Blank out arbitrary-value brackets before scanning for token names. Inside
+	// `[...]` the words are CSS PROPERTIES, not utilities: a legitimate
+	// `transition-[color,background-color,text-decoration-color]` was being read
+	// as the undeclared tokens `text-decoration` and `border-color`, so the guard
+	// rejected the very fix for the focus-ring transition bug. Colors inside
+	// brackets are still policed — that is ARBITRARY_COLOR's job, above.
+	const scannable = line.replace(/\[[^\]]*\]/g, (b) => " ".repeat(b.length));
+	for (const m of scannable.matchAll(/\b(text|bg|border)-([A-Za-z0-9][\w.\/[\]#%()-]*)/g)) {
 		const prefix = m[1] as string;
 		let rest = (m[2] as string).split("/")[0] as string; // drop the /10 opacity modifier
 		if (prefix === "border") rest = rest.replace(BORDER_SIDE, ""); // border-l-[3px] → [3px]
@@ -264,5 +271,43 @@ describe("contrast", () => {
 			.filter(([, r]) => r < 3)
 			.map(([s, r]) => `${s}: ${r.toFixed(2)}`);
 		expect(failures).toEqual([]);
+	});
+});
+
+// Structural rules that a review round proved were unguarded: each of these could
+// be reverted with the whole suite — and `ci:fast` — staying green.
+describe("primitive structural rules", () => {
+	const primitiveFiles = walk(path.join(src, "components/primitives")).filter(
+		(f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
+	);
+
+	function offendingLines(test: (line: string) => boolean): string[] {
+		const out: string[] = [];
+		for (const f of primitiveFiles) {
+			readFileSync(f, "utf8")
+				.split("\n")
+				.forEach((line, i) => {
+					if (!line.trimStart().startsWith("//") && test(line)) out.push(`${path.basename(f)}:${i + 1}`);
+				});
+		}
+		return out;
+	}
+
+	it("never puts transition-colors on a focusable element (CONVENTIONS §2.7)", () => {
+		// Tailwind v4 folds `outline-color` into `transition-colors`, so `.focus-ring`
+		// FADES IN from the element's own currentColor — measured settling through
+		// rgb(143,143,153) (its glyph grey) before reaching the brand ring. One task
+		// found this, wrote the reason in a code comment, and nine sibling primitives
+		// shipped the bug anyway. Name the transitioned properties instead.
+		expect(offendingLines((l) => l.includes("transition-colors"))).toEqual([]);
+	});
+
+	it("keeps every sr-only twin out of the selection flow", () => {
+		// `sr-only` clips visually but stays selectable, so select-and-copy over a
+		// MiddleTruncate returned the ellipsised label CONCATENATED with the full id
+		// — the clipboard family shipping wrong data through the manual-copy fallback
+		// its own author designated. `select-none` fixes it without touching the
+		// accessibility tree.
+		expect(offendingLines((l) => /["\'`][^"\'`]*\bsr-only\b/.test(l) && !l.includes("select-none"))).toEqual([]);
 	});
 });
