@@ -144,10 +144,103 @@ type TableBodyProps<T> = Omit<React.ComponentPropsWithRef<"tbody">, "children"> 
 		| { rows: readonly T[]; renderRow: (row: T, index: number) => ReactNode; children?: never }
 	);
 
-export function TableBody<T>({ className, children, rows, renderRow, ...props }: TableBodyProps<T>) {
+/**
+ * Anything a Tab press can reach. `[tabindex="-1"]` is excluded on purpose: per
+ * §2.15 rule 3 that value marks a REDUNDANT control (a second link to where the
+ * row already goes), so it is never an arrow-key destination either.
+ */
+const FOCUSABLE = ':is(a[href],button,input,select,textarea,[tabindex]):not([tabindex="-1"]):not(:disabled)';
+
+/**
+ * Controls whose own behaviour is bound to ↑/↓ — a `<select>` changes value, a
+ * textarea moves the caret. Row navigation must not steal those. A checkbox and
+ * a radio are deliberately NOT here: neither does anything with an arrow key, so
+ * E2-T5's selection column arrows onward like everything else.
+ */
+const OWNS_ARROW_KEYS =
+	'textarea,select,[contenteditable="true"],input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"])';
+
+/**
+ * The row's arrow-key destination, in priority order (E2-T3, issue 780):
+ *
+ * 1. `data-row-primary` — the explicit marker, when a row's primary link is not
+ *    its first one. This is the whole caller-facing API: one attribute, no prop,
+ *    no registration, and it survives E2-T6's windowing because it is read from
+ *    the DOM at keypress time rather than from a ref array collected at render
+ *    (the reference's `navigateCheckboxes` is such an array, with an
+ *    acknowledged off-by-one).
+ * 2. the first ordinary link — a row's primary affordance is a link to the
+ *    record, and §2.15 rule 3 makes every redundant one `tabIndex={-1}`, which
+ *    `FOCUSABLE` already excludes.
+ * 3. any focusable control — so a row of buttons still navigates.
+ *
+ * `null` (a blank row, one of E2-T6's spacer rows) means "keep looking in the
+ * same direction", not "stop".
+ */
+function rowFocusTarget(row: Element): HTMLElement | null {
+	return (
+		row.querySelector<HTMLElement>("[data-row-primary]") ??
+		row.querySelector<HTMLElement>(`a[href]:not([tabindex="-1"])`) ??
+		row.querySelector<HTMLElement>(FOCUSABLE)
+	);
+}
+
+/**
+ * ↑/↓ between rows, delegated on `<tbody>` so it costs one listener and works
+ * for rows the caller composed, rows `renderRow` produced and rows E2-T6 has not
+ * mounted yet alike.
+ *
+ * **It is a progressive enhancement layered on Tab, never a roving tabindex**
+ * (§2.15 rule 3): no `<tr>` is focusable, no element's `tabIndex` is rewritten,
+ * every control in every row keeps its ordinary tab stop. A roving model would
+ * imply `role="grid"` and full 2-D cell navigation, which rule 1 bans — and it
+ * would silently delete the tab stops rule 7 requires for row actions.
+ *
+ * The reference has no row-level arrow navigation at all; its arrows walk the
+ * selection checkboxes only, and only when selection is enabled.
+ */
+function moveRowFocus(event: React.KeyboardEvent<HTMLTableSectionElement>) {
+	if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+	// A modifier means the user asked the browser or the OS for something else
+	// (Alt+↓ opens a select, Cmd+↓ jumps to the document end).
+	if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+
+	const from = event.target as HTMLElement;
+	if (from.matches(OWNS_ARROW_KEYS)) return;
+
+	const body = event.currentTarget;
+	const row = from.closest("tr");
+	// Only rows of THIS body: a nested table inside a cell owns its own rows.
+	if (!row || row.parentElement !== body) return;
+
+	const rows = Array.from(body.children);
+	const step = event.key === "ArrowDown" ? 1 : -1;
+	for (let i = rows.indexOf(row) + step; i >= 0 && i < rows.length; i += step) {
+		const candidate = rows[i];
+		const target = candidate && rowFocusTarget(candidate);
+		if (!target) continue;
+		// Only now — an arrow at the last row must still scroll the page rather
+		// than being swallowed by a handler that did nothing.
+		event.preventDefault();
+		target.focus();
+		return;
+	}
+}
+
+export function TableBody<T>({ className, children, rows, renderRow, onKeyDown, ...props }: TableBodyProps<T>) {
 	return (
 		// `relative` is load-bearing: E2-T7's loading overlay positions against it.
-		<tbody className={cn("relative", className)} {...props}>
+		<tbody
+			className={cn("relative", className)}
+			// The caller's handler runs FIRST and can opt out by calling
+			// `preventDefault()`; spreading `props` over this one would have dropped
+			// row navigation the moment a caller wanted a key of its own.
+			onKeyDown={(event) => {
+				onKeyDown?.(event);
+				moveRowFocus(event);
+			}}
+			{...props}
+		>
 			{/*
 			 * Destructuring a union breaks TS narrowing, so both halves are tested —
 			 * `rows &&` alone would leave `renderRow` possibly undefined.
@@ -195,7 +288,13 @@ export function TableRow({ className, isSelected = false, ...props }: TableRowPr
 				// specificity, so which wins depends on Tailwind's emission order
 				// (§2.12 rule 5). Both states are OPAQUE tokens (rule 4) — a `/10` wash
 				// composites twice under a `bg-inherit` sticky cell.
-				!inHeader && (isSelected ? "bg-control" : "hover:bg-hover"),
+				//
+				// `has-[:focus-visible]` is the keyboard twin of `hover:` (E2-T3): the
+				// row a keyboard user is standing in reads as clearly as the one under
+				// the mouse, and the sticky cell's `bg-inherit` picks it up for free.
+				// NOT `:focus-within`, which fires on a mouse click too — that is the
+				// reference's bug (`group-has-[[tabindex='0']:focus]`, §2.15 rule 9).
+				!inHeader && (isSelected ? "bg-control" : "hover:bg-hover has-[:focus-visible]:bg-hover"),
 				className,
 			)}
 			{...props}

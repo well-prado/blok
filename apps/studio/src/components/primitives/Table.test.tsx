@@ -349,6 +349,244 @@ describe("Table", () => {
 		expect(screen.getByRole("row")).toHaveAttribute("aria-rowindex", "42");
 	});
 
+	/**
+	 * E2-T3 (issue 780) — row hover / focus / keyboard navigation.
+	 *
+	 * The paint is two class assertions (§8.3 point 2 — jsdom has no `:hover`, no
+	 * `:focus-visible` and no layout, and the live measurements are in §2.18).
+	 * Everything else here is real behaviour: jsdom DOES have focus and key
+	 * events, so the navigation itself is guarded properly rather than by class.
+	 */
+	function NavFixture({ onKeyDown }: { onKeyDown?: React.KeyboardEventHandler<HTMLTableSectionElement> } = {}) {
+		return (
+			<Table aria-label="Runs">
+				<TableBody onKeyDown={onKeyDown}>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+						<TableCell>
+							<button type="button">Replay K9</button>
+						</TableCell>
+					</TableRow>
+					{/* A blank row — E2-T7's empty state and E2-T6's spacer rows look like
+					    this. Arrow navigation must step OVER it, not stop at it. */}
+					<TableBlankRow>nothing focusable here</TableBlankRow>
+					<TableRow>
+						<TableCell>
+							{/* A redundant second link to the same record: `tabIndex={-1}` per
+							    §2.15 rule 3, so it is neither a tab stop nor an arrow target. */}
+							<a href="/runs/m2" tabIndex={-1}>
+								status chip M2
+							</a>
+						</TableCell>
+						<TableCell>
+							<a href="/runs/m2">run_01H8Z3M2</a>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							{/* An ordinary earlier link that is NOT the record's primary one —
+							    the case `data-row-primary` exists for. */}
+							<a href="/workflows/process-order">process-order</a>
+						</TableCell>
+						<TableCell>
+							<a href="/runs/p7" data-row-primary>
+								run_01H8Z3P7
+							</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>
+		);
+	}
+
+	it("moves focus between rows on ArrowDown / ArrowUp, skipping rows with nothing to focus", async () => {
+		const user = userEvent.setup();
+		render(<NavFixture />);
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+
+		await user.keyboard("{ArrowDown}");
+		// Skipped the blank row entirely, and skipped the redundant `tabIndex={-1}`
+		// chip that precedes the row's real link (§2.15 rule 3).
+		expect(screen.getByRole("link", { name: "run_01H8Z3M2" })).toHaveFocus();
+
+		await user.keyboard("{ArrowDown}");
+		// `data-row-primary` beats DOM order: the workflow link comes first in the
+		// row and is not what the row is about.
+		expect(screen.getByRole("link", { name: "run_01H8Z3P7" })).toHaveFocus();
+
+		await user.keyboard("{ArrowUp}{ArrowUp}");
+		expect(screen.getByRole("link", { name: "run_01H8Z3K9" })).toHaveFocus();
+	});
+
+	it("navigates a row whose only affordance is a button, and never a disabled one", async () => {
+		const user = userEvent.setup();
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<button type="button">Replay K9</button>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<button type="button" disabled>
+								Replay M2
+							</button>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<button type="button">Replay P7</button>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		screen.getByRole("button", { name: "Replay K9" }).focus();
+		await user.keyboard("{ArrowDown}");
+		// A row whose controls are all disabled has no destination — §2.13's
+		// "disable the CONTROLS, never the row" is what a keyboard user then meets.
+		expect(screen.getByRole("button", { name: "Replay P7" })).toHaveFocus();
+	});
+
+	it("is a progressive enhancement on Tab, not a roving tabindex (§2.15 rule 3)", async () => {
+		const user = userEvent.setup();
+		render(<NavFixture />);
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+		await user.keyboard("{ArrowDown}");
+
+		// No `<tr>` is focusable and no control's tabIndex was rewritten, so every
+		// action in every row keeps its ordinary tab stop — which is what lets
+		// E2-T4's `focus-visible:` reveal fire at all (§2.15 rule 7).
+		for (const row of screen.getAllByRole("row")) expect(row).not.toHaveAttribute("tabindex");
+		expect(screen.getByRole("button", { name: "Replay K9" })).not.toHaveAttribute("tabindex");
+		// Tab still walks the row's own controls, in DOM order.
+		screen.getByRole("link", { name: "run_01H8Z3K9" }).focus();
+		await user.tab();
+		expect(screen.getByRole("button", { name: "Replay K9" })).toHaveFocus();
+	});
+
+	it("ignores an arrow that came from a nested table's own rows", async () => {
+		const user = userEvent.setup();
+		render(
+			<Table aria-label="Runs">
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<Table aria-label="Steps">
+								<TableBody>
+									<TableRow>
+										<TableCell>
+											<a href="/steps/1">step 1</a>
+										</TableCell>
+									</TableRow>
+								</TableBody>
+							</Table>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		screen.getByRole("link", { name: "step 1" }).focus();
+		// The inner body handles its own rows; the event then bubbles to the outer
+		// one, which must recognise the row as none of its children. Without that
+		// check the outer table reads an index of -1 and jumps to its first row.
+		await user.keyboard("{ArrowDown}");
+		expect(screen.getByRole("link", { name: "step 1" })).toHaveFocus();
+	});
+
+	it("does not trap or wrap at either end, and leaves the arrow key alone there", async () => {
+		const user = userEvent.setup();
+		const onTableKeyDown = vi.fn();
+		render(
+			<Table aria-label="Runs" onKeyDown={onTableKeyDown}>
+				<TableBody>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/k9">run_01H8Z3K9</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const only = screen.getByRole("link", { name: "run_01H8Z3K9" });
+		only.focus();
+
+		await user.keyboard("{ArrowUp}{ArrowDown}");
+		expect(only).toHaveFocus();
+		// And the page still scrolls: a boundary press is NOT swallowed, which a
+		// handler that called preventDefault() up front would have done.
+		expect(onTableKeyDown).toHaveBeenCalledTimes(2);
+		for (const [event] of onTableKeyDown.mock.calls) expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("leaves the arrow keys to a control that owns them, and runs the caller's handler", async () => {
+		const user = userEvent.setup();
+		const onKeyDown = vi.fn();
+		render(
+			<Table aria-label="Runs">
+				<TableBody onKeyDown={onKeyDown}>
+					<TableRow>
+						<TableCell>
+							<input aria-label="Rename run" defaultValue="run_01H8Z3K9" />
+						</TableCell>
+					</TableRow>
+					<TableRow>
+						<TableCell>
+							<a href="/runs/m2">run_01H8Z3M2</a>
+						</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const field = screen.getByRole("textbox", { name: "Rename run" });
+		field.focus();
+
+		await user.keyboard("{ArrowDown}");
+		// The caret belongs to the field; stealing it is how a table breaks inline
+		// editing. A checkbox is deliberately NOT in that exemption, so E2-T5's
+		// selection column still navigates.
+		expect(field).toHaveFocus();
+		// The caller's own handler still sees every key, ours or not.
+		expect(onKeyDown).toHaveBeenCalledOnce();
+	});
+
+	it("paints the keyboard-focused row like the hovered one, and never the header row (§2.15 rule 9)", () => {
+		render(
+			<Table aria-label="Runs">
+				<TableHeader>
+					<TableRow>
+						<TableHeaderCell>Run</TableHeaderCell>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					<TableRow>
+						<TableCell>plain</TableCell>
+					</TableRow>
+					<TableRow isSelected>
+						<TableCell>picked</TableCell>
+					</TableRow>
+				</TableBody>
+			</Table>,
+		);
+		const [headerRow, plain, picked] = screen.getAllByRole("row");
+		// `:focus-visible`, never `:focus-within` — the reference keys off `:focus`
+		// and so paints a keyboard state on a mouse click.
+		expect(plain).toHaveClass("has-[:focus-visible]:bg-hover");
+		expect(headerRow).not.toHaveClass("has-[:focus-visible]:bg-hover");
+		// Selection is the stronger signal and stays unmoved, exactly as with hover.
+		expect(picked).toHaveClass("bg-control");
+		expect(picked).not.toHaveClass("has-[:focus-visible]:bg-hover");
+	});
+
 	// The one non-trivial invariant in this file. E2-T6 reads TABLE_ROW_HEIGHT for
 	// `estimateSize` and E16-T5 may read it too, so the number and the class it is
 	// supposed to describe must not drift apart. Edit either alone and this fails.
