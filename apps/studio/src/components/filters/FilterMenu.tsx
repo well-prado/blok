@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { ShortcutKey } from "@/components/shared/ShortcutKey";
+import { useShortcut } from "@/hooks/useShortcuts";
 
 import { FILTER_FIELDS } from "@/lib/filterTypes";
 import { cn } from "@/lib/utils";
@@ -75,20 +76,23 @@ export function FilterMenu({ onSelect }: { onSelect?: (field: string, value: str
 		}
 	};
 
-	React.useEffect(() => {
-		const handleGlobalKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-				const activeElement = document.activeElement as HTMLElement;
-				const isInput = activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA";
-				if (!isInput && !open) {
-					e.preventDefault();
-					setOpen(true);
-				}
-			}
-		};
-		document.addEventListener("keydown", handleGlobalKeyDown);
-		return () => document.removeEventListener("keydown", handleGlobalKeyDown);
-	}, [open]);
+	useShortcut(
+		"/",
+		(e) => {
+			e.preventDefault();
+			setOpen(true);
+		},
+		{ description: "Focus filter bar" },
+	);
+
+	useShortcut(
+		"f",
+		(e) => {
+			e.preventDefault();
+			setOpen(true);
+		},
+		{ description: "Focus filter bar" },
+	);
 
 	return (
 		<Popover.Root open={open} onOpenChange={setOpen}>

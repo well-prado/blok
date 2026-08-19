@@ -1,17 +1,26 @@
 import { FilterMenu } from "@/components/filters/FilterMenu";
+import { ShortcutProvider } from "@/components/providers/ShortcutProvider";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 describe("FilterMenu", () => {
 	it("renders its trigger button with an accessible name", () => {
-		render(<FilterMenu />);
+		render(
+			<ShortcutProvider>
+				<FilterMenu />
+			</ShortcutProvider>,
+		);
 		expect(screen.getByRole("button", { name: /Filter.../ })).toBeInTheDocument();
 	});
 
 	it("sets aria-expanded on the combobox when populated", async () => {
 		const user = userEvent.setup();
-		render(<FilterMenu />);
+		render(
+			<ShortcutProvider>
+				<FilterMenu />
+			</ShortcutProvider>,
+		);
 
 		await user.click(screen.getByRole("button", { name: /Filter.../ }));
 		const combobox = screen.getByRole("combobox");
@@ -22,7 +31,11 @@ describe("FilterMenu", () => {
 
 	it("handles keyboard navigation through two levels", async () => {
 		const user = userEvent.setup();
-		render(<FilterMenu />);
+		render(
+			<ShortcutProvider>
+				<FilterMenu />
+			</ShortcutProvider>,
+		);
 
 		await user.click(screen.getByRole("button", { name: /Filter.../ }));
 

@@ -1,0 +1,81 @@
+{
+	"name": "test-license-worker",
+	"version": "1.0.0",
+	"description": "test-license-worker - a Blok application",
+	"type": "module",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"main": "dist/triggers/worker/index.js",
+	"types": "dist/triggers/worker/index.d.ts",
+	"author": "",
+	"scripts": {
+		"dev": "blokctl dev",
+		"start": "node dist/triggers/worker/index.js",
+		"build": "rimraf ./dist && tsc",
+		"start:worker": "bun run src/triggers/worker/index.ts"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"@types/uuid": "^11.0.0",
+		"rimraf": "^6.1.2",
+		"typescript": "^5.8.3",
+		"blokctl": "file:/Users/wellprado/Projects/Personal/blok/packages/cli"
+	},
+	"dependencies": {
+		"@blokjs/api-call": "file:/Users/wellprado/Projects/Personal/blok/nodes/web/api-call@1.0.0",
+		"@blokjs/core": "file:/Users/wellprado/Projects/Personal/blok/core/core",
+		"@blokjs/helper": "file:/Users/wellprado/Projects/Personal/blok/core/workflow-helper",
+		"@blokjs/if-else": "file:/Users/wellprado/Projects/Personal/blok/nodes/control-flow/if-else@1.0.0",
+		"@blokjs/runner": "file:/Users/wellprado/Projects/Personal/blok/core/runner",
+		"@blokjs/shared": "file:/Users/wellprado/Projects/Personal/blok/core/shared",
+		"@blokjs/trigger-worker": "file:/Users/wellprado/Projects/Personal/blok/triggers/worker",
+		"@opentelemetry/api": "^1.9.0",
+		"@opentelemetry/exporter-prometheus": "^0.221.0",
+		"@opentelemetry/resources": "^2.10.0",
+		"@opentelemetry/sdk-metrics": "^2.10.0",
+		"@opentelemetry/sdk-trace-base": "^2.10.0",
+		"@opentelemetry/semantic-conventions": "^1.39.0",
+		"nats": "^2.28.0",
+		"uuid": "^11.1.0",
+		"zod": "^3.24.2",
+		"@blokjs/helpers": "file:/Users/wellprado/Projects/Personal/blok/nodes/utility/helpers@1.0.0"
+	},
+	"private": true,
+	"overrides": {
+		"@blokjs/api-call": "file:/Users/wellprado/Projects/Personal/blok/nodes/web/api-call@1.0.0",
+		"@blokjs/helper": "file:/Users/wellprado/Projects/Personal/blok/core/workflow-helper",
+		"@blokjs/helpers": "file:/Users/wellprado/Projects/Personal/blok/nodes/utility/helpers@1.0.0",
+		"@blokjs/if-else": "file:/Users/wellprado/Projects/Personal/blok/nodes/control-flow/if-else@1.0.0",
+		"@blokjs/react": "file:/Users/wellprado/Projects/Personal/blok/nodes/web/react@1.0.0",
+		"@blokjs/runner": "file:/Users/wellprado/Projects/Personal/blok/core/runner",
+		"@blokjs/shared": "file:/Users/wellprado/Projects/Personal/blok/core/shared",
+		"@blokjs/trigger-cron": "file:/Users/wellprado/Projects/Personal/blok/triggers/cron",
+		"@blokjs/trigger-grpc": "file:/Users/wellprado/Projects/Personal/blok/triggers/grpc",
+		"@blokjs/trigger-pubsub": "file:/Users/wellprado/Projects/Personal/blok/triggers/pubsub",
+		"@blokjs/trigger-mcp": "file:/Users/wellprado/Projects/Personal/blok/triggers/mcp",
+		"@blokjs/trigger-sse": "file:/Users/wellprado/Projects/Personal/blok/triggers/sse",
+		"@blokjs/trigger-webhook": "file:/Users/wellprado/Projects/Personal/blok/triggers/webhook",
+		"@blokjs/trigger-websocket": "file:/Users/wellprado/Projects/Personal/blok/triggers/websocket",
+		"@blokjs/trigger-worker": "file:/Users/wellprado/Projects/Personal/blok/triggers/worker",
+		"@blokjs/core": "file:/Users/wellprado/Projects/Personal/blok/core/core"
+	},
+	"resolutions": {
+		"@blokjs/api-call": "file:/Users/wellprado/Projects/Personal/blok/nodes/web/api-call@1.0.0",
+		"@blokjs/helper": "file:/Users/wellprado/Projects/Personal/blok/core/workflow-helper",
+		"@blokjs/helpers": "file:/Users/wellprado/Projects/Personal/blok/nodes/utility/helpers@1.0.0",
+		"@blokjs/if-else": "file:/Users/wellprado/Projects/Personal/blok/nodes/control-flow/if-else@1.0.0",
+		"@blokjs/react": "file:/Users/wellprado/Projects/Personal/blok/nodes/web/react@1.0.0",
+		"@blokjs/runner": "file:/Users/wellprado/Projects/Personal/blok/core/runner",
+		"@blokjs/shared": "file:/Users/wellprado/Projects/Personal/blok/core/shared",
+		"@blokjs/trigger-cron": "file:/Users/wellprado/Projects/Personal/blok/triggers/cron",
+		"@blokjs/trigger-grpc": "file:/Users/wellprado/Projects/Personal/blok/triggers/grpc",
+		"@blokjs/trigger-pubsub": "file:/Users/wellprado/Projects/Personal/blok/triggers/pubsub",
+		"@blokjs/trigger-mcp": "file:/Users/wellprado/Projects/Personal/blok/triggers/mcp",
+		"@blokjs/trigger-sse": "file:/Users/wellprado/Projects/Personal/blok/triggers/sse",
+		"@blokjs/trigger-webhook": "file:/Users/wellprado/Projects/Personal/blok/triggers/webhook",
+		"@blokjs/trigger-websocket": "file:/Users/wellprado/Projects/Personal/blok/triggers/websocket",
+		"@blokjs/trigger-worker": "file:/Users/wellprado/Projects/Personal/blok/triggers/worker",
+		"@blokjs/core": "file:/Users/wellprado/Projects/Personal/blok/core/core"
+	}
+}
