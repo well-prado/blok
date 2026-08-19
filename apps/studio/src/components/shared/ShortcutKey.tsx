@@ -43,7 +43,7 @@ export function ShortcutKey({ shortcut, className }: { shortcut: string; classNa
 					className,
 				)}
 			>
-				{formatCombination(sequences[0], mac)}
+				{formatCombination(sequences[0] as NonNullable<(typeof sequences)[0]>, mac)}
 			</kbd>
 		);
 	}

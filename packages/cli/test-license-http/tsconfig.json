@@ -1,0 +1,39 @@
+{
+	"ts-node": {
+		"transpileOnly": true
+	},
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"rootDir": "./src",
+		"baseUrl": ".",
+		"paths": {
+			"@nodes/*": ["./src/nodes/*"],
+			"@src/*": ["src/*"]
+		},
+		"allowJs": true,
+		"declaration": true,
+		"sourceMap": true,
+		"outDir": "./dist",
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"strict": true,
+		"noUnusedLocals": true,
+		"noImplicitReturns": true,
+		"skipLibCheck": true
+	},
+	"compileOnSave": true,
+	"include": [
+		"./src",
+		"./src/nodes/**/*.json",
+		"./src/nodes/**/*.md",
+		"./src/*.json",
+		"./src/nodes/**/*.jsx"
+	],
+	"exclude": [
+		"src/nodes/**/test/*.ts",
+		"node_modules",
+		"src/nodes/examples/**/**"
+	]
+}

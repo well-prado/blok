@@ -53,8 +53,8 @@ describe("ShortcutKey", () => {
 		const { container } = render(<ShortcutKey shortcut="g r" />);
 		const kbds = container.querySelectorAll("kbd");
 		expect(kbds.length).toBe(2);
-		expect(kbds[0].textContent).toBe("g");
-		expect(kbds[1].textContent).toBe("r");
+		expect(kbds[0]?.textContent).toBe("g");
+		expect(kbds[1]?.textContent).toBe("r");
 	});
 
 	it("renders combination on Windows", () => {
@@ -74,8 +74,8 @@ describe("ShortcutKey", () => {
 		const { container } = render(<ShortcutKey shortcut="g r" />);
 		const kbds = container.querySelectorAll("kbd");
 		expect(kbds.length).toBe(2);
-		expect(kbds[0].textContent).toBe("g");
-		expect(kbds[1].textContent).toBe("r");
+		expect(kbds[0]?.textContent).toBe("g");
+		expect(kbds[1]?.textContent).toBe("r");
 	});
 
 	it("renders sequences with combination on Windows", () => {
@@ -83,7 +83,7 @@ describe("ShortcutKey", () => {
 		const { container } = render(<ShortcutKey shortcut="Mod+K g" />);
 		const kbds = container.querySelectorAll("kbd");
 		expect(kbds.length).toBe(2);
-		expect(kbds[0].textContent).toBe("Ctrl+K");
-		expect(kbds[1].textContent).toBe("g");
+		expect(kbds[0]?.textContent).toBe("Ctrl+K");
+		expect(kbds[1]?.textContent).toBe("g");
 	});
 });

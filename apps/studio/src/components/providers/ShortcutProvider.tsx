@@ -106,12 +106,12 @@ export const ShortcutProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
 			const matchesSequence = (parsedSeq: ParsedCombo[], eventSeq: (typeof ev)[]) => {
 				if (parsedSeq.length !== eventSeq.length) return false;
-				return parsedSeq.every((part, i) => matchesPart(part, eventSeq[i]));
+				return parsedSeq.every((part, i) => matchesPart(part, eventSeq[i] as NonNullable<(typeof eventSeq)[0]>));
 			};
 
 			const matchesPartialSequence = (parsedSeq: ParsedCombo[], eventSeq: (typeof ev)[]) => {
 				if (eventSeq.length >= parsedSeq.length) return false;
-				return eventSeq.every((part, i) => matchesPart(parsedSeq[i], part));
+				return eventSeq.every((part, i) => matchesPart(parsedSeq[i] as ParsedCombo, part));
 			};
 
 			const evaluateBuffer = (buffer: (typeof ev)[]) => {

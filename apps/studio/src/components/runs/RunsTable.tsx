@@ -16,7 +16,7 @@ import {
 	useReactTable,
 } from "@tanstack/react-table";
 import { ArrowUpDown, Check, ChevronLeft, ChevronRight, GitCompareArrows } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 interface RunsTableProps {
 	runs: WorkflowRun[];
@@ -98,7 +98,7 @@ export function RunsTable({
 		"o",
 		() => {
 			if (cursorIndex !== null && runs[cursorIndex]) {
-				navigate({ to: "/runs/$runId", params: { runId: runs[cursorIndex].id } });
+				navigate({ to: "/runs/$runId", params: { runId: (runs[cursorIndex as number] as { id: string }).id } });
 			}
 		},
 		{ description: "Open selected run" },
@@ -108,7 +108,7 @@ export function RunsTable({
 		"Enter",
 		() => {
 			if (cursorIndex !== null && runs[cursorIndex]) {
-				navigate({ to: "/runs/$runId", params: { runId: runs[cursorIndex].id } });
+				navigate({ to: "/runs/$runId", params: { runId: (runs[cursorIndex as number] as { id: string }).id } });
 			}
 		},
 		{ description: "Open selected run" },
@@ -118,7 +118,7 @@ export function RunsTable({
 		"x",
 		() => {
 			if (cursorIndex !== null && runs[cursorIndex]) {
-				selection.toggle(runs[cursorIndex].id);
+				selection.toggle((runs[cursorIndex as number] as { id: string }).id);
 			}
 		},
 		{ description: "Toggle run selection" },
@@ -130,7 +130,7 @@ export function RunsTable({
 			const targets = selection.someSelected
 				? Array.from(selection.selected)
 				: cursorIndex !== null
-					? [runs[cursorIndex].id]
+					? [(runs[cursorIndex as number] as { id: string }).id]
 					: [];
 			for (const id of targets) {
 				const r = runs.find((r) => r.id === id);
@@ -148,7 +148,7 @@ export function RunsTable({
 			const targets = selection.someSelected
 				? Array.from(selection.selected)
 				: cursorIndex !== null
-					? [runs[cursorIndex].id]
+					? [(runs[cursorIndex as number] as { id: string }).id]
 					: [];
 			for (const id of targets) {
 				cancelRun(id).catch(console.error);
@@ -163,7 +163,7 @@ export function RunsTable({
 			const targets = selection.someSelected
 				? Array.from(selection.selected)
 				: cursorIndex !== null
-					? [runs[cursorIndex].id]
+					? [(runs[cursorIndex as number] as { id: string }).id]
 					: [];
 			if (targets.length === 0) return;
 			const input = window.prompt("Enter tags to add (comma separated):");

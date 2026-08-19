@@ -1,5 +1,6 @@
 import { ShortcutProvider } from "@/components/providers/ShortcutProvider";
-import { act, render, screen } from "@testing-library/react";
+import type { WorkflowRun } from "@/types";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RunsTable } from "./RunsTable";
@@ -8,7 +9,7 @@ import { RunsTable } from "./RunsTable";
 vi.mock("@tanstack/react-router", async () => {
 	const actual = await vi.importActual<unknown>("@tanstack/react-router");
 	return {
-		...actual,
+		...(actual as Record<string, unknown>),
 		Link: ({ children, to, params }: { children: React.ReactNode; to: string; params?: { runId?: string } }) => (
 			<a href={`${to}?runId=${params?.runId}`}>{children}</a>
 		),
@@ -24,10 +25,12 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("RunsTable Shortcuts", () => {
-	const mockRuns: unknown[] = [
+	const mockRuns = [
 		{
 			id: "run-1",
 			workflowName: "wf-1",
+			workflowPath: "",
+			triggerSummary: "",
 			status: "completed",
 			triggerType: "http",
 			durationMs: 100,
@@ -39,6 +42,8 @@ describe("RunsTable Shortcuts", () => {
 		{
 			id: "run-2",
 			workflowName: "wf-2",
+			workflowPath: "",
+			triggerSummary: "",
 			status: "running",
 			triggerType: "http",
 			durationMs: 100,
@@ -50,6 +55,8 @@ describe("RunsTable Shortcuts", () => {
 		{
 			id: "run-3",
 			workflowName: "wf-3",
+			workflowPath: "",
+			triggerSummary: "",
 			status: "failed",
 			triggerType: "worker",
 			durationMs: 100,
@@ -61,7 +68,7 @@ describe("RunsTable Shortcuts", () => {
 	];
 
 	const defaultProps = {
-		runs: mockRuns,
+		runs: mockRuns as unknown as WorkflowRun[],
 		total: 3,
 		page: 1,
 		limit: 10,
@@ -90,7 +97,7 @@ describe("RunsTable Shortcuts", () => {
 		// Check if the bulk checkbox for run-2 is checked
 		// The checkbox logic: title="Select" button will have a <Check /> icon inside if selected.
 		// Since we don't have aria-checked, we can check the class or just use the title
-		const row2Checkbox = screen.getAllByTitle("Select")[1];
+		const row2Checkbox = screen.getAllByTitle("Select")[1] as HTMLElement;
 		expect(row2Checkbox.className).toContain("bg-blok-green-500");
 
 		// Press j to move to run-3 (index 2)
@@ -98,7 +105,7 @@ describe("RunsTable Shortcuts", () => {
 		// Press x to toggle selection for run-3
 		await user.keyboard("x");
 
-		const row3Checkbox = screen.getAllByTitle("Select")[2];
+		const row3Checkbox = screen.getAllByTitle("Select")[2] as HTMLElement;
 		expect(row3Checkbox.className).toContain("bg-blok-green-500");
 	});
 });

@@ -83,7 +83,7 @@ describe("GlobalShortcuts", () => {
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "e" }));
 
 		expect(dispatchSpy).toHaveBeenCalledWith(expect.any(CustomEvent));
-		expect(dispatchSpy.mock.calls[0][0].type).toBe("blok:open-env-switcher");
+		expect(dispatchSpy.mock.calls[0]?.[0]?.type).toBe("blok:open-env-switcher");
 	});
 
 	it("dispatches blok:open-command-palette on 'mod+k'", () => {
@@ -94,7 +94,7 @@ describe("GlobalShortcuts", () => {
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
 
 		expect(dispatchSpy).toHaveBeenCalledWith(expect.any(CustomEvent));
-		expect(dispatchSpy.mock.calls[0][0].type).toBe("blok:open-command-palette");
+		expect(dispatchSpy.mock.calls[0]?.[0]?.type).toBe("blok:open-command-palette");
 	});
 
 	it("dispatches blok:open-cheat-sheet on '?'", () => {
@@ -104,6 +104,6 @@ describe("GlobalShortcuts", () => {
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
 
 		expect(dispatchSpy).toHaveBeenCalledWith(expect.any(CustomEvent));
-		expect(dispatchSpy.mock.calls[0][0].type).toBe("blok:open-cheat-sheet");
+		expect(dispatchSpy.mock.calls[0]?.[0]?.type).toBe("blok:open-cheat-sheet");
 	});
 });

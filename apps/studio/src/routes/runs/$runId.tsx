@@ -140,7 +140,7 @@ function RunTracePage() {
 			const res = await fetchRuns({ workflow: data.run.workflowName, limit: 100 });
 			const idx = res.runs.findIndex((r) => r.id === runId);
 			if (idx >= 0 && idx < res.runs.length - 1) {
-				navigate({ to: "/runs/$runId", params: { runId: res.runs[idx + 1].id } });
+				navigate({ to: "/runs/$runId", params: { runId: (res.runs[idx + 1] as { id: string }).id } });
 			}
 		},
 		{ description: "Previous run" },
@@ -153,7 +153,7 @@ function RunTracePage() {
 			const res = await fetchRuns({ workflow: data.run.workflowName, limit: 100 });
 			const idx = res.runs.findIndex((r) => r.id === runId);
 			if (idx > 0) {
-				navigate({ to: "/runs/$runId", params: { runId: res.runs[idx - 1].id } });
+				navigate({ to: "/runs/$runId", params: { runId: (res.runs[idx - 1] as { id: string }).id } });
 			}
 		},
 		{ description: "Next run" },

@@ -10,7 +10,7 @@ const mockNavigate = vi.fn();
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual = await importOriginal<unknown>();
 	return {
-		...actual,
+		...(actual as Record<string, unknown>),
 		useNavigate: () => mockNavigate,
 		Link: ({
 			children,
@@ -52,7 +52,8 @@ import { useRunDetail } from "@/hooks/useRunDetail";
 // We need to mock useParams for the Route somehow, but Route.useParams is attached by TanStack Router.
 // Since we import Route directly, and it might not have useParams mocked, let's mock the entire Route object or just use a proxy.
 // Actually, `Route.useParams()` is called inside `RunTracePage`. We can mock `Route.useParams`.
-Route.useParams = () => ({ runId: "run-123" });
+// biome-ignore lint/suspicious/noExplicitAny: mock
+Route.useParams = () => ({ runId: "run-123" }) as any;
 
 describe("RunTracePage Shortcuts", () => {
 	const mockData = {

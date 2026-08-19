@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { describe, expect, it, vi } from "vitest";
 import { useActiveShortcuts, useShortcut } from "../../hooks/useShortcuts";
 import { ShortcutProvider } from "./ShortcutProvider";
 
@@ -132,7 +132,7 @@ describe("ShortcutProvider", () => {
 			const shortcuts = useActiveShortcuts();
 			return (
 				<ul>
-					{shortcuts.map((s, i) => (
+					{shortcuts.map((s) => (
 						<li key={s.keyCombo} data-testid="shortcut-item">
 							{s.keyCombo} - {s.description}
 						</li>
@@ -150,6 +150,6 @@ describe("ShortcutProvider", () => {
 
 		const items = screen.getAllByTestId("shortcut-item");
 		expect(items).toHaveLength(1);
-		expect(items[0].textContent).toBe("Mod+K - Search");
+		expect(items[0]?.textContent).toBe("Mod+K - Search");
 	});
 });
