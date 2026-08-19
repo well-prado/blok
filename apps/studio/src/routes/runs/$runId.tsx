@@ -1,3 +1,6 @@
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
+import { PageAccessories } from "@/components/layout/PageAccessories";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { DurationBadge } from "@/components/shared/DurationBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
@@ -18,7 +21,7 @@ import { exportRunCsv, exportRunJson, fetchRuns, replayRun } from "@/lib/api";
 import { formatTimestamp } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, ArrowLeft, GitBranch, Loader2, RotateCcw, Send } from "lucide-react";
+import { Activity, GitBranch, Loader2, RotateCcw, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /**
@@ -244,47 +247,44 @@ function RunTracePage() {
 	return (
 		<div className="h-full flex flex-col">
 			{/* Header */}
-			<header className="shrink-0 border-b border-zinc-800 bg-canvas/60 px-4 py-3">
-				<div className="flex items-center gap-3 mb-1">
-					<Link
-						to="/workflows/$name"
-						params={{ name: run.workflowName }}
-						className="p-1 rounded hover:bg-hover text-zinc-500 hover:text-zinc-300 transition-colors"
-					>
-						<ArrowLeft className="w-4 h-4" />
-					</Link>
-					<span className="text-sm text-zinc-500">{run.workflowName}</span>
-					<span className="text-zinc-700">/</span>
-					<span className="text-sm font-mono text-zinc-400">{run.id.slice(0, 12)}</span>
-					<StatusBadge status={run.status} />
-					<DurationBadge
-						ms={run.status === "running" || run.status === "paused" ? run.startedAt : run.durationMs}
-						running={run.status === "running" || run.status === "paused"}
-					/>
-					{run.replayOf && (
-						<Link
-							to="/runs/$runId"
-							params={{ runId: run.replayOf }}
-							className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
-							title={`Replay of run ${run.replayOf}`}
-						>
-							<RotateCcw className="w-2.5 h-2.5" />
-							replay of {run.replayOf.slice(0, 8)}
-						</Link>
-					)}
-					{run.parentRunId && (
-						<Link
-							to="/runs/$runId"
-							params={{ runId: run.parentRunId }}
-							className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
-							title={`Called from run ${run.parentRunId}`}
-						>
-							<GitBranch className="w-2.5 h-2.5" />
-							called from {run.parentRunId.slice(0, 8)}
-						</Link>
-					)}
-
-					<div className="ml-auto flex items-center gap-2">
+			<div className="shrink-0 border-b border-zinc-800 bg-canvas/60 px-4 py-3">
+				<PageHeader className="items-center mb-1 gap-3 sm:flex-row sm:items-center">
+					<div className="flex items-center gap-3">
+						<Breadcrumbs
+							segments={[
+								{ label: run.workflowName, to: "/workflows/$name", params: { name: run.workflowName } },
+								{ label: run.id.slice(0, 12) },
+							]}
+						/>
+						<StatusBadge status={run.status} />
+						<DurationBadge
+							ms={run.status === "running" || run.status === "paused" ? run.startedAt : run.durationMs}
+							running={run.status === "running" || run.status === "paused"}
+						/>
+						{run.replayOf && (
+							<Link
+								to="/runs/$runId"
+								params={{ runId: run.replayOf }}
+								className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
+								title={`Replay of run ${run.replayOf}`}
+							>
+								<RotateCcw className="w-2.5 h-2.5" />
+								replay of {run.replayOf.slice(0, 8)}
+							</Link>
+						)}
+						{run.parentRunId && (
+							<Link
+								to="/runs/$runId"
+								params={{ runId: run.parentRunId }}
+								className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
+								title={`Called from run ${run.parentRunId}`}
+							>
+								<GitBranch className="w-2.5 h-2.5" />
+								called from {run.parentRunId.slice(0, 8)}
+							</Link>
+						)}
+					</div>
+					<PageAccessories className="ml-auto">
 						{isFinished && isHttpTrigger && (
 							<button
 								type="button"
@@ -320,8 +320,8 @@ function RunTracePage() {
 						)}
 						{run.status === "failed" && run.error && <ExplainError runId={runId} />}
 						<ExportMenu onExportJson={() => exportRunJson(runId)} onExportCsv={() => exportRunCsv(runId)} />
-					</div>
-				</div>
+					</PageAccessories>
+				</PageHeader>
 
 				<div className="flex items-center gap-4 text-xs text-zinc-500 ml-9">
 					<span>
@@ -371,7 +371,7 @@ function RunTracePage() {
 						))}
 					</div>
 				)}
-			</header>
+			</div>
 
 			{/* 3-pane shell */}
 			<div className="flex-1 grid grid-cols-[240px_minmax(0,1fr)_320px] overflow-hidden">

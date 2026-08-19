@@ -1,4 +1,7 @@
 import { FilterBar } from "@/components/filters/FilterBar";
+import { PageAccessories } from "@/components/layout/PageAccessories";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { PageTitle } from "@/components/layout/PageTitle";
 import { ConcurrencyTile } from "@/components/runs/ConcurrencyTile";
 import { RunsTable } from "@/components/runs/RunsTable";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -25,15 +28,17 @@ function AllRunsPage() {
 
 	return (
 		<div className="p-6 max-w-7xl mx-auto space-y-5">
-			<div className="flex items-start justify-between gap-4">
+			<PageHeader>
 				<div>
-					<h1 className="text-2xl font-medium font-display italic tracking-tight text-zinc-100">All Runs</h1>
+					<PageTitle>All Runs</PageTitle>
 					<p className="text-sm text-zinc-500 mt-1">Every workflow execution across every trigger.</p>
 				</div>
-				{/* Tier 2 follow-up · live in-flight slots tile. Hidden when no
-				    keys are active so it doesn't take space at idle. */}
-				<ConcurrencyTile />
-			</div>
+				<PageAccessories>
+					{/* Tier 2 follow-up · live in-flight slots tile. Hidden when no
+						keys are active so it doesn't take space at idle. */}
+					<ConcurrencyTile />
+				</PageAccessories>
+			</PageHeader>
 
 			<FilterBar />
 
