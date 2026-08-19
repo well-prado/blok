@@ -44,7 +44,7 @@ type SpinnerProps = Omit<React.ComponentPropsWithRef<"output">, "children"> & {
 export function Spinner({ className, size = "md", ink = "default", label = "Loading", ...props }: SpinnerProps) {
 	return (
 		<output className={cn("inline-flex items-center", inks[ink], className)} {...props}>
-			<Loader2 aria-hidden="true" className={cn("animate-spin", sizes[size])} />
+			<Loader2 aria-hidden="true" className={cn("motion-safe:animate-spin", sizes[size])} />
 			{label !== null && <span className="sr-only select-none">{label}</span>}
 		</output>
 	);
