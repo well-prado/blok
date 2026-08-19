@@ -1,6 +1,7 @@
 import { DurationBadge } from "@/components/shared/DurationBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
+import { ShortcutKey } from "@/components/shared/ShortcutKey";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { TagEditor } from "@/components/shared/TagEditor";
 import { ActiveStepPanel } from "@/components/trace/ActiveStepPanel";
@@ -12,12 +13,13 @@ import { RequestBuilder } from "@/components/trace/RequestBuilder";
 import { StepRail } from "@/components/trace/StepRail";
 import { TraceGraph } from "@/components/trace/TraceGraph";
 import { useRunDetail, useSubRuns, useTraceStream } from "@/hooks/useRunDetail";
-import { exportRunCsv, exportRunJson, replayRun } from "@/lib/api";
+import { useShortcut } from "@/hooks/useShortcuts";
+import { exportRunCsv, exportRunJson, fetchRuns, replayRun } from "@/lib/api";
 import { formatTimestamp } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Activity, ArrowLeft, GitBranch, Loader2, RotateCcw, Send } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 /**
  * Run-detail · 3-pane operator layout (Direction A · Phase 1).
@@ -64,55 +66,106 @@ function RunTracePage() {
 		if (target) setActiveStepId(target.id);
 	}, [data, activeStepId]);
 
-	// Keyboard nav
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			if (
-				e.target instanceof HTMLInputElement ||
-				e.target instanceof HTMLSelectElement ||
-				e.target instanceof HTMLTextAreaElement
-			) {
-				return;
-			}
-			if (e.metaKey || e.ctrlKey) return;
+	// Keyboard nav (Modes)
+	useShortcut("alt+1", () => setMode("step"), { description: "Active step pane" });
+	useShortcut("alt+2", () => setMode("graph"), { description: "Graph pane" });
+	useShortcut("alt+3", () => setMode("logs"), { description: "Logs pane" });
+	useShortcut("alt+4", () => setMode("events"), { description: "Events pane" });
+	useShortcut(
+		"alt+5",
+		() => {
+			if (data?.run.triggerType === "http") setMode("request");
+		},
+		{ description: "Request pane" },
+	);
+	useShortcut("escape", () => setMode("step"), { description: "Back to Active step" });
 
-			// j/k → next/prev step
-			if ((e.key === "j" || e.key === "k") && data) {
-				e.preventDefault();
-				const sorted = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex);
-				if (sorted.length === 0) return;
-				const idx = sorted.findIndex((n) => n.id === activeStepId);
-				const nextIdx = e.key === "j" ? Math.min(idx + 1, sorted.length - 1) : Math.max(idx - 1, 0);
-				const target = sorted[nextIdx];
-				if (target) setActiveStepId(target.id);
-				return;
-			}
+	// Keyboard nav (Step selection)
+	useShortcut(
+		"j",
+		(e) => {
+			if (!data) return;
+			e.preventDefault();
+			const sorted = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex);
+			if (sorted.length === 0) return;
+			const idx = sorted.findIndex((n) => n.id === activeStepId);
+			const nextIdx = Math.min(idx + 1, sorted.length - 1);
+			const target = sorted[nextIdx];
+			if (target) setActiveStepId(target.id);
+		},
+		{ description: "Next step" },
+	);
 
-			// 1-5 → mode switch
-			switch (e.key) {
-				case "1":
-					setMode("step");
-					break;
-				case "2":
-					setMode("graph");
-					break;
-				case "3":
-					setMode("logs");
-					break;
-				case "4":
-					setMode("events");
-					break;
-				case "5":
-					setMode("request");
-					break;
-				case "Escape":
-					setMode("step");
-					break;
+	useShortcut(
+		"k",
+		(e) => {
+			if (!data) return;
+			e.preventDefault();
+			const sorted = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex);
+			if (sorted.length === 0) return;
+			const idx = sorted.findIndex((n) => n.id === activeStepId);
+			const nextIdx = Math.max(idx - 1, 0);
+			const target = sorted[nextIdx];
+			if (target) setActiveStepId(target.id);
+		},
+		{ description: "Previous step" },
+	);
+
+	// Keyboard nav (Direct step jump)
+	const jumpToStep = useCallback(
+		(index: number) => {
+			if (!data) return;
+			const sorted = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex);
+			const target = sorted[index];
+			if (target) setActiveStepId(target.id);
+		},
+		[data],
+	);
+
+	useShortcut("1", () => jumpToStep(0), { description: "Jump to step 1" });
+	useShortcut("2", () => jumpToStep(1), { description: "Jump to step 2" });
+	useShortcut("3", () => jumpToStep(2), { description: "Jump to step 3" });
+	useShortcut("4", () => jumpToStep(3), { description: "Jump to step 4" });
+	useShortcut("5", () => jumpToStep(4), { description: "Jump to step 5" });
+	useShortcut("6", () => jumpToStep(5), { description: "Jump to step 6" });
+	useShortcut("7", () => jumpToStep(6), { description: "Jump to step 7" });
+	useShortcut("8", () => jumpToStep(7), { description: "Jump to step 8" });
+	useShortcut("9", () => jumpToStep(8), { description: "Jump to step 9" });
+
+	// Keyboard nav (Run navigation & actions)
+	useShortcut(
+		"[",
+		async () => {
+			if (!data) return;
+			const res = await fetchRuns({ workflow: data.run.workflowName, limit: 100 });
+			const idx = res.runs.findIndex((r) => r.id === runId);
+			if (idx >= 0 && idx < res.runs.length - 1) {
+				navigate({ to: "/runs/$runId", params: { runId: res.runs[idx + 1].id } });
 			}
-		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	}, [data, activeStepId]);
+		},
+		{ description: "Previous run" },
+	);
+
+	useShortcut(
+		"]",
+		async () => {
+			if (!data) return;
+			const res = await fetchRuns({ workflow: data.run.workflowName, limit: 100 });
+			const idx = res.runs.findIndex((r) => r.id === runId);
+			if (idx > 0) {
+				navigate({ to: "/runs/$runId", params: { runId: res.runs[idx - 1].id } });
+			}
+		},
+		{ description: "Next run" },
+	);
+
+	useShortcut(
+		"y",
+		() => {
+			navigator.clipboard.writeText(runId);
+		},
+		{ description: "Copy Run ID" },
+	);
 
 	const activeNode = useMemo(() => {
 		if (!data || !activeStepId) return null;
@@ -144,6 +197,20 @@ function RunTracePage() {
 		}
 	};
 
+	const isFinished =
+		data?.run.status === "completed" || data?.run.status === "failed" || data?.run.status === "cancelled";
+	const isHttpTrigger = data?.run.triggerType === "http";
+
+	useShortcut(
+		"r",
+		() => {
+			if (isFinished && isHttpTrigger) {
+				handleReplay();
+			}
+		},
+		{ description: "Replay this run" },
+	);
+
 	if (isLoading) {
 		return (
 			<div className="flex items-center justify-center h-full">
@@ -165,8 +232,6 @@ function RunTracePage() {
 	}
 
 	const { run, nodes, logs } = data;
-	const isHttpTrigger = run.triggerType === "http";
-	const isFinished = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
 
 	const modes: { key: Mode; label: string; show: boolean }[] = [
 		{ key: "step", label: "Active step", show: true },
@@ -332,9 +397,10 @@ function RunTracePage() {
 									)}
 								>
 									{m.label}
-									<kbd className="font-mono text-[9.5px] px-1 py-px rounded bg-raised border border-zinc-800 text-zinc-500">
-										{i + 1}
-									</kbd>
+									<ShortcutKey
+										shortcut={`alt+${i + 1}`}
+										className="font-mono text-[9.5px] px-1 py-px bg-raised border-zinc-800"
+									/>
 								</button>
 							))}
 					</nav>

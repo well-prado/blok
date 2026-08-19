@@ -1,5 +1,8 @@
 import { BulkActionToolbar } from "@/components/runs/BulkActionToolbar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { useShortcut } from "@/hooks/useShortcuts";
+import { useTableSelection } from "@/hooks/useTableSelection";
+import { addRunTags, cancelRun, replayRun } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import type { WorkflowRun } from "@/types";
@@ -46,33 +49,136 @@ export function RunsTable({
 	const navigate = useNavigate();
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [compareSelection, setCompareSelection] = useState<string[]>([]);
-	const [bulkSelection, setBulkSelection] = useState<Set<string>>(() => new Set());
-
-	// Esc clears bulk selection
-	useEffect(() => {
-		if (!enableBulk) return;
-		const onKey = (e: KeyboardEvent) => {
-			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-			if (e.key === "Escape" && bulkSelection.size > 0) {
-				setBulkSelection(new Set());
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [enableBulk, bulkSelection.size]);
+	const selection = useTableSelection(runs.map((r) => r.id));
+	const [cursorIndex, setCursorIndex] = useState<number | null>(null);
 
 	const toggleBulk = (id: string) => {
-		setBulkSelection((prev) => {
-			const next = new Set(prev);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
+		selection.toggle(id);
 	};
 
 	const toggleAll = () => {
-		setBulkSelection((prev) => (prev.size === runs.length ? new Set() : new Set(runs.map((r) => r.id))));
+		if (selection.allSelected) selection.clear();
+		else selection.selectAll();
 	};
+
+	useShortcut(
+		"Escape",
+		() => {
+			if (!enableBulk) return;
+			if (selection.someSelected) {
+				selection.clear();
+			}
+		},
+		{ description: "Clear selection" },
+	);
+
+	useShortcut(
+		"j",
+		() => {
+			setCursorIndex((prev) => {
+				if (prev === null) return 0;
+				return Math.min(prev + 1, runs.length - 1);
+			});
+		},
+		{ description: "Move cursor down" },
+	);
+
+	useShortcut(
+		"k",
+		() => {
+			setCursorIndex((prev) => {
+				if (prev === null) return 0;
+				return Math.max(prev - 1, 0);
+			});
+		},
+		{ description: "Move cursor up" },
+	);
+
+	useShortcut(
+		"o",
+		() => {
+			if (cursorIndex !== null && runs[cursorIndex]) {
+				navigate({ to: "/runs/$runId", params: { runId: runs[cursorIndex].id } });
+			}
+		},
+		{ description: "Open selected run" },
+	);
+
+	useShortcut(
+		"Enter",
+		() => {
+			if (cursorIndex !== null && runs[cursorIndex]) {
+				navigate({ to: "/runs/$runId", params: { runId: runs[cursorIndex].id } });
+			}
+		},
+		{ description: "Open selected run" },
+	);
+
+	useShortcut(
+		"x",
+		() => {
+			if (cursorIndex !== null && runs[cursorIndex]) {
+				selection.toggle(runs[cursorIndex].id);
+			}
+		},
+		{ description: "Toggle run selection" },
+	);
+
+	useShortcut(
+		"r",
+		() => {
+			const targets = selection.someSelected
+				? Array.from(selection.selected)
+				: cursorIndex !== null
+					? [runs[cursorIndex].id]
+					: [];
+			for (const id of targets) {
+				const r = runs.find((r) => r.id === id);
+				if (r && r.triggerType === "http") {
+					replayRun(id).catch(console.error);
+				}
+			}
+		},
+		{ description: "Replay selected/cursored runs" },
+	);
+
+	useShortcut(
+		"c",
+		() => {
+			const targets = selection.someSelected
+				? Array.from(selection.selected)
+				: cursorIndex !== null
+					? [runs[cursorIndex].id]
+					: [];
+			for (const id of targets) {
+				cancelRun(id).catch(console.error);
+			}
+		},
+		{ description: "Cancel selected/cursored runs" },
+	);
+
+	useShortcut(
+		"t",
+		() => {
+			const targets = selection.someSelected
+				? Array.from(selection.selected)
+				: cursorIndex !== null
+					? [runs[cursorIndex].id]
+					: [];
+			if (targets.length === 0) return;
+			const input = window.prompt("Enter tags to add (comma separated):");
+			if (!input) return;
+			const newTags = input
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
+			if (newTags.length === 0) return;
+			for (const id of targets) {
+				addRunTags(id, newTags).catch(console.error);
+			}
+		},
+		{ description: "Edit tags for selected/cursored runs" },
+	);
 
 	const handleCompare = () => {
 		if (compareSelection.length === 2) {
@@ -84,8 +190,8 @@ export function RunsTable({
 	};
 
 	// `toggleBulk` and `toggleAll` are stable across renders for our purposes —
-	// they read fresh `bulkSelection` via setState callback — so we don't include
-	// them in deps. The selection-driven re-render is captured by `bulkSelection`.
+	// they read fresh `selection` via setState callback — so we don't include
+	// them in deps. The selection-driven re-render is captured by `selection`.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: toggleBulk/toggleAll are stable refs.
 	const columns = useMemo<ColumnDef<WorkflowRun>[]>(() => {
 		const cols: ColumnDef<WorkflowRun>[] = [];
@@ -103,24 +209,22 @@ export function RunsTable({
 						}}
 						className={cn(
 							"w-4 h-4 rounded-sm border flex items-center justify-center transition-colors shrink-0",
-							bulkSelection.size === runs.length && runs.length > 0
+							selection.allSelected && runs.length > 0
 								? "bg-blok-green-500 border-blok-green-500"
-								: bulkSelection.size > 0
+								: selection.someSelected
 									? "bg-blok-green-500/40 border-blok-green-500/60"
 									: "border-zinc-700 hover:border-zinc-500",
 						)}
-						title={bulkSelection.size === runs.length ? "Deselect all" : "Select all"}
+						title={selection.allSelected ? "Deselect all" : "Select all"}
 					>
-						{bulkSelection.size === runs.length && runs.length > 0 && (
-							<Check className="w-3 h-3 text-[#00231b]" strokeWidth={3} />
-						)}
-						{bulkSelection.size > 0 && bulkSelection.size < runs.length && (
+						{selection.allSelected && runs.length > 0 && <Check className="w-3 h-3 text-[#00231b]" strokeWidth={3} />}
+						{selection.someSelected && !selection.allSelected && (
 							<span className="w-1.5 h-0.5 bg-zinc-100 rounded-full" />
 						)}
 					</button>
 				),
 				cell: ({ row }) => {
-					const isSelected = bulkSelection.has(row.original.id);
+					const isSelected = selection.has(row.original.id);
 					return (
 						<button
 							type="button"
@@ -251,7 +355,7 @@ export function RunsTable({
 		);
 
 		return cols;
-	}, [showWorkflow, enableCompare, enableBulk, compareSelection, bulkSelection, runs.length]);
+	}, [showWorkflow, enableCompare, enableBulk, compareSelection, selection, runs.length]);
 
 	const table = useReactTable({
 		data: runs,
@@ -271,7 +375,7 @@ export function RunsTable({
 			    Export JSON / Export CSV / Clear. Renders above the table to
 			    avoid floating-chrome occlusion. */}
 			{enableBulk && (
-				<BulkActionToolbar selectedIds={bulkSelection} runs={runs} onClear={() => setBulkSelection(new Set())} />
+				<BulkActionToolbar selectedIds={selection.selected} runs={runs} onClear={() => selection.clear()} />
 			)}
 
 			{/* Compare bar — legacy 2-way compare radio. Only shown when
@@ -330,14 +434,19 @@ export function RunsTable({
 						))}
 					</thead>
 					<tbody>
-						{table.getRowModel().rows.map((row) => (
+						{table.getRowModel().rows.map((row, index) => (
 							<tr
 								key={row.id}
 								className={cn(
 									"border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors cursor-pointer",
 									compareSelection.includes(row.original.id) && "bg-blue-500/5",
-									bulkSelection.has(row.original.id) && "bg-blok-green-500/5",
+									selection.has(row.original.id) && "bg-blok-green-500/5",
+									cursorIndex === index && "ring-1 ring-inset ring-zinc-500 bg-zinc-800/30",
 								)}
+								onClick={() => setCursorIndex(index)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") setCursorIndex(index);
+								}}
 							>
 								{row.getVisibleCells().map((cell) => (
 									<td key={cell.id} className="px-3 py-2.5">
