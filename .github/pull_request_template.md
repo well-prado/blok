@@ -13,6 +13,19 @@ _Reference any related issues or discussions (e.g., "Closes #123")._
 
 ---
 
+## Architecture Conformance
+_Required for `agent-harness` work. Use `None — no architecture impact` for unrelated changes._
+
+Governing ADRs: None — no architecture impact.
+
+Conformance evidence: None — no architecture impact.
+
+Preserved invariants and considered security/crash/concurrency/compatibility cases:
+
+- None — no architecture impact.
+
+---
+
 ## Changes Made
 _Outline the specific changes made in this pull request:_
 - **Feature/Improvement**: Brief description of the feature or improvement.
