@@ -7,8 +7,6 @@ they must not silently contradict it.
 ## Architecture programs
 
 - [Coding harness and enforced agent workflows](agent-harness/README.md)
-- [Universal node library](universal-node-library.md)
-- [gRPC runtime performance](grpc-runtime-performance.md)
 - [Observability](observability.md)
 - [Security model](security-model.md)
 - [Trigger system](trigger-system.md)
