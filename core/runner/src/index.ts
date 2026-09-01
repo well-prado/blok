@@ -148,6 +148,7 @@ export {
 	InteractionAuthorizationError,
 	InteractionConflictError,
 } from "./policy/InteractionStore";
+export { SqliteInteractionStore } from "./policy/SqliteInteractionStore";
 
 // Concurrency gate (Tier 2 #6)
 import {
