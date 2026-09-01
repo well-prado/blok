@@ -185,6 +185,12 @@ export default abstract class BlokService<T> extends NodeBase {
 		return response;
 	}
 
+	protected async validatePrepared(ctx: Context): Promise<void> {
+		const opts = (ctx.config as unknown as JsonLikeObject)[this.name] as JsonLikeObject;
+		const inputs = opts?.inputs || opts?.conditions;
+		await this.validate(inputs as JsonLikeObject, this.inputSchema);
+	}
+
 	public abstract handle(
 		ctx: Context,
 		inputs: T | JsonLikeObject | Condition[],

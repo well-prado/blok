@@ -150,6 +150,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		this.capabilityManifest = definition.capabilityManifest
 			? parseCapabilityManifest(definition.capabilityManifest)
 			: undefined;
+		this.capabilityManifestRaw = definition.capabilityManifest;
 
 		// Set content type if specified (e.g. "text/html", "application/pdf")
 		if (definition.contentType) {
@@ -170,6 +171,20 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		// This allows existing tools that expect JSON Schema to continue working
 		this.inputSchema = this.zodToJsonSchema(definition.input);
 		this.outputSchema = this.zodToJsonSchema(definition.output);
+	}
+
+	protected async validatePrepared(ctx: Context): Promise<void> {
+		await super.validatePrepared(ctx);
+		const opts = (ctx.config as Record<string, unknown>)[this.name];
+		const inputs = opts && typeof opts === "object" ? (opts as Record<string, unknown>).inputs : undefined;
+		try {
+			this.definition.input.parse(inputs);
+		} catch (error) {
+			// Keep prepare-time validation errors identical to the historical
+			// handle() path; policy must see validated input without changing
+			// the public error envelope for ordinary workflows.
+			throw this.mapErrorToGlobalError(error);
+		}
 	}
 
 	/**

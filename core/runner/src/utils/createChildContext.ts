@@ -1,5 +1,6 @@
 import type { Context, LoggerContext } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
+import { propagatePolicyExecution } from "../policy/PolicyPipeline";
 
 /**
  * Construct a fresh `Context` for a sub-workflow invocation.
@@ -128,6 +129,7 @@ export function createChildContext(
 	ctx.publish = (name: string, value: unknown): void => {
 		(ctx.state as Record<string, unknown>)[name] = value;
 	};
+	propagatePolicyExecution(parent, ctx);
 
 	return ctx;
 }
