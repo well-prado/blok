@@ -4,6 +4,8 @@ import BlokResponse, { type IBlokResponse } from "../BlokResponse";
 import Configuration from "../Configuration";
 import Runner from "../Runner";
 import type { FunctionNode } from "../defineNode";
+import type { PolicyExecutionOptions } from "../policy/PolicyPipeline";
+import { installPolicyExecution } from "../policy/PolicyPipeline";
 import type Condition from "../types/Condition";
 import type JsonLikeObject from "../types/JsonLikeObject";
 import type { TestContextOverrides, TestResult } from "./TestHarness";
@@ -85,6 +87,12 @@ export interface WorkflowExecuteOptions {
 	params?: Record<string, string>;
 	/** Additional context overrides */
 	contextOverrides?: TestContextOverrides;
+	/**
+	 * Optional agent policy state installed before the real v2 runner starts.
+	 * This keeps mocked model steps behind the same policy boundary as a
+	 * production run; legacy sequential workflows do not have policy hooks.
+	 */
+	policy?: PolicyExecutionOptions;
 }
 
 /**
@@ -117,11 +125,16 @@ class MockNode extends BlokService<any> {
 	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
 	private handler: (input: any, ctx: Context) => Promise<any>;
 
-	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
-	constructor(name: string, handler: (input: any, ctx: Context) => Promise<any>) {
+	constructor(
+		name: string,
+		handler: (input: unknown, ctx: Context) => Promise<unknown>,
+		capabilityManifest?: NodeBase["capabilityManifest"],
+	) {
 		super();
 		this.name = name;
 		this.handler = handler;
+		this.capabilityManifest = capabilityManifest;
+		this.capabilityManifestRaw = capabilityManifest;
 	}
 
 	// biome-ignore lint/suspicious/noExplicitAny: matches BlokService.handle signature
@@ -244,10 +257,15 @@ export class WorkflowTestRunner {
 	 *
 	 * @param name - The node name as referenced in the workflow steps
 	 * @param handler - Async function that receives (input, ctx) and returns output
+	 * @param capabilityManifest - Optional manifest copied from the real node when
+	 * a policy-aware test double replaces it
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
-	mockNode(name: string, handler: (input: any, ctx: Context) => Promise<any>): void {
-		const mockNodeInstance = new MockNode(name, handler);
+	mockNode(
+		name: string,
+		handler: (input: unknown, ctx: Context) => Promise<unknown>,
+		capabilityManifest?: NodeBase["capabilityManifest"],
+	): void {
+		const mockNodeInstance = new MockNode(name, handler, capabilityManifest);
 		this.nodes.set(name, mockNodeInstance);
 
 		if (this.config.verbose) {
@@ -450,6 +468,8 @@ export class WorkflowTestRunner {
 			eventLogger: logger,
 			_PRIVATE_: {},
 		} as unknown as Context;
+
+		if (options?.policy) installPolicyExecution(ctx, options.policy);
 
 		let workflowSuccess = true;
 		// biome-ignore lint/suspicious/noExplicitAny: error can be any type

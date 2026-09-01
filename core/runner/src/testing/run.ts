@@ -164,6 +164,7 @@ export async function runWorkflow<W>(
 			...opts?.contextOverrides,
 			...(opts?.env ? { env: opts.env } : {}),
 		},
+		policy: opts?.policy,
 	});
 
 	// A mock that broke its node's output contract fails the TEST, not just the
@@ -360,22 +361,27 @@ async function registerNodes(
 		const mock = opts?.mock?.[key];
 		if (mock) {
 			const impl = mock as unknown as (input: unknown, ctx: Context) => unknown | Promise<unknown>;
+			const declaredNode = getDefinedNode(key);
 			// A regular function, not an arrow: `MockNode.handle` invokes the
 			// handler as `this.handler(...)`, and the runner clones the mock node
 			// per step with `name` set to the step id — so `this.name` is the only
 			// place the step id is visible from inside a mock.
-			runner.mockNode(key, async function (this: { name?: string }, mockInput: unknown, ctx: Context) {
-				const value = await impl(mockInput, ctx);
-				let output: unknown;
-				try {
-					output = validateMockOutput(key, value);
-				} catch (violation) {
-					violations.push(violation as Error);
-					throw violation;
-				}
-				calls.push({ id: typeof this?.name === "string" ? this.name : key, inputs: mockInput, output });
-				return output;
-			});
+			runner.mockNode(
+				key,
+				async function (this: { name?: string }, mockInput: unknown, ctx: Context) {
+					const value = await impl(mockInput, ctx);
+					let output: unknown;
+					try {
+						output = validateMockOutput(key, value);
+					} catch (violation) {
+						violations.push(violation as Error);
+						throw violation;
+					}
+					calls.push({ id: typeof this?.name === "string" ? this.name : key, inputs: mockInput, output });
+					return output;
+				},
+				declaredNode?.capabilityManifest,
+			);
 			continue;
 		}
 		const node = explicit.get(key) ?? getDefinedNode(key) ?? (await importNode(key));
