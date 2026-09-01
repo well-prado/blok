@@ -1,3 +1,4 @@
+import { type CapabilityManifestV1, parseCapabilityManifest } from "@blokjs/shared";
 import type { z } from "zod";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
@@ -49,6 +50,8 @@ export interface WorkflowOpts<
 	version: string;
 	/** What this workflow does. Optional but recommended. */
 	description?: string;
+	/** Aggregated operational risk metadata for agent/policy catalogs (ADR 0003). */
+	capabilityManifest?: CapabilityManifestV1;
 	/**
 	 * Trigger configuration. Most workflows use a single key:
 	 *   `{ http: { method: "GET" } }`
@@ -296,6 +299,7 @@ export function workflow<
 		name: opts.name,
 		version: opts.version,
 		description: opts.description,
+		...(opts.capabilityManifest ? { capabilityManifest: parseCapabilityManifest(opts.capabilityManifest) } : {}),
 		trigger: validatedTrigger,
 		steps: compiledSteps,
 		// Carry the middleware marker/chain so it survives onto `_config` and

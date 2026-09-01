@@ -110,6 +110,7 @@ module Blok
             descriptor.description = reflection[:description].to_s
             descriptor.input_schema_json = reflection[:input_schema_json] if reflection[:input_schema_json]
             descriptor.output_schema_json = reflection[:output_schema_json] if reflection[:output_schema_json]
+            descriptor.capability_manifest_json = reflection[:capability_manifest_json] if reflection[:capability_manifest_json]
           end
           descriptor
         end

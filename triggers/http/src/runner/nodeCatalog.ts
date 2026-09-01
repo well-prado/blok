@@ -13,6 +13,7 @@
  * Pure + structurally typed so it's unit-testable without booting a server.
  */
 
+import { type CapabilityManifestStatus, type CapabilityManifestV1, assessCapabilityManifest } from "@blokjs/shared";
 import { bounded } from "./bootTimeout.js";
 
 /** One node in the catalog. */
@@ -31,6 +32,11 @@ export interface NodeCatalogEntry {
 	inputSchema: unknown | null;
 	outputSchema: unknown | null;
 	tags: string[];
+	capabilityManifest: CapabilityManifestV1 | null;
+	capabilityManifestStatus: CapabilityManifestStatus;
+	capabilityManifestErrors: string[];
+	agentEligible: boolean;
+	agentEligibilityReason: string;
 }
 
 interface ReflectableNode {
@@ -38,6 +44,7 @@ interface ReflectableNode {
 	description?: string;
 	getReflectionSchemas?: () => { input: unknown; output: unknown };
 	getSchemas?: () => { input: unknown; output: unknown };
+	capabilityManifest?: unknown;
 }
 
 interface RuntimeNode {
@@ -45,6 +52,7 @@ interface RuntimeNode {
 	description?: string;
 	inputSchema: unknown | null;
 	outputSchema: unknown | null;
+	capabilityManifest?: unknown | null;
 	tags?: string[];
 }
 
@@ -68,12 +76,33 @@ function normSchema(schema: unknown): unknown | null {
 	return schema && typeof schema === "object" && Object.keys(schema as object).length > 0 ? schema : null;
 }
 
+function manifestFields(
+	value: unknown,
+): Pick<
+	NodeCatalogEntry,
+	| "capabilityManifest"
+	| "capabilityManifestStatus"
+	| "capabilityManifestErrors"
+	| "agentEligible"
+	| "agentEligibilityReason"
+> {
+	const assessment = assessCapabilityManifest(value);
+	return {
+		capabilityManifest: assessment.manifest,
+		capabilityManifestStatus: assessment.status,
+		capabilityManifestErrors: assessment.errors,
+		agentEligible: assessment.agentEligible,
+		agentEligibilityReason: assessment.reason,
+	};
+}
+
 /** Extract `{ name, description, inputSchema, outputSchema }` from an in-process node. */
 export function reflectModuleNode(node: unknown): {
 	name?: string;
 	description?: string;
 	inputSchema: unknown | null;
 	outputSchema: unknown | null;
+	capabilityManifest: unknown;
 } {
 	const n = node as ReflectableNode;
 	let input: unknown | null = null;
@@ -87,7 +116,13 @@ export function reflectModuleNode(node: unknown): {
 		input = normSchema(s.input);
 		output = normSchema(s.output);
 	}
-	return { name: n.name, description: n.description, inputSchema: input, outputSchema: output };
+	return {
+		name: n.name,
+		description: n.description,
+		inputSchema: input,
+		outputSchema: output,
+		capabilityManifest: n.capabilityManifest,
+	};
 }
 
 /**
@@ -120,6 +155,7 @@ export async function buildNodeCatalog(
 				inputSchema: r.inputSchema,
 				outputSchema: r.outputSchema,
 				tags: [],
+				...manifestFields(r.capabilityManifest),
 			});
 		}
 	}
@@ -137,6 +173,7 @@ export async function buildNodeCatalog(
 					inputSchema: n.inputSchema,
 					outputSchema: n.outputSchema,
 					tags: n.tags ?? [],
+					...manifestFields(n.capabilityManifest),
 				});
 			}
 		} catch (err) {

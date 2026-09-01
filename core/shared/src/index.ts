@@ -22,6 +22,28 @@ import BlokError, {
 	type WorkflowInputValidationInfo,
 	type WorkflowInputValidationIssue,
 } from "./BlokError";
+import {
+	CAPABILITY_CLASSIFICATIONS,
+	CAPABILITY_DETERMINISM,
+	CAPABILITY_EFFECTS,
+	CAPABILITY_IDEMPOTENCY,
+	CAPABILITY_MANIFEST_VERSION,
+	CAPABILITY_MATURITY,
+	type CapabilityClassification,
+	type CapabilityDeterminism,
+	type CapabilityEffect,
+	type CapabilityIdempotency,
+	type CapabilityManifestAssessment,
+	CapabilityManifestError,
+	type CapabilityManifestStatus,
+	type CapabilityManifestV1,
+	type CapabilityMaturity,
+	type CapabilityResourceBounds,
+	assessCapabilityManifest,
+	parseCapabilityManifest,
+	requireAgentEligibleManifest,
+	serializeCapabilityManifest,
+} from "./CapabilityManifest";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
@@ -58,6 +80,26 @@ import { NamedMissingStateError } from "./utils/NamedMissingStateError";
 import { type StructuralRef, type StructuralTpl, isStructuralRef, isStructuralTpl, lowerRefs } from "./utils/lowerRefs";
 
 export {
+	CAPABILITY_MANIFEST_VERSION,
+	CAPABILITY_EFFECTS,
+	CAPABILITY_CLASSIFICATIONS,
+	CAPABILITY_DETERMINISM,
+	CAPABILITY_IDEMPOTENCY,
+	CAPABILITY_MATURITY,
+	CapabilityManifestError,
+	parseCapabilityManifest,
+	serializeCapabilityManifest,
+	assessCapabilityManifest,
+	requireAgentEligibleManifest,
+	type CapabilityEffect,
+	type CapabilityClassification,
+	type CapabilityDeterminism,
+	type CapabilityIdempotency,
+	type CapabilityMaturity,
+	type CapabilityResourceBounds,
+	type CapabilityManifestV1,
+	type CapabilityManifestStatus,
+	type CapabilityManifestAssessment,
 	NodeBase,
 	type Context,
 	type RequestContext,

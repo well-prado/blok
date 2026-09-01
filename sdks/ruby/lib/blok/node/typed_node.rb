@@ -96,6 +96,12 @@ module Blok
           @output_fields
         end
 
+        # Get/set structured operational metadata (ADR 0003).
+        def capability_manifest(value = nil)
+          @capability_manifest = value unless value.nil?
+          @capability_manifest
+        end
+
         # Build a JSON Schema (Ruby Hash) from a list of fields.
         def schema_for(fields)
           properties = {}
@@ -129,7 +135,8 @@ module Blok
         {
           description: self.class.description,
           input_schema_json: JSON.generate(self.class.schema_for(self.class.input_fields)),
-          output_schema_json: out_fields.nil? ? nil : JSON.generate(self.class.schema_for(out_fields))
+          output_schema_json: out_fields.nil? ? nil : JSON.generate(self.class.schema_for(out_fields)),
+          capability_manifest_json: self.class.capability_manifest.nil? ? nil : JSON.generate(self.class.capability_manifest)
         }
       end
 

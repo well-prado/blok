@@ -41,6 +41,15 @@ final class SearchNode extends TypedNode
 
         return ['results' => $rows, 'count' => count($rows)];
     }
+
+    public function capabilityManifest(): ?array
+    {
+        return [
+            'version' => '1', 'classification' => 'agent-compatible', 'effects' => ['read'],
+            'capabilities' => ['workspace.read'], 'secrets' => [], 'determinism' => 'deterministic',
+            'idempotency' => 'idempotent', 'maturity' => 'stable',
+        ];
+    }
 }
 
 final class TypedNodeTest extends TestCase
@@ -80,5 +89,6 @@ final class TypedNodeTest extends TestCase
         $props = (array) $schema['properties'];
         $this->assertArrayHasKey('query', $props);
         $this->assertSame(['query'], $schema['required']);
+        $this->assertSame('agent-compatible', $node->capabilityManifest()['classification']);
     }
 }

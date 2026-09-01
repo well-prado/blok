@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Blok.Core.Errors;
 using Blok.Core.Types;
 
@@ -18,6 +19,7 @@ public interface INodeReflector
     string Description { get; }
     byte[] InputSchemaJson();
     byte[] OutputSchemaJson();
+    byte[] CapabilityManifestJson();
 }
 
 /// <summary>
@@ -49,12 +51,19 @@ public interface INodeReflector
 public abstract class TypedNode<TInput, TOutput> : INodeHandler, INodeReflector
 {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions ManifestOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>The node's registered name (e.g. <c>"@acme/search"</c>).</summary>
     public abstract string Name { get; }
 
     /// <summary>Human-readable description, surfaced in the node catalog.</summary>
     public virtual string Description => "";
+
+    /// <summary>Structured operational metadata; null preserves legacy execution compatibility.</summary>
+    public virtual CapabilityManifest? CapabilityManifest => null;
 
     /// <summary>Run the node with a VALIDATED, typed input.</summary>
     public abstract Task<TOutput> RunAsync(Context ctx, TInput input);
@@ -93,6 +102,11 @@ public abstract class TypedNode<TInput, TOutput> : INodeHandler, INodeReflector
 
     /// <inheritdoc />
     public byte[] OutputSchemaJson() => SchemaBytes(typeof(TOutput));
+
+    /// <inheritdoc />
+    public byte[] CapabilityManifestJson() => CapabilityManifest is null
+        ? Array.Empty<byte>()
+        : JsonSerializer.SerializeToUtf8Bytes(CapabilityManifest, ManifestOptions);
 
     private static byte[] SchemaBytes(Type type)
     {

@@ -1,3 +1,4 @@
+import type { CapabilityManifestStatus, CapabilityManifestV1 } from "@blokjs/shared";
 import type { OptionValues } from "commander";
 import color from "picocolors";
 
@@ -17,6 +18,10 @@ export interface NodeEntry {
 	inputSchema: unknown | null;
 	outputSchema: unknown | null;
 	tags?: string[];
+	capabilityManifest?: CapabilityManifestV1 | null;
+	capabilityManifestStatus?: CapabilityManifestStatus;
+	agentEligible?: boolean;
+	agentEligibilityReason?: string;
 }
 
 /**
@@ -62,16 +67,20 @@ export function formatCatalog(nodes: readonly NodeEntry[]): string {
 		name: n.name,
 		runtime: n.runtime,
 		schema: schemaMark(n),
+		effects: n.capabilityManifest?.effects.join(",") || "—",
+		capabilities: n.capabilityManifest?.capabilities.join(",") || "—",
 		description: n.description ?? "",
 	}));
 	const nameW = Math.max("NAME".length, ...rows.map((r) => r.name.length));
 	const rtW = Math.max("RUNTIME".length, ...rows.map((r) => r.runtime.length));
 	const schW = Math.max("SCHEMA".length, ...rows.map((r) => r.schema.length));
-	const header = `${"NAME".padEnd(nameW)}  ${"RUNTIME".padEnd(rtW)}  ${"SCHEMA".padEnd(schW)}  DESCRIPTION`;
+	const effectsW = Math.max("EFFECTS".length, ...rows.map((r) => r.effects.length));
+	const capabilitiesW = Math.max("CAPABILITIES".length, ...rows.map((r) => r.capabilities.length));
+	const header = `${"NAME".padEnd(nameW)}  ${"RUNTIME".padEnd(rtW)}  ${"SCHEMA".padEnd(schW)}  ${"EFFECTS".padEnd(effectsW)}  ${"CAPABILITIES".padEnd(capabilitiesW)}  DESCRIPTION`;
 	const lines = [header];
 	for (const r of rows) {
 		lines.push(
-			`${r.name.padEnd(nameW)}  ${r.runtime.padEnd(rtW)}  ${r.schema.padEnd(schW)}  ${r.description}`.trimEnd(),
+			`${r.name.padEnd(nameW)}  ${r.runtime.padEnd(rtW)}  ${r.schema.padEnd(schW)}  ${r.effects.padEnd(effectsW)}  ${r.capabilities.padEnd(capabilitiesW)}  ${r.description}`.trimEnd(),
 		);
 	}
 	return lines.join("\n");

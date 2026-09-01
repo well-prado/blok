@@ -31,4 +31,9 @@ var TypedGreetNode = blok.DefineNode(TypedGreetNodeName, "Typed greeting (SPEC-B
 		}
 		greeting := strings.Repeat("Hello, "+in.Name, repeat)
 		return TypedGreetOutput{Greeting: greeting, Length: len(greeting)}, nil
+	}, blok.CapabilityManifest{
+		Version: "1", Classification: "agent-compatible", Effects: []string{},
+		Capabilities: []string{}, Secrets: []string{}, Determinism: "deterministic",
+		Idempotency: "idempotent", Maturity: "stable",
+		Resources: &blok.CapabilityResourceBounds{MaxDurationMs: 5000, MaxInputBytes: 4194304, MaxOutputBytes: 4194304, MaxConcurrency: 64},
 	})

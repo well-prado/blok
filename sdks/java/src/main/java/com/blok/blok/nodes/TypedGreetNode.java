@@ -1,7 +1,9 @@
 package com.blok.blok.nodes;
 
 import com.blok.blok.node.TypedNode;
+import com.blok.blok.node.CapabilityManifest;
 import com.blok.blok.types.Context;
+import java.util.List;
 
 /** Typed greeting node demonstrating the SPEC-B TypedNode contract. */
 public final class TypedGreetNode extends TypedNode<TypedGreetNode.Input, TypedGreetNode.Output> {
@@ -30,6 +32,15 @@ public final class TypedGreetNode extends TypedNode<TypedGreetNode.Input, TypedG
     @Override
     protected Class<?> outputClass() {
         return Output.class;
+    }
+
+    @Override
+    protected CapabilityManifest capabilityManifest() {
+        return new CapabilityManifest(
+                "1", "agent-compatible", List.of(), List.of(), List.of(),
+                "deterministic", "idempotent", "stable",
+                new CapabilityManifest.ResourceBounds(5000L, null, 4194304L, 4194304L, 64L),
+                null, null);
     }
 
     @Override

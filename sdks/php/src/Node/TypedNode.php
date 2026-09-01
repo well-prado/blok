@@ -115,6 +115,12 @@ abstract class TypedNode implements NodeHandler, NodeReflector
         return $class === null ? null : $this->reflectSchema($class);
     }
 
+    /** @return array<string, mixed>|null */
+    public function capabilityManifest(): ?array
+    {
+        return null;
+    }
+
     /** @return array<string, mixed> a minimal JSON Schema from the DTO's typed ctor params. */
     private function reflectSchema(string $class): array
     {

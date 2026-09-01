@@ -17,6 +17,9 @@ public sealed class SearchNode : TypedNode<SearchInput, SearchOutput>
 {
     public override string Name => "@acme/search";
     public override string Description => "Full-text search";
+    public override CapabilityManifest CapabilityManifest => new(
+        "1", "agent-compatible", ["read"], ["workspace.read"], [],
+        "deterministic", "idempotent", "stable");
 
     public override Task<SearchOutput> RunAsync(Context ctx, SearchInput input)
     {
@@ -65,5 +68,6 @@ public class TypedNodeTests
         var inputSchema = Encoding.UTF8.GetString(node.InputSchemaJson());
         inputSchema.Should().Contain("properties");
         node.OutputSchemaJson().Length.Should().BeGreaterThan(0);
+        Encoding.UTF8.GetString(node.CapabilityManifestJson()).Should().Contain("agent-compatible");
     }
 }

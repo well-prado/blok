@@ -185,6 +185,27 @@ export function NodeLibraryDialog({ open, insertHint, pending, error, onAdd, onC
 									<h3 className="font-mono text-sm font-semibold text-zinc-100">{selected.name}</h3>
 									<p className="mt-0.5 font-mono text-[10px] text-zinc-500">{selected.ref}</p>
 									{selected.description && <p className="mt-3 text-xs text-zinc-300">{selected.description}</p>}
+									<div className="mt-4 rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
+										<h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Capabilities</h4>
+										{selected.capabilityManifest ? (
+											<div className="mt-2 space-y-1 text-xs text-zinc-300">
+												<p>
+													<span className="text-zinc-500">Effects:</span>{" "}
+													{selected.capabilityManifest.effects.join(", ") || "pure"}
+												</p>
+												<p>
+													<span className="text-zinc-500">Requires:</span>{" "}
+													{selected.capabilityManifest.capabilities.join(", ") || "none"}
+												</p>
+												<p>
+													<span className="text-zinc-500">Agent:</span>{" "}
+													{selected.agentEligible ? "eligible" : selected.agentEligibilityReason || "denied"}
+												</p>
+											</div>
+										) : (
+											<p className="mt-2 text-xs text-amber-300">No valid manifest — denied to agent execution</p>
+										)}
+									</div>
 									{schemaRows(selected.inputSchema).length > 0 && (
 										<div className="mt-4">
 											<h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Inputs</h4>

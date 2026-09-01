@@ -18,4 +18,7 @@ interface NodeReflector
 
     /** @return array<string, mixed>|null JSON Schema for the output, or null. */
     public function outputSchema(): ?array;
+
+    /** @return array<string, mixed>|null structured operational metadata. */
+    public function capabilityManifest(): ?array;
 }

@@ -18,7 +18,26 @@ class TypedGreetOutput(BaseModel):
     length: int
 
 
-@node("typed-greet", "Typed greeting (SPEC-B contract demo)")
+@node(
+    "typed-greet",
+    "Typed greeting (SPEC-B contract demo)",
+    capability_manifest={
+        "version": "1",
+        "classification": "agent-compatible",
+        "effects": [],
+        "capabilities": [],
+        "secrets": [],
+        "determinism": "deterministic",
+        "idempotency": "idempotent",
+        "maturity": "stable",
+        "resources": {
+            "maxDurationMs": 5000,
+            "maxInputBytes": 4194304,
+            "maxOutputBytes": 4194304,
+            "maxConcurrency": 64,
+        },
+    },
+)
 def typed_greet(ctx: Context, input: TypedGreetInput) -> TypedGreetOutput:
     repeat = input.repeat if input.repeat > 0 else 1
     greeting = ("Hello, " + input.name) * repeat

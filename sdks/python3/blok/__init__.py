@@ -47,8 +47,12 @@ try:
         register_decorated,
         registered_nodes,
     )
+    from blok.node.capability_manifest import CapabilityManifest, CapabilityResourceBounds
 
-    __all__ += ["node", "FunctionNode", "register_decorated", "registered_nodes"]
+    __all__ += [
+        "node", "FunctionNode", "register_decorated", "registered_nodes",
+        "CapabilityManifest", "CapabilityResourceBounds",
+    ]
 except ImportError:
     pass
 

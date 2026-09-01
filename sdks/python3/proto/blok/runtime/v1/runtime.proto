@@ -287,6 +287,10 @@ message NodeDescriptor {
   bytes  input_schema_json  = 3;     // JSON Schema (drives OpenAPI/Studio/LLMs)
   bytes  output_schema_json = 4;
   repeated string tags = 5;
+  // CapabilityManifestV1 JSON (ADR 0003). Additive and optional: empty means
+  // legacy/unclassified, which ordinary workflows may still execute but agent
+  // policy MUST treat as ineligible rather than silently safe.
+  bytes capability_manifest_json = 6;
 }
 
 // =============================================================================

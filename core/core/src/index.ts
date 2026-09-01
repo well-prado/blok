@@ -39,6 +39,7 @@ export {
 // pure `@blokjs/core/dsl` subpath so workflow-only bundles can tree-shake the
 // node execution graph.
 export { defineNode } from "@blokjs/runner/defineNode";
+export type { CapabilityManifestV1 } from "@blokjs/shared";
 
 // Type foundation (handles + runtime stub).
 export type {

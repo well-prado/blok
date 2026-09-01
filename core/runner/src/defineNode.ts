@@ -1,8 +1,8 @@
 import type { ZodError, z } from "zod";
 import { zodToJsonSchema as toJsonSchema } from "zod-to-json-schema";
 
-import type { Context } from "@blokjs/shared";
-import { GlobalError } from "@blokjs/shared";
+import type { CapabilityManifestV1, Context } from "@blokjs/shared";
+import { GlobalError, parseCapabilityManifest } from "@blokjs/shared";
 import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
 import type { IBlokResponse } from "./BlokResponse";
@@ -80,6 +80,13 @@ export interface FnNodeDefinition<
 	/** Human-readable description of what this node does */
 	description: string;
 
+	/**
+	 * Versioned operational risk metadata (ADR 0003). Optional for backward
+	 * compatibility; a missing manifest is explicitly denied to agent-originated
+	 * execution while ordinary workflows continue to run unchanged.
+	 */
+	capabilityManifest?: CapabilityManifestV1;
+
 	/** Zod schema for input validation */
 	input: TInput;
 
@@ -129,6 +136,9 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 	/** Human-readable description — surfaced in the node catalog (`/__blok/nodes`). */
 	public description?: string;
 
+	/** Normalized operational metadata — surfaced in catalogs and policy. */
+	public capabilityManifest?: CapabilityManifestV1;
+
 	/** Lazily-computed real JSON Schema for reflection (see {@link getReflectionSchemas}). */
 	private _reflectionSchemas?: { input: unknown; output: unknown };
 
@@ -137,6 +147,9 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		this.definition = definition;
 		this.name = definition.name;
 		this.description = definition.description;
+		this.capabilityManifest = definition.capabilityManifest
+			? parseCapabilityManifest(definition.capabilityManifest)
+			: undefined;
 
 		// Set content type if specified (e.g. "text/html", "application/pdf")
 		if (definition.contentType) {

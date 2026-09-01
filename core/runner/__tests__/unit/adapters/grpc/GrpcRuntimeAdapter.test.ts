@@ -593,6 +593,7 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 					inputSchema: { type: "object", properties: { query: { type: "string" } } },
 					outputSchema: { type: "object", properties: { count: { type: "integer" } } },
 					tags: ["typed"],
+					capabilityManifest: null,
 				},
 			]);
 		});
@@ -617,9 +618,30 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 			const nodes = await adapter.listNodes();
 
 			expect(nodes).toEqual([
-				{ name: "empty", description: undefined, inputSchema: null, outputSchema: null, tags: [] },
-				{ name: "malformed", description: undefined, inputSchema: null, outputSchema: { type: "string" }, tags: [] },
-				{ name: "input-only", description: undefined, inputSchema: { type: "object" }, outputSchema: null, tags: [] },
+				{
+					name: "empty",
+					description: undefined,
+					inputSchema: null,
+					outputSchema: null,
+					tags: [],
+					capabilityManifest: null,
+				},
+				{
+					name: "malformed",
+					description: undefined,
+					inputSchema: null,
+					outputSchema: { type: "string" },
+					tags: [],
+					capabilityManifest: null,
+				},
+				{
+					name: "input-only",
+					description: undefined,
+					inputSchema: { type: "object" },
+					outputSchema: null,
+					tags: [],
+					capabilityManifest: null,
+				},
 			]);
 		});
 

@@ -159,6 +159,7 @@
       "name": "@blokjs/helper",
       "version": "2.1.0",
       "dependencies": {
+        "@blokjs/shared": "^2.1.0",
         "zod": "^3.24.2",
       },
       "devDependencies": {

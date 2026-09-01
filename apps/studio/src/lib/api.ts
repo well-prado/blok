@@ -90,6 +90,21 @@ export interface NodeCatalogEntry {
 	description?: string;
 	inputSchema?: unknown;
 	outputSchema?: unknown;
+	capabilityManifest?: {
+		version: "1";
+		classification: "agent-compatible" | "trusted-legacy" | "denied-to-agents";
+		effects: string[];
+		capabilities: string[];
+		secrets: string[];
+		determinism: string;
+		idempotency: string;
+		maturity: string;
+		resources?: Record<string, number>;
+	} | null;
+	capabilityManifestStatus?: "declared" | "missing" | "invalid";
+	capabilityManifestErrors?: string[];
+	agentEligible?: boolean;
+	agentEligibilityReason?: string;
 }
 
 export function fetchNodeCatalog(): Promise<{ nodes: NodeCatalogEntry[]; count: number }> {

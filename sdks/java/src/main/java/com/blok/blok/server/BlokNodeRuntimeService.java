@@ -171,6 +171,11 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
                 if (outputSchema != null) {
                     descriptor.setOutputSchemaJson(com.google.protobuf.ByteString.copyFromUtf8(outputSchema));
                 }
+                String capabilityManifest = reflector.capabilityManifestJson();
+                if (capabilityManifest != null) {
+                    descriptor.setCapabilityManifestJson(
+                            com.google.protobuf.ByteString.copyFromUtf8(capabilityManifest));
+                }
             }
             builder.addNodes(descriptor.build());
         }

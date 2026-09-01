@@ -290,20 +290,22 @@ func (s *BlokNodeRuntime) ListNodes(ctx context.Context, req *pb.ListNodesReques
 		// SPEC-B P4 — DefineNode handlers expose a description + JSON Schema via
 		// NodeReflector; legacy map-based handlers report empty.
 		var description string
-		var inputSchema, outputSchema []byte
+		var inputSchema, outputSchema, capabilityManifest []byte
 		if h, err := s.registry.Get(name); err == nil {
 			if r, ok := h.(NodeReflector); ok {
 				description = r.Description()
 				inputSchema = r.InputSchemaJSON()
 				outputSchema = r.OutputSchemaJSON()
+				capabilityManifest = r.CapabilityManifestJSON()
 			}
 		}
 		descriptors = append(descriptors, &pb.NodeDescriptor{
-			Name:             name,
-			Description:      description,
-			InputSchemaJson:  inputSchema,
-			OutputSchemaJson: outputSchema,
-			Tags:             nil,
+			Name:                   name,
+			Description:            description,
+			InputSchemaJson:        inputSchema,
+			OutputSchemaJson:       outputSchema,
+			Tags:                   nil,
+			CapabilityManifestJson: capabilityManifest,
 		})
 	}
 	return &pb.ListNodesResponse{

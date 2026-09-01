@@ -53,6 +53,10 @@ func TestDefineNodeInvalidInputYieldsBlokError(t *testing.T) {
 func TestDefineNodeReflection(t *testing.T) {
 	h := DefineNode("@acme/r", "desc", func(ctx *Context, in tdInput) (tdOutput, error) {
 		return tdOutput{}, nil
+	}, CapabilityManifest{
+		Version: "1", Classification: "agent-compatible", Effects: []string{"read"},
+		Capabilities: []string{"workspace.read"}, Secrets: []string{}, Determinism: "deterministic",
+		Idempotency: "idempotent", Maturity: "stable",
 	})
 	r, ok := h.(NodeReflector)
 	if !ok {
@@ -71,5 +75,12 @@ func TestDefineNodeReflection(t *testing.T) {
 	}
 	if len(r.OutputSchemaJSON()) == 0 {
 		t.Fatal("empty output schema")
+	}
+	var manifest map[string]interface{}
+	if err := json.Unmarshal(r.CapabilityManifestJSON(), &manifest); err != nil {
+		t.Fatalf("capability manifest not valid JSON: %v", err)
+	}
+	if manifest["classification"] != "agent-compatible" {
+		t.Fatalf("unexpected capability manifest: %v", manifest)
 	}
 }

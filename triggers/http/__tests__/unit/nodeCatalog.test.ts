@@ -39,6 +39,50 @@ describe("reflectModuleNode (SPEC-B P1.3)", () => {
 });
 
 describe("buildNodeCatalog (SPEC-B P1.3)", () => {
+	it("classifies valid, missing, and invalid manifests without treating legacy nodes as safe", async () => {
+		const validManifest = {
+			version: "1",
+			classification: "agent-compatible",
+			effects: ["read"],
+			capabilities: ["workspace.read"],
+			secrets: [],
+			determinism: "deterministic",
+			idempotency: "idempotent",
+			maturity: "stable",
+		};
+		const moduleNodes = new Map<string, unknown>([
+			["valid", { ...fnNode("valid", "valid"), capabilityManifest: validManifest }],
+			["legacy", fnNode("legacy", "legacy")],
+		]);
+		const runtimes = [
+			{
+				kind: "go",
+				adapter: {
+					listNodes: async () => [
+						{ name: "invalid", inputSchema: null, outputSchema: null, capabilityManifest: { version: "2" } },
+					],
+				},
+			},
+		];
+
+		const catalog = await buildNodeCatalog(moduleNodes, runtimes);
+		expect(catalog.find((node) => node.name === "valid")).toMatchObject({
+			capabilityManifestStatus: "declared",
+			agentEligible: true,
+			agentEligibilityReason: "eligible",
+		});
+		expect(catalog.find((node) => node.name === "legacy")).toMatchObject({
+			capabilityManifestStatus: "missing",
+			agentEligible: false,
+			agentEligibilityReason: "missing-manifest",
+		});
+		expect(catalog.find((node) => node.name === "invalid")).toMatchObject({
+			capabilityManifestStatus: "invalid",
+			agentEligible: false,
+			agentEligibilityReason: "invalid-manifest",
+		});
+	});
+
 	it("aggregates module nodes + runtime nodes with correct runtime labels", async () => {
 		const moduleNodes = new Map<string, unknown>([
 			["@x/a", fnNode("@x/a", "node a")],

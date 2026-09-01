@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use crate::blok_error::BlokError;
+use crate::capability_manifest::CapabilityManifest;
 use crate::types::Context;
 
 /// NodeHandler is the core trait that all Blok nodes must implement.
@@ -51,6 +52,11 @@ pub trait NodeHandler: Send + Sync {
 
     /// v0.7 — JSON Schema for this node's output. See [`Self::input_schema`].
     fn output_schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+
+    /// Structured operational metadata for agent policy and catalog reflection.
+    fn capability_manifest(&self) -> Option<CapabilityManifest> {
         None
     }
 }
@@ -114,6 +120,10 @@ pub trait TypedNode: Send + Sync {
         ""
     }
 
+    fn capability_manifest(&self) -> Option<CapabilityManifest> {
+        None
+    }
+
     /// Run the node with a VALIDATED, typed input.
     async fn run(&self, ctx: &mut Context, input: Self::Input) -> Result<Self::Output, BlokError>;
 }
@@ -168,5 +178,9 @@ impl<T: TypedNode> NodeHandler for TypedNodeHandler<T> {
 
     fn output_schema(&self) -> Option<serde_json::Value> {
         serde_json::to_value(schemars::schema_for!(T::Output)).ok()
+    }
+
+    fn capability_manifest(&self) -> Option<CapabilityManifest> {
+        self.0.capability_manifest()
     }
 }

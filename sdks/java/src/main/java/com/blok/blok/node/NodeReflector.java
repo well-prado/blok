@@ -15,4 +15,7 @@ public interface NodeReflector {
 
     /** JSON Schema for the output, or {@code null}. */
     String outputSchemaJson();
+
+    /** Capability manifest JSON, or {@code null} for legacy/unclassified nodes. */
+    String capabilityManifestJson();
 }

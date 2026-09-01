@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,6 +43,14 @@ async function importSecondHelperInstance(): Promise<{
 	const copyDir = path.join(tmp, "helper-dist");
 	await cp(distDir, copyDir, { recursive: true });
 	await cp(path.join(packageDir, "src"), path.join(tmp, "src"), { recursive: true });
+
+	// The copied helper remains a separate module instance, but it still needs
+	// the runtime dependencies that a package manager installs beside it.
+	const sharedIndexPath = require.resolve("@blokjs/shared");
+	const sharedPackageDir = path.dirname(path.dirname(sharedIndexPath));
+	const dependencyScope = path.join(tmp, "node_modules", "@blokjs");
+	await mkdir(dependencyScope, { recursive: true });
+	await symlink(sharedPackageDir, path.join(dependencyScope, "shared"), "dir");
 
 	const nonce = `?v=${Date.now()}-${Math.random()}`;
 	const helper = (await import(pathToFileURL(path.join(copyDir, "index.js")).href + nonce)) as HelperPublic;

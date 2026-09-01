@@ -1,7 +1,9 @@
 //! Tests for the typed `TypedNode` contract (SPEC-B P3).
 
 use async_trait::async_trait;
-use blok::{BlokError, Context, NodeHandler, NodeRegistry, TypedNode, TypedNodeHandler};
+use blok::{
+    BlokError, CapabilityManifest, Context, NodeHandler, NodeRegistry, TypedNode, TypedNodeHandler,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,6 +36,13 @@ impl TypedNode for Search {
     }
     fn description(&self) -> &str {
         "Full-text search"
+    }
+    fn capability_manifest(&self) -> Option<CapabilityManifest> {
+        serde_json::from_value(serde_json::json!({
+            "version": "1", "classification": "agent-compatible", "effects": ["read"],
+            "capabilities": ["workspace.read"], "secrets": [], "determinism": "deterministic",
+            "idempotency": "idempotent", "maturity": "stable"
+        })).ok()
     }
     async fn run(&self, _ctx: &mut Context, input: Input) -> Result<Output, BlokError> {
         let results = vec![input.query; input.limit as usize];
@@ -92,6 +101,7 @@ fn reflection_schemas_and_description() {
     let output = h.output_schema().expect("output schema");
     assert!(output.to_string().contains("count"));
     assert_eq!(h.description(), "Full-text search");
+    assert_eq!(h.capability_manifest().unwrap().classification, "agent-compatible");
 }
 
 #[test]

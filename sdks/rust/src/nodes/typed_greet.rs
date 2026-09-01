@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::blok_error::BlokError;
+use crate::capability_manifest::{CapabilityManifest, CapabilityResourceBounds};
 use crate::node::TypedNode;
 use crate::types::Context;
 
@@ -39,6 +40,28 @@ impl TypedNode for TypedGreetNode {
 
     fn description(&self) -> &str {
         "Typed greeting (SPEC-B contract demo)"
+    }
+
+    fn capability_manifest(&self) -> Option<CapabilityManifest> {
+        Some(CapabilityManifest {
+            version: "1".into(),
+            classification: "agent-compatible".into(),
+            effects: vec![],
+            capabilities: vec![],
+            secrets: vec![],
+            determinism: "deterministic".into(),
+            idempotency: "idempotent".into(),
+            maturity: "stable".into(),
+            resources: Some(CapabilityResourceBounds {
+                max_duration_ms: Some(5000),
+                max_memory_bytes: None,
+                max_input_bytes: Some(4194304),
+                max_output_bytes: Some(4194304),
+                max_concurrency: Some(64),
+            }),
+            runtimes: None,
+            triggers: None,
+        })
     }
 
     async fn run(

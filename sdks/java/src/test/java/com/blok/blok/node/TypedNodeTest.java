@@ -43,6 +43,13 @@ class TypedNodeTest {
         }
 
         @Override
+        protected CapabilityManifest capabilityManifest() {
+            return new CapabilityManifest(
+                    "1", "agent-compatible", List.of("read"), List.of("workspace.read"), List.of(),
+                    "deterministic", "idempotent", "stable", null, null, null);
+        }
+
+        @Override
         protected SearchOutput run(Context ctx, SearchInput input) {
             List<String> rows = Collections.nCopies(input.limit(), input.query());
             return new SearchOutput(rows, rows.size());
@@ -72,5 +79,6 @@ class TypedNodeTest {
         assertTrue(node.inputSchemaJson().contains("query"));
         assertNotNull(node.outputSchemaJson());
         assertTrue(node.outputSchemaJson().contains("count"));
+        assertTrue(node.capabilityManifestJson().contains("agent-compatible"));
     }
 }

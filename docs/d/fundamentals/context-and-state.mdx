@@ -102,6 +102,13 @@ The node-side `ctx` ABI is still real and kept. Use it for runtime concerns:
 | `ctx.connection` | WebSocket-only connection API. Usually reached through helper nodes. |
 | `ctx.stream` | SSE-only stream API. Usually reached through helper nodes. |
 
+Node and workflow `capabilityManifest` metadata is separate from state and
+must never carry secret values. It declares operational effects and opaque
+secret reference names for catalog and policy use; see
+[Capability manifests](/d/fundamentals/capability-manifests). Missing metadata
+does not block ordinary execution, but it is denied at an agent execution
+boundary.
+
 ## Reading data
 
 Use the handle in the workflow, not runtime context strings.

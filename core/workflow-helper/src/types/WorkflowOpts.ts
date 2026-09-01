@@ -1,6 +1,46 @@
+import {
+	CAPABILITY_CLASSIFICATIONS,
+	CAPABILITY_DETERMINISM,
+	CAPABILITY_EFFECTS,
+	CAPABILITY_IDEMPOTENCY,
+	CAPABILITY_MANIFEST_VERSION,
+	CAPABILITY_MATURITY,
+	type CapabilityManifestV1,
+	parseCapabilityManifest,
+} from "@blokjs/shared";
 import { z } from "zod";
 import { StepInputsSchema, StepOptsSchema, V2StepSchema } from "./StepOpts";
 import { TriggersSchema } from "./TriggerOpts";
+
+const CapabilityIdentifierSchema = z
+	.string()
+	.regex(/^[A-Za-z][A-Za-z0-9._:/-]{0,127}$/, "must be an opaque capability or secret reference name");
+
+const CapabilityManifestSchema = z
+	.object({
+		version: z.literal(CAPABILITY_MANIFEST_VERSION),
+		classification: z.enum(CAPABILITY_CLASSIFICATIONS),
+		effects: z.array(z.enum(CAPABILITY_EFFECTS)),
+		capabilities: z.array(CapabilityIdentifierSchema),
+		secrets: z.array(CapabilityIdentifierSchema),
+		determinism: z.enum(CAPABILITY_DETERMINISM),
+		idempotency: z.enum(CAPABILITY_IDEMPOTENCY),
+		maturity: z.enum(CAPABILITY_MATURITY),
+		resources: z
+			.object({
+				maxDurationMs: z.number().int().positive().optional(),
+				maxMemoryBytes: z.number().int().positive().optional(),
+				maxInputBytes: z.number().int().positive().optional(),
+				maxOutputBytes: z.number().int().positive().optional(),
+				maxConcurrency: z.number().int().positive().optional(),
+			})
+			.passthrough()
+			.optional(),
+		runtimes: z.array(CapabilityIdentifierSchema).optional(),
+		triggers: z.array(CapabilityIdentifierSchema).optional(),
+	})
+	.passthrough()
+	.transform((value): CapabilityManifestV1 => parseCapabilityManifest(value));
 
 /**
  * Validation schema for the workflow envelope (v1 — legacy).
@@ -27,6 +67,7 @@ export const WorkflowOptsSchema = z.object({
 		})
 		.min(5, { message: "Format required x.x.x" }),
 	description: z.string().optional(),
+	capabilityManifest: CapabilityManifestSchema.optional(),
 	steps: z.array(StepOptsSchema).optional(),
 	nodes: z.record(z.string(), StepInputsSchema).optional(),
 	trigger: z.record(TriggersSchema, z.unknown()).optional(),
@@ -74,6 +115,9 @@ export const WorkflowV2Schema = z.object({
 		.string()
 		.optional()
 		.describe("What this workflow does. Optional but recommended — surfaces in Studio and CLI."),
+	capabilityManifest: CapabilityManifestSchema.optional().describe(
+		"Versioned operational effects, required capabilities, secret reference names, reliability classes, and resource bounds.",
+	),
 	trigger: z
 		.record(TriggersSchema, z.unknown())
 		.optional()
