@@ -2,6 +2,7 @@ import {
 	type AuditSink,
 	CapabilityManifestError,
 	type Context,
+	type InteractionAttribution,
 	type InteractionSuspension,
 	type InteractionSuspensionPort,
 	type NodeBase,
@@ -27,6 +28,10 @@ import {
 	type TurnIdentity,
 	type WorkflowIdentity,
 	assessCapabilityManifest,
+	immutableInteractionSnapshot,
+	redactInteractionDecision,
+	redactInteractionRequest,
+	redactInteractionString,
 } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
 import { RunTracker } from "../tracing/RunTracker";
@@ -45,6 +50,7 @@ export interface PolicyExecutionOptions {
 	sandboxVerifier?: SandboxVerifier;
 	layers?: readonly PolicyLayer[];
 	secretResolver?: SecretResolver;
+	attribution?: InteractionAttribution;
 }
 interface PolicyState extends PolicyExecutionOptions {
 	origin: "agent";
@@ -172,6 +178,7 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 		principal: state.principal,
 		session: state.session,
 		turn: state.turn,
+		...(state.attribution ? { attribution: state.attribution } : {}),
 		workflow,
 		step: { id: node.name, attempt },
 		manifest: node.capabilityManifest ?? null,
@@ -191,30 +198,34 @@ function auditBase(
 	cached: boolean,
 	type: "policy.pre" | "policy.post",
 ) {
+	const safeRequest = redactInteractionRequest(request);
+	const safeDecision = redactInteractionDecision(result.decision);
 	return {
 		version: "1" as const,
 		eventType: type,
 		eventId: uuid(),
 		timestamp: new Date().toISOString(),
 		correlationId,
-		decisionId: result.decision.id,
-		principalId: request.principal?.id,
-		sessionId: request.session?.id,
-		turnId: request.turn?.id,
-		workflow: request.workflow,
-		step: request.step,
-		attempt: request.step.attempt ?? 1,
-		manifest: request.manifest,
-		scope: request.scope,
-		layers: request.layers,
-		matchedRules: result.matchedRules
-			.slice(0, 32)
-			.map((rule: PolicyRuleMatch) => ({ ...rule, ruleId: bounded(rule.ruleId) })),
+		decisionId: safeDecision.id,
+		principalId: safeRequest.principal?.id,
+		sessionId: safeRequest.session?.id,
+		turnId: safeRequest.turn?.id,
+		workflow: safeRequest.workflow,
+		step: safeRequest.step,
+		attempt: safeRequest.step.attempt ?? 1,
+		manifest: safeRequest.manifest,
+		scope: safeRequest.scope,
+		layers: safeRequest.layers,
+		matchedRules: result.matchedRules.slice(0, 32).map((rule: PolicyRuleMatch) => ({
+			...rule,
+			ruleId: redactInteractionString(bounded(rule.ruleId) ?? "unknown"),
+		})),
 		decision: {
-			...result.decision,
-			reason: bounded(result.decision.reason),
-			reasonCode: bounded(result.decision.reasonCode) ?? "unknown",
+			...safeDecision,
+			reason: bounded(safeDecision.reason),
+			reasonCode: bounded(safeDecision.reasonCode) ?? "unknown",
 		},
+		...(safeRequest.attribution ? { attribution: safeRequest.attribution } : {}),
 		sandbox: {
 			required: result.decision.kind === "require-sandbox",
 			verified: result.decision.kind !== "require-sandbox",
@@ -403,6 +414,7 @@ function secretRequest(ctx: Context, reference: SecretRef): SecretRequest {
 		principal: state.principal,
 		session: state.session,
 		turn: state.turn,
+		...(state.attribution ? { attribution: state.attribution } : {}),
 		workflow: { name: ctx.workflow_name ?? "<unknown>" },
 		step,
 		manifest: null,
@@ -432,6 +444,7 @@ export async function resolveSecret(ctx: Context, reference: SecretRef): Promise
 			principalId: request.principal?.id,
 			sessionId: request.session?.id,
 			turnId: request.turn?.id,
+			...(request.attribution ? { attribution: request.attribution } : {}),
 			workflow: request.workflow,
 			step: request.step,
 			reference,
@@ -453,6 +466,7 @@ export async function resolveSecret(ctx: Context, reference: SecretRef): Promise
 				principalId: request.principal?.id,
 				sessionId: request.session?.id,
 				turnId: request.turn?.id,
+				...(request.attribution ? { attribution: request.attribution } : {}),
 				workflow: request.workflow,
 				step: request.step,
 				reference,
@@ -519,10 +533,10 @@ export async function recordPostExecution(
 export class InMemoryAuditSink implements AuditSink {
 	private readonly events: Array<PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent> = [];
 	async append(event: PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent): Promise<void> {
-		this.events.push(Object.freeze(structuredClone(event)));
+		this.events.push(immutableInteractionSnapshot(event));
 	}
 	read(): readonly (PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent)[] {
-		return this.events.map((event) => structuredClone(event));
+		return this.events.map((event) => immutableInteractionSnapshot(event));
 	}
 }
 export class InMemoryPolicyProvider implements PolicyProvider {

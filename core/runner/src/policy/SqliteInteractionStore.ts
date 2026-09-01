@@ -7,6 +7,15 @@ import type {
 	PolicyDecision,
 	PolicyRequest,
 } from "@blokjs/shared";
+import {
+	fingerprintInteractionPayload,
+	immutableInteractionSnapshot,
+	parseInteractionAnswer,
+	parseInteractionPayload,
+	redactInteractionDecision,
+	redactInteractionPayload,
+	redactInteractionRequest,
+} from "@blokjs/shared";
 import { InteractionAuthorizationError, InteractionConflictError } from "./InteractionStore";
 
 const esmRequire = createRequire(import.meta.url);
@@ -51,7 +60,7 @@ type ClaimedInteractionRecord = InteractionRecord & {
 type MutableInteractionRecord = { -readonly [Key in keyof ClaimedInteractionRecord]: ClaimedInteractionRecord[Key] };
 
 function clone<T>(value: T): T {
-	return structuredClone(value);
+	return immutableInteractionSnapshot(value);
 }
 
 function json(value: unknown, label: string): string {
@@ -80,7 +89,8 @@ function sameAnswer(record: InteractionRecord, answer: InteractionAnswer): boole
 	return (
 		record.status === expectedStatus &&
 		record.answeredBy === answer.principalId &&
-		JSON.stringify(record.answer ?? null) === JSON.stringify(answer.answer ?? null)
+		fingerprintInteractionPayload(record.answer) ===
+			fingerprintInteractionPayload(answer.answer === undefined ? undefined : redactInteractionPayload(answer.answer))
 	);
 }
 
@@ -103,7 +113,11 @@ function rowToRecord(row: InteractionRow): ClaimedInteractionRecord {
 		expiresAt: row.expires_at,
 		sequence: row.sequence,
 	};
-	if (row.answer_json !== null) record.answer = parseJson<unknown>(row.answer_json, "interaction answer");
+	if (row.answer_json !== null)
+		record.answer = parseInteractionPayload(
+			parseJson<unknown>(row.answer_json, "interaction answer"),
+			"interaction answer",
+		);
 	if (row.answered_by !== null) record.answeredBy = row.answered_by;
 	if (row.answered_at !== null) record.answeredAt = row.answered_at;
 	if (row.claimed_by !== null) record.claimedBy = row.claimed_by;
@@ -212,14 +226,20 @@ export class SqliteInteractionStore implements InteractionStore {
 		opts?: { expiresAt?: string },
 	): Promise<InteractionRecord> {
 		const createdAt = new Date().toISOString();
+		if (typeof request.requestId !== "string" || request.requestId.length === 0 || request.requestId.length > 256)
+			throw new InteractionConflictError("interaction request id is invalid");
+		const safeRequest = redactInteractionRequest(request);
+		const safeDecision = redactInteractionDecision(decision);
+		const expiresAt = opts?.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString();
+		if (!Number.isFinite(Date.parse(expiresAt))) throw new InteractionConflictError("interaction expiry is invalid");
 		const record: InteractionRecord = {
 			version: "1",
 			id: request.requestId,
-			request: clone(request),
-			decision: clone(decision),
+			request: safeRequest,
+			decision: safeDecision,
 			status: "pending",
 			createdAt,
-			expiresAt: opts?.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+			expiresAt,
 			sequence: 0,
 		};
 		const result = this.stmt(
@@ -245,16 +265,23 @@ export class SqliteInteractionStore implements InteractionStore {
 	}
 
 	async answer(answer: InteractionAnswer): Promise<InteractionRecord> {
-		const serializedAnswer = assertBoundedAnswer(answer.answer);
-		const record = this.find(answer.id);
+		let parsed: InteractionAnswer;
+		try {
+			parsed = parseInteractionAnswer(answer);
+		} catch (error) {
+			throw new InteractionConflictError(error instanceof Error ? error.message : "invalid interaction answer");
+		}
+		const safeAnswer = parsed.answer === undefined ? undefined : redactInteractionPayload(parsed.answer);
+		const serializedAnswer = assertBoundedAnswer(safeAnswer);
+		const record = this.find(parsed.id);
 		if (!record) throw new InteractionConflictError("interaction not found");
 		if (record.status !== "pending") {
-			if (sameAnswer(record, answer)) return clone(record);
+			if (sameAnswer(record, parsed)) return clone(record);
 			throw new InteractionConflictError("interaction is already resolved");
 		}
-		if (record.request.principal?.id !== answer.principalId)
+		if (record.request.principal?.id !== parsed.principalId)
 			throw new InteractionAuthorizationError("interaction answer principal does not match the request");
-		if (record.sequence !== answer.sequence) throw new InteractionConflictError("interaction sequence mismatch");
+		if (record.sequence !== parsed.sequence) throw new InteractionConflictError("interaction sequence mismatch");
 
 		if (Date.parse(record.expiresAt) <= Date.now()) {
 			const expired = this.stmt(
@@ -263,7 +290,7 @@ export class SqliteInteractionStore implements InteractionStore {
 			).run(record.id, record.sequence);
 			if (expired.changes !== 1) {
 				const current = this.find(record.id);
-				if (current && sameAnswer(current, answer)) return clone(current);
+				if (current && sameAnswer(current, parsed)) return clone(current);
 			}
 			throw new InteractionConflictError("interaction has expired");
 		}
@@ -273,16 +300,16 @@ export class SqliteInteractionStore implements InteractionStore {
 			"answer",
 			"UPDATE policy_interactions SET status = ?, answer_json = ?, answered_by = ?, answered_at = ?, sequence = sequence + 1 WHERE id = ? AND status = 'pending' AND sequence = ?",
 		).run(
-			answer.deny ? "denied" : "answered",
+			parsed.deny ? "denied" : "answered",
 			serializedAnswer,
-			answer.principalId,
+			parsed.principalId,
 			answeredAt,
 			record.id,
 			record.sequence,
 		);
 		if (updated.changes !== 1) {
 			const current = this.find(record.id);
-			if (current && sameAnswer(current, answer)) return clone(current);
+			if (current && sameAnswer(current, parsed)) return clone(current);
 			throw new InteractionConflictError("interaction sequence mismatch");
 		}
 		const resolved = this.find(record.id);
@@ -303,13 +330,14 @@ export class SqliteInteractionStore implements InteractionStore {
 			throw new InteractionAuthorizationError("interaction claim principal does not match the request");
 		if (record.status !== "answered")
 			throw new InteractionConflictError(`interaction cannot resume from status ${record.status}`);
+		if (record.claimedBy !== undefined) throw new InteractionConflictError("interaction has already been claimed");
 		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
 		if (Date.parse(record.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
 
 		const claimedAt = new Date().toISOString();
 		const updated = this.stmt(
 			"claim",
-			"UPDATE policy_interactions SET claimed_by = ?, claimed_at = ?, sequence = sequence + 1 WHERE id = ? AND principal_id = ? AND status = 'answered' AND sequence = ? AND expires_at > ?",
+			"UPDATE policy_interactions SET claimed_by = ?, claimed_at = ?, sequence = sequence + 1 WHERE id = ? AND principal_id = ? AND status = 'answered' AND claimed_by IS NULL AND sequence = ? AND expires_at > ?",
 		).run(principalId, claimedAt, id, principalId, sequence, new Date().toISOString());
 		if (updated.changes !== 1) {
 			const current = this.find(id);
@@ -329,9 +357,9 @@ export class SqliteInteractionStore implements InteractionStore {
 	async cancel(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
 		const record = this.find(id);
 		if (!record) throw new InteractionConflictError("interaction not found");
-		if (record.status !== "pending") return clone(record);
 		if (record.request.principal?.id !== principalId)
 			throw new InteractionAuthorizationError("interaction cancel principal does not match the request");
+		if (record.status !== "pending") return clone(record);
 		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
 		const updated = this.stmt(
 			"cancel",
@@ -345,6 +373,7 @@ export class SqliteInteractionStore implements InteractionStore {
 
 	async expire(now = new Date().toISOString()): Promise<readonly InteractionRecord[]> {
 		const timestamp = Date.parse(now);
+		if (!Number.isFinite(timestamp)) throw new InteractionConflictError("interaction expiry timestamp is invalid");
 		const rows = this.stmt(
 			"pending",
 			"SELECT version, id, principal_id, request_json, decision_json, status, created_at, expires_at, sequence, answer_json, answered_by, answered_at, claimed_by, claimed_at FROM policy_interactions WHERE status = 'pending'",

@@ -1,4 +1,4 @@
-import type { PolicyContext } from "./PolicyContracts";
+import type { InteractionAttribution, PolicyContext } from "./PolicyContracts";
 
 export const SECRET_REFERENCE_VERSION = "1" as const;
 
@@ -41,6 +41,7 @@ export interface SecretResolutionAuditEvent {
 	readonly principalId?: string;
 	readonly sessionId?: string;
 	readonly turnId?: string;
+	readonly attribution?: InteractionAttribution;
 	readonly workflow: PolicyContext["workflow"];
 	readonly step: PolicyContext["step"];
 	readonly reference: SecretRef;

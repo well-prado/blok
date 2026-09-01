@@ -1,4 +1,12 @@
-import type { PolicyDecision, PolicyRequest } from "@blokjs/shared";
+import {
+	INTERACTION_REDACTED_VALUE,
+	type InteractionAttribution,
+	InteractionContractError,
+	type PolicyDecision,
+	type PolicyRequest,
+	parseInteractionAnswer,
+	parseInteractionPayload,
+} from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import {
 	DurableInteractionPort,
@@ -152,5 +160,77 @@ describe("durable interaction store", () => {
 		expect(preSuspensionEffects).toBe(1);
 		expect(postSuspensionEffects).toBe(1);
 		expect(restored).toEqual([{ exactRequest: request, state: persistedState }]);
+	});
+	it("validates bounded JSON answers and rejects non-JSON values", () => {
+		expect(() => parseInteractionPayload({ nested: { value: 1n } })).toThrow(InteractionContractError);
+		expect(() => parseInteractionPayload({ value: Number.NaN })).toThrow(/finite numbers/);
+		expect(() => parseInteractionPayload(Array.from({ length: 9 }, () => "x".repeat(8 * 1024)))).toThrow(/bytes/);
+		expect(() => parseInteractionAnswer({ id: "i", principalId: "p", sequence: -1 })).toThrow(/sequence/);
+	});
+
+	it("returns deeply immutable, redacted snapshots with nested/parallel attribution", async () => {
+		const attribution: InteractionAttribution = {
+			rootId: "run-root",
+			parentId: "run-parent",
+			branchId: "branch-2",
+			branchIndex: 2,
+			branchPath: ["fan-out", "child-workflow"],
+			depth: 2,
+		};
+		const requestWithSecrets: PolicyRequest = {
+			...request,
+			attribution,
+			signal: new AbortController().signal,
+			scope: {
+				...request.scope,
+				fragments: { tenant: "acme", sessionToken: "raw-session-token" },
+			},
+		};
+		const store = new InMemoryInteractionStore();
+		const created = await store.create(requestWithSecrets, { ...decision, reason: "approval for secret: raw-secret" });
+		const answer = await store.answer({
+			id: request.requestId,
+			principalId: "principal-1",
+			answer: { approved: true, token: "raw-answer-token", nested: { ok: "yes" } },
+			sequence: 0,
+		});
+
+		expect(created.request.signal).toBeUndefined();
+		expect(created.request.attribution).toEqual(attribution);
+		expect(created.request.scope.fragments).toEqual({ tenant: "acme", sessionToken: INTERACTION_REDACTED_VALUE });
+		expect(created.decision.reason).toBe(INTERACTION_REDACTED_VALUE);
+		expect(answer.answer).toEqual({ approved: true, token: INTERACTION_REDACTED_VALUE, nested: { ok: "yes" } });
+		expect(Object.isFrozen(answer)).toBe(true);
+		expect(Object.isFrozen(answer.request)).toBe(true);
+		expect(Object.isFrozen(answer.request.attribution)).toBe(true);
+		expect(Object.isFrozen(answer.answer)).toBe(true);
+		expect(JSON.stringify(answer)).not.toContain("raw-");
+
+		const fetched = await store.get(request.requestId);
+		expect(fetched).toEqual(answer);
+	});
+
+	it("rejects unauthorized cancellation and resolves cancellation with the expected sequence", async () => {
+		const store = new InMemoryInteractionStore();
+		await store.create(request, decision);
+		await expect(store.cancel(request.requestId, "other", 0)).rejects.toBeInstanceOf(InteractionAuthorizationError);
+		const cancelled = await store.cancel(request.requestId, "principal-1", 0);
+		expect(cancelled.status).toBe("cancelled");
+		expect(cancelled.sequence).toBe(1);
+		await expect(
+			store.answer({ id: request.requestId, principalId: "principal-1", sequence: 1 }),
+		).rejects.toBeInstanceOf(InteractionConflictError);
+	});
+
+	it("claims an answered interaction once without changing its terminal answer", async () => {
+		const store = new InMemoryInteractionStore();
+		await store.create(request, decision);
+		await store.answer({ id: request.requestId, principalId: "principal-1", answer: { approved: true }, sequence: 0 });
+		const claimed = await store.claim(request.requestId, "principal-1", 1);
+		expect(claimed.status).toBe("answered");
+		expect(claimed.claimedBy).toBe("principal-1");
+		expect(claimed.claimedAt).toEqual(expect.any(String));
+		expect(claimed.sequence).toBe(2);
+		await expect(store.claim(request.requestId, "principal-1", 2)).rejects.toBeInstanceOf(InteractionConflictError);
 	});
 });
