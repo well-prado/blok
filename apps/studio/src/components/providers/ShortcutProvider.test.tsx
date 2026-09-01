@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useRef, useState } from "react";
 
 import { describe, expect, it, vi } from "vitest";
 import { useActiveShortcuts, useShortcut } from "../../hooks/useShortcuts";
@@ -151,5 +152,32 @@ describe("ShortcutProvider", () => {
 		const items = screen.getAllByTestId("shortcut-item");
 		expect(items).toHaveLength(1);
 		expect(items[0]?.textContent).toBe("Mod+K - Search");
+	});
+
+	it("registers inline callbacks once and dispatches to the latest render", () => {
+		const InlineShortcut = () => {
+			const [count, setCount] = useState(0);
+			const renders = useRef(0);
+			renders.current += 1;
+			useShortcut("x", () => setCount((value) => value + 1), { description: "Increment" });
+			return (
+				<div>
+					<span data-testid="count">{count}</span>
+					<span data-testid="renders">{renders.current}</span>
+				</div>
+			);
+		};
+
+		render(
+			<ShortcutProvider>
+				<InlineShortcut />
+			</ShortcutProvider>,
+		);
+
+		fireEvent.keyDown(window, { key: "x" });
+		fireEvent.keyDown(window, { key: "x" });
+
+		expect(screen.getByTestId("count")).toHaveTextContent("2");
+		expect(Number(screen.getByTestId("renders").textContent)).toBeLessThan(6);
 	});
 });

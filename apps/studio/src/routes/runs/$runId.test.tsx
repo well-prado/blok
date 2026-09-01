@@ -47,6 +47,12 @@ vi.mock("@/lib/api", () => ({
 	fetchRuns: vi.fn(),
 }));
 
+// The shortcut contract does not need xyflow's layout engine. Keeping the
+// graph as a semantic test double avoids requiring ResizeObserver in JSDOM.
+vi.mock("@/components/trace/TraceGraph", () => ({
+	TraceGraph: () => <div data-testid="trace-graph">Graph</div>,
+}));
+
 import { useRunDetail } from "@/hooks/useRunDetail";
 
 // We need to mock useParams for the Route somehow, but Route.useParams is attached by TanStack Router.
@@ -96,20 +102,20 @@ describe("RunTracePage Shortcuts", () => {
 		renderWithProvider();
 
 		// Initially, active step should be rendered. Wait, node-3 is failed, so it selects node-3.
-		expect(screen.getByText("Step 3")).toBeInTheDocument(); // TraceGraph or ActiveStepPanel should render it.
+		expect(screen.getByRole("heading", { name: "Step 3" })).toBeInTheDocument();
 		// We'll just check if mode buttons get the active class.
-		const logsBtn = screen.getByText("Logs").closest("button");
+		const logsBtn = screen.getByRole("button", { name: /^Logs/ });
 		expect(logsBtn).not.toHaveClass("border-blok-green-500");
 
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", altKey: true }));
 		});
-		expect(screen.getByText("Logs").closest("button")).toHaveClass("border-blok-green-500");
+		expect(screen.getByRole("button", { name: /^Logs/ })).toHaveClass("border-blok-green-500");
 
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "2", altKey: true }));
 		});
-		expect(screen.getByText("Graph").closest("button")).toHaveClass("border-blok-green-500");
+		expect(screen.getByRole("button", { name: /^Graph/ })).toHaveClass("border-blok-green-500");
 	});
 
 	it("switches to step pane on escape", () => {
@@ -117,12 +123,12 @@ describe("RunTracePage Shortcuts", () => {
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "2", altKey: true }));
 		});
-		expect(screen.getByText("Graph").closest("button")).toHaveClass("border-blok-green-500");
+		expect(screen.getByRole("button", { name: /^Graph/ })).toHaveClass("border-blok-green-500");
 
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 		});
-		expect(screen.getByText("Active step").closest("button")).toHaveClass("border-blok-green-500");
+		expect(screen.getByRole("button", { name: /^Active step/ })).toHaveClass("border-blok-green-500");
 	});
 
 	it("navigates steps with j/k", () => {
@@ -136,13 +142,13 @@ describe("RunTracePage Shortcuts", () => {
 		});
 		// It should now select node-2. Let's see if there's a visual indication.
 		// The active step panel renders the node.
-		expect(screen.getByText("Step 2")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Step 2" })).toBeInTheDocument();
 
 		// Press 'j' to go next
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "j" }));
 		});
-		expect(screen.getByText("Step 3")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Step 3" })).toBeInTheDocument();
 	});
 
 	it("jumps to step N directly with 1-9", () => {
@@ -151,11 +157,11 @@ describe("RunTracePage Shortcuts", () => {
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "1" }));
 		});
-		expect(screen.getByText("Step 1")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Step 1" })).toBeInTheDocument();
 
 		act(() => {
 			window.dispatchEvent(new KeyboardEvent("keydown", { key: "2" }));
 		});
-		expect(screen.getByText("Step 2")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Step 2" })).toBeInTheDocument();
 	});
 });

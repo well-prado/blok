@@ -1,6 +1,6 @@
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import type React from "react";
 import { twMerge } from "tailwind-merge";
-import { useReducedMotion } from "../../hooks/useReducedMotion";
 
 interface AnimatingArrowProps extends React.SVGProps<SVGSVGElement> {
 	className?: string;

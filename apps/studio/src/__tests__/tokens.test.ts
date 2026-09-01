@@ -167,7 +167,7 @@ describe("token layer", () => {
 		// the class scan. `static` is the documented guarantee that they are emitted
 		// anyway. (Measured no-op at tailwind 4.3.3 — this pins the intent, not a
 		// current behaviour.)
-		expect(css.match(/^@theme static\s*\{/gm)?.length).toBe(3);
+		expect(css.match(/^@theme static\s*\{/gm)?.length).toBe(4);
 		expect(css).not.toMatch(/^@theme\s*\{/m);
 	});
 

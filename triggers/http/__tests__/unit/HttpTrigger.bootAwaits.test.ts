@@ -33,25 +33,17 @@ vi.mock("@hono/node-server", () => ({
 }));
 vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() }));
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
+vi.mock("../../src/runner/bootTimeout", () => ({
+	bounded: async (_promise: PromiseLike<unknown>, ms: number, what: string): Promise<never> => {
+		throw new Error(`${what} did not settle within ${ms}ms`);
+	},
+}));
 
 import { WorkflowRegistry } from "@blokjs/runner";
 import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
-/**
- * Fake timers make the 10s bound instant, but boot does REAL (unfaked) fs work
- * on the way to the awaits under test — so pump the clock until `listen()`
- * settles instead of advancing once: each step also yields to the real event
- * loop, letting boot get far enough to schedule the timer in the first place.
- * WITHOUT the bound nothing ever settles, the loop runs out, and the `await`
- * below hangs until the `it(...)` budget kills the test — which is the point.
- */
 async function runBoot(trigger: HttpTrigger): Promise<void> {
-	let settled = false;
-	const pending = trigger.listen().finally(() => {
-		settled = true;
-	});
-	for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(500);
-	await pending;
+	await trigger.listen();
 }
 
 describe("#873 · listen() bounds the foreign promises it awaits at boot", () => {
@@ -67,11 +59,9 @@ describe("#873 · listen() bounds the foreign promises it awaits at boot", () =>
 			errors.push(String(line));
 		});
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
-		vi.useRealTimers();
 		vi.restoreAllMocks();
 		// biome-ignore lint/performance/noDelete: restore literal absence, not the string "undefined"
 		delete process.env.BLOK_METRICS_DISABLED;

@@ -85,11 +85,12 @@ describe("RunsTable Shortcuts", () => {
 			</ShortcutProvider>,
 		);
 
-		// Press j twice to move to run-2 (index 1) then run-3 (index 2)
+		// With no initial cursor, the first j selects run-1 and the second run-2.
 		await user.keyboard("j");
 		await user.keyboard("j");
-		// Press k once to move back to run-2 (index 1)
+		// Exercise k, then return to run-2 before toggling it.
 		await user.keyboard("k");
+		await user.keyboard("j");
 
 		// Press x to toggle selection for run-2
 		await user.keyboard("x");

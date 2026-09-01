@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fsExtra from "fs-extra";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,14 +39,16 @@ describe("scaffolded package.json — no inherited license (#864)", () => {
 	});
 
 	async function scaffold(name: string, triggers: string) {
+		const uniqueName = `${name}-${randomUUID()}`;
+		const dir = path.join(process.cwd(), uniqueName);
+		// Track the directory before scaffolding so partial failures are also cleaned up.
+		created.push(dir);
 		setNonInteractive(true);
 		try {
-			await createProject({ name, triggers, packageManager: "npm" }, "0.0.0-test", false, REPO_ROOT);
+			await createProject({ name: uniqueName, triggers, packageManager: "npm" }, "0.0.0-test", false, REPO_ROOT);
 		} finally {
 			setNonInteractive(false);
 		}
-		const dir = path.join(process.cwd(), name);
-		created.push(dir);
 		return JSON.parse(fsExtra.readFileSync(path.join(dir, "package.json"), "utf8"));
 	}
 
