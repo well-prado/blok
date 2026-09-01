@@ -112,7 +112,7 @@ export type {
 	ApprovalContract,
 	AssertionGateContract,
 	EvidenceGateContract,
-	EvidenceRequirement,
+	EvidenceGateRequirement,
 	OutputTrust,
 	TrustedEvidence,
 } from "./EnforcementContracts";

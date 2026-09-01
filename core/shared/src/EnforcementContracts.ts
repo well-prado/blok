@@ -38,7 +38,7 @@ export interface AssertionGateContract {
 	readonly message?: string;
 }
 
-export interface EvidenceRequirement {
+export interface EvidenceGateRequirement {
 	readonly artifactId: string;
 	readonly artifactVersion: string;
 	readonly producerStepId: string;
@@ -46,7 +46,7 @@ export interface EvidenceRequirement {
 
 export interface EvidenceGateContract {
 	readonly version: typeof ENFORCEMENT_CONTRACT_VERSION;
-	readonly requirements: readonly EvidenceRequirement[];
+	readonly requirements: readonly EvidenceGateRequirement[];
 }
 
 export interface TrustedEvidence {
