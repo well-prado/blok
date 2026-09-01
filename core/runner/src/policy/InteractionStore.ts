@@ -6,6 +6,14 @@ import type {
 	PolicyRequest,
 } from "@blokjs/shared";
 import type { InteractionRequest, InteractionSuspensionPort } from "@blokjs/shared";
+import {
+	fingerprintInteractionPayload,
+	immutableInteractionSnapshot,
+	parseInteractionAnswer,
+	redactInteractionDecision,
+	redactInteractionPayload,
+	redactInteractionRequest,
+} from "@blokjs/shared";
 
 export class InteractionConflictError extends Error {
 	readonly code = "INTERACTION_CONFLICT";
@@ -29,24 +37,15 @@ export interface InteractionResumeRequest {
 	readonly sequence: number;
 }
 
-const MAX_ANSWER_BYTES = 64 * 1024;
 function clone<T>(value: T): T {
-	return structuredClone(value);
-}
-function assertBounded(answer: unknown): void {
-	let serialized: string;
-	try {
-		serialized = JSON.stringify(answer ?? null);
-	} catch {
-		throw new InteractionConflictError("interaction answer must be JSON-serializable");
-	}
-	if (serialized.length > MAX_ANSWER_BYTES) throw new InteractionConflictError("interaction answer is too large");
+	return immutableInteractionSnapshot(value);
 }
 function sameAnswer(record: InteractionRecord, answer: InteractionAnswer): boolean {
 	return (
 		record.answeredBy === answer.principalId &&
 		record.status === (answer.deny ? "denied" : "answered") &&
-		JSON.stringify(record.answer ?? null) === JSON.stringify(answer.answer ?? null)
+		fingerprintInteractionPayload(record.answer) ===
+			fingerprintInteractionPayload(answer.answer === undefined ? undefined : redactInteractionPayload(answer.answer))
 	);
 }
 
@@ -60,19 +59,25 @@ export class InMemoryInteractionStore implements InteractionStore {
 		opts?: { expiresAt?: string },
 	): Promise<InteractionRecord> {
 		const now = new Date().toISOString();
+		if (typeof request.requestId !== "string" || request.requestId.length === 0 || request.requestId.length > 256)
+			throw new InteractionConflictError("interaction request id is invalid");
+		const safeRequest = redactInteractionRequest(request);
+		const safeDecision = redactInteractionDecision(decision);
+		const expiresAt = opts?.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString();
+		if (!Number.isFinite(Date.parse(expiresAt))) throw new InteractionConflictError("interaction expiry is invalid");
 		const record: InteractionRecord = {
 			version: "1",
 			id: request.requestId,
-			request: clone(request),
-			decision: clone(decision),
+			request: safeRequest,
+			decision: safeDecision,
 			status: "pending",
 			createdAt: now,
-			expiresAt: opts?.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+			expiresAt,
 			sequence: 0,
 			suspension: request.suspension ? clone(request.suspension) : undefined,
 		};
 		if (this.records.has(record.id)) throw new InteractionConflictError("interaction already exists");
-		this.records.set(record.id, record);
+		this.records.set(record.id, clone(record));
 		return clone(record);
 	}
 
@@ -82,33 +87,40 @@ export class InMemoryInteractionStore implements InteractionStore {
 	}
 
 	async answer(answer: InteractionAnswer): Promise<InteractionRecord> {
-		assertBounded(answer.answer);
-		const record = this.records.get(answer.id);
+		let parsed: InteractionAnswer;
+		try {
+			parsed = parseInteractionAnswer(answer);
+		} catch (error) {
+			throw new InteractionConflictError(error instanceof Error ? error.message : "invalid interaction answer");
+		}
+		const record = this.records.get(parsed.id);
 		if (!record) throw new InteractionConflictError("interaction not found");
 		if (record.status !== "pending") {
-			if (sameAnswer(record, answer)) return clone(record);
+			if (sameAnswer(record, parsed)) return clone(record);
 			throw new InteractionConflictError("interaction is already resolved");
 		}
-		if (record.request.principal?.id !== answer.principalId)
+		if (record.request.principal?.id !== parsed.principalId)
 			throw new InteractionAuthorizationError("interaction answer principal does not match the request");
-		if (record.sequence !== answer.sequence) throw new InteractionConflictError("interaction sequence mismatch");
+		if (record.sequence !== parsed.sequence) throw new InteractionConflictError("interaction sequence mismatch");
 		if (Date.parse(record.expiresAt) <= Date.now()) {
 			const expired = { ...record, status: "expired" as const, sequence: record.sequence + 1 };
-			this.records.set(record.id, expired);
+			this.records.set(record.id, clone(expired));
 			throw new InteractionConflictError("interaction has expired");
 		}
+		const safeAnswer = parsed.answer === undefined ? undefined : redactInteractionPayload(parsed.answer);
 		const resolved: InteractionRecord = {
 			...record,
-			status: answer.deny ? "denied" : "answered",
-			answer: clone(answer.answer),
-			answeredBy: answer.principalId,
+			status: parsed.deny ? "denied" : "answered",
+			...(safeAnswer === undefined ? {} : { answer: safeAnswer }),
+			answeredBy: parsed.principalId,
 			answeredAt: new Date().toISOString(),
 			sequence: record.sequence + 1,
 		};
-		this.records.set(record.id, resolved);
+		this.records.set(record.id, clone(resolved));
 		return clone(resolved);
 	}
 
+	/** Atomically fence one resume consumer without changing the answered status. */
 	async claim(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
 		const record = this.records.get(id);
 		if (!record) throw new InteractionConflictError("interaction not found");
@@ -116,6 +128,7 @@ export class InMemoryInteractionStore implements InteractionStore {
 			throw new InteractionAuthorizationError("interaction claim principal does not match the request");
 		if (record.status !== "answered")
 			throw new InteractionConflictError(`interaction cannot resume from status ${record.status}`);
+		if (record.claimedBy !== undefined) throw new InteractionConflictError("interaction has already been claimed");
 		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
 		if (Date.parse(record.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
 		const claimed: InteractionRecord = {
@@ -124,29 +137,30 @@ export class InMemoryInteractionStore implements InteractionStore {
 			claimedAt: new Date().toISOString(),
 			sequence: record.sequence + 1,
 		};
-		this.records.set(id, claimed);
+		this.records.set(id, clone(claimed));
 		return clone(claimed);
 	}
 
 	async cancel(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
 		const record = this.records.get(id);
 		if (!record) throw new InteractionConflictError("interaction not found");
-		if (record.status !== "pending") return clone(record);
 		if (record.request.principal?.id !== principalId)
 			throw new InteractionAuthorizationError("interaction cancel principal does not match the request");
+		if (record.status !== "pending") return clone(record);
 		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
 		const cancelled = { ...record, status: "cancelled" as const, sequence: record.sequence + 1 };
-		this.records.set(id, cancelled);
+		this.records.set(id, clone(cancelled));
 		return clone(cancelled);
 	}
 
 	async expire(now = new Date().toISOString()): Promise<readonly InteractionRecord[]> {
 		const timestamp = Date.parse(now);
+		if (!Number.isFinite(timestamp)) throw new InteractionConflictError("interaction expiry timestamp is invalid");
 		const expired: InteractionRecord[] = [];
 		for (const record of this.records.values()) {
 			if (record.status === "pending" && Date.parse(record.expiresAt) <= timestamp) {
 				const next = { ...record, status: "expired" as const, sequence: record.sequence + 1 };
-				this.records.set(record.id, next);
+				this.records.set(record.id, clone(next));
 				expired.push(clone(next));
 			}
 		}

@@ -26,6 +26,17 @@ returns a control signal. It never waits on a process-local promise. Durable
 approval persistence and UI are the responsibility of issue #918. A missing
 port is a denial.
 
+The shared interaction contract accepts only bounded JSON answers (64 KiB
+total, bounded depth/items/string size), rejects circular/non-JSON values, and
+deep-freezes snapshots. Expiry, cancellation, sequence mismatches, duplicate
+answers, and principal mismatches are terminal/conflict checks at the durable
+store boundary. Runtime-only signals are not persisted. Interaction records
+carry optional root/parent/branch lineage so parallel and nested approvals are
+attributable without granting a child additional authority. An answered record
+is consumed for resume by one atomic claim (`claimedBy`/`claimedAt` plus a
+sequence advance); the claim does not change the answer status, and later
+claims are rejected.
+
 `require-sandbox` accepts only a verifier-approved attestation bound to the
 principal, session, workflow, step, requested effects, profile, policy decision,
 and validity window. A boolean `sandboxed` flag is not an attestation.
@@ -37,6 +48,10 @@ effect was undone. Events contain correlation and attribution identifiers,
 decision/rule metadata, cache-versus-execution state, outcome and duration.
 Secret-like values, headers, arbitrary inputs/outputs, credentials, stacks, and
 unbounded errors are not persisted; redaction and truncation are explicit.
+Interaction snapshots apply the same boundary rule to request fragments,
+decision text, and answer payloads, replacing sensitive fields with
+`[REDACTED]` before records are available to audit, session, or trace-facing
+consumers.
 
 Desktop and cloud hosts can provide their own `PolicyProvider`, `AuditSink`,
 `InteractionSuspensionPort`, and sandbox verifier. Tests can use the exported

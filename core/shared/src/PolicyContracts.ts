@@ -13,6 +13,28 @@ export interface TurnIdentity {
 	readonly id: string;
 	readonly index?: number;
 }
+/**
+ * Bounded lineage for policy and interaction records.
+ *
+ * The runner may execute a policy request from a nested workflow or a
+ * parallel branch. Keeping this metadata on the request means a control-plane
+ * consumer can attribute an answer without inferring ownership from a step
+ * name (which is only unique within one workflow definition).
+ */
+export interface InteractionAttribution {
+	/** Stable root execution/session lineage identifier. */
+	readonly rootId: string;
+	/** Parent run, workflow, or interaction identifier when nested. */
+	readonly parentId?: string;
+	/** Stable branch/child identifier for parallel or delegated work. */
+	readonly branchId?: string;
+	/** Zero-based branch position, when the parent fan-out has an index. */
+	readonly branchIndex?: number;
+	/** Ordered, bounded path of nested workflow/branch labels. */
+	readonly branchPath?: readonly string[];
+	/** Nesting depth; root executions use zero. */
+	readonly depth: number;
+}
 export interface WorkflowIdentity {
 	readonly name: string;
 	readonly version?: string;
@@ -68,6 +90,7 @@ export interface PolicyContext {
 	readonly principal?: PrincipalIdentity;
 	readonly session?: SessionIdentity;
 	readonly turn?: TurnIdentity;
+	readonly attribution?: InteractionAttribution;
 	readonly workflow: WorkflowIdentity;
 	readonly step: StepIdentity;
 	readonly manifest: CapabilityManifestV1 | null;
@@ -111,6 +134,7 @@ export interface AuditEventBase {
 	readonly layers: readonly PolicyLayer[];
 	readonly matchedRules: readonly PolicyRuleMatch[];
 	readonly decision: PolicyDecision;
+	readonly attribution?: InteractionAttribution;
 	readonly sandbox: { required: boolean; verified: boolean };
 	readonly cached: boolean;
 	readonly redaction: AuditRedactionState;

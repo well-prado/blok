@@ -63,8 +63,12 @@ describe("SqliteInteractionStore", () => {
 	it("returns immutable snapshots and makes exact duplicate answers idempotent", async () => {
 		const db = createStore();
 		const created = await db.create(request, decision);
-		(created.request as { workflow: { name: string } }).workflow.name = "mutated";
-		(created.decision as { id: string }).id = "mutated";
+		expect(() => {
+			(created.request as { workflow: { name: string } }).workflow.name = "mutated";
+		}).toThrow(TypeError);
+		expect(() => {
+			(created.decision as { id: string }).id = "mutated";
+		}).toThrow(TypeError);
 		const stored = await db.get(request.requestId);
 		expect(stored?.request.workflow.name).toBe("approval-test");
 		expect(stored?.decision.id).toBe("decision-1");
@@ -73,7 +77,9 @@ describe("SqliteInteractionStore", () => {
 		const first = await db.answer(answer);
 		const duplicate = await db.answer(answer);
 		expect(duplicate).toEqual(first);
-		(duplicate.request as { workflow: { name: string } }).workflow.name = "mutated-again";
+		expect(() => {
+			(duplicate.request as { workflow: { name: string } }).workflow.name = "mutated-again";
+		}).toThrow(TypeError);
 		expect((await db.get(request.requestId))?.request.workflow.name).toBe("approval-test");
 	});
 

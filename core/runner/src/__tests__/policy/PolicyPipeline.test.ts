@@ -261,4 +261,54 @@ describe("runner policy boundary", () => {
 		expect(seen).toEqual([persisted]);
 		expect(seen[0]).toBe(persisted);
 	});
+	it("redacts provider-controlled decision text before audit snapshots", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const audit = new InMemoryAuditSink();
+		const ctx = context("effect", { value: "x" });
+		installPolicyExecution(ctx, {
+			principal: { id: "principal-1", kind: "test" },
+			session: { id: "session-1" },
+			turn: { id: "turn-1" },
+			attribution: {
+				rootId: "run-root",
+				parentId: "run-parent",
+				branchId: "branch-1",
+				branchIndex: 1,
+				branchPath: ["parallel", "nested"],
+				depth: 2,
+			},
+			policyVersion: "test-v1",
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: {
+					kind: "allow",
+					id: "decision-1",
+					reasonCode: "policy-secret: raw-secret",
+					reason: "password=raw-password",
+					policyVersion: "test-v1",
+				},
+				matchedRules: [{ layer: "deployment", ruleId: "rule-1" }],
+			})),
+			auditSink: audit,
+		});
+		await new Runner([node]).run(ctx);
+		const serialized = JSON.stringify(audit.read());
+		expect(serialized).not.toContain("raw-secret");
+		expect(serialized).not.toContain("raw-password");
+		expect(audit.read()[0]?.redaction.redacted).toBe(true);
+		expect(Object.isFrozen(audit.read()[0])).toBe(true);
+		expect(audit.read()[0]?.attribution).toEqual({
+			rootId: "run-root",
+			parentId: "run-parent",
+			branchId: "branch-1",
+			branchIndex: 1,
+			branchPath: ["parallel", "nested"],
+			depth: 2,
+		});
+	});
 });
