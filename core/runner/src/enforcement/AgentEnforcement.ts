@@ -3,7 +3,7 @@ import {
 	type AssertionGateContract,
 	EnforcementViolationError,
 	type EvidenceGateContract,
-	type EvidenceRequirement,
+	type EvidenceGateRequirement,
 	type NodeBase,
 	type TrustedEvidence,
 } from "@blokjs/shared";
@@ -111,7 +111,7 @@ function parseEvidence(value: unknown): TrustedEvidence[] {
 	return value.evidence.filter(isTrustedEvidence);
 }
 
-function matchesEvidence(evidence: TrustedEvidence, requirement: EvidenceRequirement): boolean {
+function matchesEvidence(evidence: TrustedEvidence, requirement: EvidenceGateRequirement): boolean {
 	return (
 		evidence.artifact.id === requirement.artifactId &&
 		evidence.artifact.version === requirement.artifactVersion &&
