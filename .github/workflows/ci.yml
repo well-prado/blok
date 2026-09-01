@@ -1,9 +1,10 @@
 name: CI
 
-# The single CI workflow. Runs ONLY on merge to main — pull requests do not
-# trigger it. Run the gates locally before merging (`bun run ci:fast`,
-# `bun run ci:packaging`, `bash tests/e2e/scaffold-smoke/combos.sh`); main is
-# where they're enforced.
+# The single CI workflow. Pull requests prove the merge candidate before it
+# reaches main; the push trigger verifies the exact merged commit as a final
+# backstop. Run the focused local gates first (`bun run ci:fast`,
+# `bun run ci:packaging`, `bash tests/e2e/scaffold-smoke/combos.sh`) so hosted
+# CI remains confirmation rather than the first feedback loop.
 #
 # Consolidated from six separate workflows (integration, cross-runtime,
 # packaging, scaffold-smoke, no-dollar-proxy, no-legacy-expr) so a merge
@@ -22,6 +23,8 @@ name: CI
 # belongs to the publish lifecycle, not to merges.
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
