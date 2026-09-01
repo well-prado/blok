@@ -27,6 +27,10 @@ as repository, task kind, path, label, tenant, or environment. The runtime
 validates every transition. A model-produced statement is never accepted as
 proof that a deterministic check ran.
 
+The language-neutral H1-03 contract for these profiles, binding inputs, trusted
+workflow references, pinned run identities, and guided override events is
+defined in [h1-03-enforcement-profiles-and-binding.md](../h1-03-enforcement-profiles-and-binding.md).
+
 ## Consequences
 
 - The model cannot choose to skip a required step.
