@@ -15,6 +15,20 @@ export class InteractionAuthorizationError extends Error {
 	readonly code = "INTERACTION_UNAUTHORIZED";
 }
 
+export type InteractionReauthorize = (request: PolicyRequest) => void | Promise<void>;
+
+export type InteractionResumeCallback = (input: {
+	readonly request: PolicyRequest;
+	readonly answer: unknown;
+	readonly interaction: InteractionRecord;
+}) => void | Promise<void>;
+
+export interface InteractionResumeRequest {
+	readonly id: string;
+	readonly principalId: string;
+	readonly sequence: number;
+}
+
 const MAX_ANSWER_BYTES = 64 * 1024;
 function clone<T>(value: T): T {
 	return structuredClone(value);
@@ -31,6 +45,7 @@ function assertBounded(answer: unknown): void {
 function sameAnswer(record: InteractionRecord, answer: InteractionAnswer): boolean {
 	return (
 		record.answeredBy === answer.principalId &&
+		record.status === (answer.deny ? "denied" : "answered") &&
 		JSON.stringify(record.answer ?? null) === JSON.stringify(answer.answer ?? null)
 	);
 }
@@ -93,6 +108,25 @@ export class InMemoryInteractionStore implements InteractionStore {
 		return clone(resolved);
 	}
 
+	async claim(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
+		const record = this.records.get(id);
+		if (!record) throw new InteractionConflictError("interaction not found");
+		if (record.request.principal?.id !== principalId)
+			throw new InteractionAuthorizationError("interaction claim principal does not match the request");
+		if (record.status !== "answered")
+			throw new InteractionConflictError(`interaction cannot resume from status ${record.status}`);
+		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
+		if (Date.parse(record.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
+		const claimed: InteractionRecord = {
+			...record,
+			claimedBy: principalId,
+			claimedAt: new Date().toISOString(),
+			sequence: record.sequence + 1,
+		};
+		this.records.set(id, claimed);
+		return clone(claimed);
+	}
+
 	async cancel(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
 		const record = this.records.get(id);
 		if (!record) throw new InteractionConflictError("interaction not found");
@@ -116,6 +150,40 @@ export class InMemoryInteractionStore implements InteractionStore {
 			}
 		}
 		return expired;
+	}
+}
+
+/**
+ * Coordinates the control-plane half of an interaction resume.
+ *
+ * The coordinator deliberately knows nothing about Runner or RunnerSteps.
+ * The caller supplies the policy re-authorizer and the continuation that owns
+ * context/cursor rehydration. The store claim is the single-consumer fence;
+ * a failed or concurrent second resume therefore cannot invoke the callback.
+ */
+export class InteractionResumeCoordinator {
+	constructor(
+		private readonly store: InteractionStore,
+		private readonly reauthorize: InteractionReauthorize,
+	) {}
+
+	async resume(input: InteractionResumeRequest, callback: InteractionResumeCallback): Promise<InteractionRecord> {
+		const record = await this.store.get(input.id);
+		if (!record) throw new InteractionConflictError("interaction not found");
+		if (record.request.principal?.id !== input.principalId)
+			throw new InteractionAuthorizationError("interaction resume principal does not match the request");
+		if (record.status !== "answered")
+			throw new InteractionConflictError(`interaction cannot resume from status ${record.status}`);
+		if (record.sequence !== input.sequence) throw new InteractionConflictError("interaction sequence mismatch");
+		if (Date.parse(record.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
+
+		// Re-authorize the immutable request before claiming the answer. This
+		// permits a policy change to reject without consuming the answer, while
+		// the subsequent atomic claim still fences concurrent resume attempts.
+		await this.reauthorize(record.request);
+		const claimed = await this.store.claim(input.id, input.principalId, input.sequence);
+		await callback({ request: claimed.request, answer: claimed.answer, interaction: claimed });
+		return claimed;
 	}
 }
 

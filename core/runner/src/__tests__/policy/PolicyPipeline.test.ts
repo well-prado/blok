@@ -1,4 +1,4 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, PolicyRequest } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import Runner from "../../Runner";
@@ -8,6 +8,7 @@ import {
 	InMemoryPolicyProvider,
 	PolicyDeniedError,
 	installPolicyExecution,
+	reauthorizePolicyRequest,
 } from "../../policy/PolicyPipeline";
 
 const manifest = {
@@ -114,5 +115,37 @@ describe("runner policy boundary", () => {
 		installPolicyExecution(agent, policy(true, new InMemoryAuditSink()));
 		await expect(new Runner([node]).run(agent)).rejects.toThrow(/eligible manifest/);
 		expect(calls).toBe(1);
+	});
+
+	it("re-authorizes the exact persisted policy request", async () => {
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		const seen: PolicyRequest[] = [];
+		const persisted: PolicyRequest = {
+			requestId: "persisted-interaction",
+			origin: "agent",
+			principal: { id: "principal-1", kind: "test" },
+			session: { id: "session-1" },
+			turn: { id: "turn-1" },
+			workflow: { name: "policy-test" },
+			step: { id: "effect", attempt: 1 },
+			manifest,
+			scope: { effects: ["network"], capabilities: ["network.test"], secrets: [], fragments: {} },
+			layers: [{ name: "deployment", version: "test-v1" }],
+		};
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async (request) => {
+				seen.push(request);
+				return {
+					decision: { kind: "allow", id: "decision-2", reasonCode: "still-allowed", policyVersion: "test-v1" },
+					matchedRules: [],
+				};
+			}),
+		});
+
+		await reauthorizePolicyRequest(ctx, persisted);
+		expect(seen).toEqual([persisted]);
+		expect(seen[0]).toBe(persisted);
 	});
 });

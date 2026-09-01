@@ -15,6 +15,9 @@ export interface InteractionRecord {
 	readonly answer?: unknown;
 	readonly answeredBy?: string;
 	readonly answeredAt?: string;
+	/** Set when the answered record is atomically claimed for resumption. */
+	readonly claimedBy?: string;
+	readonly claimedAt?: string;
 }
 
 export interface InteractionAnswer {
@@ -29,6 +32,12 @@ export interface InteractionStore {
 	create(request: PolicyRequest, decision: PolicyDecision, opts?: { expiresAt?: string }): Promise<InteractionRecord>;
 	get(id: string): Promise<InteractionRecord | undefined>;
 	answer(answer: InteractionAnswer): Promise<InteractionRecord>;
+	/**
+	 * Atomically consume an answered interaction for one resume attempt.
+	 * Implementations must compare both the principal and expected sequence
+	 * in the same transaction as the claim.
+	 */
+	claim(id: string, principalId: string, sequence: number): Promise<InteractionRecord>;
 	cancel(id: string, principalId: string, sequence: number): Promise<InteractionRecord>;
 	expire(now?: string): Promise<readonly InteractionRecord[]>;
 }
