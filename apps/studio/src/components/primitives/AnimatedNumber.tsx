@@ -1,3 +1,4 @@
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 
@@ -5,18 +6,6 @@ type AnimatedNumberProps = Omit<React.ComponentPropsWithRef<"span">, "children">
 	value: number;
 	format?: (value: number) => React.ReactNode;
 };
-
-function useReducedMotion() {
-	const [reduced, setReduced] = useState(false);
-	useEffect(() => {
-		const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-		setReduced(mql.matches);
-		const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
-		mql.addEventListener("change", handler);
-		return () => mql.removeEventListener("change", handler);
-	}, []);
-	return reduced;
-}
 
 export function AnimatedNumber({ value, format, className, ...props }: AnimatedNumberProps) {
 	const [displayValue, setDisplayValue] = useState(value);

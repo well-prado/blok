@@ -418,7 +418,7 @@ export function RunsTable({
 										className="text-left px-3 py-2 text-xs font-medium text-zinc-500 uppercase tracking-wider"
 										style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }}
 									>
-										{header.isPlaceholder ? null : (
+										{header.isPlaceholder ? null : header.column.getCanSort() ? (
 											<button
 												type="button"
 												className="flex items-center gap-1 hover:text-zinc-300 transition-colors"
@@ -427,6 +427,8 @@ export function RunsTable({
 												{flexRender(header.column.columnDef.header, header.getContext())}
 												<ArrowUpDown className="w-3 h-3" />
 											</button>
+										) : (
+											flexRender(header.column.columnDef.header, header.getContext())
 										)}
 									</th>
 								))}
