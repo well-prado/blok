@@ -1,13 +1,16 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, PolicyRequest } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import Runner from "../../Runner";
 import { defineNode } from "../../defineNode";
+import { DurableInteractionPort, InMemoryInteractionStore } from "../../policy/InteractionStore";
 import {
 	InMemoryAuditSink,
 	InMemoryPolicyProvider,
 	PolicyDeniedError,
+	PolicyInteractionRequiredError,
 	installPolicyExecution,
+	reauthorizePolicyRequest,
 } from "../../policy/PolicyPipeline";
 
 const manifest = {
@@ -96,6 +99,117 @@ describe("runner policy boundary", () => {
 		expect(calls).toBe(0);
 	});
 
+	it("persists an ask before the typed control signal escapes", async () => {
+		let calls = 0;
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => {
+				calls += 1;
+				return { ok: true };
+			},
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		const store = new InMemoryInteractionStore();
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [{ layer: "deployment", ruleId: "ask-test" }],
+			})),
+			interaction: new DurableInteractionPort(store),
+		});
+
+		let requestId = "";
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			expect(error).toBeInstanceOf(PolicyInteractionRequiredError);
+			requestId = (error as PolicyInteractionRequiredError).requestId;
+		}
+		expect(calls).toBe(0);
+		const records = await store.get(requestId);
+		expect(records).toMatchObject({
+			status: "pending",
+			request: { requestId },
+			decision: { kind: "ask", id: "decision-ask" },
+		});
+	});
+
+	it("does not emit the typed signal when interaction persistence fails", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [],
+			})),
+			interaction: {
+				suspend: async () => {
+					throw new Error("interaction store unavailable");
+				},
+			},
+		});
+
+		let thrown: unknown;
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toContain("interaction store unavailable");
+		expect(thrown).not.toBeInstanceOf(PolicyInteractionRequiredError);
+	});
+
+	it("withholds the typed signal when a port fails after recording", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		let persisted = false;
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [],
+			})),
+			interaction: {
+				suspend: async () => {
+					persisted = true;
+					throw new Error("interaction acknowledgement failed");
+				},
+			},
+		});
+
+		let thrown: unknown;
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(persisted).toBe(true);
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toContain("interaction acknowledgement failed");
+		expect(thrown).not.toBeInstanceOf(PolicyInteractionRequiredError);
+	});
+
 	it("fails closed for a missing manifest while preserving ordinary compatibility", async () => {
 		let calls = 0;
 		const node = defineNode({
@@ -114,5 +228,87 @@ describe("runner policy boundary", () => {
 		installPolicyExecution(agent, policy(true, new InMemoryAuditSink()));
 		await expect(new Runner([node]).run(agent)).rejects.toThrow(/eligible manifest/);
 		expect(calls).toBe(1);
+	});
+
+	it("re-authorizes the exact persisted policy request", async () => {
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		const seen: PolicyRequest[] = [];
+		const persisted: PolicyRequest = {
+			requestId: "persisted-interaction",
+			origin: "agent",
+			principal: { id: "principal-1", kind: "test" },
+			session: { id: "session-1" },
+			turn: { id: "turn-1" },
+			workflow: { name: "policy-test" },
+			step: { id: "effect", attempt: 1 },
+			manifest,
+			scope: { effects: ["network"], capabilities: ["network.test"], secrets: [], fragments: {} },
+			layers: [{ name: "deployment", version: "test-v1" }],
+		};
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async (request) => {
+				seen.push(request);
+				return {
+					decision: { kind: "allow", id: "decision-2", reasonCode: "still-allowed", policyVersion: "test-v1" },
+					matchedRules: [],
+				};
+			}),
+		});
+
+		await reauthorizePolicyRequest(ctx, persisted);
+		expect(seen).toEqual([persisted]);
+		expect(seen[0]).toBe(persisted);
+	});
+	it("redacts provider-controlled decision text before audit snapshots", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const audit = new InMemoryAuditSink();
+		const ctx = context("effect", { value: "x" });
+		installPolicyExecution(ctx, {
+			principal: { id: "principal-1", kind: "test" },
+			session: { id: "session-1" },
+			turn: { id: "turn-1" },
+			attribution: {
+				rootId: "run-root",
+				parentId: "run-parent",
+				branchId: "branch-1",
+				branchIndex: 1,
+				branchPath: ["parallel", "nested"],
+				depth: 2,
+			},
+			policyVersion: "test-v1",
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: {
+					kind: "allow",
+					id: "decision-1",
+					reasonCode: "policy-secret: raw-secret",
+					reason: "password=raw-password",
+					policyVersion: "test-v1",
+				},
+				matchedRules: [{ layer: "deployment", ruleId: "rule-1" }],
+			})),
+			auditSink: audit,
+		});
+		await new Runner([node]).run(ctx);
+		const serialized = JSON.stringify(audit.read());
+		expect(serialized).not.toContain("raw-secret");
+		expect(serialized).not.toContain("raw-password");
+		expect(audit.read()[0]?.redaction.redacted).toBe(true);
+		expect(Object.isFrozen(audit.read()[0])).toBe(true);
+		expect(audit.read()[0]?.attribution).toEqual({
+			rootId: "run-root",
+			parentId: "run-parent",
+			branchId: "branch-1",
+			branchIndex: 1,
+			branchPath: ["parallel", "nested"],
+			depth: 2,
+		});
 	});
 });

@@ -2,6 +2,8 @@ import {
 	type AuditSink,
 	CapabilityManifestError,
 	type Context,
+	type InteractionAttribution,
+	type InteractionSuspension,
 	type InteractionSuspensionPort,
 	type NodeBase,
 	type PolicyEvaluationResult,
@@ -26,8 +28,13 @@ import {
 	type TurnIdentity,
 	type WorkflowIdentity,
 	assessCapabilityManifest,
+	immutableInteractionSnapshot,
+	redactInteractionDecision,
+	redactInteractionRequest,
+	redactInteractionString,
 } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
+import { RunTracker } from "../tracing/RunTracker";
 
 export interface SandboxVerifier {
 	verify(attestation: SandboxAttestation, request: PolicyRequest): Promise<boolean>;
@@ -43,6 +50,7 @@ export interface PolicyExecutionOptions {
 	sandboxVerifier?: SandboxVerifier;
 	layers?: readonly PolicyLayer[];
 	secretResolver?: SecretResolver;
+	attribution?: InteractionAttribution;
 }
 interface PolicyState extends PolicyExecutionOptions {
 	origin: "agent";
@@ -70,7 +78,10 @@ export class PolicyDeniedError extends Error {
 }
 export class PolicyInteractionRequiredError extends Error {
 	readonly code = "POLICY_INTERACTION_REQUIRED";
-	constructor(public readonly requestId: string) {
+	constructor(
+		public readonly requestId: string,
+		public readonly suspension?: InteractionSuspension,
+	) {
 		super(`Policy interaction required: ${requestId}`);
 		this.name = "PolicyInteractionRequiredError";
 	}
@@ -137,18 +148,44 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 	const state = states.get(ctx);
 	if (!state) throw new PolicyDeniedError("missing-security-state");
 	const workflow: WorkflowIdentity = { name: ctx.workflow_name ?? "<unknown>" };
+	const ctxRecord = ctx as Record<string, unknown>;
+	const traceRunId = typeof ctxRecord._traceRunId === "string" ? ctxRecord._traceRunId : undefined;
+	const stepInfo = ctxRecord._stepInfo as { index?: unknown; depth?: unknown } | undefined;
+	const stepIndex = typeof stepInfo?.index === "number" ? stepInfo.index : undefined;
+	const run = traceRunId ? RunTracker.getInstance().getRun(traceRunId) : undefined;
+	const suspension: InteractionSuspension | undefined =
+		traceRunId && stepIndex !== undefined
+			? {
+					runId: traceRunId,
+					status: "suspended",
+					step: { id: node.name, index: stepIndex, attempt },
+					cursor: {
+						stepIndex,
+						deep: typeof stepInfo?.depth === "number" && stepInfo.depth > 0,
+						nodeRunId: typeof ctxRecord._traceNodeId === "string" ? ctxRecord._traceNodeId : undefined,
+						lastCompletedStepIndex: run?.lastCompletedStepIndex,
+					},
+					trace: {
+						workflow,
+						parentRunId: run?.parentRunId,
+						parentNodeRunId: run?.parentNodeRunId,
+					},
+				}
+			: undefined;
 	return {
 		requestId: uuid(),
 		origin: "agent",
 		principal: state.principal,
 		session: state.session,
 		turn: state.turn,
+		...(state.attribution ? { attribution: state.attribution } : {}),
 		workflow,
 		step: { id: node.name, attempt },
 		manifest: node.capabilityManifest ?? null,
 		scope: scopeFor(node),
 		layers: state.layers ?? [],
 		signal,
+		...(suspension ? { suspension } : {}),
 	};
 }
 function bounded(value: string | undefined, max = 256): string | undefined {
@@ -161,30 +198,34 @@ function auditBase(
 	cached: boolean,
 	type: "policy.pre" | "policy.post",
 ) {
+	const safeRequest = redactInteractionRequest(request);
+	const safeDecision = redactInteractionDecision(result.decision);
 	return {
 		version: "1" as const,
 		eventType: type,
 		eventId: uuid(),
 		timestamp: new Date().toISOString(),
 		correlationId,
-		decisionId: result.decision.id,
-		principalId: request.principal?.id,
-		sessionId: request.session?.id,
-		turnId: request.turn?.id,
-		workflow: request.workflow,
-		step: request.step,
-		attempt: request.step.attempt ?? 1,
-		manifest: request.manifest,
-		scope: request.scope,
-		layers: request.layers,
-		matchedRules: result.matchedRules
-			.slice(0, 32)
-			.map((rule: PolicyRuleMatch) => ({ ...rule, ruleId: bounded(rule.ruleId) })),
+		decisionId: safeDecision.id,
+		principalId: safeRequest.principal?.id,
+		sessionId: safeRequest.session?.id,
+		turnId: safeRequest.turn?.id,
+		workflow: safeRequest.workflow,
+		step: safeRequest.step,
+		attempt: safeRequest.step.attempt ?? 1,
+		manifest: safeRequest.manifest,
+		scope: safeRequest.scope,
+		layers: safeRequest.layers,
+		matchedRules: result.matchedRules.slice(0, 32).map((rule: PolicyRuleMatch) => ({
+			...rule,
+			ruleId: redactInteractionString(bounded(rule.ruleId) ?? "unknown"),
+		})),
 		decision: {
-			...result.decision,
-			reason: bounded(result.decision.reason),
-			reasonCode: bounded(result.decision.reasonCode) ?? "unknown",
+			...safeDecision,
+			reason: bounded(safeDecision.reason),
+			reasonCode: bounded(safeDecision.reasonCode) ?? "unknown",
 		},
+		...(safeRequest.attribution ? { attribution: safeRequest.attribution } : {}),
 		sandbox: {
 			required: result.decision.kind === "require-sandbox",
 			verified: result.decision.kind !== "require-sandbox",
@@ -261,8 +302,13 @@ export async function authorizeStep(
 		throw new PolicyDeniedError(result.decision.reasonCode, result.decision.reason ?? result.decision.reasonCode);
 	if (result.decision.kind === "ask") {
 		if (!state.interaction) throw new PolicyDeniedError("missing-interaction-port");
-		await state.interaction.suspend({ id: request.requestId, decision: result.decision, request });
-		throw new PolicyInteractionRequiredError(request.requestId);
+		await state.interaction.suspend({
+			id: request.requestId,
+			decision: result.decision,
+			request,
+			suspension: request.suspension,
+		});
+		throw new PolicyInteractionRequiredError(request.requestId, request.suspension);
 	}
 	if (result.decision.kind === "require-sandbox") {
 		if (!result.sandbox || !state.sandboxVerifier || !(await state.sandboxVerifier.verify(result.sandbox, request)))
@@ -271,6 +317,77 @@ export async function authorizeStep(
 	if (ctx.signal?.aborted) throw new PolicyDeniedError("cancelled");
 	if (request.scope.secrets.length > 0) authorizedSecrets.set(ctx, new Set(request.scope.secrets));
 	return { request, result, correlationId, startedAt: performance.now(), cached };
+}
+
+/**
+ * Re-authorize a persisted interaction request without manufacturing a new
+ * request id or changing its policy scope. Control-plane resume code injects
+ * this function into InteractionResumeCoordinator before it invokes the
+ * continuation that owns workflow/cursor rehydration.
+ */
+export async function reauthorizePolicyRequest(ctx: Context, request: PolicyRequest): Promise<void> {
+	const state = states.get(ctx);
+	if (!state) throw new PolicyDeniedError("missing-security-state");
+	if (request.origin !== "agent") throw new PolicyDeniedError("invalid-interaction-origin");
+	if (request.principal?.id !== state.principal.id) throw new PolicyDeniedError("interaction-principal-mismatch");
+	if (request.session?.id !== state.session.id) throw new PolicyDeniedError("interaction-session-mismatch");
+	if (request.turn?.id !== state.turn.id) throw new PolicyDeniedError("interaction-turn-mismatch");
+	if (request.workflow.name !== (ctx.workflow_name ?? "<unknown>"))
+		throw new PolicyDeniedError("interaction-workflow-mismatch");
+	if (ctx.signal?.aborted || request.signal?.aborted) throw new PolicyDeniedError("cancelled");
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let abortHandler: (() => void) | undefined;
+	const cancellation = new Promise<never>((_, reject) => {
+		const signal = ctx.signal ?? request.signal;
+		if (signal?.aborted) reject(new PolicyDeniedError("cancelled"));
+		else if (signal) {
+			abortHandler = () => reject(new PolicyDeniedError("cancelled"));
+			signal.addEventListener("abort", abortHandler, { once: true });
+		}
+	});
+	let result: PolicyEvaluationResult;
+	try {
+		result = await Promise.race([
+			state.provider.evaluate(request),
+			cancellation,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new PolicyDeniedError("policy-timeout")), 5000);
+			}),
+		]);
+	} catch (error) {
+		throw error instanceof PolicyDeniedError ? error : new PolicyDeniedError("policy-provider-failure");
+	} finally {
+		if (timer) clearTimeout(timer);
+		if (abortHandler) (ctx.signal ?? request.signal)?.removeEventListener("abort", abortHandler);
+	}
+	if (
+		!result ||
+		!result.decision ||
+		result.decision.policyVersion !== state.policyVersion ||
+		!["allow", "deny", "ask", "require-sandbox"].includes(result.decision.kind) ||
+		!result.decision.id ||
+		!result.decision.reasonCode
+	) {
+		throw new PolicyDeniedError("malformed-policy-result");
+	}
+	const correlationId = uuid();
+	try {
+		await state.auditSink.append(
+			auditBase(request, result, correlationId, false, "policy.pre") as PreExecutionAuditEvent,
+		);
+	} catch (error) {
+		throw new PolicyAuditError(`pre-execution audit failed: ${String(error)}`, false);
+	}
+	if (result.decision.kind === "deny")
+		throw new PolicyDeniedError(result.decision.reasonCode, result.decision.reason ?? result.decision.reasonCode);
+	if (result.decision.kind === "ask") throw new PolicyDeniedError("interaction-required");
+	if (
+		result.decision.kind === "require-sandbox" &&
+		(!result.sandbox || !state.sandboxVerifier || !(await state.sandboxVerifier.verify(result.sandbox, request)))
+	) {
+		throw new PolicyDeniedError("invalid-sandbox-attestation");
+	}
 }
 
 export class SecretResolutionError extends Error {
@@ -297,6 +414,7 @@ function secretRequest(ctx: Context, reference: SecretRef): SecretRequest {
 		principal: state.principal,
 		session: state.session,
 		turn: state.turn,
+		...(state.attribution ? { attribution: state.attribution } : {}),
 		workflow: { name: ctx.workflow_name ?? "<unknown>" },
 		step,
 		manifest: null,
@@ -326,6 +444,7 @@ export async function resolveSecret(ctx: Context, reference: SecretRef): Promise
 			principalId: request.principal?.id,
 			sessionId: request.session?.id,
 			turnId: request.turn?.id,
+			...(request.attribution ? { attribution: request.attribution } : {}),
 			workflow: request.workflow,
 			step: request.step,
 			reference,
@@ -347,6 +466,7 @@ export async function resolveSecret(ctx: Context, reference: SecretRef): Promise
 				principalId: request.principal?.id,
 				sessionId: request.session?.id,
 				turnId: request.turn?.id,
+				...(request.attribution ? { attribution: request.attribution } : {}),
 				workflow: request.workflow,
 				step: request.step,
 				reference,
@@ -413,10 +533,10 @@ export async function recordPostExecution(
 export class InMemoryAuditSink implements AuditSink {
 	private readonly events: Array<PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent> = [];
 	async append(event: PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent): Promise<void> {
-		this.events.push(Object.freeze(structuredClone(event)));
+		this.events.push(immutableInteractionSnapshot(event));
 	}
 	read(): readonly (PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent)[] {
-		return this.events.map((event) => structuredClone(event));
+		return this.events.map((event) => immutableInteractionSnapshot(event));
 	}
 }
 export class InMemoryPolicyProvider implements PolicyProvider {

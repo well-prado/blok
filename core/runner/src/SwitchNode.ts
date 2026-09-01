@@ -33,6 +33,7 @@
 
 import type { Context, ResponseContext } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
+import { PolicyInteractionRequiredError } from "./policy/PolicyPipeline";
 import {
 	type PrimitiveStackFrame,
 	consumeRehydratedCursor,
@@ -40,6 +41,7 @@ import {
 	pushPrimitiveFrame,
 	readRehydratedCursor,
 } from "./runtime/PrimitiveStack";
+import { RunTracker } from "./tracing/RunTracker";
 import type { SwitchIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
@@ -173,6 +175,18 @@ export class SwitchNode extends RunnerNode {
 			response.data = data;
 			applyStepOutput(ctx, this, { data });
 			return response;
+		} catch (err) {
+			if (err instanceof PolicyInteractionRequiredError && frame) {
+				try {
+					RunTracker.getInstance().getStore().updateNodeRun(frame.nodeRunId, {
+						iterationContext: frame.cursor,
+					});
+				} catch (writeErr) {
+					const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+					ctx.logger.logLevel("warn", `[blok][interaction] switch cursor write failed: ${msg}`);
+				}
+			}
+			throw err;
 		} finally {
 			if (frame) popPrimitiveFrame(ctx);
 		}

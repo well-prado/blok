@@ -83,7 +83,9 @@ export type {
 	AuditRedactionState,
 	AuditSink,
 	ExecutionOrigin,
+	InteractionAttribution,
 	InteractionRequest,
+	InteractionSuspension,
 	InteractionSuspensionPort,
 	PolicyContext,
 	PolicyDecision,
@@ -112,6 +114,32 @@ export type {
 	SecretResolutionFailure,
 	SecretResolver,
 } from "./SecretContracts";
+export type {
+	InteractionPayload,
+	InteractionAnswer,
+	InteractionRecord,
+	InteractionStatus,
+	InteractionStore,
+} from "./InteractionContracts";
+export {
+	INTERACTION_MAX_LINEAGE_DEPTH,
+	INTERACTION_MAX_LINEAGE_PATH,
+	INTERACTION_MAX_PAYLOAD_BYTES,
+	INTERACTION_MAX_PAYLOAD_DEPTH,
+	INTERACTION_MAX_PAYLOAD_ITEMS,
+	INTERACTION_MAX_STRING_LENGTH,
+	INTERACTION_REDACTED_VALUE,
+	INTERACTION_VERSION,
+	InteractionContractError,
+	fingerprintInteractionPayload,
+	immutableInteractionSnapshot,
+	parseInteractionAnswer,
+	parseInteractionPayload,
+	redactInteractionDecision,
+	redactInteractionPayload,
+	redactInteractionRequest,
+	redactInteractionString,
+} from "./InteractionContracts";
 
 export {
 	CAPABILITY_MANIFEST_VERSION,

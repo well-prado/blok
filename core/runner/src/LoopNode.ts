@@ -22,6 +22,7 @@ import type { Context, ResponseContext } from "@blokjs/shared";
 import _ from "lodash";
 import { LoopMaxIterationsError } from "./LoopMaxIterationsError";
 import RunnerNode from "./RunnerNode";
+import { PolicyInteractionRequiredError } from "./policy/PolicyPipeline";
 import {
 	type PrimitiveStackFrame,
 	consumeRehydratedCursor,
@@ -29,6 +30,7 @@ import {
 	pushPrimitiveFrame,
 	readRehydratedCursor,
 } from "./runtime/PrimitiveStack";
+import { RunTracker } from "./tracing/RunTracker";
 import type { SequentialIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
@@ -211,6 +213,18 @@ export class LoopNode extends RunnerNode {
 			// Persist to ctx.state[this.name] (see ForEachNode comment).
 			applyStepOutput(ctx, this, { data: lastData });
 			return response;
+		} catch (err) {
+			if (err instanceof PolicyInteractionRequiredError && frame) {
+				try {
+					RunTracker.getInstance().getStore().updateNodeRun(frame.nodeRunId, {
+						iterationContext: frame.cursor,
+					});
+				} catch (writeErr) {
+					const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+					ctx.logger.logLevel("warn", `[blok][interaction] loop cursor write failed: ${msg}`);
+				}
+			}
+			throw err;
 		} finally {
 			// v0.6 Phase 4 — always pop so sibling loops / outer
 			// runSteps see a clean stack, including on wait re-throw.

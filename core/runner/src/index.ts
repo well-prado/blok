@@ -135,6 +135,7 @@ export {
 	PolicyDeniedError,
 	PolicyInteractionRequiredError,
 	propagatePolicyExecution,
+	reauthorizePolicyRequest,
 	recordPostExecution,
 	resolveSecret,
 	SecretResolutionError,
@@ -142,6 +143,17 @@ export {
 	type PolicyToken,
 	type SandboxVerifier,
 } from "./policy/PolicyPipeline";
+export {
+	DurableInteractionPort,
+	InMemoryInteractionStore,
+	InteractionResumeCoordinator,
+	InteractionAuthorizationError,
+	InteractionConflictError,
+	type InteractionReauthorize,
+	type InteractionResumeCallback,
+	type InteractionResumeRequest,
+} from "./policy/InteractionStore";
+export { SqliteInteractionStore } from "./policy/SqliteInteractionStore";
 
 // Concurrency gate (Tier 2 #6)
 import {
