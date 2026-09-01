@@ -128,6 +128,11 @@ interface InternalStep {
 	 * author's description (issue #713).
 	 */
 	description?: string;
+	agentStep?: import("@blokjs/shared").AgentStepContract;
+	approval?: import("@blokjs/shared").ApprovalContract;
+	assertionGate?: import("@blokjs/shared").AssertionGateContract;
+	evidenceGate?: import("@blokjs/shared").EvidenceGateContract;
+	outputTrust?: import("@blokjs/shared").OutputTrust;
 	[key: string]: unknown;
 }
 
@@ -1209,10 +1214,31 @@ function pickString(value: unknown): string | undefined {
  * in every InternalStep constructor (incl. the nested inner-step builders) so
  * they survive at any depth, in any arm.
  */
-function copyStepMeta(step: Record<string, unknown>): { ui?: Record<string, unknown>; description?: string } {
+function copyStepMeta(step: Record<string, unknown>): {
+	ui?: Record<string, unknown>;
+	description?: string;
+	agentStep?: import("@blokjs/shared").AgentStepContract;
+	approval?: import("@blokjs/shared").ApprovalContract;
+	assertionGate?: import("@blokjs/shared").AssertionGateContract;
+	evidenceGate?: import("@blokjs/shared").EvidenceGateContract;
+	outputTrust?: import("@blokjs/shared").OutputTrust;
+} {
 	return {
 		...(isPlainObject(step.ui) ? { ui: step.ui } : {}),
 		...(typeof step.description === "string" ? { description: step.description } : {}),
+		...(isPlainObject(step.agentStep)
+			? { agentStep: step.agentStep as unknown as import("@blokjs/shared").AgentStepContract }
+			: {}),
+		...(isPlainObject(step.approval)
+			? { approval: step.approval as unknown as import("@blokjs/shared").ApprovalContract }
+			: {}),
+		...(isPlainObject(step.assertionGate)
+			? { assertionGate: step.assertionGate as unknown as import("@blokjs/shared").AssertionGateContract }
+			: {}),
+		...(isPlainObject(step.evidenceGate)
+			? { evidenceGate: step.evidenceGate as unknown as import("@blokjs/shared").EvidenceGateContract }
+			: {}),
+		...(step.outputTrust === "model" || step.outputTrust === "trusted" ? { outputTrust: step.outputTrust } : {}),
 	};
 }
 

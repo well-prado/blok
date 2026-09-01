@@ -1211,6 +1211,139 @@
 								],
 								"description": "OPTIONAL. Per-attempt execution timeout. Number (ms) or duration string ('30s', '5m', '500ms'). When the step's `step.process()` exceeds this duration, the attempt fails with a StepTimeoutError. Pairs with `retry` — each attempt gets its own timeout (total budget = maxDuration × maxAttempts). On final-attempt timeout, the run auto-flips to `\"timedOut\"` status (distinct from `\"failed\"` so SLA dashboards can separate timeouts from logic failures)."
 							},
+							"agentStep": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"objective": {
+										"type": "string",
+										"minLength": 1
+									},
+									"completion": {
+										"type": "object",
+										"properties": {
+											"required": {
+												"type": "boolean"
+											},
+											"path": {
+												"type": "string",
+												"minLength": 1
+											},
+											"equals": {}
+										},
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"objective",
+									"completion"
+								],
+								"additionalProperties": false,
+								"description": "H1-02 model step contract. The runner requires the declared completion signal before publishing output."
+							},
+							"approval": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"reason": {
+										"type": "string",
+										"minLength": 1
+									},
+									"scope": {
+										"type": "string",
+										"minLength": 1
+									}
+								},
+								"required": [
+									"version",
+									"reason"
+								],
+								"additionalProperties": false,
+								"description": "H1-02 approval handoff metadata. Policy `ask` suspends through the durable H1-01 interaction port."
+							},
+							"assertionGate": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"path": {
+										"type": "string",
+										"minLength": 1
+									},
+									"equals": {},
+									"truthy": {
+										"type": "boolean"
+									},
+									"message": {
+										"type": "string",
+										"minLength": 1
+									}
+								},
+								"required": [
+									"version"
+								],
+								"additionalProperties": false,
+								"description": "H1-02 deterministic assertion gate. A failed or model-provenance result is rejected before publication."
+							},
+							"evidenceGate": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"requirements": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"artifactId": {
+													"type": "string",
+													"minLength": 1
+												},
+												"artifactVersion": {
+													"type": "string",
+													"minLength": 1
+												},
+												"producerStepId": {
+													"type": "string",
+													"minLength": 1
+												}
+											},
+											"required": [
+												"artifactId",
+												"artifactVersion",
+												"producerStepId"
+											],
+											"additionalProperties": false
+										},
+										"minItems": 1
+									}
+								},
+								"required": [
+									"version",
+									"requirements"
+								],
+								"additionalProperties": false,
+								"description": "H1-02 trusted evidence gate. Every declared artifact/version/producer requirement must be verified."
+							},
+							"outputTrust": {
+								"type": "string",
+								"enum": [
+									"model",
+									"trusted"
+								],
+								"description": "Output provenance declared by the node implementation. Model output cannot satisfy trusted gates."
+							},
 							"concurrencyKey": {
 								"not": {}
 							},

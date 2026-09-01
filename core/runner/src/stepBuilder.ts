@@ -33,6 +33,13 @@ import {
 	type WorkflowV2Opts as WorkflowOpts,
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
+import type {
+	AgentStepContract,
+	ApprovalContract,
+	AssertionGateContract,
+	EvidenceGateContract,
+	OutputTrust,
+} from "@blokjs/shared";
 import { lowerRefs } from "@blokjs/shared";
 import type { z } from "zod";
 import type { EphemeralHandle, ErrorHandle, Handle, OutputOf, SpreadHandle } from "./handles";
@@ -906,6 +913,16 @@ export interface StepOptions {
 	type?: string;
 	/** Literal string or handle lowered to the `js/ctx...` string consumed by resolveIdempotencyKey. */
 	idempotencyKey?: string | Handle<unknown>;
+	/** Require a model/agent result to expose the declared completion signal. */
+	agentStep?: AgentStepContract;
+	/** Include a durable policy approval handoff in the pre-execution request. */
+	approval?: ApprovalContract;
+	/** Require a trusted deterministic result to satisfy an assertion. */
+	assertionGate?: AssertionGateContract;
+	/** Require trusted provenance for every declared evidence item. */
+	evidenceGate?: EvidenceGateContract;
+	/** Implementation-declared output boundary; model output remains untrusted. */
+	outputTrust?: OutputTrust;
 	/** Escape hatch for the other v2 step knobs (idempotencyKey, retry, maxDuration, …). */
 	[opt: string]: unknown;
 }

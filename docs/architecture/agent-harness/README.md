@@ -112,6 +112,9 @@ The dependency-ordered implementation plan lives in
 [ROADMAP.md](ROADMAP.md). GitHub issues are execution records; this directory
 remains the architectural source of truth.
 
+The H1-02 runner enforcement contract is documented in
+[h1-02-runner-enforcement.md](h1-02-runner-enforcement.md).
+
 - [GitHub Project 11: Blok AI Harness & Enforced Workflows](https://github.com/users/well-prado/projects/11)
 - [Epic #913: Blok coding harness and enforced agent workflows](https://github.com/well-prado/blok/issues/913)
 

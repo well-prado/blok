@@ -3,6 +3,7 @@ import { GlobalError, parseCapabilityManifest } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./adapters/RuntimeAdapter";
 import type { DecodedExecuteEvent } from "./adapters/grpc/GrpcCodec";
+import { enforceStepOutput } from "./enforcement/AgentEnforcement";
 import { hasPolicyExecution } from "./policy/PolicyPipeline";
 import { RunTracker } from "./tracing/RunTracker";
 import type { TraceLogEntry } from "./tracing/types";
@@ -58,6 +59,11 @@ export class RuntimeAdapterNode extends RunnerNode {
 		this.ephemeral = targetNode.ephemeral;
 		this.capabilityManifest = targetNode.capabilityManifest;
 		this.capabilityManifestRaw = targetNode.capabilityManifestRaw;
+		this.agentStep = targetNode.agentStep;
+		this.approval = targetNode.approval;
+		this.assertionGate = targetNode.assertionGate;
+		this.evidenceGate = targetNode.evidenceGate;
+		this.outputTrust = targetNode.outputTrust;
 	}
 
 	/** Resolve sidecar authority only at the agent prepare boundary. */
@@ -135,17 +141,16 @@ export class RuntimeAdapterNode extends RunnerNode {
 		}
 		const state = ctx.state as Record<string, unknown>;
 
-		// Merge SDK-returned `vars_delta` into state. This is the SDK's
-		// explicit publication path (proto field `vars_delta` on
-		// ExecuteResponse) — it stacks with the auto-store rule below.
-		if (result.vars && typeof result.vars === "object") {
-			Object.assign(state, result.vars);
-		}
-
 		// V2 persistence — runner-owned, declarative.
 		// `ephemeral` skips, `spread` merges, `as` renames, default stores
 		// at state[name]. SDK nodes have always auto-stored (today's
 		// behaviour); this just routes through the unified helper.
+		// H1-02 — a runtime result must pass the gate before vars/state
+		// publication. No state rollback is needed when a gate rejects.
+		if (!result.errors && result.success) enforceStepOutput(this, result.data);
+		// Merge SDK-returned `vars_delta` only after enforcement. A rejected
+		// evidence/assertion result must not publish side-channel state either.
+		if (result.vars && typeof result.vars === "object") Object.assign(state, result.vars);
 		applyStepOutput(ctx, this, result);
 
 		// Convert errors to GlobalError if present

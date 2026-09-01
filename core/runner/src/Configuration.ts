@@ -227,6 +227,18 @@ export default class Configuration implements Config {
 			node.as = (step as RunnerNode & { as?: string }).as;
 			node.spread = (step as RunnerNode & { spread?: boolean }).spread === true;
 			node.ephemeral = (step as RunnerNode & { ephemeral?: boolean }).ephemeral === true;
+			const enforcement = step as RunnerNode & {
+				agentStep?: NodeBase["agentStep"];
+				approval?: NodeBase["approval"];
+				assertionGate?: NodeBase["assertionGate"];
+				evidenceGate?: NodeBase["evidenceGate"];
+				outputTrust?: NodeBase["outputTrust"];
+			};
+			if (enforcement.agentStep !== undefined) node.agentStep = enforcement.agentStep;
+			if (enforcement.approval !== undefined) node.approval = enforcement.approval;
+			if (enforcement.assertionGate !== undefined) node.assertionGate = enforcement.assertionGate;
+			if (enforcement.evidenceGate !== undefined) node.evidenceGate = enforcement.evidenceGate;
+			if (enforcement.outputTrust !== undefined) node.outputTrust = enforcement.outputTrust;
 			// V2 idempotency cache + retry knobs — read by RunnerSteps before
 			// delegating to step.process(). Caching layers ABOVE
 			// PersistenceHelper; retry wraps the same call site.
@@ -237,6 +249,11 @@ export default class Configuration implements Config {
 				subworkflow?: string;
 				wait?: boolean;
 				maxDuration?: number | string;
+				agentStep?: NodeBase["agentStep"];
+				approval?: NodeBase["approval"];
+				assertionGate?: NodeBase["assertionGate"];
+				evidenceGate?: NodeBase["evidenceGate"];
+				outputTrust?: NodeBase["outputTrust"];
 			};
 			if (v2Idem.idempotencyKey !== undefined) node.idempotencyKey = v2Idem.idempotencyKey;
 			if (v2Idem.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Idem.idempotencyKeyTTL;
@@ -395,10 +412,20 @@ export default class Configuration implements Config {
 				subworkflow?: string;
 				wait?: boolean;
 				maxDuration?: number | string;
+				agentStep?: NodeBase["agentStep"];
+				approval?: NodeBase["approval"];
+				assertionGate?: NodeBase["assertionGate"];
+				evidenceGate?: NodeBase["evidenceGate"];
+				outputTrust?: NodeBase["outputTrust"];
 			};
 			if (v2Flow.as !== undefined) node.as = v2Flow.as;
 			node.spread = v2Flow.spread === true;
 			node.ephemeral = v2Flow.ephemeral === true;
+			if (v2Flow.agentStep !== undefined) node.agentStep = v2Flow.agentStep;
+			if (v2Flow.approval !== undefined) node.approval = v2Flow.approval;
+			if (v2Flow.assertionGate !== undefined) node.assertionGate = v2Flow.assertionGate;
+			if (v2Flow.evidenceGate !== undefined) node.evidenceGate = v2Flow.evidenceGate;
+			if (v2Flow.outputTrust !== undefined) node.outputTrust = v2Flow.outputTrust;
 			if (v2Flow.idempotencyKey !== undefined) node.idempotencyKey = v2Flow.idempotencyKey;
 			if (v2Flow.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Flow.idempotencyKeyTTL;
 			if (v2Flow.retry !== undefined) node.retry = v2Flow.retry;
@@ -526,6 +553,11 @@ export default class Configuration implements Config {
 			idempotencyKeyTTL?: number;
 			retry?: NodeBase["retry"];
 			maxDuration?: number | string;
+			agentStep?: NodeBase["agentStep"];
+			approval?: NodeBase["approval"];
+			assertionGate?: NodeBase["assertionGate"];
+			evidenceGate?: NodeBase["evidenceGate"];
+			outputTrust?: NodeBase["outputTrust"];
 		};
 		if (v2.as !== undefined) targetNode.as = v2.as;
 		targetNode.spread = v2.spread === true;
@@ -538,6 +570,11 @@ export default class Configuration implements Config {
 		if (v2.idempotencyKey !== undefined) targetNode.idempotencyKey = v2.idempotencyKey;
 		if (v2.idempotencyKeyTTL !== undefined) targetNode.idempotencyKeyTTL = v2.idempotencyKeyTTL;
 		if (v2.retry !== undefined) targetNode.retry = v2.retry;
+		if (v2.agentStep !== undefined) targetNode.agentStep = v2.agentStep;
+		if (v2.approval !== undefined) targetNode.approval = v2.approval;
+		if (v2.assertionGate !== undefined) targetNode.assertionGate = v2.assertionGate;
+		if (v2.evidenceGate !== undefined) targetNode.evidenceGate = v2.evidenceGate;
+		if (v2.outputTrust !== undefined) targetNode.outputTrust = v2.outputTrust;
 		if (v2.maxDuration !== undefined) {
 			const parsed = tryParseDuration(v2.maxDuration);
 			if (parsed !== null) targetNode.maxDurationMs = parsed;

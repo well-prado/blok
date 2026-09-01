@@ -1,7 +1,15 @@
 import type { ZodError, z } from "zod";
 import { zodToJsonSchema as toJsonSchema } from "zod-to-json-schema";
 
-import type { CapabilityManifestV1, Context } from "@blokjs/shared";
+import type {
+	AgentStepContract,
+	ApprovalContract,
+	AssertionGateContract,
+	CapabilityManifestV1,
+	Context,
+	EvidenceGateContract,
+	OutputTrust,
+} from "@blokjs/shared";
 import { GlobalError, parseCapabilityManifest } from "@blokjs/shared";
 import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
@@ -87,6 +95,17 @@ export interface FnNodeDefinition<
 	 */
 	capabilityManifest?: CapabilityManifestV1;
 
+	/** H1-02 metadata for model work and runner-owned completion checks. */
+	agentStep?: AgentStepContract;
+	/** H1-02 policy-backed approval metadata. */
+	approval?: ApprovalContract;
+	/** H1-02 deterministic assertion gate metadata. */
+	assertionGate?: AssertionGateContract;
+	/** H1-02 trusted evidence gate metadata. */
+	evidenceGate?: EvidenceGateContract;
+	/** Only trusted deterministic implementations may opt into this boundary. */
+	outputTrust?: OutputTrust;
+
 	/** Zod schema for input validation */
 	input: TInput;
 
@@ -138,6 +157,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 
 	/** Normalized operational metadata — surfaced in catalogs and policy. */
 	public capabilityManifest?: CapabilityManifestV1;
+	public agentStep?: AgentStepContract;
+	public approval?: ApprovalContract;
+	public assertionGate?: AssertionGateContract;
+	public evidenceGate?: EvidenceGateContract;
+	public outputTrust: OutputTrust = "model";
 
 	/** Lazily-computed real JSON Schema for reflection (see {@link getReflectionSchemas}). */
 	private _reflectionSchemas?: { input: unknown; output: unknown };
@@ -151,6 +175,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			? parseCapabilityManifest(definition.capabilityManifest)
 			: undefined;
 		this.capabilityManifestRaw = definition.capabilityManifest;
+		this.agentStep = definition.agentStep;
+		this.approval = definition.approval;
+		this.assertionGate = definition.assertionGate;
+		this.evidenceGate = definition.evidenceGate;
+		if (definition.outputTrust !== undefined) this.outputTrust = definition.outputTrust;
 
 		// Set content type if specified (e.g. "text/html", "application/pdf")
 		if (definition.contentType) {

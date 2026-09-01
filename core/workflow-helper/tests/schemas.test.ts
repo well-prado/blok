@@ -204,6 +204,46 @@ describe("V2RegularStepSchema — idempotencyKey + retry", () => {
 	});
 });
 
+describe("V2RegularStepSchema — H1-02 enforcement metadata", () => {
+	const baseStep = { id: "agent", use: "@blokjs/model" };
+
+	it("accepts completion, approval, assertion, evidence, and trust metadata", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			agentStep: {
+				version: "1",
+				objective: "inspect the change",
+				completion: { path: "completed", equals: true },
+			},
+			approval: { version: "1", reason: "Deploy the reviewed change", scope: "production" },
+			assertionGate: { version: "1", path: "passed", truthy: true },
+			evidenceGate: {
+				version: "1",
+				requirements: [{ artifactId: "tests", artifactVersion: "1", producerStepId: "run-tests" }],
+			},
+			outputTrust: "trusted",
+		});
+
+		expect(result.outputTrust).toBe("trusted");
+		expect(result.evidenceGate?.requirements[0]?.producerStepId).toBe("run-tests");
+	});
+
+	it("rejects malformed versions and assertion selectors", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				agentStep: { version: "2", objective: "inspect", completion: {} },
+			}),
+		).toThrow();
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				assertionGate: { version: "1", path: "passed" },
+			}),
+		).toThrow(/assertionGate requires/);
+	});
+});
+
 describe("RetryConfigSchema", () => {
 	it("requires maxAttempts", () => {
 		expect(() => RetryConfigSchema.parse({} as unknown as { maxAttempts: number })).toThrow();

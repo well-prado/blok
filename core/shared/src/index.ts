@@ -107,6 +107,20 @@ export type {
 	WorkflowIdentity,
 } from "./PolicyContracts";
 export type {
+	AgentCompletionContract,
+	AgentStepContract,
+	ApprovalContract,
+	AssertionGateContract,
+	EvidenceGateContract,
+	EvidenceRequirement,
+	OutputTrust,
+	TrustedEvidence,
+} from "./EnforcementContracts";
+export {
+	ENFORCEMENT_CONTRACT_VERSION,
+	EnforcementViolationError,
+} from "./EnforcementContracts";
+export type {
 	SecretLease,
 	SecretRef,
 	SecretRequest,

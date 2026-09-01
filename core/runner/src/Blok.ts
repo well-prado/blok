@@ -2,6 +2,7 @@ import { type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/s
 import { type Counter, type Gauge, type Histogram, metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import type { IBlokResponse } from "./BlokResponse";
+import { enforceStepOutput } from "./enforcement/AgentEnforcement";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 // The identical local type — reaching into `@blokjs/shared/dist/**` emitted an
@@ -155,6 +156,10 @@ export default abstract class BlokService<T> extends NodeBase {
 		// Pass through the full IBlokResponse so the helper's error guard
 		// (`success: false` / non-null `error`) skips state persistence on
 		// the failure path — see PersistenceHelper.isErroredResult.
+		// H1-02 — validate agent completion and trusted gates before this node
+		// publishes anything into workflow state. The runner invokes the same
+		// helper for bare/custom nodes and cache replays.
+		if (!errored) enforceStepOutput(this, (result as IBlokResponse).data);
 		applyStepOutput(ctx, this, result as IBlokResponse);
 
 		// Hand the raw result back to the runner. RunnerSteps mirrors

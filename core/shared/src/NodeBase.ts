@@ -50,6 +50,16 @@ export default abstract class NodeBase {
 	public capabilityManifest?: import("./CapabilityManifest").CapabilityManifestV1;
 	/** Raw descriptor value retained so invalid runtime metadata fails closed. */
 	public capabilityManifestRaw?: unknown;
+	/** H1-02: model work must satisfy an explicit completion contract. */
+	public agentStep?: import("./EnforcementContracts").AgentStepContract;
+	/** H1-02: policy-backed durable approval handoff metadata. */
+	public approval?: import("./EnforcementContracts").ApprovalContract;
+	/** H1-02: runner-owned deterministic assertion gate. */
+	public assertionGate?: import("./EnforcementContracts").AssertionGateContract;
+	/** H1-02: runner-owned trusted evidence gate. */
+	public evidenceGate?: import("./EnforcementContracts").EvidenceGateContract;
+	/** Trust is a property of the node implementation, never model prose. */
+	public outputTrust: import("./EnforcementContracts").OutputTrust = "model";
 
 	// =========================================================================
 	// V2 persistence knobs — populated by Configuration.getSteps from the

@@ -185,6 +185,7 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 		scope: scopeFor(node),
 		layers: state.layers ?? [],
 		signal,
+		...(node.approval ? { approval: node.approval } : {}),
 		...(suspension ? { suspension } : {}),
 	};
 }
