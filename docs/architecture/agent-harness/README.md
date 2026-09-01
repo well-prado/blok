@@ -115,6 +115,9 @@ remains the architectural source of truth.
 The H1-02 runner enforcement contract is documented in
 [h1-02-runner-enforcement.md](h1-02-runner-enforcement.md).
 
+The H1-02 reference strict coding procedure and its conformance evidence are
+documented in [h1-02-reference-workflow.md](h1-02-reference-workflow.md).
+
 - [GitHub Project 11: Blok AI Harness & Enforced Workflows](https://github.com/users/well-prado/projects/11)
 - [Epic #913: Blok coding harness and enforced agent workflows](https://github.com/well-prado/blok/issues/913)
 
