@@ -20,6 +20,12 @@ operation must claim the interaction transactionally and re-authorize the
 effect; it must never rerun committed pre-suspension steps. Nested and parallel
 resume cursors remain owned by the existing runner cursor machinery.
 
+The runner-side `InteractionResumeCoordinator` implements that boundary. It
+accepts an exact-request re-authorizer and a narrow continuation callback; the
+callback receives the claimed request, answer, and interaction snapshot and is
+responsible for process/context rehydration. The coordinator owns no `Runner` or
+`RunnerSteps` execution and the store claim fences duplicate or stale resumes.
+
 Provider adapters are out of scope for this reference implementation. Their
 contract tests must cover crash points before/after persistence, duplicate
 answers, expiry, cancellation, principal mismatch, and process restart.

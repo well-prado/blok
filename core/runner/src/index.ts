@@ -135,6 +135,7 @@ export {
 	PolicyDeniedError,
 	PolicyInteractionRequiredError,
 	propagatePolicyExecution,
+	reauthorizePolicyRequest,
 	recordPostExecution,
 	resolveSecret,
 	SecretResolutionError,
@@ -145,8 +146,12 @@ export {
 export {
 	DurableInteractionPort,
 	InMemoryInteractionStore,
+	InteractionResumeCoordinator,
 	InteractionAuthorizationError,
 	InteractionConflictError,
+	type InteractionReauthorize,
+	type InteractionResumeCallback,
+	type InteractionResumeRequest,
 } from "./policy/InteractionStore";
 
 // Concurrency gate (Tier 2 #6)

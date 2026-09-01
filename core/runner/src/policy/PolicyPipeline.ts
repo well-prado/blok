@@ -273,6 +273,77 @@ export async function authorizeStep(
 	return { request, result, correlationId, startedAt: performance.now(), cached };
 }
 
+/**
+ * Re-authorize a persisted interaction request without manufacturing a new
+ * request id or changing its policy scope. Control-plane resume code injects
+ * this function into InteractionResumeCoordinator before it invokes the
+ * continuation that owns workflow/cursor rehydration.
+ */
+export async function reauthorizePolicyRequest(ctx: Context, request: PolicyRequest): Promise<void> {
+	const state = states.get(ctx);
+	if (!state) throw new PolicyDeniedError("missing-security-state");
+	if (request.origin !== "agent") throw new PolicyDeniedError("invalid-interaction-origin");
+	if (request.principal?.id !== state.principal.id) throw new PolicyDeniedError("interaction-principal-mismatch");
+	if (request.session?.id !== state.session.id) throw new PolicyDeniedError("interaction-session-mismatch");
+	if (request.turn?.id !== state.turn.id) throw new PolicyDeniedError("interaction-turn-mismatch");
+	if (request.workflow.name !== (ctx.workflow_name ?? "<unknown>"))
+		throw new PolicyDeniedError("interaction-workflow-mismatch");
+	if (ctx.signal?.aborted || request.signal?.aborted) throw new PolicyDeniedError("cancelled");
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let abortHandler: (() => void) | undefined;
+	const cancellation = new Promise<never>((_, reject) => {
+		const signal = ctx.signal ?? request.signal;
+		if (signal?.aborted) reject(new PolicyDeniedError("cancelled"));
+		else if (signal) {
+			abortHandler = () => reject(new PolicyDeniedError("cancelled"));
+			signal.addEventListener("abort", abortHandler, { once: true });
+		}
+	});
+	let result: PolicyEvaluationResult;
+	try {
+		result = await Promise.race([
+			state.provider.evaluate(request),
+			cancellation,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new PolicyDeniedError("policy-timeout")), 5000);
+			}),
+		]);
+	} catch (error) {
+		throw error instanceof PolicyDeniedError ? error : new PolicyDeniedError("policy-provider-failure");
+	} finally {
+		if (timer) clearTimeout(timer);
+		if (abortHandler) (ctx.signal ?? request.signal)?.removeEventListener("abort", abortHandler);
+	}
+	if (
+		!result ||
+		!result.decision ||
+		result.decision.policyVersion !== state.policyVersion ||
+		!["allow", "deny", "ask", "require-sandbox"].includes(result.decision.kind) ||
+		!result.decision.id ||
+		!result.decision.reasonCode
+	) {
+		throw new PolicyDeniedError("malformed-policy-result");
+	}
+	const correlationId = uuid();
+	try {
+		await state.auditSink.append(
+			auditBase(request, result, correlationId, false, "policy.pre") as PreExecutionAuditEvent,
+		);
+	} catch (error) {
+		throw new PolicyAuditError(`pre-execution audit failed: ${String(error)}`, false);
+	}
+	if (result.decision.kind === "deny")
+		throw new PolicyDeniedError(result.decision.reasonCode, result.decision.reason ?? result.decision.reasonCode);
+	if (result.decision.kind === "ask") throw new PolicyDeniedError("interaction-required");
+	if (
+		result.decision.kind === "require-sandbox" &&
+		(!result.sandbox || !state.sandboxVerifier || !(await state.sandboxVerifier.verify(result.sandbox, request)))
+	) {
+		throw new PolicyDeniedError("invalid-sandbox-attestation");
+	}
+}
+
 export class SecretResolutionError extends Error {
 	readonly code: SecretResolutionFailure;
 	constructor(code: SecretResolutionFailure) {
