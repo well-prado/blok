@@ -79,6 +79,59 @@ describe("RunTracker", () => {
 			expect(fetched?.error?.message).toBe("boom");
 		});
 
+		it("suspends and resumes a run without losing its trace identity", () => {
+			const run = tracker.startRun(makeRunOpts({ parentRunId: "parent-1", parentNodeRunId: "node-parent" }));
+			const events: RunEvent[] = [];
+			tracker.on("event", (event: RunEvent) => events.push(event));
+
+			expect(
+				tracker.suspendRun(run.id, {
+					interactionId: "interaction-1",
+					stepId: "approve",
+					stepIndex: 1,
+					total: 3,
+					deep: false,
+					stateSnapshot: '{"prepared":true}',
+				}),
+			).toBe(true);
+			expect(tracker.getRun(run.id)).toMatchObject({
+				status: "suspended",
+				stateSnapshot: '{"prepared":true}',
+				parentRunId: "parent-1",
+				parentNodeRunId: "node-parent",
+			});
+			expect(events.at(-1)).toMatchObject({
+				type: "RUN_SUSPENDED",
+				workflowName: "test-workflow",
+				nodeName: "approve",
+				payload: { interactionId: "interaction-1", stepIndex: 1 },
+			});
+
+			expect(tracker.resumeSuspendedRun(run.id, { interactionId: "interaction-1" })).toBe(true);
+			expect(tracker.getRun(run.id)?.status).toBe("running");
+			expect(events.at(-1)).toMatchObject({
+				type: "RUN_RESUMED",
+				payload: { interactionId: "interaction-1" },
+			});
+			expect(tracker.resumeSuspendedRun(run.id, { interactionId: "interaction-1" })).toBe(false);
+		});
+
+		it("allows cancellation of a suspended run", () => {
+			const run = tracker.startRun(makeRunOpts());
+			expect(
+				tracker.suspendRun(run.id, {
+					interactionId: "interaction-1",
+					stepId: "approve",
+					stepIndex: 0,
+					total: 1,
+					deep: false,
+				}),
+			).toBe(true);
+			expect(tracker.cancelRun(run.id)).toBe(true);
+			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
+			expect(tracker.resumeSuspendedRun(run.id, { interactionId: "interaction-1" })).toBe(false);
+		});
+
 		it("should return undefined for unknown run ID", () => {
 			expect(tracker.getRun("nonexistent")).toBeUndefined();
 		});

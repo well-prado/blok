@@ -77,6 +77,8 @@ export interface PolicyContext {
 }
 export interface PolicyRequest extends PolicyContext {
 	readonly requestId: string;
+	/** Durable execution reference when this request is an interaction ask. */
+	readonly suspension?: InteractionSuspension;
 }
 export interface PolicyEvaluationResult {
 	readonly decision: PolicyDecision;
@@ -135,6 +137,29 @@ export interface InteractionRequest {
 	readonly id: string;
 	readonly decision: PolicyDecision;
 	readonly request: PolicyRequest;
+	/**
+	 * Durable run identity used by the control plane to resume the existing
+	 * execution. This is a reference to persisted trace state, not a copy of
+	 * workflow data or secrets.
+	 */
+	readonly suspension?: InteractionSuspension;
+}
+
+export interface InteractionSuspension {
+	readonly runId: string;
+	readonly status: "suspended";
+	readonly step: StepIdentity;
+	readonly cursor: {
+		readonly stepIndex: number;
+		readonly deep: boolean;
+		readonly nodeRunId?: string;
+		readonly lastCompletedStepIndex?: number;
+	};
+	readonly trace: {
+		readonly workflow: WorkflowIdentity;
+		readonly parentRunId?: string;
+		readonly parentNodeRunId?: string;
+	};
 }
 export interface InteractionSuspensionPort {
 	suspend(request: InteractionRequest): Promise<void>;

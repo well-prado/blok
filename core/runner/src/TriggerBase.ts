@@ -7,6 +7,7 @@ import Configuration from "./Configuration";
 import DefaultLogger from "./DefaultLogger";
 import { RunCancelledError } from "./RunCancelledError";
 import Runner from "./Runner";
+import { serializeStateSnapshot } from "./RunnerSteps";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
 import { QueueExpiredError } from "./concurrency/QueueExpiredError";
@@ -29,6 +30,7 @@ import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter"
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 import { captureError, setErrorSink } from "./observability/ErrorSink";
 import { createSentryErrorSink } from "./observability/SentryIntegration";
+import { PolicyInteractionRequiredError } from "./policy/PolicyPipeline";
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import { DeferredDispatchSignal } from "./scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
@@ -1482,6 +1484,53 @@ export default abstract class TriggerBase extends Trigger {
 			runSuccess = false;
 			if (err instanceof DeferredDispatchSignal || err instanceof WaitDispatchRequest) terminal = false;
 
+			// H1-01 — policy ask is a durable suspension, not a failed run.
+			// PolicyPipeline has already committed the interaction record before
+			// this typed signal reaches the trigger. Persist the matching trace
+			// status and state snapshot before allowing the signal to escape to a
+			// transport. The ordinary Runner/Trigger execution path is reused on
+			// resume; no second execution engine is introduced.
+			if (err instanceof PolicyInteractionRequiredError && traceRunId) {
+				const stepInfo = ctxRecord._stepInfo as
+					| { name?: unknown; index?: unknown; total?: unknown; depth?: unknown }
+					| undefined;
+				const stepId = typeof stepInfo?.name === "string" ? stepInfo.name : "unknown";
+				const stepIndex = typeof stepInfo?.index === "number" ? stepInfo.index : -1;
+				const total = typeof stepInfo?.total === "number" ? stepInfo.total : 0;
+				const deep = typeof stepInfo?.depth === "number" && stepInfo.depth > 0;
+				const nodeRunId = typeof ctxRecord._traceNodeId === "string" ? ctxRecord._traceNodeId : undefined;
+				const stateSnapshot = serializeStateSnapshot(ctx.state, ctx.logger);
+				try {
+					if (
+						!tracker.suspendRun(traceRunId, {
+							interactionId: err.requestId,
+							stepId,
+							stepIndex,
+							total,
+							deep,
+							nodeRunId,
+							stateSnapshot,
+						})
+					) {
+						// A concurrent cancellation/terminal transition wins over a
+						// late policy signal. Do not turn that terminal trace back into
+						// a suspended run; preserve the typed signal for the caller.
+						ctx.logger.logLevel?.(
+							"warn",
+							`[blok][interaction] run ${traceRunId} was no longer running when interaction ${err.requestId} suspended`,
+						);
+					}
+				} catch (lifecycleError) {
+					// The interaction record is already durable, but the run must
+					// not remain falsely running if trace persistence fails. Fail
+					// closed and withhold the policy control signal so a caller
+					// cannot assume this interaction is resumable.
+					tracker.failRun(traceRunId, lifecycleError);
+					throw lifecycleError;
+				}
+				runSuccess = true;
+			}
+
 			// PR 4 — wait.for / wait.until step requesting deferred dispatch.
 			// Translate to the existing scheduling pipeline:
 			//   1. Mark run "delayed" with the wait deadline as scheduledAt.
@@ -1549,6 +1598,7 @@ export default abstract class TriggerBase extends Trigger {
 			// "failed". The HTTP transport translates → 410 Gone.
 			if (
 				traceRunId &&
+				!(err instanceof PolicyInteractionRequiredError) &&
 				!(err instanceof ConcurrencyLimitError) &&
 				!(err instanceof QueueExpiredError) &&
 				!(err instanceof DeferredDispatchSignal) &&
@@ -1565,7 +1615,12 @@ export default abstract class TriggerBase extends Trigger {
 			// skip them. The status is read back from the run record AFTER
 			// the upstream markers (markRunTimedOut / markRunThrottled /
 			// abortRunningRun / failRun) have flipped it.
-			if (traceRunId && !(err instanceof DeferredDispatchSignal) && !(err instanceof WaitDispatchRequest)) {
+			if (
+				traceRunId &&
+				!(err instanceof PolicyInteractionRequiredError) &&
+				!(err instanceof DeferredDispatchSignal) &&
+				!(err instanceof WaitDispatchRequest)
+			) {
 				const resolvedStatus = tracker.getRun(traceRunId)?.status;
 				this.metricsBridge.recordError(err instanceof Error ? err.constructor.name : "Error", {
 					workflow_name: cfg.name || "",
@@ -1841,6 +1896,31 @@ export default abstract class TriggerBase extends Trigger {
 	 * The re-entered `run(ctx)` reuses the existing `traceRunId` (already
 	 * stashed on `ctx._traceRunId` from the first pass).
 	 */
+	public async resumeInteraction(
+		ctx: Context,
+		interactionId: string,
+		configuration: Configuration = this.configuration,
+	): Promise<TriggerResponse> {
+		const ctxRecord = ctx as Record<string, unknown>;
+		const traceRunId = typeof ctxRecord._traceRunId === "string" ? ctxRecord._traceRunId : undefined;
+		if (!traceRunId) throw new Error("cannot resume interaction without a trace run id");
+
+		const tracker = RunTracker.getInstance();
+		if (!tracker.resumeSuspendedRun(traceRunId, { interactionId })) {
+			throw new Error(`run ${traceRunId} is not suspended or has already resumed`);
+		}
+
+		// Reuse the same dispatch re-entry marker consumed by wait and deferred
+		// scheduling. TriggerBase.run then rehydrates state and every nested
+		// iteration cursor through the existing machinery.
+		ctxRecord._blokDispatchReentry = true;
+		try {
+			return await this.run(ctx, configuration);
+		} finally {
+			ctxRecord._blokDispatchReentry = false;
+		}
+	}
+
 	protected async dispatchDeferred(ctx: Context, traceRunId: string, expiresAt: number | undefined): Promise<void> {
 		const tracker = RunTracker.getInstance();
 

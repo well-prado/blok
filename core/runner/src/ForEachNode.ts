@@ -33,6 +33,7 @@ import { RunCancelledError } from "./RunCancelledError";
 import RunnerNode from "./RunnerNode";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { ForEachWaitMetrics } from "./monitoring/ForEachWaitMetrics";
+import { PolicyInteractionRequiredError } from "./policy/PolicyPipeline";
 import {
 	type PrimitiveStackFrame,
 	consumeRehydratedCursor,
@@ -288,6 +289,7 @@ export class ForEachNode extends RunnerNode {
 				type WorkerOutcome =
 					| { kind: "completed"; index: number; result: unknown }
 					| { kind: "wait"; index: number; throwObj: WaitDispatchRequest }
+					| { kind: "interaction"; index: number; throwObj: PolicyInteractionRequiredError }
 					| { kind: "cancelled"; index: number }
 					| { kind: "error"; index: number; err: unknown };
 
@@ -320,6 +322,12 @@ export class ForEachNode extends RunnerNode {
 								// their current ones at the next step boundary.
 								if (!poolSignal.aborted) poolController.abort();
 								outcomes.push({ kind: "wait", index, throwObj: err });
+							} else if (err instanceof PolicyInteractionRequiredError) {
+								// An ask is a durable control-flow boundary. Stop peer
+								// iterations, preserve their completed/cancelled split,
+								// and let the trigger persist the suspended run.
+								if (!poolSignal.aborted) poolController.abort();
+								outcomes.push({ kind: "interaction", index, throwObj: err });
 							} else if (err instanceof RunCancelledError) {
 								// Distinguish pool-cancel from user-cancel. If
 								// poolSignal is aborted AND ctx.signal is NOT,
@@ -442,6 +450,48 @@ export class ForEachNode extends RunnerNode {
 				const waits = allOutcomes.filter(
 					(o): o is { kind: "wait"; index: number; throwObj: WaitDispatchRequest } => o.kind === "wait",
 				);
+				const interactions = allOutcomes.filter(
+					(o): o is { kind: "interaction"; index: number; throwObj: PolicyInteractionRequiredError } =>
+						o.kind === "interaction",
+				);
+				if (interactions.length > 0) {
+					// First interaction wins by iteration index, matching the
+					// deterministic first-wait-wins rule. Completed iterations are
+					// retained and all others are relaunched on resume.
+					interactions.sort((a, b) => a.index - b.index);
+					const interaction = interactions[0];
+					const completed = allOutcomes.filter(
+						(o): o is { kind: "completed"; index: number; result: unknown } => o.kind === "completed",
+					);
+					const cancelled = allOutcomes
+						.filter((o): o is { kind: "cancelled"; index: number } => o.kind === "cancelled")
+						.map((o) => o.index);
+					const completedResults: (unknown | null)[] = new Array(items.length);
+					for (const c of completed) completedResults[c.index] = c.result === undefined ? null : c.result;
+					if (parallelResume) {
+						for (let k = 0; k < parallelResume.completedResults.length; k++) {
+							if (
+								Object.prototype.hasOwnProperty.call(parallelResume.completedResults, k) &&
+								parallelResume.completedResults[k] !== undefined &&
+								completedResults[k] === undefined
+							) {
+								completedResults[k] = parallelResume.completedResults[k];
+							}
+						}
+					}
+					const allCancelled = [...new Set([...cancelled, ...interactions.slice(1).map((i) => i.index)])].sort(
+						(a, b) => a - b,
+					);
+					const cursor: ParallelIterationContext = {
+						mode: "parallel",
+						waitFiringIteration: interaction.index,
+						innerStepIndex: interaction.throwObj.suspension?.cursor.stepIndex ?? 0,
+						completedResults,
+						cancelledIterations: [...new Set([...allCancelled, ...waits.map((w) => w.index)])].sort((a, b) => a - b),
+					};
+					this.writeCursor(ctx, frame, cursor);
+					throw interaction.throwObj;
+				}
 				if (waits.length > 0) {
 					// First-wait-wins by iteration index.
 					waits.sort((a, b) => a.index - b.index);
@@ -537,6 +587,22 @@ export class ForEachNode extends RunnerNode {
 			// its `run()` method, but we own our own run() here).
 			applyStepOutput(ctx, this, { data: results });
 			return response;
+		} catch (err) {
+			if (err instanceof PolicyInteractionRequiredError && frame) {
+				// Sequential interaction asks do not pass through the parallel
+				// outcome classifier. Persist this primitive's current cursor
+				// before its finally block pops the frame.
+				const cursor = frame.cursor as SequentialIterationContext;
+				try {
+					RunTracker.getInstance().getStore().updateNodeRun(frame.nodeRunId, {
+						iterationContext: cursor,
+					});
+				} catch (writeErr) {
+					const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+					ctx.logger.logLevel("warn", `[blok][interaction] forEach cursor write failed: ${msg}`);
+				}
+			}
+			throw err;
 		} finally {
 			// v0.6 Phase 4 — always pop the frame so sibling primitives
 			// later in the workflow don't see a stale cursor pointer, AND

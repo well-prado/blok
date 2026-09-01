@@ -604,6 +604,53 @@ export class RunTracker extends EventEmitter {
 	}
 
 	/**
+	 * Mark a policy-interrupted run as suspended after the interaction record
+	 * has been durably created. The run remains non-terminal so a control-plane
+	 * answer can re-enter the same TriggerBase/Runner cursor path.
+	 */
+	suspendRun(
+		runId: string,
+		payload: {
+			interactionId: string;
+			stepId: string;
+			stepIndex: number;
+			total: number;
+			deep: boolean;
+			nodeRunId?: string;
+			stateSnapshot?: string;
+		},
+	): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || run.status !== "running") return false;
+		this.store.updateRun(runId, {
+			status: "suspended",
+			...(payload.stateSnapshot !== undefined ? { stateSnapshot: payload.stateSnapshot } : {}),
+		});
+		this.emitEvent(runId, run.workflowName, "RUN_SUSPENDED", payload.stepId, payload.nodeRunId, {
+			interactionId: payload.interactionId,
+			stepIndex: payload.stepIndex,
+			total: payload.total,
+			deep: payload.deep,
+		});
+		return true;
+	}
+
+	/**
+	 * Re-open a suspended run for the existing runner re-entry path. The
+	 * interaction record is validated/claimed by the control plane; this seam
+	 * only performs the trace transition and emits lineage.
+	 */
+	resumeSuspendedRun(runId: string, payload: { interactionId: string }): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || run.status !== "suspended") return false;
+		this.store.updateRun(runId, { status: "running" });
+		this.emitEvent(runId, run.workflowName, "RUN_RESUMED", undefined, undefined, {
+			interactionId: payload.interactionId,
+		});
+		return true;
+	}
+
+	/**
 	 * Tier 2 polish — cancel a pending (delayed/debounced/queued) run.
 	 * Idempotent. Returns true when the run existed AND was in a cancellable
 	 * state; false when the run doesn't exist OR is already running/completed/
@@ -624,7 +671,7 @@ export class RunTracker extends EventEmitter {
 		// cancellation can flip status to "cancelled" before the in-flight
 		// step throws `RunCancelledError`. The tracker's `abortRunningRun`
 		// calls this method right after firing the AbortController.
-		const cancellable = ["delayed", "debounced", "queued", "running", "paused"];
+		const cancellable = ["delayed", "debounced", "queued", "running", "paused", "suspended"];
 		if (!cancellable.includes(run.status)) return false;
 
 		const previousStatus = run.status;
@@ -1238,6 +1285,7 @@ export class RunTracker extends EventEmitter {
 	private fireWebhooks(event: RunEvent): void {
 		const eventMap: Record<string, string> = {
 			RUN_STARTED: "run.started",
+			RUN_SUSPENDED: "run.suspended",
 			RUN_COMPLETED: "run.completed",
 			RUN_FAILED: "run.failed",
 			// OBS-05 T4 — terminal-failure webhooks for the non-`failed`

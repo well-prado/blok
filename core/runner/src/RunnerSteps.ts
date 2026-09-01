@@ -170,7 +170,7 @@ const DEFAULT_STATE_SNAPSHOT_MAX_BYTES = 1_048_576;
  * for that specific run becomes best-effort, matching pre-v0.6
  * behaviour for top-level waits across process restart.
  */
-function serializeStateSnapshot(
+export function serializeStateSnapshot(
 	state: unknown,
 	logger: { logLevel: (level: string, message: string) => void },
 ): string | undefined {

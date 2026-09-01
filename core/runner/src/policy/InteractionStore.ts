@@ -69,6 +69,7 @@ export class InMemoryInteractionStore implements InteractionStore {
 			createdAt: now,
 			expiresAt: opts?.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
 			sequence: 0,
+			suspension: request.suspension ? clone(request.suspension) : undefined,
 		};
 		if (this.records.has(record.id)) throw new InteractionConflictError("interaction already exists");
 		this.records.set(record.id, record);
@@ -190,6 +191,13 @@ export class InteractionResumeCoordinator {
 export class DurableInteractionPort implements InteractionSuspensionPort {
 	constructor(private readonly store: InteractionStore) {}
 	async suspend(request: InteractionRequest): Promise<void> {
-		await this.store.create(request.request, request.decision);
+		const record = await this.store.create(request.request, request.decision);
+		// A store adapter may normalize or clone records. Keep the port's
+		// contract honest: a successful suspend means the record is visible,
+		// including its run/cursor reference, before PolicyPipeline emits its
+		// typed control signal.
+		if (record.id !== request.id || record.request.requestId !== request.request.requestId) {
+			throw new InteractionConflictError("interaction store returned a mismatched record");
+		}
 	}
 }

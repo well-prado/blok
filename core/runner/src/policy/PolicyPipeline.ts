@@ -2,6 +2,7 @@ import {
 	type AuditSink,
 	CapabilityManifestError,
 	type Context,
+	type InteractionSuspension,
 	type InteractionSuspensionPort,
 	type NodeBase,
 	type PolicyEvaluationResult,
@@ -28,6 +29,7 @@ import {
 	assessCapabilityManifest,
 } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
+import { RunTracker } from "../tracing/RunTracker";
 
 export interface SandboxVerifier {
 	verify(attestation: SandboxAttestation, request: PolicyRequest): Promise<boolean>;
@@ -70,7 +72,10 @@ export class PolicyDeniedError extends Error {
 }
 export class PolicyInteractionRequiredError extends Error {
 	readonly code = "POLICY_INTERACTION_REQUIRED";
-	constructor(public readonly requestId: string) {
+	constructor(
+		public readonly requestId: string,
+		public readonly suspension?: InteractionSuspension,
+	) {
 		super(`Policy interaction required: ${requestId}`);
 		this.name = "PolicyInteractionRequiredError";
 	}
@@ -137,6 +142,30 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 	const state = states.get(ctx);
 	if (!state) throw new PolicyDeniedError("missing-security-state");
 	const workflow: WorkflowIdentity = { name: ctx.workflow_name ?? "<unknown>" };
+	const ctxRecord = ctx as Record<string, unknown>;
+	const traceRunId = typeof ctxRecord._traceRunId === "string" ? ctxRecord._traceRunId : undefined;
+	const stepInfo = ctxRecord._stepInfo as { index?: unknown; depth?: unknown } | undefined;
+	const stepIndex = typeof stepInfo?.index === "number" ? stepInfo.index : undefined;
+	const run = traceRunId ? RunTracker.getInstance().getRun(traceRunId) : undefined;
+	const suspension: InteractionSuspension | undefined =
+		traceRunId && stepIndex !== undefined
+			? {
+					runId: traceRunId,
+					status: "suspended",
+					step: { id: node.name, index: stepIndex, attempt },
+					cursor: {
+						stepIndex,
+						deep: typeof stepInfo?.depth === "number" && stepInfo.depth > 0,
+						nodeRunId: typeof ctxRecord._traceNodeId === "string" ? ctxRecord._traceNodeId : undefined,
+						lastCompletedStepIndex: run?.lastCompletedStepIndex,
+					},
+					trace: {
+						workflow,
+						parentRunId: run?.parentRunId,
+						parentNodeRunId: run?.parentNodeRunId,
+					},
+				}
+			: undefined;
 	return {
 		requestId: uuid(),
 		origin: "agent",
@@ -149,6 +178,7 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 		scope: scopeFor(node),
 		layers: state.layers ?? [],
 		signal,
+		...(suspension ? { suspension } : {}),
 	};
 }
 function bounded(value: string | undefined, max = 256): string | undefined {
@@ -261,8 +291,13 @@ export async function authorizeStep(
 		throw new PolicyDeniedError(result.decision.reasonCode, result.decision.reason ?? result.decision.reasonCode);
 	if (result.decision.kind === "ask") {
 		if (!state.interaction) throw new PolicyDeniedError("missing-interaction-port");
-		await state.interaction.suspend({ id: request.requestId, decision: result.decision, request });
-		throw new PolicyInteractionRequiredError(request.requestId);
+		await state.interaction.suspend({
+			id: request.requestId,
+			decision: result.decision,
+			request,
+			suspension: request.suspension,
+		});
+		throw new PolicyInteractionRequiredError(request.requestId, request.suspension);
 	}
 	if (result.decision.kind === "require-sandbox") {
 		if (!result.sandbox || !state.sandboxVerifier || !(await state.sandboxVerifier.verify(result.sandbox, request)))
