@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PolicyDecision, PolicyRequest } from "@blokjs/shared";
+import type { InteractionRecord, PolicyDecision, PolicyRequest } from "@blokjs/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { InteractionAuthorizationError, InteractionConflictError } from "../../policy/InteractionStore";
 import { SqliteInteractionStore } from "../../policy/SqliteInteractionStore";
@@ -19,6 +19,7 @@ const request: PolicyRequest = {
 	layers: [{ name: "deployment", version: "v1" }],
 };
 const decision: PolicyDecision = { kind: "ask", id: "decision-1", reasonCode: "approval", policyVersion: "v1" };
+type ClaimedInteractionRecord = InteractionRecord & { readonly claimedBy?: string; readonly claimedAt?: string };
 
 let directory: string | undefined;
 let store: SqliteInteractionStore | undefined;
@@ -89,6 +90,36 @@ describe("SqliteInteractionStore", () => {
 		await expect(
 			db.answer({ id: request.requestId, principalId: "principal-1", answer: { approved: false }, sequence: 0 }),
 		).rejects.toBeInstanceOf(InteractionConflictError);
+	});
+
+	it("claims answered interactions once with principal, sequence, status, and expiry fencing", async () => {
+		const db = createStore();
+		await db.create(request, decision, { expiresAt: "2099-01-01T00:00:00.000Z" });
+		await expect(db.claim(request.requestId, "principal-1", 0)).rejects.toBeInstanceOf(InteractionConflictError);
+		await db.answer({ id: request.requestId, principalId: "principal-1", answer: { approved: true }, sequence: 0 });
+
+		await expect(db.claim(request.requestId, "other", 1)).rejects.toBeInstanceOf(InteractionAuthorizationError);
+		await expect(db.claim(request.requestId, "principal-1", 0)).rejects.toBeInstanceOf(InteractionConflictError);
+		const claimed = (await db.claim(request.requestId, "principal-1", 1)) as ClaimedInteractionRecord;
+		expect(claimed.status).toBe("answered");
+		expect(claimed.sequence).toBe(2);
+		expect(claimed.claimedBy).toBe("principal-1");
+		expect(claimed.claimedAt).toEqual(expect.any(String));
+		await expect(db.claim(request.requestId, "principal-1", 1)).rejects.toBeInstanceOf(InteractionConflictError);
+
+		const deniedRequest = { ...request, requestId: "sqlite-interaction-denied" };
+		await db.create(deniedRequest, decision);
+		await db.answer({ id: deniedRequest.requestId, principalId: "principal-1", deny: true, sequence: 0 });
+		await expect(db.claim(deniedRequest.requestId, "principal-1", 1)).rejects.toBeInstanceOf(InteractionConflictError);
+	});
+
+	it("does not claim an answered interaction after its expiry", async () => {
+		const db = createStore();
+		await db.create(request, decision, { expiresAt: new Date(Date.now() + 25).toISOString() });
+		await db.answer({ id: request.requestId, principalId: "principal-1", answer: { approved: true }, sequence: 0 });
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		await expect(db.claim(request.requestId, "principal-1", 1)).rejects.toBeInstanceOf(InteractionConflictError);
+		expect((await db.get(request.requestId))?.sequence).toBe(1);
 	});
 
 	it("expires pending interactions and prevents later answers", async () => {

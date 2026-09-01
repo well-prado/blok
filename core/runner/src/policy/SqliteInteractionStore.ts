@@ -30,6 +30,7 @@ interface SqliteStatement {
 interface InteractionRow {
 	version: string;
 	id: string;
+	principal_id: string | null;
 	request_json: string;
 	decision_json: string;
 	status: InteractionStatus;
@@ -39,9 +40,15 @@ interface InteractionRow {
 	answer_json: string | null;
 	answered_by: string | null;
 	answered_at: string | null;
+	claimed_by: string | null;
+	claimed_at: string | null;
 }
 
-type MutableInteractionRecord = { -readonly [Key in keyof InteractionRecord]: InteractionRecord[Key] };
+type ClaimedInteractionRecord = InteractionRecord & {
+	readonly claimedBy?: string;
+	readonly claimedAt?: string;
+};
+type MutableInteractionRecord = { -readonly [Key in keyof ClaimedInteractionRecord]: ClaimedInteractionRecord[Key] };
 
 function clone<T>(value: T): T {
 	return structuredClone(value);
@@ -85,7 +92,7 @@ function parseJson<T>(value: string, label: string): T {
 	}
 }
 
-function rowToRecord(row: InteractionRow): InteractionRecord {
+function rowToRecord(row: InteractionRow): ClaimedInteractionRecord {
 	const record: MutableInteractionRecord = {
 		version: "1",
 		id: row.id,
@@ -99,6 +106,8 @@ function rowToRecord(row: InteractionRow): InteractionRecord {
 	if (row.answer_json !== null) record.answer = parseJson<unknown>(row.answer_json, "interaction answer");
 	if (row.answered_by !== null) record.answeredBy = row.answered_by;
 	if (row.answered_at !== null) record.answeredAt = row.answered_at;
+	if (row.claimed_by !== null) record.claimedBy = row.claimed_by;
+	if (row.claimed_at !== null) record.claimedAt = row.claimed_at;
 	return clone(record);
 }
 
@@ -150,6 +159,7 @@ export class SqliteInteractionStore implements InteractionStore {
 			CREATE TABLE IF NOT EXISTS policy_interactions (
 				id TEXT PRIMARY KEY,
 				version TEXT NOT NULL,
+				principal_id TEXT,
 				request_json TEXT NOT NULL,
 				decision_json TEXT NOT NULL,
 				status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'denied', 'expired', 'cancelled')),
@@ -158,11 +168,26 @@ export class SqliteInteractionStore implements InteractionStore {
 				sequence INTEGER NOT NULL,
 				answer_json TEXT,
 				answered_by TEXT,
-				answered_at TEXT
+				answered_at TEXT,
+				claimed_by TEXT,
+				claimed_at TEXT
 			);
 			CREATE INDEX IF NOT EXISTS idx_policy_interactions_status_expiry
 				ON policy_interactions(status, expires_at);
 		`);
+		const columns = new Set(
+			(this.db.prepare("PRAGMA table_info(policy_interactions)").all() as unknown as Array<{ name: string }>).map(
+				(column) => column.name,
+			),
+		);
+		if (!columns.has("principal_id")) {
+			this.db.exec("ALTER TABLE policy_interactions ADD COLUMN principal_id TEXT");
+			this.db.exec(
+				"UPDATE policy_interactions SET principal_id = json_extract(request_json, '$.principal.id') WHERE principal_id IS NULL",
+			);
+		}
+		if (!columns.has("claimed_by")) this.db.exec("ALTER TABLE policy_interactions ADD COLUMN claimed_by TEXT");
+		if (!columns.has("claimed_at")) this.db.exec("ALTER TABLE policy_interactions ADD COLUMN claimed_at TEXT");
 	}
 
 	private stmt(key: string, sql: string): SqliteStatement {
@@ -173,10 +198,10 @@ export class SqliteInteractionStore implements InteractionStore {
 		return statement;
 	}
 
-	private find(id: string): InteractionRecord | undefined {
+	private find(id: string): ClaimedInteractionRecord | undefined {
 		const row = this.stmt(
 			"get",
-			"SELECT version, id, request_json, decision_json, status, created_at, expires_at, sequence, answer_json, answered_by, answered_at FROM policy_interactions WHERE id = ?",
+			"SELECT version, id, principal_id, request_json, decision_json, status, created_at, expires_at, sequence, answer_json, answered_by, answered_at, claimed_by, claimed_at FROM policy_interactions WHERE id = ?",
 		).get(id) as InteractionRow | undefined;
 		return row ? rowToRecord(row) : undefined;
 	}
@@ -199,10 +224,11 @@ export class SqliteInteractionStore implements InteractionStore {
 		};
 		const result = this.stmt(
 			"create",
-			"INSERT OR IGNORE INTO policy_interactions (id, version, request_json, decision_json, status, created_at, expires_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT OR IGNORE INTO policy_interactions (id, version, principal_id, request_json, decision_json, status, created_at, expires_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		).run(
 			record.id,
 			record.version,
+			request.principal?.id ?? null,
 			json(record.request, "interaction request"),
 			json(record.decision, "interaction decision"),
 			record.status,
@@ -264,6 +290,42 @@ export class SqliteInteractionStore implements InteractionStore {
 		return resolved;
 	}
 
+	/**
+	 * Atomically fences one resume attempt. The public interaction contract's
+	 * `claim` addition is supplied by the resume coordinator stream; keeping
+	 * this method here makes SQLite safe to use when that stream lands without
+	 * coupling this adapter to runner cursor/orchestration code.
+	 */
+	async claim(id: string, principalId: string, sequence: number): Promise<ClaimedInteractionRecord> {
+		const record = this.find(id);
+		if (!record) throw new InteractionConflictError("interaction not found");
+		if (record.request.principal?.id !== principalId)
+			throw new InteractionAuthorizationError("interaction claim principal does not match the request");
+		if (record.status !== "answered")
+			throw new InteractionConflictError(`interaction cannot resume from status ${record.status}`);
+		if (record.sequence !== sequence) throw new InteractionConflictError("interaction sequence mismatch");
+		if (Date.parse(record.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
+
+		const claimedAt = new Date().toISOString();
+		const updated = this.stmt(
+			"claim",
+			"UPDATE policy_interactions SET claimed_by = ?, claimed_at = ?, sequence = sequence + 1 WHERE id = ? AND principal_id = ? AND status = 'answered' AND sequence = ? AND expires_at > ?",
+		).run(principalId, claimedAt, id, principalId, sequence, new Date().toISOString());
+		if (updated.changes !== 1) {
+			const current = this.find(id);
+			if (!current) throw new InteractionConflictError("interaction not found");
+			if (current.request.principal?.id !== principalId)
+				throw new InteractionAuthorizationError("interaction claim principal does not match the request");
+			if (current.status !== "answered")
+				throw new InteractionConflictError(`interaction cannot resume from status ${current.status}`);
+			if (Date.parse(current.expiresAt) <= Date.now()) throw new InteractionConflictError("interaction has expired");
+			throw new InteractionConflictError("interaction sequence mismatch");
+		}
+		const claimed = this.find(id);
+		if (!claimed) throw new InteractionConflictError("interaction not found");
+		return claimed;
+	}
+
 	async cancel(id: string, principalId: string, sequence: number): Promise<InteractionRecord> {
 		const record = this.find(id);
 		if (!record) throw new InteractionConflictError("interaction not found");
@@ -285,7 +347,7 @@ export class SqliteInteractionStore implements InteractionStore {
 		const timestamp = Date.parse(now);
 		const rows = this.stmt(
 			"pending",
-			"SELECT version, id, request_json, decision_json, status, created_at, expires_at, sequence, answer_json, answered_by, answered_at FROM policy_interactions WHERE status = 'pending'",
+			"SELECT version, id, principal_id, request_json, decision_json, status, created_at, expires_at, sequence, answer_json, answered_by, answered_at, claimed_by, claimed_at FROM policy_interactions WHERE status = 'pending'",
 		).all() as unknown as InteractionRow[];
 		const expired: InteractionRecord[] = [];
 		const expirePending = this.stmt(
