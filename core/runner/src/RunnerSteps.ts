@@ -14,6 +14,14 @@ import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
+import {
+	PolicyAuditError,
+	PolicyDeniedError,
+	PolicyInteractionRequiredError,
+	type PolicyToken,
+	authorizeStep,
+	recordPostExecution,
+} from "./policy/PolicyPipeline";
 import { getPrimitiveStack } from "./runtime/PrimitiveStack";
 import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
@@ -379,6 +387,15 @@ export default abstract class RunnerSteps {
 				}
 
 				if (!step.flow) {
+					// Prepare resolves the input slice and completes local schema
+					// validation before the policy boundary. The existing process()
+					// implementation is then reused for the actual effect.
+					try {
+						await step.prepare(ctx);
+					} catch (error) {
+						if (error && typeof error === "object") (error as { _blokStepId?: string })._blokStepId = step.name;
+						throw error;
+					}
 					// --- Trace: start node ---
 					let nodeRunId: string | undefined;
 					const stepAny = step as unknown as Record<string, unknown>;
@@ -708,6 +725,7 @@ export default abstract class RunnerSteps {
 					if (cacheStore && resolvedIdemKey && nodeRunId) {
 						const hit = cacheStore.getIdempotencyCache(workflowName, step.name, resolvedIdemKey);
 						if (hit) {
+							const cachePolicy = await authorizeStep(ctx, step, 1, true);
 							// Persist the UNWRAPPED value so a cache HIT lands the
 							// same bare `state[<id>]` shape a fresh run did (defineNode
 							// steps cache the full BlokResponse envelope; state stores
@@ -724,6 +742,7 @@ export default abstract class RunnerSteps {
 								},
 								hit.data,
 							);
+							await recordPostExecution(ctx, cachePolicy, "success");
 							ctx.logger.log(`${stepPrefix} → cached (from run ${hit.sourceRunId})`);
 							continue;
 						}
@@ -747,6 +766,7 @@ export default abstract class RunnerSteps {
 					// `30000` via `parseDuration`).
 					const maxDurationMs = (step as NodeBase).maxDurationMs;
 					let attempt = 0;
+					let policyToken: PolicyToken | null = null;
 
 					// v0.6 Phase 4 — the primitive stack on ctx is owned by
 					// ForEachNode/LoopNode/SwitchNode (push on entry, pop in
@@ -778,6 +798,7 @@ export default abstract class RunnerSteps {
 							attempt += 1;
 
 							try {
+								policyToken = await authorizeStep(ctx, step, attempt);
 								// Run process() inside the step span's context so child spans
 								// (gRPC runtime / sub-workflow dispatch) nest under it.
 								const processInvocation = (): Promise<{ data: unknown }> =>
@@ -789,6 +810,7 @@ export default abstract class RunnerSteps {
 										? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
 										: await processInvocation();
 								ctx.response = model.data as BlokResponse;
+								await recordPostExecution(ctx, policyToken, "success");
 
 								// Treat soft errors (data carries `.error`) the same as
 								// thrown errors so retry semantics are uniform.
@@ -844,6 +866,20 @@ export default abstract class RunnerSteps {
 								stepSpan.setStatus({ code: SpanStatusCode.OK });
 								break;
 							} catch (nodeErr) {
+								if (
+									nodeErr instanceof PolicyAuditError ||
+									nodeErr instanceof PolicyDeniedError ||
+									nodeErr instanceof PolicyInteractionRequiredError
+								) {
+									throw nodeErr;
+								}
+								if (policyToken)
+									await recordPostExecution(
+										ctx,
+										policyToken,
+										ctx.signal?.aborted ? "cancelled" : "failure",
+										nodeErr instanceof Error ? nodeErr.name : undefined,
+									);
 								// v0.5.3 — control-flow signals from a step's run()
 								// must NOT be retried OR wrapped as enriched errors.
 								// In the production wait path, RunnerSteps throws
@@ -962,7 +998,12 @@ export default abstract class RunnerSteps {
 			// RunCancelledError` discrimination and the run would get
 			// failRun'd on top of an already-cancelled status. Pass through
 			// untouched so the catch in TriggerBase.run sees the right type.
-			if (e instanceof RunCancelledError) {
+			if (
+				e instanceof RunCancelledError ||
+				e instanceof PolicyDeniedError ||
+				e instanceof PolicyInteractionRequiredError ||
+				e instanceof PolicyAuditError
+			) {
 				throw e;
 			}
 

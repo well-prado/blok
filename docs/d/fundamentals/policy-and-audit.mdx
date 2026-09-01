@@ -1,0 +1,43 @@
+---
+title: Policy and audit
+description: Fail-closed authorization and bounded evidence for agent-originated workflow execution.
+icon: "scale-balanced"
+---
+
+Agent execution is opt-in. A trusted caller installs an opaque policy state on
+the run; request headers, workflow inputs, environment variables, and node
+metadata cannot create that identity. Ordinary workflows have no policy state
+and retain compatibility with legacy nodes.
+
+The runner prepares a step (resolving inputs and completing local validation),
+authorizes it, checks cancellation, and only then executes it. The same seam
+is used for module nodes, runtime adapters, nested runners, retries, and
+parallel child contexts. Each retry attempt is authorized independently.
+
+Policy layers are evaluated deterministically in this order: deployment,
+repository, workflow, phase, user. Deny is terminal. `require-sandbox` takes
+precedence over `ask`; a malformed result, provider exception, timeout, missing
+identity, missing manifest, or missing required port fails closed. A pure
+fast-path is safe only for an explicitly eligible, deterministic node with no
+effects, capabilities, secrets, or hidden runtime effect path.
+
+`ask` writes a typed interaction request to an injected suspension port and
+returns a control signal. It never waits on a process-local promise. Durable
+approval persistence and UI are the responsibility of issue #918. A missing
+port is a denial.
+
+`require-sandbox` accepts only a verifier-approved attestation bound to the
+principal, session, workflow, step, requested effects, profile, policy decision,
+and validity window. A boolean `sandboxed` flag is not an attestation.
+
+Every authorized invocation appends a bounded normalized pre-event before the
+effect and a post-event after it. Pre-event failure prevents execution. A
+post-event failure is surfaced as a critical audit failure without claiming the
+effect was undone. Events contain correlation and attribution identifiers,
+decision/rule metadata, cache-versus-execution state, outcome and duration.
+Secret-like values, headers, arbitrary inputs/outputs, credentials, stacks, and
+unbounded errors are not persisted; redaction and truncation are explicit.
+
+Desktop and cloud hosts can provide their own `PolicyProvider`, `AuditSink`,
+`InteractionSuspensionPort`, and sandbox verifier. Tests can use the exported
+in-memory implementations without changing the production trust boundary.

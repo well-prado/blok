@@ -10,6 +10,8 @@ import type VarsContext from "./types/VarsContext";
 import mapper, { cloneResolvable } from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
 
+const preparedContexts = new WeakMap<Context, Set<NodeBase>>();
+
 /**
  * Resolve one step's config slice for this execution and publish the resolved
  * COPY at `config[name]`, leaving the source slice unresolved. Returns the
@@ -44,6 +46,10 @@ export default abstract class NodeBase {
 	public active = true;
 	public stop = false;
 	public originalConfig: ParamsDictionary = {};
+	/** Trusted manifest copied from the node descriptor; absent means unsafe to agents. */
+	public capabilityManifest?: import("./CapabilityManifest").CapabilityManifestV1;
+	/** Raw descriptor value retained so invalid runtime metadata fails closed. */
+	public capabilityManifestRaw?: unknown;
 
 	// =========================================================================
 	// V2 persistence knobs — populated by Configuration.getSteps from the
@@ -158,6 +164,20 @@ export default abstract class NodeBase {
 	 */
 	public wait?: boolean;
 
+	public async prepare(ctx: Context): Promise<void> {
+		const config: NodeConfigContext = ctx.config as unknown as NodeConfigContext;
+		this.originalConfig = resolveSlice(config, this.name, this.blueprintMapper, ctx);
+		await this.validatePrepared(ctx);
+		let prepared = preparedContexts.get(ctx);
+		if (!prepared) {
+			prepared = new Set<NodeBase>();
+			preparedContexts.set(ctx, prepared);
+		}
+		prepared.add(this);
+	}
+
+	protected async validatePrepared(_ctx: Context): Promise<void> {}
+
 	public async process(ctx: Context, step?: Step): Promise<ResponseContext> {
 		let response: ResponseContext = {
 			success: true,
@@ -165,8 +185,8 @@ export default abstract class NodeBase {
 			error: null,
 		};
 
-		const config: NodeConfigContext = ctx.config as unknown as NodeConfigContext;
-		this.originalConfig = resolveSlice(config, this.name, this.blueprintMapper, ctx);
+		const prepared = preparedContexts.get(ctx)?.has(this) === true;
+		if (!prepared) await this.prepare(ctx);
 
 		response = await this.run(ctx);
 

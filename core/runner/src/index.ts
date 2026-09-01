@@ -124,6 +124,21 @@ import { type RegisteredWorkflow, type WorkflowAuthorizeFn, WorkflowRegistry } f
 // Nearest-miss "did you mean…?" helper, shared by every by-name/by-route
 // lookup that can fail (#693): HTTP catch-all, RPC mount, subworkflow lookup.
 import { type MatchCandidate, type RankedMatch, levenshteinDistance, nearestMatches } from "./workflow/NearestMatch";
+export {
+	authorizeStep,
+	hasPolicyExecution,
+	InMemoryAuditSink,
+	InMemoryPolicyProvider,
+	installPolicyExecution,
+	PolicyAuditError,
+	PolicyDeniedError,
+	PolicyInteractionRequiredError,
+	propagatePolicyExecution,
+	recordPostExecution,
+	type PolicyExecutionOptions,
+	type PolicyToken,
+	type SandboxVerifier,
+} from "./policy/PolicyPipeline";
 
 // Concurrency gate (Tier 2 #6)
 import {

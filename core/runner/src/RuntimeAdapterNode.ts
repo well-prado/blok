@@ -1,8 +1,9 @@
 import type { Context, ResponseContext } from "@blokjs/shared";
-import { GlobalError } from "@blokjs/shared";
+import { GlobalError, parseCapabilityManifest } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./adapters/RuntimeAdapter";
 import type { DecodedExecuteEvent } from "./adapters/grpc/GrpcCodec";
+import { hasPolicyExecution } from "./policy/PolicyPipeline";
 import { RunTracker } from "./tracing/RunTracker";
 import type { TraceLogEntry } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
@@ -55,6 +56,32 @@ export class RuntimeAdapterNode extends RunnerNode {
 		this.as = targetNode.as;
 		this.spread = targetNode.spread;
 		this.ephemeral = targetNode.ephemeral;
+		this.capabilityManifest = targetNode.capabilityManifest;
+		this.capabilityManifestRaw = targetNode.capabilityManifestRaw;
+	}
+
+	/** Resolve sidecar authority only at the agent prepare boundary. */
+	async prepare(ctx: Context): Promise<void> {
+		await super.prepare(ctx);
+		if (!hasPolicyExecution(ctx) || !this.adapter.listNodes) return;
+		try {
+			const descriptor = (await this.adapter.listNodes()).find((candidate) => candidate.name === this.targetNode.node);
+			this.capabilityManifestRaw = descriptor?.capabilityManifest;
+			this.targetNode.capabilityManifestRaw = descriptor?.capabilityManifest;
+			if (descriptor?.capabilityManifest !== undefined && descriptor.capabilityManifest !== null) {
+				try {
+					this.capabilityManifest = parseCapabilityManifest(descriptor.capabilityManifest);
+					this.targetNode.capabilityManifest = this.capabilityManifest;
+				} catch {
+					/* preserve raw invalid metadata; policy denies it */
+				}
+			}
+		} catch {
+			// Missing trusted reflection is deliberately represented as missing
+			// metadata and rejected by authorizeStep for agent execution.
+			this.capabilityManifest = undefined;
+			this.capabilityManifestRaw = undefined;
+		}
 	}
 
 	/**

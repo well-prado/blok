@@ -78,6 +78,32 @@ import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
 import { NamedMissingStateError } from "./utils/NamedMissingStateError";
 import { type StructuralRef, type StructuralTpl, isStructuralRef, isStructuralTpl, lowerRefs } from "./utils/lowerRefs";
+export type {
+	AuditEventBase,
+	AuditRedactionState,
+	AuditSink,
+	ExecutionOrigin,
+	InteractionRequest,
+	InteractionSuspensionPort,
+	PolicyContext,
+	PolicyDecision,
+	PolicyDecisionKind,
+	PolicyEvaluationResult,
+	PolicyLayer,
+	PolicyLayerName,
+	PolicyProvider,
+	PolicyRequest,
+	PolicyRuleMatch,
+	PostExecutionAuditEvent,
+	PreExecutionAuditEvent,
+	PrincipalIdentity,
+	RequestedCapabilityScope,
+	SandboxAttestation,
+	SessionIdentity,
+	StepIdentity,
+	TurnIdentity,
+	WorkflowIdentity,
+} from "./PolicyContracts";
 
 export {
 	CAPABILITY_MANIFEST_VERSION,

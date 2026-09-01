@@ -31,6 +31,7 @@ import { GlobalError } from "@blokjs/shared";
 import { RunCancelledError } from "./RunCancelledError";
 import RunnerNode from "./RunnerNode";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
+import { PolicyAuditError, PolicyDeniedError, PolicyInteractionRequiredError } from "./policy/PolicyPipeline";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 interface TryCatchOpts {
@@ -192,7 +193,13 @@ export class TryCatchNode extends RunnerNode {
 			// re-entry detection. Use `idempotencyKey` on each pre-wait
 			// step (or rely on natural idempotency — read-only fetches,
 			// stateless transforms) to make re-execution free.
-			if (err instanceof WaitDispatchRequest || err instanceof RunCancelledError) {
+			if (
+				err instanceof WaitDispatchRequest ||
+				err instanceof RunCancelledError ||
+				err instanceof PolicyDeniedError ||
+				err instanceof PolicyInteractionRequiredError ||
+				err instanceof PolicyAuditError
+			) {
 				throw err;
 			}
 			caught = toErrorEnvelope(err);
@@ -210,7 +217,13 @@ export class TryCatchNode extends RunnerNode {
 				// formally support waits in catch arms — re-entry semantics
 				// differ from the try-arm path — but at least don't lose
 				// the signal here. Document as a Phase 4 follow-up.)
-				if (catchErr instanceof WaitDispatchRequest || catchErr instanceof RunCancelledError) {
+				if (
+					catchErr instanceof WaitDispatchRequest ||
+					catchErr instanceof RunCancelledError ||
+					catchErr instanceof PolicyDeniedError ||
+					catchErr instanceof PolicyInteractionRequiredError ||
+					catchErr instanceof PolicyAuditError
+				) {
 					throw catchErr;
 				}
 				// `catch` itself threw. Hold onto it so `finally` still runs,
