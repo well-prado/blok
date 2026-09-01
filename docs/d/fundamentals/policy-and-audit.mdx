@@ -41,3 +41,25 @@ unbounded errors are not persisted; redaction and truncation are explicit.
 Desktop and cloud hosts can provide their own `PolicyProvider`, `AuditSink`,
 `InteractionSuspensionPort`, and sandbox verifier. Tests can use the exported
 in-memory implementations without changing the production trust boundary.
+
+## Secret references
+
+Agent nodes declare opaque secret names in `capabilityManifest.secrets`. After
+the node is authorized, trusted node code may resolve one of those names:
+
+```ts
+const lease = await resolveSecret(ctx, { version: "1", name: "payments.api-key" });
+const apiKey = lease.read();
+```
+
+The runner never puts the resolved value in workflow state, audit metadata, or
+the generic gRPC envelope. Resolution is attributed to the current principal,
+session, turn, workflow, and step, and emits a redacted audit event. A name that
+was not declared by the node, a missing resolver, an expired/revoked lease, or
+an unavailable provider fails closed.
+
+Agent contexts also do not inherit the ambient process environment. Existing
+ordinary workflows retain their legacy environment behavior, including the
+operator-controlled `BLOK_NODE_ENV_ALLOW` allowlist. Sidecar integrations must
+use a future explicit grant protocol for secret material; they must not rely on
+ambient environment forwarding.

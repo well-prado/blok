@@ -15,7 +15,14 @@ import {
 	type PrincipalIdentity,
 	type RequestedCapabilityScope,
 	type SandboxAttestation,
+	type SecretLease,
+	type SecretRef,
+	type SecretRequest,
+	type SecretResolutionAuditEvent,
+	type SecretResolutionFailure,
+	type SecretResolver,
 	type SessionIdentity,
+	type StepIdentity,
 	type TurnIdentity,
 	type WorkflowIdentity,
 	assessCapabilityManifest,
@@ -35,6 +42,7 @@ export interface PolicyExecutionOptions {
 	interaction?: InteractionSuspensionPort;
 	sandboxVerifier?: SandboxVerifier;
 	layers?: readonly PolicyLayer[];
+	secretResolver?: SecretResolver;
 }
 interface PolicyState extends PolicyExecutionOptions {
 	origin: "agent";
@@ -47,6 +55,8 @@ export interface PolicyToken {
 	cached: boolean;
 }
 const states = new WeakMap<Context, PolicyState>();
+const authorizedSecrets = new WeakMap<Context, ReadonlySet<string>>();
+const activeSteps = new WeakMap<Context, StepIdentity>();
 
 export class PolicyDeniedError extends Error {
 	readonly code = "POLICY_DENIED";
@@ -88,10 +98,22 @@ export function installPolicyExecution(ctx: Context, options: PolicyExecutionOpt
 		throw new PolicyDeniedError("missing-security-state");
 	}
 	states.set(ctx, { ...options, origin: "agent", layers: normalizeLayers(options.layers) });
+	authorizedSecrets.delete(ctx);
+	// Agent execution must not inherit the ambient process environment. Keep
+	// this as an own property so the ABI remains unchanged for ordinary runs.
+	if (Object.getOwnPropertyDescriptor(ctx, "env")?.configurable) {
+		Object.defineProperty(ctx, "env", { value: Object.freeze({}), enumerable: true, configurable: true });
+	}
 }
 export function propagatePolicyExecution(parent: Context, child: Context): void {
 	const state = states.get(parent);
-	if (state) states.set(child, state);
+	if (state) {
+		states.set(child, state);
+		const secrets = authorizedSecrets.get(parent);
+		if (secrets) authorizedSecrets.set(child, secrets);
+		const step = activeSteps.get(parent);
+		if (step) activeSteps.set(child, step);
+	}
 }
 export function hasPolicyExecution(ctx: Context): boolean {
 	return states.has(ctx);
@@ -104,7 +126,12 @@ function normalizeLayers(layers: readonly PolicyLayer[] | undefined): readonly P
 }
 function scopeFor(node: NodeBase): RequestedCapabilityScope {
 	const manifest = node.capabilityManifest;
-	return { effects: manifest?.effects ?? [], capabilities: manifest?.capabilities ?? [], fragments: {} };
+	return {
+		effects: manifest?.effects ?? [],
+		capabilities: manifest?.capabilities ?? [],
+		secrets: manifest?.secrets ?? [],
+		fragments: {},
+	};
 }
 function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: AbortSignal): PolicyRequest {
 	const state = states.get(ctx);
@@ -180,10 +207,13 @@ export async function authorizeStep(
 	const state = states.get(ctx);
 	if (!state) return null;
 	if (ctx.signal?.aborted) throw new PolicyDeniedError("cancelled");
+	if (!state.secretResolver && (node.capabilityManifest?.secrets.length ?? 0) > 0)
+		throw new PolicyDeniedError("missing-secret-resolver");
 	const assessment = assessCapabilityManifest(node.capabilityManifestRaw ?? node.capabilityManifest);
 	if (!assessment.agentEligible || !assessment.manifest)
 		throw new CapabilityManifestError([`agent execution requires an eligible manifest (${assessment.reason})`]);
 	const request = requestFor(ctx, node, attempt, ctx.signal);
+	activeSteps.set(ctx, request.step);
 	let result: PolicyEvaluationResult;
 	try {
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -239,7 +269,124 @@ export async function authorizeStep(
 			throw new PolicyDeniedError("invalid-sandbox-attestation");
 	}
 	if (ctx.signal?.aborted) throw new PolicyDeniedError("cancelled");
+	if (request.scope.secrets.length > 0) authorizedSecrets.set(ctx, new Set(request.scope.secrets));
 	return { request, result, correlationId, startedAt: performance.now(), cached };
+}
+
+export class SecretResolutionError extends Error {
+	readonly code: SecretResolutionFailure;
+	constructor(code: SecretResolutionFailure) {
+		super(code);
+		this.name = "SecretResolutionError";
+		this.code = code;
+	}
+}
+
+const SECRET_NAME = /^[A-Za-z][A-Za-z0-9._:/-]{0,127}$/;
+function validSecretRef(reference: SecretRef): boolean {
+	return reference.version === "1" && SECRET_NAME.test(reference.name);
+}
+
+function secretRequest(ctx: Context, reference: SecretRef): SecretRequest {
+	const state = states.get(ctx);
+	if (!state) throw new SecretResolutionError("SECRET_NOT_AUTHORIZED");
+	const step = activeSteps.get(ctx) ?? { id: "unknown" };
+	return {
+		requestId: uuid(),
+		origin: "agent",
+		principal: state.principal,
+		session: state.session,
+		turn: state.turn,
+		workflow: { name: ctx.workflow_name ?? "<unknown>" },
+		step,
+		manifest: null,
+		scope: { effects: ["secret"], capabilities: ["secret.resolve"], secrets: [reference.name], fragments: {} },
+		layers: state.layers ?? [],
+		signal: ctx.signal,
+		reference,
+	};
+}
+
+export async function resolveSecret(ctx: Context, reference: SecretRef): Promise<SecretLease> {
+	if (!validSecretRef(reference)) throw new SecretResolutionError("SECRET_NOT_AUTHORIZED");
+	const state = states.get(ctx);
+	if (!state?.secretResolver || !authorizedSecrets.get(ctx)?.has(reference.name))
+		throw new SecretResolutionError("SECRET_NOT_AUTHORIZED");
+	if (ctx.signal?.aborted) throw new SecretResolutionError("SECRET_RESOLVER_UNAVAILABLE");
+	const request = secretRequest(ctx, reference);
+	const correlationId = uuid();
+	try {
+		const lease = await state.secretResolver.resolve(request);
+		const event: SecretResolutionAuditEvent = {
+			version: "1",
+			eventType: "secret.resolve",
+			eventId: uuid(),
+			timestamp: new Date().toISOString(),
+			correlationId,
+			principalId: request.principal?.id,
+			sessionId: request.session?.id,
+			turnId: request.turn?.id,
+			workflow: request.workflow,
+			step: request.step,
+			reference,
+			leaseId: lease.leaseId,
+			outcome: "success",
+			redaction: { redacted: true, fields: ["value"] },
+		};
+		await state.auditSink.append(event);
+		return lease;
+	} catch (error) {
+		const code = error instanceof SecretResolutionError ? error.code : "SECRET_RESOLVER_UNAVAILABLE";
+		try {
+			await state.auditSink.append({
+				version: "1",
+				eventType: "secret.resolve",
+				eventId: uuid(),
+				timestamp: new Date().toISOString(),
+				correlationId,
+				principalId: request.principal?.id,
+				sessionId: request.session?.id,
+				turnId: request.turn?.id,
+				workflow: request.workflow,
+				step: request.step,
+				reference,
+				outcome: "failure",
+				errorCode: code,
+				redaction: { redacted: true, fields: ["value"] },
+			} satisfies SecretResolutionAuditEvent);
+		} catch {
+			throw new PolicyAuditError("secret-resolution audit failed", false);
+		}
+		throw error instanceof SecretResolutionError ? error : new SecretResolutionError(code);
+	}
+}
+
+export class InMemorySecretResolver implements SecretResolver {
+	private readonly values: ReadonlyMap<string, string>;
+	private readonly revoked = new Set<string>();
+	constructor(values: ReadonlyMap<string, string> | Record<string, string>) {
+		this.values = values instanceof Map ? new Map(values) : new Map(Object.entries(values));
+	}
+	revoke(name: string): void {
+		this.revoked.add(name);
+	}
+	async resolve(request: SecretRequest): Promise<SecretLease> {
+		if (this.revoked.has(request.reference.name)) throw new SecretResolutionError("SECRET_REVOKED");
+		const value = this.values.get(request.reference.name);
+		if (value === undefined) throw new SecretResolutionError("SECRET_NOT_FOUND");
+		const expiresAtMs = Date.now() + 60_000;
+		const expiresAt = new Date(expiresAtMs).toISOString();
+		return {
+			reference: request.reference,
+			leaseId: uuid(),
+			expiresAt,
+			read: () => {
+				if (Date.now() >= expiresAtMs) throw new SecretResolutionError("SECRET_EXPIRED");
+				if (this.revoked.has(request.reference.name)) throw new SecretResolutionError("SECRET_REVOKED");
+				return value;
+			},
+		};
+	}
 }
 export async function recordPostExecution(
 	ctx: Context,
@@ -264,11 +411,11 @@ export async function recordPostExecution(
 }
 
 export class InMemoryAuditSink implements AuditSink {
-	private readonly events: Array<PreExecutionAuditEvent | PostExecutionAuditEvent> = [];
-	async append(event: PreExecutionAuditEvent | PostExecutionAuditEvent): Promise<void> {
+	private readonly events: Array<PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent> = [];
+	async append(event: PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent): Promise<void> {
 		this.events.push(Object.freeze(structuredClone(event)));
 	}
-	read(): readonly (PreExecutionAuditEvent | PostExecutionAuditEvent)[] {
+	read(): readonly (PreExecutionAuditEvent | PostExecutionAuditEvent | SecretResolutionAuditEvent)[] {
 		return this.events.map((event) => structuredClone(event));
 	}
 }

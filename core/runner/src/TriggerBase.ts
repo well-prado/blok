@@ -1961,6 +1961,7 @@ export default abstract class TriggerBase extends Trigger {
 		Object.defineProperty(ctx, "env", {
 			value: getEnvForCtx(),
 			enumerable: true,
+			configurable: true,
 		});
 
 		return ctx;
