@@ -112,5 +112,7 @@ export interface RuntimeNodeDescriptor {
 	inputSchema: unknown | null;
 	/** JSON Schema (parsed) for the node's output, or `null`. */
 	outputSchema: unknown | null;
+	/** Parsed capability manifest JSON, null when the SDK/node did not declare one. */
+	capabilityManifest?: unknown | null;
 	tags?: string[];
 }

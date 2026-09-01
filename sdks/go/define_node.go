@@ -14,13 +14,15 @@ type NodeReflector interface {
 	Description() string
 	InputSchemaJSON() []byte
 	OutputSchemaJSON() []byte
+	CapabilityManifestJSON() []byte
 }
 
 // typedNode is the generic, validated node produced by DefineNode.
 type typedNode[I any, O any] struct {
-	name        string
-	description string
-	run         func(ctx *Context, input I) (O, error)
+	name               string
+	description        string
+	run                func(ctx *Context, input I) (O, error)
+	capabilityManifest *CapabilityManifest
 }
 
 // Execute unmarshals the raw config into the typed Input, runs the node, and
@@ -49,6 +51,12 @@ func (t *typedNode[I, O]) validationError(cause error) error {
 func (t *typedNode[I, O]) Description() string      { return t.description }
 func (t *typedNode[I, O]) InputSchemaJSON() []byte  { return reflectSchemaJSON[I]() }
 func (t *typedNode[I, O]) OutputSchemaJSON() []byte { return reflectSchemaJSON[O]() }
+func (t *typedNode[I, O]) CapabilityManifestJSON() []byte {
+	if t.capabilityManifest == nil {
+		return nil
+	}
+	return t.capabilityManifest.JSON()
+}
 
 // DefineNode builds a typed node (SPEC-B P4) — the Go equivalent of the
 // TypeScript defineNode / Python @node / Rust TypedNode. The raw config is
@@ -71,8 +79,15 @@ func (t *typedNode[I, O]) OutputSchemaJSON() []byte { return reflectSchemaJSON[O
 //	        rows := doSearch(in.Query, in.Limit)
 //	        return Output{Results: rows, Count: len(rows)}, nil
 //	    }))
-func DefineNode[I any, O any](name, description string, run func(ctx *Context, input I) (O, error)) NodeHandler {
-	return &typedNode[I, O]{name: name, description: description, run: run}
+func DefineNode[I any, O any](name, description string, run func(ctx *Context, input I) (O, error), manifests ...CapabilityManifest) NodeHandler {
+	var manifest *CapabilityManifest
+	if len(manifests) > 1 {
+		panic("DefineNode accepts at most one capability manifest")
+	}
+	if len(manifests) == 1 {
+		manifest = &manifests[0]
+	}
+	return &typedNode[I, O]{name: name, description: description, run: run, capabilityManifest: manifest}
 }
 
 // reflectSchemaJSON returns the JSON-encoded JSON Schema for T, or nil on error.

@@ -168,6 +168,20 @@ Hard rules:
 - Avoid `any`; use `unknown` and narrow.
 - Throw plain `Error` for failures unless a specific framework error is needed.
 
+### Capability manifests
+
+Nodes and workflows may declare `capabilityManifest` v1 metadata: explicit
+effects, narrow required capabilities, opaque secret reference names,
+determinism/idempotency, maturity, resource bounds, and optional
+runtime/trigger constraints. Select the narrowest truthful declaration. Never
+put a secret value in a manifest, workflow value, log, trace, or model context.
+
+Missing metadata remains backward compatible for ordinary execution, but is
+never agent-safe by default. Only a valid `agent-compatible` manifest is
+eligible for later agent policy evaluation; `trusted-legacy`,
+`denied-to-agents`, missing, and invalid manifests fail closed at that boundary.
+See `docs/d/fundamentals/capability-manifests.mdx` and ADR 0003.
+
 ## Handles and Persistence
 
 Every successful step stores its output at `ctx.state[id]`. A failed step writes

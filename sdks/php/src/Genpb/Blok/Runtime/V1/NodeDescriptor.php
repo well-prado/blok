@@ -36,6 +36,14 @@ class NodeDescriptor extends \Google\Protobuf\Internal\Message
      * Generated from protobuf field <code>repeated string tags = 5;</code>
      */
     private $tags;
+    /**
+     * CapabilityManifestV1 JSON (ADR 0003). Additive and optional: empty means
+     * legacy/unclassified, which ordinary workflows may still execute but agent
+     * policy MUST treat as ineligible rather than silently safe.
+     *
+     * Generated from protobuf field <code>bytes capability_manifest_json = 6;</code>
+     */
+    protected $capability_manifest_json = '';
 
     /**
      * Constructor.
@@ -49,6 +57,10 @@ class NodeDescriptor extends \Google\Protobuf\Internal\Message
      *           JSON Schema (drives OpenAPI/Studio/LLMs)
      *     @type string $output_schema_json
      *     @type string[] $tags
+     *     @type string $capability_manifest_json
+     *           CapabilityManifestV1 JSON (ADR 0003). Additive and optional: empty means
+     *           legacy/unclassified, which ordinary workflows may still execute but agent
+     *           policy MUST treat as ineligible rather than silently safe.
      * }
      */
     public function __construct($data = NULL) {
@@ -166,6 +178,36 @@ class NodeDescriptor extends \Google\Protobuf\Internal\Message
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::STRING);
         $this->tags = $arr;
+
+        return $this;
+    }
+
+    /**
+     * CapabilityManifestV1 JSON (ADR 0003). Additive and optional: empty means
+     * legacy/unclassified, which ordinary workflows may still execute but agent
+     * policy MUST treat as ineligible rather than silently safe.
+     *
+     * Generated from protobuf field <code>bytes capability_manifest_json = 6;</code>
+     * @return string
+     */
+    public function getCapabilityManifestJson()
+    {
+        return $this->capability_manifest_json;
+    }
+
+    /**
+     * CapabilityManifestV1 JSON (ADR 0003). Additive and optional: empty means
+     * legacy/unclassified, which ordinary workflows may still execute but agent
+     * policy MUST treat as ineligible rather than silently safe.
+     *
+     * Generated from protobuf field <code>bytes capability_manifest_json = 6;</code>
+     * @param string $var
+     * @return $this
+     */
+    public function setCapabilityManifestJson(string $var)
+    {
+        GPBUtil::checkString($var, false);
+        $this->capability_manifest_json = $var;
 
         return $this;
     }

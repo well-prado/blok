@@ -14,7 +14,9 @@
  * Boot the servers + run via:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
  */
 
+import { readFileSync } from "node:fs";
 import { GrpcRuntimeAdapter } from "@blokjs/runner";
+import { assessCapabilityManifest, parseCapabilityManifest } from "@blokjs/shared";
 
 type Json = Record<string, unknown>;
 interface ExecResult {
@@ -67,6 +69,19 @@ const BLOB_DIR = process.env.BLOK_BLOB_DIR ?? "";
 // Comfortably over the 1 MiB default offload threshold, comfortably under the
 // 16 MiB message limit the echoed response still travels inline under.
 const OVERSIZED_BYTES = 2 * 1024 * 1024;
+const CAPABILITY_FIXTURE = parseCapabilityManifest(
+	JSON.parse(readFileSync(new URL("../../fixtures/capability-manifest/typed-greet.v1.json", import.meta.url), "utf8")),
+);
+const CAPABILITY_CONFORMANCE = JSON.parse(
+	readFileSync(new URL("../../fixtures/capability-manifest/conformance-cases.v1.json", import.meta.url), "utf8"),
+) as {
+	base: Record<string, unknown>;
+	compatibilityCases: Array<{
+		name: string;
+		overrides: Record<string, unknown>;
+		expectedStatus: "declared" | "invalid";
+	}>;
+};
 
 // Poll listNodes until every required runtime is reachable or the deadline hits
 // (containers take a few seconds to boot under `docker compose up`).
@@ -143,6 +158,20 @@ function check(cond: boolean, msg: string): void {
 }
 
 async function main(): Promise<void> {
+	// The same runner boundary consumes metadata from every SDK. Exercise its
+	// forward-compatible and fail-closed rules in this cross-runtime gate before
+	// comparing the live descriptors.
+	for (const testCase of CAPABILITY_CONFORMANCE.compatibilityCases) {
+		const assessment = assessCapabilityManifest({
+			...CAPABILITY_CONFORMANCE.base,
+			...testCase.overrides,
+		});
+		check(
+			assessment.status === testCase.expectedStatus,
+			`manifest compatibility: ${testCase.name} → ${testCase.expectedStatus}`,
+		);
+	}
+
 	// Probe reachability (listNodes returns [] on a connection error), waiting
 	// for any REQUIRED runtimes to boot. Runs against whatever subset is up.
 	const live = await waitForLive();
@@ -175,6 +204,16 @@ async function main(): Promise<void> {
 		check(!!tg?.inputSchema && inputJson.includes("name"), `${kind}: typed-greet input schema has 'name'`);
 		check(!!tg?.outputSchema && outputJson.includes("greeting"), `${kind}: typed-greet output schema has 'greeting'`);
 		check((tg?.description ?? "").length > 0, `${kind}: typed-greet has a description ("${tg?.description}")`);
+		let reflectedManifest: unknown = null;
+		try {
+			reflectedManifest = parseCapabilityManifest(tg?.capabilityManifest);
+		} catch {
+			// The equality assertion below reports an invalid/missing descriptor.
+		}
+		check(
+			JSON.stringify(reflectedManifest) === JSON.stringify(CAPABILITY_FIXTURE),
+			`${kind}: typed-greet capability manifest matches the canonical v1 fixture`,
+		);
 
 		// 2a. Execute — valid typed input → typed output.
 		const ok = await run(adapter, "typed-greet", kind, { name: "Ada", repeat: 2 });

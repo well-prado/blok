@@ -138,6 +138,9 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
                 if (input.Length > 0) descriptor.InputSchemaJson = Google.Protobuf.ByteString.CopyFrom(input);
                 var output = reflector.OutputSchemaJson();
                 if (output.Length > 0) descriptor.OutputSchemaJson = Google.Protobuf.ByteString.CopyFrom(output);
+                var capabilityManifest = reflector.CapabilityManifestJson();
+                if (capabilityManifest.Length > 0)
+                    descriptor.CapabilityManifestJson = Google.Protobuf.ByteString.CopyFrom(capabilityManifest);
             }
             response.Nodes.Add(descriptor);
         }

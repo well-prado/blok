@@ -1,0 +1,89 @@
+---
+title: Capability manifests
+description: Declare node and workflow effects, required authority, secret references, reliability, and resource bounds.
+icon: "shield-halved"
+---
+
+Input and output schemas describe data. A capability manifest describes what a
+node or workflow can do operationally. Coding agents and deployment policy need
+both contracts before they can make a safe execution decision.
+
+## TypeScript node example
+
+```ts
+export default defineNode({
+  name: "fetch-user",
+  description: "Fetch a user from the account API",
+  input: z.object({ id: z.string() }),
+  output: z.object({ user: z.object({ id: z.string(), email: z.string() }) }),
+  capabilityManifest: {
+    version: "1",
+    classification: "agent-compatible",
+    effects: ["network", "read"],
+    capabilities: ["network.http", "account.user.read"],
+    secrets: ["account-api-token"],
+    determinism: "external",
+    idempotency: "idempotent",
+    maturity: "stable",
+    resources: {
+      maxDurationMs: 5000,
+      maxInputBytes: 1048576,
+      maxOutputBytes: 4194304,
+      maxConcurrency: 64,
+    },
+  },
+  async execute(ctx, input) {
+    // Resolve account-api-token through trusted infrastructure; do not put its
+    // value in the manifest, workflow inputs, outputs, logs, or traces.
+    return { user: await accounts.get(input.id, { signal: ctx.signal }) };
+  },
+});
+```
+
+Workflows accept the same optional `capabilityManifest` in their options.
+Runtime SDK typed-node APIs expose the same language-neutral fields and reflect
+them through gRPC `ListNodes`.
+
+## Fields
+
+| Field | Meaning |
+|---|---|
+| `version` | Contract version. Version 1 readers reject other versions. |
+| `classification` | `agent-compatible`, `trusted-legacy`, or `denied-to-agents`. |
+| `effects` | Broad observable effects: `read`, `write`, `network`, `filesystem`, `process`, `secret`, `streaming`, `destructive`. An empty list means pure. |
+| `capabilities` | Narrow authority identifiers such as `network.http` or `fs.workspace.read`. |
+| `secrets` | Opaque secret reference names only. Never credentials or `NAME=value` strings. |
+| `determinism` | `deterministic`, `time-dependent`, `random`, `external`, or `unknown`. |
+| `idempotency` | `idempotent`, `conditionally-idempotent`, `non-idempotent`, or `unknown`. |
+| `maturity` | `stable`, `beta`, `experimental`, or `deprecated`. |
+| `resources` | Positive bounds for duration, memory, input/output bytes, and concurrency. |
+| `runtimes`, `triggers` | Optional applicability constraints. |
+
+## Choose the narrowest truthful declaration
+
+- Pure calculation: `effects: []`, usually no capabilities or secrets.
+- Read a workspace file: `effects: ["filesystem", "read"]` and a narrow
+  capability such as `fs.workspace.read`.
+- Write a file: add `write`; add `destructive` only if existing data can be
+  deleted or irreversibly replaced.
+- Spawn a tool: `process` plus a specific capability such as
+  `process.spawn.compiler`.
+- Call an API: `network`; add `secret` only if a credential reference is used.
+- Emit a live stream: `streaming` plus the actual read/network/process effects
+  used to produce it.
+
+Do not declare everything a runtime could theoretically do. Declare what this
+node implementation actually does.
+
+## Compatibility and fail-closed behavior
+
+Existing nodes without metadata still run in ordinary workflows. Their catalog
+status is `missing`, and they are not eligible for agent-originated execution.
+Invalid manifests are reported as `invalid` and are also denied. A manifest is
+agent-eligible only when it is valid and explicitly classified
+`agent-compatible`; later policy issues still decide whether the requested
+authority is allowed, denied, requires consent, or requires a sandbox.
+
+Unknown fields are ignored by v1 readers so newer SDKs can add fields without
+breaking older runners. Unknown versions are rejected because their meaning
+cannot be safely inferred.

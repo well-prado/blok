@@ -26,15 +26,28 @@ describe("formatCatalog", () => {
 				description: "Semantic search",
 				inputSchema: {},
 				outputSchema: {},
+				capabilityManifest: {
+					version: "1",
+					classification: "agent-compatible",
+					effects: ["network", "read"],
+					capabilities: ["network.http"],
+					secrets: [],
+					determinism: "external",
+					idempotency: "idempotent",
+					maturity: "stable",
+				},
+				capabilityManifestStatus: "declared",
 			},
 		];
 		const out = formatCatalog(nodes);
 		const lines = out.split("\n");
-		expect(lines[0]).toMatch(/^NAME\s+RUNTIME\s+SCHEMA\s+DESCRIPTION$/);
+		expect(lines[0]).toMatch(/^NAME\s+RUNTIME\s+SCHEMA\s+EFFECTS\s+CAPABILITIES\s+DESCRIPTION$/);
 		expect(out).toContain("@blokjs/respond");
 		expect(out).toContain("runtime.python3");
 		expect(out).toContain("in,out");
 		expect(out).toContain("Semantic search");
+		expect(out).toContain("network,read");
+		expect(out).toContain("network.http");
 		// Columns aligned: every row starts the RUNTIME column at the same offset.
 		const rtOffset = lines[0].indexOf("RUNTIME");
 		expect(lines[1].slice(rtOffset, rtOffset + 6)).toBe("module");

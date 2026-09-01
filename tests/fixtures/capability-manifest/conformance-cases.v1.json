@@ -1,0 +1,95 @@
+{
+	"base": {
+		"version": "1",
+		"classification": "agent-compatible",
+		"effects": [],
+		"capabilities": [],
+		"secrets": [],
+		"determinism": "deterministic",
+		"idempotency": "unknown",
+		"maturity": "stable"
+	},
+	"cases": [
+		{ "name": "pure", "overrides": {} },
+		{
+			"name": "read",
+			"overrides": { "effects": ["read"], "capabilities": ["workspace.read"] }
+		},
+		{
+			"name": "write",
+			"overrides": { "effects": ["write"], "capabilities": ["workspace.write"] }
+		},
+		{
+			"name": "network",
+			"overrides": { "effects": ["network"], "capabilities": ["network.http"] }
+		},
+		{
+			"name": "filesystem",
+			"overrides": {
+				"effects": ["filesystem"],
+				"capabilities": ["fs.workspace.read"]
+			}
+		},
+		{
+			"name": "process",
+			"overrides": { "effects": ["process"], "capabilities": ["process.spawn"] }
+		},
+		{
+			"name": "secret",
+			"overrides": {
+				"effects": ["secret"],
+				"capabilities": ["secret.resolve"],
+				"secrets": ["github.token"]
+			}
+		},
+		{
+			"name": "streaming",
+			"overrides": { "effects": ["streaming"], "capabilities": ["stream.emit"] }
+		},
+		{
+			"name": "destructive",
+			"overrides": {
+				"effects": ["destructive", "write"],
+				"capabilities": ["workspace.delete"]
+			}
+		},
+		{ "name": "idempotent", "overrides": { "idempotency": "idempotent" } },
+		{
+			"name": "bounded",
+			"overrides": {
+				"resources": {
+					"maxDurationMs": 5000,
+					"maxMemoryBytes": 134217728,
+					"maxInputBytes": 4194304,
+					"maxOutputBytes": 4194304,
+					"maxConcurrency": 64
+				}
+			}
+		}
+	],
+	"compatibilityCases": [
+		{
+			"name": "additive unknown fields",
+			"overrides": {
+				"futurePolicyHint": { "scope": "workspace" },
+				"resources": { "maxDurationMs": 5000, "futureCpuMillis": 250 }
+			},
+			"expectedStatus": "declared"
+		},
+		{
+			"name": "unknown version",
+			"overrides": { "version": "2" },
+			"expectedStatus": "invalid"
+		},
+		{
+			"name": "unknown effect",
+			"overrides": { "effects": ["telepathy"] },
+			"expectedStatus": "invalid"
+		},
+		{
+			"name": "secret value instead of reference",
+			"overrides": { "secrets": ["TOKEN=raw-secret"] },
+			"expectedStatus": "invalid"
+		}
+	]
+}

@@ -29,6 +29,7 @@
 //! ```
 
 pub mod blok_error;
+pub mod capability_manifest;
 pub mod config;
 pub mod errors;
 #[cfg(feature = "grpc")]
@@ -52,6 +53,7 @@ pub use blok_error::{
     BlokErrorCategory, BlokErrorSeverity, Origin, CONTEXT_SNAPSHOT_MAX_BYTES,
     DEFAULT_RUNTIME_KIND, DEFAULT_SDK_NAME,
 };
+pub use capability_manifest::{CapabilityManifest, CapabilityResourceBounds};
 pub use config::ServerConfig;
 pub use errors::{ErrorCategory, NodeError};
 pub use logging::{LogEntry, LogLevel, Logger};

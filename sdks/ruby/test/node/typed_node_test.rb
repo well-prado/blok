@@ -10,6 +10,11 @@ class TypedNodeTest < Minitest::Test
   class SearchNode < Blok::Node::TypedNode
     node_name "@acme/search"
     description "Full-text search"
+    capability_manifest(
+      "version" => "1", "classification" => "agent-compatible", "effects" => ["read"],
+      "capabilities" => ["workspace.read"], "secrets" => [], "determinism" => "deterministic",
+      "idempotency" => "idempotent", "maturity" => "stable"
+    )
 
     input do
       field :query, :string, required: true
@@ -63,5 +68,6 @@ class TypedNodeTest < Minitest::Test
     assert schema["properties"].key?("query")
     assert_equal ["query"], schema["required"]
     refute_nil reflection[:output_schema_json]
+    assert_equal "agent-compatible", JSON.parse(reflection[:capability_manifest_json])["classification"]
   end
 end

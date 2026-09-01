@@ -63,6 +63,11 @@ public abstract class TypedNode<I, O> implements NodeHandler, NodeReflector {
         return null;
     }
 
+    /** Structured operational metadata; absent nodes remain ordinary-execution compatible. */
+    protected CapabilityManifest capabilityManifest() {
+        return null;
+    }
+
     /** Run the node with a VALIDATED, typed input. */
     protected abstract O run(Context ctx, I input) throws Exception;
 
@@ -91,6 +96,12 @@ public abstract class TypedNode<I, O> implements NodeHandler, NodeReflector {
     public String outputSchemaJson() {
         Class<?> out = outputClass();
         return out == null ? null : reflectSchema(out);
+    }
+
+    @Override
+    public String capabilityManifestJson() {
+        CapabilityManifest manifest = capabilityManifest();
+        return manifest == null ? null : GSON.toJson(manifest);
     }
 
     /** Build a minimal JSON Schema from the type's declared instance fields. */

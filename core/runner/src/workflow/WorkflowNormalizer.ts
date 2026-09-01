@@ -1,5 +1,11 @@
 import { parseDuration, unresolvableKeyShape } from "@blokjs/helper";
-import { isStructuralRef, isStructuralTpl, lowerRefs } from "@blokjs/shared";
+import {
+	type CapabilityManifestV1,
+	isStructuralRef,
+	isStructuralTpl,
+	lowerRefs,
+	parseCapabilityManifest,
+} from "@blokjs/shared";
 
 /**
  * WorkflowNormalizer — accepts v1 or v2 workflow shapes and projects both
@@ -175,6 +181,8 @@ export interface InternalWorkflow {
 	input?: unknown;
 	output?: unknown;
 	events?: Record<string, unknown>;
+	/** Structured operational metadata used by catalog and agent policy. */
+	capabilityManifest?: CapabilityManifestV1;
 }
 
 /**
@@ -222,6 +230,8 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	if (Array.isArray(wf.steps)) warnLegacyExpressionsOnce(wf.steps as unknown[], name, sourcePath);
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
+	const capabilityManifest =
+		wf.capabilityManifest === undefined ? undefined : parseCapabilityManifest(wf.capabilityManifest);
 	// v0.7 — typed-client metadata. Carried verbatim (Zod schema for TS
 	// workflows, JSON Schema for JSON). Previously stripped at normalization.
 	const input = wf.input;
@@ -362,6 +372,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		name,
 		version,
 		description,
+		...(capabilityManifest ? { capabilityManifest } : {}),
 		trigger,
 		steps: internalSteps,
 		nodes: internalNodes,

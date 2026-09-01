@@ -6,6 +6,22 @@ require_relative "../lib/blok"
 class TypedGreetNode < Blok::Node::TypedNode
   node_name "typed-greet"
   description "Typed greeting (SPEC-B contract demo)"
+  capability_manifest(
+    "version" => "1",
+    "classification" => "agent-compatible",
+    "effects" => [],
+    "capabilities" => [],
+    "secrets" => [],
+    "determinism" => "deterministic",
+    "idempotency" => "idempotent",
+    "maturity" => "stable",
+    "resources" => {
+      "maxDurationMs" => 5000,
+      "maxInputBytes" => 4_194_304,
+      "maxOutputBytes" => 4_194_304,
+      "maxConcurrency" => 64
+    }
+  )
 
   input do
     field :name, :string, required: true

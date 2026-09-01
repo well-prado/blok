@@ -25,6 +25,133 @@
 			"type": "string",
 			"description": "What this workflow does. Optional but recommended — surfaces in Studio and CLI."
 		},
+		"capabilityManifest": {
+			"type": "object",
+			"properties": {
+				"version": {
+					"type": "string",
+					"const": "1"
+				},
+				"classification": {
+					"type": "string",
+					"enum": [
+						"agent-compatible",
+						"trusted-legacy",
+						"denied-to-agents"
+					]
+				},
+				"effects": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"read",
+							"write",
+							"network",
+							"filesystem",
+							"process",
+							"secret",
+							"streaming",
+							"destructive"
+						]
+					}
+				},
+				"capabilities": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+					}
+				},
+				"secrets": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+					}
+				},
+				"determinism": {
+					"type": "string",
+					"enum": [
+						"deterministic",
+						"time-dependent",
+						"random",
+						"external",
+						"unknown"
+					]
+				},
+				"idempotency": {
+					"type": "string",
+					"enum": [
+						"idempotent",
+						"conditionally-idempotent",
+						"non-idempotent",
+						"unknown"
+					]
+				},
+				"maturity": {
+					"type": "string",
+					"enum": [
+						"stable",
+						"beta",
+						"experimental",
+						"deprecated"
+					]
+				},
+				"resources": {
+					"type": "object",
+					"properties": {
+						"maxDurationMs": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						},
+						"maxMemoryBytes": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						},
+						"maxInputBytes": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						},
+						"maxOutputBytes": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						},
+						"maxConcurrency": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						}
+					},
+					"additionalProperties": true
+				},
+				"runtimes": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+					}
+				},
+				"triggers": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+					}
+				}
+			},
+			"required": [
+				"version",
+				"classification",
+				"effects",
+				"capabilities",
+				"secrets",
+				"determinism",
+				"idempotency",
+				"maturity"
+			],
+			"additionalProperties": true,
+			"description": "Versioned operational effects, required capabilities, secret reference names, reliability classes, and resource bounds."
+		},
 		"trigger": {
 			"type": "object",
 			"additionalProperties": {},

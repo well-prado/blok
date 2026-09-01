@@ -260,12 +260,18 @@ impl NodeRuntime for BlokNodeRuntime {
                     .and_then(|h| h.output_schema())
                     .and_then(|s| serde_json::to_vec(&s).ok())
                     .unwrap_or_default();
+                let capability_manifest_json = handler
+                    .as_ref()
+                    .and_then(|h| h.capability_manifest())
+                    .and_then(|m| serde_json::to_vec(&m).ok())
+                    .unwrap_or_default();
                 ProtoNodeDescriptor {
                     name,
                     description,
                     input_schema_json,
                     output_schema_json,
                     tags: Vec::new(),
+                    capability_manifest_json,
                 }
             })
             .collect();

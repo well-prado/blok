@@ -43,6 +43,7 @@ from pydantic import BaseModel, ValidationError
 from ..errors.blok_error import BlokError
 from ..types.context import Context
 from .node_handler import NodeHandler
+from .capability_manifest import CapabilityManifest, validate_capability_manifest
 
 # Module-global collection of `@node`-decorated handlers. Importing the module
 # that declares them runs the decorator (side effect) and appends here;
@@ -70,12 +71,16 @@ class FunctionNode(NodeHandler):
         func: Callable[[Context, Any], Any],
         input_model: Optional[Type[BaseModel]],
         output_model: Optional[Type[BaseModel]],
+        capability_manifest: Optional[CapabilityManifest],
     ) -> None:
         self.name = name
         self.description = description
         self._func = func
         self.input_model = input_model
         self.output_model = output_model
+        self.capability_manifest = (
+            validate_capability_manifest(capability_manifest) if capability_manifest is not None else None
+        )
 
     def execute(self, ctx: Context, config: Dict[str, Any]) -> Any:
         # 1. Validate input → typed model (or pass the raw dict through untyped).
@@ -163,6 +168,7 @@ def node(
     description: str = "",
     *,
     register: bool = True,
+    capability_manifest: Optional[CapabilityManifest] = None,
 ) -> Callable[[Callable[[Context, Any], Any]], FunctionNode]:
     """Decorate a node function into a validated, auto-registered `FunctionNode`.
 
@@ -180,6 +186,7 @@ def node(
             func=func,
             input_model=input_model,
             output_model=output_model,
+            capability_manifest=capability_manifest,
         )
         if register:
             _DECORATED_NODES.append(handler)

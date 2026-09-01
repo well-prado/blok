@@ -46,6 +46,26 @@ final class TypedGreetNode extends TypedNode
         return TypedGreetOutput::class;
     }
 
+    public function capabilityManifest(): ?array
+    {
+        return [
+            'version' => '1',
+            'classification' => 'agent-compatible',
+            'effects' => [],
+            'capabilities' => [],
+            'secrets' => [],
+            'determinism' => 'deterministic',
+            'idempotency' => 'idempotent',
+            'maturity' => 'stable',
+            'resources' => [
+                'maxDurationMs' => 5000,
+                'maxInputBytes' => 4194304,
+                'maxOutputBytes' => 4194304,
+                'maxConcurrency' => 64,
+            ],
+        ];
+    }
+
     protected function run(Context $ctx, object $input): mixed
     {
         /** @var TypedGreetInput $input */

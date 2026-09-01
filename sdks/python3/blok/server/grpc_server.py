@@ -355,6 +355,11 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
                     input_schema_json=_node_schema_bytes(handler, "input_json_schema"),
                     output_schema_json=_node_schema_bytes(handler, "output_json_schema"),
                     tags=[],
+                    capability_manifest_json=(
+                        json.dumps(getattr(handler, "capability_manifest"), separators=(",", ":")).encode("utf-8")
+                        if getattr(handler, "capability_manifest", None) is not None
+                        else b""
+                    ),
                 )
             )
         return pb.ListNodesResponse(

@@ -88,7 +88,14 @@ def test_untyped_node_passes_dict_through():
 
 
 def test_reflection_schemas():
-    @node(name="@acme/r")
+    @node(
+        name="@acme/r",
+        capability_manifest={
+            "version": "1", "classification": "agent-compatible", "effects": ["read"],
+            "capabilities": ["workspace.read"], "secrets": [], "determinism": "deterministic",
+            "idempotency": "idempotent", "maturity": "stable",
+        },
+    )
     def r(ctx: Context, inp: _Input) -> _Output:
         return _Output(results=[], count=0)
 
@@ -97,6 +104,7 @@ def test_reflection_schemas():
     assert "query" in inp_schema["properties"]
     out_schema = r.output_json_schema()
     assert out_schema["properties"]["count"]["type"] == "integer"
+    assert r.capability_manifest["classification"] == "agent-compatible"
 
 
 def test_auto_registration():

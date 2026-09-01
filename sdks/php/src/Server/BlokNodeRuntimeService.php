@@ -121,6 +121,10 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
                 if ($output !== null) {
                     $descriptor->setOutputSchemaJson((string) json_encode($output));
                 }
+                $capabilityManifest = $handler->capabilityManifest();
+                if ($capabilityManifest !== null) {
+                    $descriptor->setCapabilityManifestJson((string) json_encode($capabilityManifest));
+                }
             }
             $descriptors[] = $descriptor;
         }

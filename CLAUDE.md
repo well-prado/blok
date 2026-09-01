@@ -58,6 +58,14 @@ The node-side `ctx` ABI is kept for runtime concerns: `ctx.request`,
 Never write `ctx.state` or `ctx.vars` inside a node. Return output and let the
 runner persist it.
 
+Nodes and workflows may declare `capabilityManifest` v1 metadata. Declare only
+the effects and authority the implementation actually uses; secret entries are
+opaque reference names, never values. Missing metadata preserves ordinary
+execution compatibility but is not agent-safe. Only a valid
+`agent-compatible` manifest may reach later agent policy evaluation;
+`trusted-legacy`, `denied-to-agents`, missing, and invalid metadata fail closed.
+See `docs/d/fundamentals/capability-manifests.mdx` and ADR 0003.
+
 ## State
 
 - Every successful step persists to `ctx.state[id]`.

@@ -13,6 +13,20 @@ public sealed class TypedGreetNode : TypedNode<TypedGreetInput, TypedGreetOutput
 {
     public override string Name => "typed-greet";
     public override string Description => "Typed greeting (SPEC-B contract demo)";
+    public override CapabilityManifest CapabilityManifest => new(
+        "1",
+        "agent-compatible",
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        "deterministic",
+        "idempotent",
+        "stable",
+        new CapabilityResourceBounds(
+            MaxDurationMs: 5000,
+            MaxInputBytes: 4194304,
+            MaxOutputBytes: 4194304,
+            MaxConcurrency: 64));
 
     public override Task<TypedGreetOutput> RunAsync(Context ctx, TypedGreetInput input)
     {

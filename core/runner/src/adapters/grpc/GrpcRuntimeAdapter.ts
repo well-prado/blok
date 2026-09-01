@@ -95,6 +95,7 @@ interface ListNodesNodeShape {
 	description: string;
 	inputSchemaJson?: Uint8Array | Buffer;
 	outputSchemaJson?: Uint8Array | Buffer;
+	capabilityManifestJson?: Uint8Array | Buffer;
 	tags?: string[];
 }
 
@@ -673,10 +674,22 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 				description: n.description || undefined,
 				inputSchema: this.parseSchemaBytes(n.inputSchemaJson),
 				outputSchema: this.parseSchemaBytes(n.outputSchemaJson),
+				capabilityManifest: this.parseManifestBytes(n.capabilityManifestJson),
 				tags: n.tags ?? [],
 			}));
 		} catch {
 			return [];
+		}
+	}
+
+	/** Preserve malformed JSON as a non-object so the catalog can report invalid metadata. */
+	private parseManifestBytes(bytes: Uint8Array | Buffer | undefined): unknown | null {
+		if (!bytes || bytes.length === 0) return null;
+		const text = Buffer.from(bytes).toString("utf8");
+		try {
+			return JSON.parse(text);
+		} catch {
+			return text;
 		}
 	}
 
