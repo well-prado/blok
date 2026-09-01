@@ -20,6 +20,51 @@
 export { runNode, runWorkflow } from "./run";
 export type { NodeMock, RunWorkflowOptions, StepRun, WorkflowRun } from "./run";
 
+// Binding/profile resolver helpers (#920)
+export {
+	ENFORCEMENT_PROFILES,
+	InMemoryWorkflowBindingProvider,
+	assertWorkflowContractCurrent,
+	compareWorkflowContract,
+	evaluateEnforcementProfile,
+	explainWorkflowBinding,
+	pinWorkflowRunContract,
+	resolveWorkflowBinding,
+	workflowBindingFingerprint,
+} from "../policy/WorkflowBinding";
+export type {
+	BindingExplanation,
+	BindingActorIdentity,
+	BindingScalar,
+	BindingResolutionInput,
+	BindingResolutionStatus,
+	BindingReasonCode,
+	BindingRuleCandidate,
+	ContractFreshness,
+	ContractFreshnessResult,
+	EnforcementProfile,
+	PinnedCapabilityManifestIdentity,
+	PinnedModelConfigurationIdentity,
+	PinnedNodeIdentity,
+	PinnedPolicyIdentity,
+	PinnedRuntimeIdentity,
+	PinnedWorkflowRunContract,
+	ProfileEvaluation,
+	ProfileEvaluationInput,
+	WorkflowBindingCatalog,
+	WorkflowBindingCurrent,
+	WorkflowBindingInputs,
+	WorkflowBindingMatch,
+	WorkflowBindingPinInput,
+	WorkflowBindingRule,
+	WorkflowBindingRules,
+	WorkflowBindingResolution,
+	WorkflowBindingSelector,
+	WorkflowReference,
+	RepositoryIdentity,
+	TrustedWorkflowSource,
+} from "../policy/WorkflowBinding";
+
 // Test Logger
 export { TestLogger } from "./TestLogger";
 export type { LogEntry } from "./TestLogger";
