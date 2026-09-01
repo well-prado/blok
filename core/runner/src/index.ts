@@ -142,6 +142,12 @@ export {
 	type PolicyToken,
 	type SandboxVerifier,
 } from "./policy/PolicyPipeline";
+export {
+	DurableInteractionPort,
+	InMemoryInteractionStore,
+	InteractionAuthorizationError,
+	InteractionConflictError,
+} from "./policy/InteractionStore";
 
 // Concurrency gate (Tier 2 #6)
 import {

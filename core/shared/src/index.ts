@@ -112,6 +112,12 @@ export type {
 	SecretResolutionFailure,
 	SecretResolver,
 } from "./SecretContracts";
+export type {
+	InteractionAnswer,
+	InteractionRecord,
+	InteractionStatus,
+	InteractionStore,
+} from "./InteractionContracts";
 
 export {
 	CAPABILITY_MANIFEST_VERSION,
