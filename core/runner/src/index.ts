@@ -285,6 +285,13 @@ import BlokResponse, { type IBlokResponse } from "./BlokResponse";
 import NodeMap from "./NodeMap";
 import RunnerSteps from "./RunnerSteps";
 import { discoverNodes } from "./discoverNodes";
+import {
+	EnforcementBypassError,
+	authorizeEnforcementOverride,
+	createWorkflowReference,
+	getEnforcementBinding,
+	installEnforcementBinding,
+} from "./enforcement/EnforcementProfile";
 // These `types/*` modules are `type X = {...}; export default X;` — a type
 // alias, not a runtime value. Bun's per-file source loader (used by `bun -e
 // import(...)`, in-monorepo scripts, and bundler source-aliasing) can't see
@@ -484,6 +491,12 @@ export {
 	// Testing
 	NodeTestHarness,
 	WorkflowTestRunner,
+	// H1-03 enforcement profile/binding runtime
+	authorizeEnforcementOverride,
+	createWorkflowReference,
+	getEnforcementBinding,
+	installEnforcementBinding,
+	EnforcementBypassError,
 	TestLogger,
 	// Types
 	type Condition,
@@ -718,6 +731,19 @@ export type {
 	StartNodeOptions,
 	ScheduledDispatchRow,
 } from "./tracing/types";
+export type {
+	EnforcementDeviation,
+	EnforcementOverride,
+	EnforcementSettings,
+	ResolvedEnforcementBinding,
+} from "./enforcement/EnforcementProfile";
+export type {
+	EnforcementProfileContract,
+	EnforcementProfileSemantics,
+	EnforcementOverrideAuthorization,
+	EnforcementOverrideEvent,
+	EnforcementOverrideScope,
+} from "@blokjs/shared";
 export type { JanitorStats } from "./tracing/Janitor";
 
 // Tracing store factory + concrete stores — exposed so the CLI's

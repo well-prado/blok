@@ -1,9 +1,12 @@
 import type { WorkflowV2Builder } from "@blokjs/helper";
 import type NodeMap from "../NodeMap";
+import type { EnforcementSettings } from "../enforcement/EnforcementProfile";
 
 type GlobalOptions = {
 	nodes: NodeMap;
 	workflows: WorkflowLocator;
+	/** Trusted deployment/task metadata used to bind agent workflows. */
+	enforcement?: EnforcementSettings;
 };
 
 /**

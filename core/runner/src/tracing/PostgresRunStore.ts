@@ -420,6 +420,14 @@ export class PostgresRunStore implements RunStore {
 						await client.query("ALTER TABLE trace_saved_filters ADD COLUMN IF NOT EXISTS duration_bucket TEXT");
 					},
 				},
+				{
+					// H1-03 — immutable run contract and permitted deviations.
+					version: 12,
+					up: async () => {
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS enforcement_json JSONB");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS enforcement_deviations_json JSONB");
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -729,9 +737,9 @@ export class PostgresRunStore implements RunStore {
 				 tags_json, metadata_json, node_count, completed_nodes,
 				 environment, replay_of, parent_run_id, parent_node_run_id,
 				 scheduled_at, expires_at, debounce_key, debounce_mode,
-				 ping_count, last_completed_step_index)
+					 ping_count, last_completed_step_index, enforcement_json, enforcement_deviations_json)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-				        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+				        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
 				ON CONFLICT (id) DO UPDATE SET
 				 status = EXCLUDED.status,
 				 finished_at = EXCLUDED.finished_at,
@@ -749,7 +757,7 @@ export class PostgresRunStore implements RunStore {
 				 debounce_key = EXCLUDED.debounce_key,
 				 debounce_mode = EXCLUDED.debounce_mode,
 				 ping_count = EXCLUDED.ping_count,
-				 last_completed_step_index = EXCLUDED.last_completed_step_index`,
+					 last_completed_step_index = EXCLUDED.last_completed_step_index`,
 					[
 						run.id,
 						run.workflowName,
@@ -775,6 +783,8 @@ export class PostgresRunStore implements RunStore {
 						run.debounceMode ?? null,
 						run.pingCount ?? null,
 						run.lastCompletedStepIndex ?? null,
+						run.enforcement ? JSON.stringify(run.enforcement) : null,
+						run.enforcementDeviations ? JSON.stringify(run.enforcementDeviations) : null,
 					],
 				)
 				.then(() => {}),
@@ -858,6 +868,10 @@ export class PostgresRunStore implements RunStore {
 		if (updates.lastCompletedStepIndex !== undefined) {
 			setClauses.push(`last_completed_step_index = $${paramIdx++}`);
 			values.push(updates.lastCompletedStepIndex);
+		}
+		if (updates.enforcementDeviations !== undefined) {
+			setClauses.push(`enforcement_deviations_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.enforcementDeviations));
 		}
 		// `transitionRunToRunning` (Tier 2 #5+#7) preserves the original
 		// startedAt by updating it. Mirror sqlite, which also accepts it.
@@ -1673,6 +1687,10 @@ export class PostgresRunStore implements RunStore {
 			debounceMode: ((row.debounce_mode as string | null) ?? undefined) as "leading" | "trailing" | undefined,
 			pingCount: row.ping_count != null ? Number(row.ping_count) : undefined,
 			lastCompletedStepIndex: row.last_completed_step_index != null ? Number(row.last_completed_step_index) : undefined,
+			enforcement: row.enforcement_json ? (parseJson(row.enforcement_json) as WorkflowRun["enforcement"]) : undefined,
+			enforcementDeviations: row.enforcement_deviations_json
+				? (parseJson(row.enforcement_deviations_json) as WorkflowRun["enforcementDeviations"])
+				: undefined,
 		};
 	}
 

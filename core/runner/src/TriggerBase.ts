@@ -14,6 +14,7 @@ import { QueueExpiredError } from "./concurrency/QueueExpiredError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import { runContextCleanups, runShutdownCleanups } from "./contextCleanup";
 import { discoverNodes } from "./discoverNodes";
+import { installEnforcementBinding } from "./enforcement/EnforcementProfile";
 import type { HMREvent } from "./hmr/FileWatcher";
 import { HmrDevConsole } from "./hmr/HmrDevConsole";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
@@ -862,6 +863,20 @@ export default abstract class TriggerBase extends Trigger {
 		// but the in-flight step never sees `ctx.signal.aborted`.
 		// Re-register here mirroring the first-pass branch below.
 		if (traceRunId) {
+			const persistedContract = tracker.getRun(traceRunId)?.enforcement;
+			if (persistedContract)
+				installEnforcementBinding(ctx, {
+					status: "resolved",
+					profile: persistedContract.profile,
+					workflow: persistedContract.workflow,
+					matchedRules: [],
+					explanation: {
+						reasonCode: "binding-resolved",
+						message: "Rehydrated from the immutable run contract.",
+						matchedRuleIds: [persistedContract.bindingRuleId],
+						winningRuleIds: [persistedContract.bindingRuleId],
+					},
+				});
 			const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
 			if (privateSlot?.abortController) {
 				tracker.registerAbortController(traceRunId, privateSlot.abortController);
@@ -998,9 +1013,13 @@ export default abstract class TriggerBase extends Trigger {
 			replayOf,
 			parentRunId,
 			parentNodeRunId,
+			enforcementFactory: cfg.enforcement?.rule
+				? (runId, startedAt) => cfg.createEnforcementContract(runId, new Date(startedAt).toISOString())
+				: undefined,
 		});
 		const traceRunId = run.id;
 		ctxRecord._traceRunId = run.id;
+		if (cfg.enforcement) installEnforcementBinding(ctx, cfg.enforcement);
 
 		// Carry the sub-workflow depth across the HTTP hop so the
 		// recursion guard in nested children still fires.
@@ -1064,6 +1083,10 @@ export default abstract class TriggerBase extends Trigger {
 		let traceRunId: string | undefined;
 		const ctxRecord = ctx as Record<string, unknown>;
 		const isReentryAtTrace = ctxRecord._blokDispatchReentry === true;
+		// Binding is an execution concern, not a tracing concern. Install it
+		// before the trace branch so disabling Studio cannot bypass a guided or
+		// strict profile. Deferred re-entry replaces this with the persisted pin.
+		if (!isReentryAtTrace && cfg.enforcement) installEnforcementBinding(ctx, cfg.enforcement);
 
 		if (tracker.active && isReentryAtTrace) {
 			traceRunId = this.rehydrateDeferredRun(ctx, tracker);

@@ -1,3 +1,6 @@
+import type { PinnedWorkflowRunContract } from "@blokjs/shared";
+import type { EnforcementDeviation } from "../enforcement/EnforcementProfile";
+
 // === Run Lifecycle ===
 
 /**
@@ -213,6 +216,10 @@ export interface WorkflowRun {
 	 * (sqlite migration v11).
 	 */
 	stateSnapshot?: string;
+	/** H1-03 immutable profile/binding and execution identity snapshot. */
+	enforcement?: PinnedWorkflowRunContract;
+	/** Advisory/guided deviations recorded after the run contract is pinned. */
+	enforcementDeviations?: readonly EnforcementDeviation[];
 }
 
 // === Node Lifecycle ===
@@ -695,6 +702,8 @@ export type RunEventType =
 	 * `"timedOut"`.
 	 */
 	| "RUN_TIMED_OUT"
+	| "RUN_ENFORCEMENT_DEVIATION"
+	| "RUN_ENFORCEMENT_OVERRIDE"
 	| "BROWSER_SESSION_OPENED"
 	| "BROWSER_PAGE_UPDATED"
 	| "BROWSER_ACTION"
@@ -785,6 +794,9 @@ export interface StartRunOptions {
 	nodeCount: number;
 	tags?: string[];
 	metadata?: Record<string, unknown>;
+	enforcement?: PinnedWorkflowRunContract;
+	/** Runner lifecycle seam: create a run-id-bound pin atomically at start. */
+	enforcementFactory?: (runId: string, startedAt: number) => PinnedWorkflowRunContract;
 	/**
 	 * Tier 1 · replay lineage. When a run is started via the replay endpoint,
 	 * this carries the original run's id so Studio can render a "Replay of #..."

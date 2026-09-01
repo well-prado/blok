@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
 import https from "node:https";
+import { immutableInteractionSnapshot } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
 
+import type { EnforcementDeviation, EnforcementOverride } from "../enforcement/EnforcementProfile";
 import { InMemoryRunStore } from "./InMemoryRunStore";
 import type { RunStore } from "./RunStore";
 import { createStore } from "./createStore";
@@ -160,14 +162,16 @@ export class RunTracker extends EventEmitter {
 		// list views by this field. Old runs without the field still
 		// match `production` via the post-filter default.
 		const environment = (process.env.BLOK_ENV || "production").trim() || "production";
+		const runId = `run_${uuid().replace(/-/g, "").slice(0, 12)}`;
+		const startedAt = Date.now();
 		const run: WorkflowRun = {
-			id: `run_${uuid().replace(/-/g, "").slice(0, 12)}`,
+			id: runId,
 			workflowName: opts.workflowName,
 			workflowPath: opts.workflowPath,
 			triggerType: opts.triggerType,
 			triggerSummary: opts.triggerSummary,
 			status: "running",
-			startedAt: Date.now(),
+			startedAt,
 			nodeCount: opts.nodeCount,
 			completedNodes: 0,
 			tags: opts.tags,
@@ -181,6 +185,12 @@ export class RunTracker extends EventEmitter {
 			debounceKey: opts.debounceKey,
 			debounceMode: opts.debounceMode,
 			pingCount: opts.pingCount,
+			enforcement: opts.enforcement
+				? immutableInteractionSnapshot(opts.enforcement)
+				: opts.enforcementFactory
+					? immutableInteractionSnapshot(opts.enforcementFactory(runId, startedAt))
+					: undefined,
+			enforcementDeviations: Object.freeze([]),
 		};
 
 		this.store.saveRun(run);
@@ -194,6 +204,29 @@ export class RunTracker extends EventEmitter {
 
 		this.store.evictOldRuns(this.maxRuns);
 		return run;
+	}
+
+	/** Record a permitted deviation without changing the pinned contract. */
+	recordEnforcementDeviation(runId: string, deviation: EnforcementDeviation): void {
+		const run = this.store.getRun(runId);
+		if (!run || !run.enforcement) return;
+		const deviations = Object.freeze([...(run.enforcementDeviations ?? []), Object.freeze({ ...deviation })]);
+		this.store.updateRun(runId, { enforcementDeviations: deviations });
+		this.emitEvent(runId, run.workflowName, "RUN_ENFORCEMENT_DEVIATION", deviation.stepId, undefined, deviation);
+	}
+
+	/** Record the authorized event that allowed a guided transition override. */
+	recordEnforcementOverride(runId: string, override: EnforcementOverride): void {
+		const run = this.store.getRun(runId);
+		if (!run || !run.enforcement) return;
+		this.emitEvent(runId, run.workflowName, "RUN_ENFORCEMENT_OVERRIDE", override.scope.stepIds?.[0], undefined, {
+			eventId: override.eventId,
+			bindingRuleId: override.bindingRuleId,
+			authorizedBy: override.authorizedBy,
+			reasonCode: override.reasonCode,
+			reason: override.reason,
+			scope: override.scope,
+		});
 	}
 
 	completeRun(runId: string, data?: unknown): void {

@@ -1,5 +1,6 @@
 // import { NodeBase } from "@blokjs/shared";
 // import { z } from "zod";
+import { createHash } from "node:crypto";
 import { sep as pathSep, resolve as resolvePath } from "node:path";
 import { tryParseDuration } from "@blokjs/helper";
 import type { NodeBase } from "@blokjs/shared";
@@ -22,6 +23,17 @@ import {
 	resolveHealthCheckIntervalMs,
 	resolveMaxMessageBytes,
 } from "./adapters/transport";
+import {
+	type EnforcementSettings,
+	type ResolvedEnforcementBinding,
+	createWorkflowReference,
+} from "./enforcement/EnforcementProfile";
+import {
+	WorkflowBindingResolutionError,
+	pinWorkflowRunContract,
+	resolveWorkflowBinding,
+} from "./policy/WorkflowBinding";
+import type { PinnedNodeIdentity, PinnedRuntimeIdentity } from "./policy/WorkflowBinding";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
 import type Flow from "./types/Flow";
@@ -49,6 +61,8 @@ export default class Configuration implements Config {
 	public appliedMiddleware: readonly string[];
 	public static loaded_nodes: Node = <Node>{};
 	public globalOptions: GlobalOptions | undefined;
+	/** Resolved shared binding selected before the workflow can execute. */
+	public enforcement: ResolvedEnforcementBinding | undefined;
 
 	constructor() {
 		this.steps = [];
@@ -57,6 +71,7 @@ export default class Configuration implements Config {
 		this.name = "";
 		this.trigger = {};
 		this.appliedMiddleware = [];
+		this.enforcement = undefined;
 		this.initializeRuntimeRegistry();
 	}
 
@@ -193,11 +208,120 @@ export default class Configuration implements Config {
 		this.version = this.workflow.version;
 		this.name = this.workflow.name;
 		this.trigger = this.workflow.trigger;
+		this.bindEnforcement();
 		// Workflow-level middleware list (v0.5.2). Lives on the normalized
 		// workflow as `appliedMiddleware` — see WorkflowNormalizer for the
 		// schema overload (`middleware: string[]` at the top level).
 		const wfWithApplied = this.workflow as unknown as { appliedMiddleware?: readonly string[] };
 		this.appliedMiddleware = Array.isArray(wfWithApplied.appliedMiddleware) ? wfWithApplied.appliedMiddleware : [];
+	}
+
+	/**
+	 * Resolve and snapshot the deployment's trusted workflow binding after
+	 * normalization and node resolution. This is deliberately opt-in: a
+	 * deployment without enforcement settings keeps the pre-H1-03 path.
+	 */
+	public bindEnforcement(
+		input?: import("@blokjs/shared").WorkflowBindingInputs,
+		settings?: EnforcementSettings,
+	): ResolvedEnforcementBinding | undefined {
+		const configured = settings ?? this.globalOptions?.enforcement;
+		if (!configured) {
+			this.enforcement = undefined;
+			return undefined;
+		}
+		const binding = resolveWorkflowBinding({
+			inputs: input ?? configured.input ?? {},
+			catalog: configured.catalog ?? { rules: [] },
+		});
+		if (binding.status === "denied") {
+			throw new WorkflowBindingResolutionError(binding.explanation.reasonCode, binding.explanation.message);
+		}
+		if (binding.status === "unbound" && configured.defaultProfile && configured.defaultProfile !== "advisory") {
+			throw new WorkflowBindingResolutionError(
+				"no-binding-match",
+				`${configured.defaultProfile} enforcement requires a matching binding for workflow "${this.name}"`,
+			);
+		}
+		if (binding.workflow && binding.workflow.name !== this.name) {
+			throw new Error(
+				`enforcement binding "${binding.rule?.id ?? "unknown"}" selects workflow "${binding.workflow.name}", but loaded workflow is "${this.name}"`,
+			);
+		}
+		if (binding.workflow && binding.workflow.version !== this.version) {
+			throw new Error(
+				`enforcement binding "${binding.rule?.id ?? "unknown"}" pins workflow "${binding.workflow.name}" at ${binding.workflow.version}, but loaded version is ${this.version}`,
+			);
+		}
+		if (binding.status === "resolved" && binding.workflow) {
+			const loadedReference = createWorkflowReference({
+				name: this.name,
+				version: this.version,
+				source: this.workflow,
+				ir: this.workflow,
+			});
+			if (
+				binding.workflow.source.digest !== loadedReference.source.digest ||
+				binding.workflow.irDigest !== loadedReference.irDigest
+			) {
+				throw new Error(
+					`enforcement binding "${binding.rule?.id ?? "unknown"}" does not pin the loaded workflow source and IR`,
+				);
+			}
+		}
+		this.enforcement = binding;
+		return binding;
+	}
+
+	public createEnforcementContract(
+		runId: string,
+		boundAt: string,
+	): import("./enforcement/EnforcementProfile").EnforcementContract {
+		if (this.enforcement?.status !== "resolved" || !this.enforcement.rule || !this.enforcement.workflow)
+			throw new Error("cannot pin an unbound enforcement profile");
+		const runtimeVersions: Record<string, string> = {};
+		for (const kind of RuntimeRegistry.getInstance().getRegisteredKinds()) {
+			const version = RuntimeRegistry.getInstance().getVersion(kind);
+			if (version) runtimeVersions[kind] = version;
+		}
+		if (!runtimeVersions.nodejs) runtimeVersions.nodejs = "unspecified";
+		const settings = this.globalOptions?.enforcement;
+		const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+		const nodeMap = new Map<string, PinnedNodeIdentity>();
+		for (const step of this.steps) {
+			const node = (step as RunnerNode).node || step.name;
+			nodeMap.set(node, {
+				id: node,
+				version: settings?.nodeVersions?.[node] ?? "unspecified",
+				...(step.capabilityManifest ? { digest: digest(step.capabilityManifest) } : {}),
+			});
+		}
+		const runtimes: PinnedRuntimeIdentity[] = Object.entries({
+			nodejs: "unspecified",
+			...runtimeVersions,
+			...settings?.runtimeVersions,
+		}).map(([kind, version]) => ({ kind: kind as PinnedRuntimeIdentity["kind"], version }));
+		const workflowManifest = (
+			this.workflow as unknown as { capabilityManifest?: import("@blokjs/shared").CapabilityManifestV1 }
+		).capabilityManifest;
+		const selectedManifest = settings?.capabilityManifest ?? workflowManifest;
+		return pinWorkflowRunContract(this.enforcement, {
+			runId,
+			boundAt,
+			nodes: [...nodeMap.values()],
+			runtimes,
+			capabilityManifest: {
+				version: selectedManifest?.version ?? "1",
+				digest: digest({ manifest: selectedManifest ?? null, nodes: [...nodeMap.values()] }),
+			},
+			policy: settings?.policy ?? { id: "unspecified", version: "unspecified" },
+			model: {
+				provider: settings?.model?.provider ?? "unspecified",
+				id: settings?.model?.id ?? "unspecified",
+				version: settings?.model?.version ?? "unspecified",
+				configDigest: digest(settings?.model?.configuration ?? null),
+			},
+		});
 	}
 
 	protected async getSteps(blueprint_steps: RunnerNode[]): Promise<NodeBase[]> {
