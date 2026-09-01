@@ -1,0 +1,38 @@
+name: Architecture governance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: architecture-governance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: ADRs and harness PR conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Architecture checker tests
+        run: bunx vitest run scripts/architecture/check-architecture-governance.test.ts
+
+      - name: Validate architecture and pull-request evidence
+        run: bun run scripts/architecture/check-architecture-governance.ts
