@@ -84,6 +84,7 @@ export type {
 	AuditSink,
 	ExecutionOrigin,
 	InteractionRequest,
+	InteractionSuspension,
 	InteractionSuspensionPort,
 	PolicyContext,
 	PolicyDecision,

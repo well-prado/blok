@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import Runner from "../../Runner";
 import { defineNode } from "../../defineNode";
+import { DurableInteractionPort, InMemoryInteractionStore } from "../../policy/InteractionStore";
 import {
 	InMemoryAuditSink,
 	InMemoryPolicyProvider,
 	PolicyDeniedError,
+	PolicyInteractionRequiredError,
 	installPolicyExecution,
 	reauthorizePolicyRequest,
 } from "../../policy/PolicyPipeline";
@@ -95,6 +97,117 @@ describe("runner policy boundary", () => {
 		installPolicyExecution(ctx, policy(false, new InMemoryAuditSink()));
 		await expect(new Runner([node]).run(ctx)).rejects.toBeInstanceOf(PolicyDeniedError);
 		expect(calls).toBe(0);
+	});
+
+	it("persists an ask before the typed control signal escapes", async () => {
+		let calls = 0;
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => {
+				calls += 1;
+				return { ok: true };
+			},
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		const store = new InMemoryInteractionStore();
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [{ layer: "deployment", ruleId: "ask-test" }],
+			})),
+			interaction: new DurableInteractionPort(store),
+		});
+
+		let requestId = "";
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			expect(error).toBeInstanceOf(PolicyInteractionRequiredError);
+			requestId = (error as PolicyInteractionRequiredError).requestId;
+		}
+		expect(calls).toBe(0);
+		const records = await store.get(requestId);
+		expect(records).toMatchObject({
+			status: "pending",
+			request: { requestId },
+			decision: { kind: "ask", id: "decision-ask" },
+		});
+	});
+
+	it("does not emit the typed signal when interaction persistence fails", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [],
+			})),
+			interaction: {
+				suspend: async () => {
+					throw new Error("interaction store unavailable");
+				},
+			},
+		});
+
+		let thrown: unknown;
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toContain("interaction store unavailable");
+		expect(thrown).not.toBeInstanceOf(PolicyInteractionRequiredError);
+	});
+
+	it("withholds the typed signal when a port fails after recording", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: manifest,
+			execute: async () => ({ ok: true }),
+		});
+		const ctx = context("effect", { value: "x" });
+		const audit = new InMemoryAuditSink();
+		let persisted = false;
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			provider: new InMemoryPolicyProvider(async () => ({
+				decision: { kind: "ask", id: "decision-ask", reasonCode: "approval", policyVersion: "test-v1" },
+				matchedRules: [],
+			})),
+			interaction: {
+				suspend: async () => {
+					persisted = true;
+					throw new Error("interaction acknowledgement failed");
+				},
+			},
+		});
+
+		let thrown: unknown;
+		try {
+			await new Runner([node]).run(ctx);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(persisted).toBe(true);
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toContain("interaction acknowledgement failed");
+		expect(thrown).not.toBeInstanceOf(PolicyInteractionRequiredError);
 	});
 
 	it("fails closed for a missing manifest while preserving ordinary compatibility", async () => {

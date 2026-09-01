@@ -1,4 +1,4 @@
-import type { PolicyDecision, PolicyRequest } from "./PolicyContracts";
+import type { InteractionSuspension, PolicyDecision, PolicyRequest } from "./PolicyContracts";
 
 export const INTERACTION_VERSION = "1" as const;
 export type InteractionStatus = "pending" | "answered" | "denied" | "expired" | "cancelled";
@@ -18,6 +18,8 @@ export interface InteractionRecord {
 	/** Set when the answered record is atomically claimed for resumption. */
 	readonly claimedBy?: string;
 	readonly claimedAt?: string;
+	/** Reference to the suspended run/cursor; persisted separately from trace state. */
+	readonly suspension?: InteractionSuspension;
 }
 
 export interface InteractionAnswer {
