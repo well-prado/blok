@@ -118,6 +118,9 @@ describe("schemaVersion — existing-workflow corpus regression (#299)", () => {
 		expect(corpus.length).toBeGreaterThan(20);
 	});
 
+	// The v2 union now includes the five enforced-agent contract shapes. Keep
+	// this corpus guard generous enough for the extra schema discrimination on
+	// slower CI hosts while still catching pathological regressions.
 	it("quantifies the corpus split (valid v2 vs quarantined)", () => {
 		let valid = 0;
 		let quarantined = 0;
@@ -130,7 +133,7 @@ describe("schemaVersion — existing-workflow corpus regression (#299)", () => {
 		// pinned quarantine. Every other file is a passing v2 workflow.
 		expect(valid).toBeGreaterThan(20);
 		expect(valid + quarantined).toBe(corpus.length);
-	});
+	}, 15_000);
 
 	for (const file of corpus) {
 		const rel = relPath(file);

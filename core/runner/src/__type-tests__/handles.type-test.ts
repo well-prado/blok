@@ -13,7 +13,17 @@ import { z } from "zod";
 import { defineNode } from "../defineNode";
 import type { EphemeralHandle, Handle, InputOf, OutputOf, Refable } from "../handles";
 import { runtimeNode } from "../handles";
-import { gt, step, subworkflow, workflowCallback as workflow } from "../stepBuilder";
+import {
+	assert,
+	agentStep,
+	approval,
+	completion,
+	evidence,
+	gt,
+	step,
+	subworkflow,
+	workflowCallback as workflow,
+} from "../stepBuilder";
 
 // @ts-expect-error Workflow author imports intentionally do not expose runtime Context; use trigger/step handles instead.
 import type { Context as WorkflowAuthorContext } from "../dsl";
@@ -142,6 +152,40 @@ void workflow("Author Boundary", { version: "1.0.0", trigger: { http: { method: 
 		userId: "u1",
 		filter: { active: true },
 	});
+});
+
+// --- #919: enforced-agent contract inference -------------------------------
+
+const agentResult = z.object({ summary: z.string() });
+const approvalResult = z.object({ approved: z.boolean() });
+
+void workflow("Agent Contracts", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (ctx) => {
+	const request = ctx.body as Handle<{ id: string }>;
+	const check = step("check", fetchUser, { userId: request.id, filter: { active: true } });
+	const report = evidence("report", {
+		producer: check,
+		artifact: { id: "report", version: "1" },
+		verification: { verifier: "test-runner", status: "pending" },
+	});
+	const passed = assert("passed", report);
+	const result = agentStep(
+		"agent",
+		"Complete the task.",
+		{ user: check.user },
+		{
+			phase: { name: "plan", capabilities: ["workspace.read"], effects: ["read"] },
+			outputSchema: agentResult,
+			completion: { required: [passed] },
+		},
+	);
+	consume<string>(result.summary);
+	const answer = approval("approval", {
+		prompt: "Approve?",
+		inputs: { summary: result.summary },
+		outputSchema: approvalResult,
+	});
+	consume<boolean>(answer.approved);
+	completion("complete", { required: [passed] });
 });
 
 // The phantom witness on the DECLARED return type survives import: Input/Output

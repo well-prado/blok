@@ -57,10 +57,15 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 // Handle-DSL authoring runtime (#421) — the eventual @blokjs/core surface.
 // branch + typed comparators (#418, ADR 0003/0004); tpl (#425).
 import {
+	agentStep,
+	approval,
+	assert as assertGate,
 	branch,
 	forEach as callbackForEach,
 	switchOn as callbackSwitchOn,
 	tryCatch as callbackTryCatch,
+	complete,
+	completion,
 	eq as condEq,
 	gt as condGt,
 	gte as condGte,
@@ -68,6 +73,7 @@ import {
 	lte as condLte,
 	ne as condNe,
 	not as condNot,
+	evidence,
 	makeHandle,
 	state,
 	step,
@@ -322,6 +328,13 @@ export {
 	callbackSwitchOn as switchOn,
 	// tryCatch over handles (#317)
 	callbackTryCatch as tryCatch,
+	// enforced-agent workflow contracts (#919)
+	agentStep,
+	approval,
+	assertGate as assert,
+	evidence,
+	completion,
+	complete,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -467,6 +480,17 @@ export type {
 export { runtimeNode } from "./handles";
 export type {
 	StepOptions,
+	AuthorSchema,
+	AgentStepOptions,
+	ApprovalOptions,
+	CompletionOptions,
+	GateRef,
+	EvidenceRef,
+	CompletionRef,
+	GateRequirement,
+	EvidenceProducer,
+	EvidenceOptions,
+	AssertOptions,
 	TriggerHandle,
 	// Per-trigger entry handles (#336)
 	HttpEntry,

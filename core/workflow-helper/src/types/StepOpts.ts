@@ -1,4 +1,16 @@
 import { z } from "zod";
+import {
+	type V2AgentStep,
+	V2AgentStepSchema,
+	type V2ApprovalStep,
+	V2ApprovalStepSchema,
+	type V2AssertStep,
+	V2AssertStepSchema,
+	type V2CompletionStep,
+	V2CompletionStepSchema,
+	type V2EvidenceStep,
+	V2EvidenceStepSchema,
+} from "./AgentContracts";
 import { DurationSchema, ResolvedKeySchema, type StructuralRefValue, StructuralRefValueSchema } from "./TriggerOpts";
 
 /**
@@ -1002,11 +1014,16 @@ function selectV2StepSchema(value: unknown): z.ZodTypeAny {
 	if ("loop" in value) return V2LoopStepSchema;
 	if ("switch" in value) return V2SwitchStepSchema;
 	if ("tryCatch" in value) return V2TryCatchStepSchema;
+	if ("agentStep" in value) return V2AgentStepSchema;
+	if ("approval" in value) return V2ApprovalStepSchema;
+	if ("evidence" in value) return V2EvidenceStepSchema;
+	if ("assert" in value) return V2AssertStepSchema;
+	if ("completion" in value) return V2CompletionStepSchema;
 	return V2RegularStepSchema;
 }
 
 /**
- * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, loop, switch, or tryCatch.
+ * Discriminated v2 step — regular, control-flow, or enforced-agent contract.
  *
  * Discriminators (no `kind` field needed):
  * - presence of `branch` → branch step
@@ -1016,6 +1033,8 @@ function selectV2StepSchema(value: unknown): z.ZodTypeAny {
  * - presence of `loop` → loop step (v0.5)
  * - presence of `switch` → switch step (v0.5)
  * - presence of `tryCatch` → tryCatch step (v0.5)
+ * - presence of `agentStep`, `approval`, `evidence`, `assert`, or `completion`
+ *   → the corresponding enforced-agent contract step
  * - otherwise → regular step
  *
  * **F22**: implemented as a key-presence dispatch rather than a plain
@@ -1054,9 +1073,19 @@ export const V2StepSchema: z.ZodType<
 	| V2LoopStep
 	| V2SwitchStep
 	| V2TryCatchStep
+	| V2AgentStep
+	| V2ApprovalStep
+	| V2EvidenceStep
+	| V2AssertStep
+	| V2CompletionStep
 > = z.lazy(() =>
 	z
 		.union([
+			V2AgentStepSchema,
+			V2ApprovalStepSchema,
+			V2EvidenceStepSchema,
+			V2AssertStepSchema,
+			V2CompletionStepSchema,
 			V2BranchStepSchema,
 			V2SubworkflowStepSchema,
 			V2WaitStepSchema,
@@ -1088,6 +1117,11 @@ export const V2StepSchema: z.ZodType<
 	| V2LoopStep
 	| V2SwitchStep
 	| V2TryCatchStep
+	| V2AgentStep
+	| V2ApprovalStep
+	| V2EvidenceStep
+	| V2AssertStep
+	| V2CompletionStep
 >;
 
 export type V2Step =

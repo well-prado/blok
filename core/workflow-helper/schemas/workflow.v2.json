@@ -197,6 +197,606 @@
 						"properties": {
 							"id": {
 								"type": "string",
+								"minLength": 1
+							},
+							"agentStep": {
+								"type": "object",
+								"properties": {
+									"objective": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 16384
+									},
+									"phase": {
+										"type": "object",
+										"properties": {
+											"name": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 128,
+												"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$",
+												"description": "Stable phase name used in traces and policy decisions."
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+												},
+												"maxItems": 64,
+												"description": "The complete capability allow-list for this phase; it is never inferred from prose."
+											},
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												},
+												"maxItems": 16,
+												"default": [],
+												"description": "Operational effects exposed by the phase."
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+												},
+												"maxItems": 32,
+												"default": [],
+												"description": "Opaque secret reference names only; values are never part of workflow IR."
+											}
+										},
+										"required": [
+											"name",
+											"capabilities"
+										],
+										"additionalProperties": false
+									},
+									"budgets": {
+										"type": "object",
+										"properties": {
+											"maxTurns": {
+												"type": "integer",
+												"exclusiveMinimum": 0,
+												"maximum": 1000
+											},
+											"maxDurationMs": {
+												"type": "integer",
+												"exclusiveMinimum": 0,
+												"maximum": 86400000
+											},
+											"maxInputBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0,
+												"maximum": 16777216
+											},
+											"maxOutputBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0,
+												"maximum": 16777216
+											},
+											"maxToolCalls": {
+												"type": "integer",
+												"exclusiveMinimum": 0,
+												"maximum": 10000
+											}
+										},
+										"additionalProperties": false
+									},
+									"inputSchema": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"additionalProperties": {}
+											}
+										]
+									},
+									"outputSchema": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"additionalProperties": {}
+											}
+										]
+									},
+									"completion": {
+										"type": "object",
+										"properties": {
+											"required": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+												},
+												"minItems": 1,
+												"maxItems": 128,
+												"description": "Assertion/evidence gate IDs that must pass."
+											},
+											"outputSchema": {
+												"anyOf": [
+													{
+														"type": "boolean"
+													},
+													{
+														"type": "object",
+														"additionalProperties": {}
+													}
+												],
+												"description": "Optional JSON Schema for the completed agent result."
+											}
+										},
+										"required": [
+											"required"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"objective",
+									"phase",
+									"completion"
+								],
+								"additionalProperties": false
+							},
+							"inputs": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"description": {
+								"type": "string"
+							},
+							"ui": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1
+							},
+							"ephemeral": {
+								"type": "boolean"
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"agentStep"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1
+							},
+							"approval": {
+								"type": "object",
+								"properties": {
+									"prompt": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 16384
+									},
+									"inputSchema": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"additionalProperties": {}
+											}
+										]
+									},
+									"outputSchema": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"additionalProperties": {}
+											}
+										]
+									},
+									"expiresInMs": {
+										"type": "integer",
+										"exclusiveMinimum": 0,
+										"maximum": 86400000
+									},
+									"reason": {
+										"type": "string",
+										"maxLength": 4096
+									}
+								},
+								"required": [
+									"prompt"
+								],
+								"additionalProperties": false
+							},
+							"inputs": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"description": {
+								"type": "string"
+							},
+							"ui": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1
+							},
+							"ephemeral": {
+								"type": "boolean"
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"approval"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1
+							},
+							"evidence": {
+								"type": "object",
+								"properties": {
+									"producer": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "step"
+													},
+													"step": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128,
+														"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+													},
+													"path": {
+														"type": "array",
+														"items": {
+															"type": [
+																"string",
+																"number"
+															]
+														},
+														"default": []
+													}
+												},
+												"required": [
+													"kind",
+													"step"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "capability"
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128,
+														"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+													}
+												},
+												"required": [
+													"kind",
+													"name"
+												],
+												"additionalProperties": false
+											}
+										]
+									},
+									"artifact": {
+										"type": "object",
+										"properties": {
+											"id": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 128,
+												"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$",
+												"description": "Stable artifact identifier."
+											},
+											"version": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"description": "Producer-assigned artifact version."
+											},
+											"contentHash": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"description": "Content hash when the producer supplies one."
+											},
+											"mediaType": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											}
+										},
+										"required": [
+											"id",
+											"version"
+										],
+										"additionalProperties": false
+									},
+									"verification": {
+										"type": "object",
+										"properties": {
+											"verifier": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 128,
+												"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+											},
+											"status": {
+												"type": "string",
+												"enum": [
+													"pending",
+													"verified",
+													"failed"
+												]
+											},
+											"checkedAt": {
+												"type": "string",
+												"format": "date-time"
+											}
+										},
+										"required": [
+											"verifier",
+											"status"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"producer",
+									"artifact",
+									"verification"
+								],
+								"additionalProperties": false
+							},
+							"description": {
+								"type": "string"
+							},
+							"ui": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1
+							},
+							"ephemeral": {
+								"type": "boolean"
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"evidence"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1
+							},
+							"assert": {
+								"type": "object",
+								"properties": {
+									"condition": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"properties": {
+													"$ref": {
+														"type": "object",
+														"properties": {
+															"step": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+															},
+															"path": {
+																"type": "array",
+																"items": {
+																	"type": [
+																		"string",
+																		"number"
+																	]
+																}
+															}
+														},
+														"required": [
+															"step"
+														],
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"$ref"
+												],
+												"additionalProperties": false
+											}
+										]
+									},
+									"evidence": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+									},
+									"message": {
+										"type": "string",
+										"maxLength": 4096
+									}
+								},
+								"additionalProperties": false
+							},
+							"description": {
+								"type": "string"
+							},
+							"ui": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1
+							},
+							"ephemeral": {
+								"type": "boolean"
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"assert"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1
+							},
+							"completion": {
+								"type": "object",
+								"properties": {
+									"required": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128,
+											"pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+										},
+										"minItems": 1,
+										"maxItems": 128,
+										"description": "Assertion/evidence gate IDs that must pass."
+									},
+									"outputSchema": {
+										"anyOf": [
+											{
+												"type": "boolean"
+											},
+											{
+												"type": "object",
+												"additionalProperties": {}
+											}
+										],
+										"description": "Optional JSON Schema for the completed agent result."
+									}
+								},
+								"required": [
+									"required"
+								],
+								"additionalProperties": false
+							},
+							"description": {
+								"type": "string"
+							},
+							"ui": {
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1
+							},
+							"ephemeral": {
+								"type": "boolean"
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"completion"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
 								"minLength": 1,
 								"description": "Stable identifier for the branch step. Visible in traces."
 							},
