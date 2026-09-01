@@ -153,6 +153,7 @@ export {
 	type InteractionResumeCallback,
 	type InteractionResumeRequest,
 } from "./policy/InteractionStore";
+export { SqliteInteractionStore } from "./policy/SqliteInteractionStore";
 
 // Concurrency gate (Tier 2 #6)
 import {
