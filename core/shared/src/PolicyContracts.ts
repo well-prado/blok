@@ -26,6 +26,7 @@ export interface StepIdentity {
 export interface RequestedCapabilityScope {
 	readonly effects: readonly CapabilityEffect[];
 	readonly capabilities: readonly string[];
+	readonly secrets: readonly string[];
 	readonly fragments: Readonly<Record<string, string | number | boolean>>;
 }
 
@@ -126,7 +127,9 @@ export interface PolicyProvider {
 	evaluate(request: PolicyRequest): Promise<PolicyEvaluationResult>;
 }
 export interface AuditSink {
-	append(event: PreExecutionAuditEvent | PostExecutionAuditEvent): Promise<void>;
+	append(
+		event: PreExecutionAuditEvent | PostExecutionAuditEvent | import("./SecretContracts").SecretResolutionAuditEvent,
+	): Promise<void>;
 }
 export interface InteractionRequest {
 	readonly id: string;

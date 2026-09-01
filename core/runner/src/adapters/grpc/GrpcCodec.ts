@@ -4,6 +4,7 @@ import type { Context } from "@blokjs/shared";
 import { type GrpcObject, type ServiceClientConstructor, loadPackageDefinition } from "@grpc/grpc-js";
 import { type Options, loadSync } from "@grpc/proto-loader";
 import type RunnerNode from "../../RunnerNode";
+import { hasPolicyExecution } from "../../policy/PolicyPipeline";
 import { isStateDietEnabled } from "../transport";
 
 // =============================================================================
@@ -258,7 +259,9 @@ export function encodeExecuteRequest(
 	const diet = isStateDietEnabled();
 	const previousOutput = diet ? null : (ctx.response?.data ?? null);
 	const vars = diet ? {} : (ctx.vars ?? {});
-	const env = stringEnv(ctx.env as Record<string, unknown> | undefined);
+	// Agent runs receive no ambient environment over the sidecar boundary.
+	// Secret leases are intentionally not part of this generic envelope.
+	const env = hasPolicyExecution(ctx) ? {} : stringEnv(ctx.env as Record<string, unknown> | undefined);
 
 	const request = ctx.request ?? ({} as Context["request"]);
 	const requestBody = (request as { body?: unknown }).body;

@@ -104,6 +104,14 @@ export type {
 	TurnIdentity,
 	WorkflowIdentity,
 } from "./PolicyContracts";
+export type {
+	SecretLease,
+	SecretRef,
+	SecretRequest,
+	SecretResolutionAuditEvent,
+	SecretResolutionFailure,
+	SecretResolver,
+} from "./SecretContracts";
 
 export {
 	CAPABILITY_MANIFEST_VERSION,
