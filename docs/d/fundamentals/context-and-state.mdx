@@ -109,6 +109,14 @@ secret reference names for catalog and policy use; see
 does not block ordinary execution, but it is denied at an agent execution
 boundary.
 
+Agent-facing steps may also declare runner-enforced metadata in their step
+options: `agentStep` requires an explicit completion signal, `approval` carries
+the reason and scope for the durable policy handoff, `assertionGate` checks a
+trusted deterministic result, and `evidenceGate` checks trusted artifact
+provenance. `outputTrust: "trusted"` is accepted only for a non-agent node with
+a deterministic capability manifest. Model-returned `provenance` fields never
+create trust; gates are validated before the current step is published.
+
 ## Reading data
 
 Use the handle in the workflow, not runtime context strings.

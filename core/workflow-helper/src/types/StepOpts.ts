@@ -127,6 +127,43 @@ const V2StepDescriptionSchema = z
 	.optional()
 	.describe("What this step does. Documentation only — ignored by the runner; surfaces in Studio and the CLI.");
 
+/** H1-02 runner enforcement metadata. These fields are data-only IR. */
+const AgentCompletionContractSchema = z
+	.object({
+		required: z.boolean().optional(),
+		path: z.string().min(1).optional(),
+		equals: z.unknown().optional(),
+	})
+	.strict();
+const AgentStepContractSchema = z
+	.object({
+		version: z.literal("1"),
+		objective: z.string().min(1),
+		completion: AgentCompletionContractSchema,
+	})
+	.strict();
+const ApprovalContractSchema = z
+	.object({ version: z.literal("1"), reason: z.string().min(1), scope: z.string().min(1).optional() })
+	.strict();
+const AssertionGateContractSchema = z
+	.object({
+		version: z.literal("1"),
+		path: z.string().min(1).optional(),
+		equals: z.unknown().optional(),
+		truthy: z.boolean().optional(),
+		message: z.string().min(1).optional(),
+	})
+	.strict()
+	.refine((value) => value.equals !== undefined || value.truthy !== undefined || value.path === undefined, {
+		message: "assertionGate requires `equals`, `truthy`, or a whole-output boolean.",
+	});
+const EvidenceRequirementSchema = z
+	.object({ artifactId: z.string().min(1), artifactVersion: z.string().min(1), producerStepId: z.string().min(1) })
+	.strict();
+const EvidenceGateContractSchema = z
+	.object({ version: z.literal("1"), requirements: z.array(EvidenceRequirementSchema).min(1) })
+	.strict();
+
 /**
  * Retry configuration for a v2 step.
  *
@@ -356,6 +393,22 @@ export const V2RegularStepSchema = z
 				'run auto-flips to `"timedOut"` status (distinct from `"failed"` ' +
 				"so SLA dashboards can separate timeouts from logic failures).",
 		),
+		agentStep: AgentStepContractSchema.optional().describe(
+			"H1-02 model step contract. The runner requires the declared completion signal before publishing output.",
+		),
+		approval: ApprovalContractSchema.optional().describe(
+			"H1-02 approval handoff metadata. Policy `ask` suspends through the durable H1-01 interaction port.",
+		),
+		assertionGate: AssertionGateContractSchema.optional().describe(
+			"H1-02 deterministic assertion gate. A failed or model-provenance result is rejected before publication.",
+		),
+		evidenceGate: EvidenceGateContractSchema.optional().describe(
+			"H1-02 trusted evidence gate. Every declared artifact/version/producer requirement must be verified.",
+		),
+		outputTrust: z
+			.enum(["model", "trusted"])
+			.optional()
+			.describe("Output provenance declared by the node implementation. Model output cannot satisfy trusted gates."),
 		// F9 — explicit rejection of trigger-only fields that authors plausibly
 		// carry over onto a step. `.strict()` below already rejects unknown keys
 		// with a generic "Unrecognized key(s)" message; these `.never()` arms

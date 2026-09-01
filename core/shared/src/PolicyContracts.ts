@@ -1,4 +1,5 @@
 import type { CapabilityEffect, CapabilityManifestV1 } from "./CapabilityManifest";
+import type { ApprovalContract } from "./EnforcementContracts";
 
 export type ExecutionOrigin = "ordinary" | "agent";
 
@@ -97,6 +98,8 @@ export interface PolicyContext {
 	readonly scope: RequestedCapabilityScope;
 	readonly layers: readonly PolicyLayer[];
 	readonly signal?: AbortSignal;
+	/** Explicit approval handoff requested by an H1-02 approval step. */
+	readonly approval?: ApprovalContract;
 }
 export interface PolicyRequest extends PolicyContext {
 	readonly requestId: string;

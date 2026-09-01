@@ -159,6 +159,13 @@ export {
 	type InteractionResumeCallback,
 	type InteractionResumeRequest,
 } from "./policy/InteractionStore";
+export {
+	enforceAgentStepCompletion,
+	enforceAssertionGate,
+	enforceEvidenceGate,
+	enforceStepOutput,
+} from "./enforcement/AgentEnforcement";
+export { EnforcementViolationError } from "@blokjs/shared";
 export { SqliteInteractionStore } from "./policy/SqliteInteractionStore";
 
 // Concurrency gate (Tier 2 #6)

@@ -1,6 +1,7 @@
 import { parseDuration } from "@blokjs/helper";
 import {
 	type Context,
+	EnforcementViolationError,
 	GlobalError,
 	type NodeBase,
 	type Step,
@@ -13,6 +14,7 @@ import { SpanKind, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
+import { enforceStepOutput } from "./enforcement/AgentEnforcement";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import {
 	PolicyAuditError,
@@ -20,6 +22,7 @@ import {
 	PolicyInteractionRequiredError,
 	type PolicyToken,
 	authorizeStep,
+	hasPolicyExecution,
 	recordPostExecution,
 } from "./policy/PolicyPipeline";
 import { getPrimitiveStack } from "./runtime/PrimitiveStack";
@@ -237,6 +240,14 @@ function unwrapPersistedData(cached: unknown): unknown {
 		"contentType" in cached
 		? (cached as { data: unknown }).data
 		: cached;
+}
+
+function stepOutput(modelData: unknown): unknown {
+	if (modelData === null || typeof modelData !== "object" || Array.isArray(modelData)) return modelData;
+	const candidate = modelData as Record<string, unknown>;
+	return typeof candidate.success === "boolean" && "data" in candidate && "error" in candidate
+		? candidate.data
+		: modelData;
 }
 
 /**
@@ -703,6 +714,12 @@ export default abstract class RunnerSteps {
 						});
 					}
 
+					if (step.approval && !hasPolicyExecution(ctx))
+						throw new EnforcementViolationError(
+							"APPROVAL_REQUIRES_AGENT_CONTEXT",
+							`Step "${step.name}" declares approval but is running outside an agent policy context`,
+						);
+
 					// === Tier 1: idempotency cache lookup ===
 					// Resolve the step's idempotency key against the live ctx,
 					// then consult the cache. On hit, short-circuit step.process
@@ -726,6 +743,18 @@ export default abstract class RunnerSteps {
 						const hit = cacheStore.getIdempotencyCache(workflowName, step.name, resolvedIdemKey);
 						if (hit) {
 							const cachePolicy = await authorizeStep(ctx, step, 1, true);
+							try {
+								enforceStepOutput(step, stepOutput(hit.data));
+							} catch (error) {
+								if (cachePolicy)
+									await recordPostExecution(
+										ctx,
+										cachePolicy,
+										"failure",
+										error instanceof Error ? error.name : "EnforcementViolationError",
+									);
+								throw error;
+							}
 							// Persist the UNWRAPPED value so a cache HIT lands the
 							// same bare `state[<id>]` shape a fresh run did (defineNode
 							// steps cache the full BlokResponse envelope; state stores
@@ -810,13 +839,18 @@ export default abstract class RunnerSteps {
 										? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
 										: await processInvocation();
 								ctx.response = model.data as BlokResponse;
-								await recordPostExecution(ctx, policyToken, "success");
 
 								// Treat soft errors (data carries `.error`) the same as
 								// thrown errors so retry semantics are uniform.
 								if (ctx.response?.error) {
 									throw ctx.response.error;
 								}
+								// H1-02 — custom RunnerNode implementations and cache
+								// replays have no lower publication hook. Enforce here
+								// before the post-execution audit reports success. Built-in
+								// Blok/runtime nodes also validate before publication.
+								enforceStepOutput(step, stepOutput(model.data));
+								await recordPostExecution(ctx, policyToken, "success");
 
 								// === Tier 1: idempotency cache write ===
 								// Cache on the success path only — failed steps are
@@ -899,7 +933,9 @@ export default abstract class RunnerSteps {
 								// fires, so the two can never disagree. Evaluated even on
 								// the final attempt, which the retry branch short-circuits
 								// past.
-								const nonRetryable = isNonRetryableError(nodeErr, retryConfig?.nonRetryableErrorNames);
+								const nonRetryable =
+									nodeErr instanceof EnforcementViolationError ||
+									isNonRetryableError(nodeErr, retryConfig?.nonRetryableErrorNames);
 								if (attempt < maxAttempts && retryConfig && !nonRetryable) {
 									// More attempts remain — record this as a soft
 									// failure and back off before retrying. The node

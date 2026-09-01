@@ -87,6 +87,7 @@ describe("policy interaction lifecycle", () => {
 			input: z.object({ value: z.string() }),
 			output: z.object({ applied: z.boolean() }),
 			capabilityManifest: manifest,
+			agentStep: { version: "1", objective: "apply the approved change", completion: { path: "applied" } },
 			execute: async () => {
 				effectCalls += 1;
 				return { applied: true };

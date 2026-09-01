@@ -66,6 +66,13 @@ execution compatibility but is not agent-safe. Only a valid
 `trusted-legacy`, `denied-to-agents`, missing, and invalid metadata fail closed.
 See `docs/d/fundamentals/capability-manifests.mdx` and ADR 0003.
 
+Agent-facing steps may declare `agentStep`, `approval`, `assertionGate`,
+`evidenceGate`, and `outputTrust` metadata. The runner requires explicit agent
+completion, routes approval `ask` through the durable H1-01 interaction port,
+and validates assertion/evidence gates before publishing state. Model output
+cannot establish trusted provenance; `outputTrust: "trusted"` requires a
+deterministic non-agent implementation and valid capability manifest.
+
 ## State
 
 - Every successful step persists to `ctx.state[id]`.
