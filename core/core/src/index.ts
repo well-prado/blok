@@ -12,8 +12,14 @@
  */
 
 export {
+	agentStep,
+	approval,
+	assert,
 	workflow,
 	step,
+	complete,
+	completion,
+	evidence,
 	subworkflow,
 	// Escape hatch to a dynamically-published state key (#333) — see dsl.ts for
 	// the full rationale. Was missing from this hand-list (#717).
@@ -43,6 +49,17 @@ export type { CapabilityManifestV1 } from "@blokjs/shared";
 
 // Type foundation (handles + runtime stub).
 export type {
+	AgentStepOptions,
+	ApprovalOptions,
+	AssertOptions,
+	AuthorSchema,
+	CompletionOptions,
+	CompletionRef,
+	EvidenceOptions,
+	EvidenceProducer,
+	EvidenceRef,
+	GateRef,
+	GateRequirement,
 	Handle,
 	EphemeralHandle,
 	ErrorHandle,

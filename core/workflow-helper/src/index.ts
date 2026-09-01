@@ -32,6 +32,26 @@ import {
 	workflow,
 } from "./components/workflowV2";
 import { RESOLVED_KEY_FIELDS, unresolvableKeyShape } from "./refSyntax";
+import {
+	type AgentBudget,
+	AgentBudgetSchema,
+	type AgentPhase,
+	AgentPhaseSchema,
+	type CompletionContract,
+	CompletionContractSchema,
+	type JsonSchema,
+	JsonSchemaSchema,
+	type V2AgentStep,
+	V2AgentStepSchema,
+	type V2ApprovalStep,
+	V2ApprovalStepSchema,
+	type V2AssertStep,
+	V2AssertStepSchema,
+	type V2CompletionStep,
+	V2CompletionStepSchema,
+	type V2EvidenceStep,
+	V2EvidenceStepSchema,
+} from "./types/AgentContracts";
 import type { V2StepUi } from "./types/StepOpts";
 import type {
 	CronTriggerOpts,
@@ -103,6 +123,25 @@ export {
 	WorkflowIRSchema,
 	WORKFLOW_IR_VERSION,
 	type WorkflowIR,
+	// enforced-agent workflow contract schemas and types
+	AgentBudgetSchema,
+	AgentPhaseSchema,
+	CompletionContractSchema,
+	JsonSchemaSchema,
+	V2AgentStepSchema,
+	V2ApprovalStepSchema,
+	V2AssertStepSchema,
+	V2CompletionStepSchema,
+	V2EvidenceStepSchema,
+	type AgentBudget,
+	type AgentPhase,
+	type CompletionContract,
+	type JsonSchema,
+	type V2AgentStep,
+	type V2ApprovalStep,
+	type V2AssertStep,
+	type V2CompletionStep,
+	type V2EvidenceStep,
 	// advisory shared validator (CLI / registry / Studio / AI authoring checks)
 	validateWorkflow,
 	type WorkflowValidationResult,

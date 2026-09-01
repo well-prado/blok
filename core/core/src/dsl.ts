@@ -8,7 +8,13 @@
  */
 
 export {
+	agentStep,
+	approval,
+	assert,
 	workflowCallback as workflow,
+	complete,
+	completion,
+	evidence,
 	step,
 	subworkflow,
 	state,
@@ -27,7 +33,21 @@ export {
 	not,
 } from "@blokjs/runner/stepBuilder";
 
-export type { SubworkflowOptions, TriggerHandle } from "@blokjs/runner/stepBuilder";
+export type {
+	AgentStepOptions,
+	ApprovalOptions,
+	AssertOptions,
+	AuthorSchema,
+	CompletionOptions,
+	CompletionRef,
+	EvidenceOptions,
+	EvidenceProducer,
+	EvidenceRef,
+	GateRef,
+	GateRequirement,
+	SubworkflowOptions,
+	TriggerHandle,
+} from "@blokjs/runner/stepBuilder";
 export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, ModuleNode } from "@blokjs/runner/handles";
 // `runtimeNode` / `node` are REAL values — `step()` lowers them to runtime /
 // module steps respectively (#424; node() = the typed-handle counterpart of a

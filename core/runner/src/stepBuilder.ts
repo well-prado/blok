@@ -25,16 +25,25 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+	type AgentBudget,
+	type AgentPhase,
 	type EmptyEventMap,
 	type EventMap,
 	type EventUnion,
 	type InferOr,
+	type JsonSchema,
 	type TypedWorkflow,
+	V2AgentStepSchema,
+	V2ApprovalStepSchema,
+	V2AssertStepSchema,
+	V2CompletionStepSchema,
+	V2EvidenceStepSchema,
 	type WorkflowV2Opts as WorkflowOpts,
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
 import { lowerRefs } from "@blokjs/shared";
 import type { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import type { EphemeralHandle, ErrorHandle, Handle, OutputOf, SpreadHandle } from "./handles";
 
 /** The structural handle reference sentinel — mirrors `@blokjs/shared`'s `StructuralRef`. */
@@ -88,7 +97,7 @@ function spreadWholeReadError(step: string): Error {
 /** A collected step record. Mirrors the v2 step shape the object factory accepts. */
 interface StepRecord {
 	id: string;
-	use: string;
+	use?: string;
 	inputs?: Record<string, unknown>;
 	[opt: string]: unknown;
 }
@@ -909,6 +918,246 @@ export interface StepOptions {
 	/** Escape hatch for the other v2 step knobs (idempotencyKey, retry, maxDuration, …). */
 	[opt: string]: unknown;
 }
+
+/** A Zod schema at the TS authoring edge, or already-serializable JSON Schema. */
+export type AuthorSchema<T = unknown> = z.ZodType<T> | JsonSchema;
+type SchemaOutput<S> = S extends z.ZodTypeAny ? z.infer<S> : unknown;
+type AgentPersistenceOptions = {
+	as?: string;
+	ephemeral?: boolean;
+	active?: boolean;
+	stop?: boolean;
+};
+
+export interface AgentStepOptions<S extends AuthorSchema = AuthorSchema> extends AgentPersistenceOptions {
+	/** Phase identity and the complete capability envelope visible to the agent. */
+	phase: AgentPhase;
+	/** Optional bounded model-loop ceilings. */
+	budgets?: AgentBudget;
+	/** Optional schema for the inputs supplied to the agent. */
+	inputSchema?: AuthorSchema;
+	/** Schema for the structured agent result; prose is not a completion signal. */
+	outputSchema?: S;
+	/** Gates that the runner must verify before this agent step can complete. */
+	completion: CompletionOptions;
+}
+
+export interface ApprovalOptions<S extends AuthorSchema = AuthorSchema> extends AgentPersistenceOptions {
+	prompt: string;
+	inputSchema?: AuthorSchema;
+	outputSchema?: S;
+	expiresInMs?: number;
+	reason?: string;
+}
+
+export type GateRef = { readonly kind: "gate"; readonly id: string };
+export type EvidenceRef = { readonly kind: "evidence"; readonly id: string };
+export type CompletionRef = { readonly kind: "completion"; readonly id: string };
+export type GateRequirement = GateRef | EvidenceRef | CompletionRef | string;
+
+export interface CompletionOptions {
+	required: readonly GateRequirement[];
+	outputSchema?: AuthorSchema;
+}
+
+export type EvidenceProducer = Handle<unknown> | { readonly kind: "capability"; readonly name: string };
+
+export interface EvidenceOptions {
+	producer: EvidenceProducer;
+	artifact: {
+		id: string;
+		version: string;
+		contentHash?: string;
+		mediaType?: string;
+	};
+	verification: {
+		verifier: string;
+		status: "pending" | "verified" | "failed";
+		checkedAt?: string;
+	};
+}
+
+export interface AssertOptions {
+	message?: string;
+}
+
+function serializeAuthorSchema(value: AuthorSchema | undefined, field: string): JsonSchema | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "boolean") return value;
+	if (value && typeof value === "object" && "_def" in value) {
+		return zodToJsonSchema(value as z.ZodTypeAny, { target: "jsonSchema7", $refStrategy: "none" }) as JsonSchema;
+	}
+	if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) return value;
+	throw new Error(`${field} must be a Zod schema or a JSON Schema value.`);
+}
+
+function gateIds(required: readonly GateRequirement[], owner: string): string[] {
+	if (!Array.isArray(required) || required.length === 0) {
+		throw new Error(`${owner} requires at least one assertion or evidence gate.`);
+	}
+	return required.map((gate, index) => {
+		const id = typeof gate === "string" ? gate : gate?.id;
+		if (typeof id !== "string" || id.length === 0) {
+			throw new Error(`${owner} gate at index ${index} must be a non-empty gate reference or ID.`);
+		}
+		return id;
+	});
+}
+
+function registerAgentContract(
+	id: string,
+	record: StepRecord,
+	builder: Builder,
+	opts: AgentPersistenceOptions | undefined,
+): Handle<unknown> {
+	if (typeof id !== "string" || id.length === 0)
+		throw new Error(`${record.agentStep ? "agentStep" : "approval"}() requires a non-empty string id.`);
+	if (builder.root.ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	if (opts?.as !== undefined && opts?.ephemeral === true) {
+		throw new Error(`Step "${id}": \`as\` and \`ephemeral\` are mutually exclusive — pick one.`);
+	}
+	builder.root.ids.add(id);
+	builder.steps.push(record);
+	return buildHandle(opts?.as ?? id, builder, [], opts?.ephemeral === true) as Handle<unknown>;
+}
+
+/** Declare structured model work with an explicit phase envelope and completion gates. */
+export function agentStep<S extends AuthorSchema = AuthorSchema>(
+	id: string,
+	objective: string,
+	inputs?: Record<string, unknown>,
+	opts?: AgentStepOptions<S>,
+): Handle<SchemaOutput<S>> {
+	const builder = currentBuilder();
+	if (!opts) throw new Error(`agentStep("${id}") requires a phase and completion contract.`);
+	const record = {
+		id,
+		agentStep: {
+			objective,
+			phase: opts.phase,
+			...(opts.budgets ? { budgets: opts.budgets } : {}),
+			...(opts.inputSchema ? { inputSchema: serializeAuthorSchema(opts.inputSchema, "agentStep inputSchema") } : {}),
+			...(opts.outputSchema
+				? { outputSchema: serializeAuthorSchema(opts.outputSchema, "agentStep outputSchema") }
+				: {}),
+			completion: {
+				required: gateIds(opts.completion.required, `agentStep("${id}")`),
+				...(opts.completion.outputSchema
+					? { outputSchema: serializeAuthorSchema(opts.completion.outputSchema, "agentStep completion.outputSchema") }
+					: {}),
+			},
+		},
+		...(inputs ? { inputs: lowerHandles(inputs, builder) as Record<string, unknown> } : {}),
+		...(opts.as !== undefined ? { as: opts.as } : {}),
+		...(opts.ephemeral !== undefined ? { ephemeral: opts.ephemeral } : {}),
+		...(opts.active !== undefined ? { active: opts.active } : {}),
+		...(opts.stop !== undefined ? { stop: opts.stop } : {}),
+	} as StepRecord;
+	V2AgentStepSchema.parse(record);
+	return registerAgentContract(id, record, builder, opts) as Handle<SchemaOutput<S>>;
+}
+
+/** Declare a durable human approval boundary backed by the H1-01 interaction contract. */
+export function approval<S extends AuthorSchema = AuthorSchema>(
+	id: string,
+	options: ApprovalOptions<S> & { inputs?: Record<string, unknown> },
+): Handle<SchemaOutput<S>> {
+	const builder = currentBuilder();
+	const record = {
+		id,
+		approval: {
+			prompt: options.prompt,
+			...(options.inputSchema
+				? { inputSchema: serializeAuthorSchema(options.inputSchema, "approval inputSchema") }
+				: {}),
+			...(options.outputSchema
+				? { outputSchema: serializeAuthorSchema(options.outputSchema, "approval outputSchema") }
+				: {}),
+			...(options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
+			...(options.reason !== undefined ? { reason: options.reason } : {}),
+		},
+		...(options.inputs ? { inputs: lowerHandles(options.inputs, builder) as Record<string, unknown> } : {}),
+		...(options.as !== undefined ? { as: options.as } : {}),
+		...(options.ephemeral !== undefined ? { ephemeral: options.ephemeral } : {}),
+		...(options.active !== undefined ? { active: options.active } : {}),
+		...(options.stop !== undefined ? { stop: options.stop } : {}),
+	} as StepRecord;
+	V2ApprovalStepSchema.parse(record);
+	return registerAgentContract(id, record, builder, options) as Handle<SchemaOutput<S>>;
+}
+
+/** Record trusted evidence provenance for a later assertion gate. */
+export function evidence(id: string, options: EvidenceOptions): EvidenceRef {
+	const builder = currentBuilder();
+	const producer = readHandleMeta(options.producer);
+	if (producer?.owner && !canRead(producer.owner, builder)) {
+		throw new Error(`evidence("${id}") reads its producer handle outside its scope.`);
+	}
+	const producerValue = producer
+		? { kind: "step" as const, step: producer.step, path: producer.path }
+		: options.producer;
+	const capabilityProducer =
+		options.producer !== null &&
+		typeof options.producer === "object" &&
+		"kind" in options.producer &&
+		(options.producer as { kind?: unknown }).kind === "capability";
+	if (!producer && !capabilityProducer) {
+		throw new Error(`evidence("${id}") requires a prior step handle or a capability producer.`);
+	}
+	const record = {
+		id,
+		evidence: { producer: producerValue, artifact: options.artifact, verification: options.verification },
+	} as StepRecord;
+	V2EvidenceStepSchema.parse(record);
+	registerAgentContract(id, record, builder, undefined);
+	return { kind: "evidence", id };
+}
+
+/** Add a deterministic gate; only a boolean handle or a provenance-bearing evidence ref is accepted. */
+export function assert(
+	id: string,
+	condition: Handle<boolean> | boolean | EvidenceRef,
+	options: AssertOptions = {},
+): GateRef {
+	const builder = currentBuilder();
+	const handle = readHandleMeta(condition);
+	const value = handle ? lowerHandles(condition, builder) : condition;
+	const isEvidence =
+		condition !== null &&
+		typeof condition === "object" &&
+		"kind" in condition &&
+		(condition as EvidenceRef).kind === "evidence";
+	const gate = isEvidence ? { evidence: (condition as EvidenceRef).id } : { condition: value };
+	const record = {
+		id,
+		assert: { ...gate, ...(options.message !== undefined ? { message: options.message } : {}) },
+	} as StepRecord;
+	V2AssertStepSchema.parse(record);
+	registerAgentContract(id, record, builder, undefined);
+	return { kind: "gate", id };
+}
+
+/** Add an explicit runner-owned terminal completion contract. */
+export function completion(id: string, options: CompletionOptions): CompletionRef {
+	const record = {
+		id,
+		completion: {
+			required: gateIds(options.required, `completion("${id}")`),
+			...(options.outputSchema
+				? { outputSchema: serializeAuthorSchema(options.outputSchema, "completion outputSchema") }
+				: {}),
+		},
+	} as StepRecord;
+	const builder = currentBuilder();
+	V2CompletionStepSchema.parse(record);
+	registerAgentContract(id, record, builder, undefined);
+	return { kind: "completion", id };
+}
+
+/** Alias matching the imperative vocabulary used by strict workflow examples. */
+export const complete = completion;
 
 function lowerExpressionSite(value: unknown, reader: Builder, site: string): unknown {
 	const meta = readHandleMeta(value);

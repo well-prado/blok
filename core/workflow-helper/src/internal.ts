@@ -15,3 +15,4 @@
 export * from "./types/StepOpts";
 export * from "./types/TriggerOpts";
 export * from "./types/WorkflowOpts";
+export * from "./types/AgentContracts";
