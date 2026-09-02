@@ -826,6 +826,239 @@
 								"additionalProperties": false,
 								"description": "Conditional sub-pipeline."
 							},
+							"join": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"mode": {
+										"type": "string",
+										"enum": [
+											"all",
+											"any"
+										]
+									},
+									"branches": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"required": {
+													"type": "boolean"
+												},
+												"evidence": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"const": "evidence"
+															},
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"kind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"claim": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+															},
+															"artifactKind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"producers": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"enum": [
+																		"capability",
+																		"deterministic-step",
+																		"runner"
+																	]
+																},
+																"minItems": 1,
+																"maxItems": 3
+															},
+															"verification": {
+																"type": "string",
+																"const": "verified"
+															}
+														},
+														"required": [
+															"type",
+															"id",
+															"kind",
+															"producers",
+															"verification"
+														],
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												}
+											},
+											"required": [
+												"id",
+												"required"
+											],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 128
+									},
+									"outputs": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"branchId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"path": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															{
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															}
+														]
+													},
+													"maxItems": 64
+												},
+												"schema": {
+													"anyOf": [
+														{
+															"type": "boolean"
+														},
+														{
+															"type": "object",
+															"additionalProperties": {}
+														}
+													]
+												}
+											},
+											"required": [
+												"id",
+												"branchId",
+												"path",
+												"schema"
+											],
+											"additionalProperties": false
+										},
+										"maxItems": 128
+									},
+									"authority": {
+										"type": "object",
+										"properties": {
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"fragments": {
+												"type": "object",
+												"additionalProperties": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "number"
+														},
+														{
+															"type": "boolean"
+														}
+													]
+												}
+											}
+										},
+										"required": [
+											"effects",
+											"capabilities",
+											"secrets",
+											"fragments"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"id",
+									"mode",
+									"branches",
+									"outputs"
+								],
+								"additionalProperties": false,
+								"description": "Evidence-aware obligations and typed outputs for the branch join."
+							},
 							"description": {
 								"type": "string",
 								"description": "What this step does. Documentation only — ignored by the runner; surfaces in Studio and the CLI."
@@ -1030,6 +1263,435 @@
 								],
 								"additionalProperties": false,
 								"description": "Retry the WHOLE sub-workflow on failure. Each retry creates a fresh child run record under the same parent."
+							},
+							"retryResume": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"stepId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"effect": {
+										"type": "string",
+										"enum": [
+											"none",
+											"read",
+											"write",
+											"network",
+											"filesystem",
+											"process",
+											"secret",
+											"streaming",
+											"destructive"
+										]
+									},
+									"maxAttempts": {
+										"type": "integer",
+										"exclusiveMinimum": 0,
+										"maximum": 20
+									},
+									"maxResumes": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 100
+									},
+									"idempotency": {
+										"type": "object",
+										"properties": {
+											"mode": {
+												"type": "string",
+												"enum": [
+													"not-required",
+													"keyed",
+													"evidence-required"
+												]
+											},
+											"keyDeclared": {
+												"type": "boolean"
+											}
+										},
+										"required": [
+											"mode"
+										],
+										"additionalProperties": false
+									},
+									"evidence": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"const": "evidence"
+												},
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"kind": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"claim": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+												},
+												"artifactKind": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"producers": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"enum": [
+															"capability",
+															"deterministic-step",
+															"runner"
+														]
+													},
+													"minItems": 1,
+													"maxItems": 3
+												},
+												"verification": {
+													"type": "string",
+													"const": "verified"
+												}
+											},
+											"required": [
+												"type",
+												"id",
+												"kind",
+												"producers",
+												"verification"
+											],
+											"additionalProperties": false
+										},
+										"maxItems": 64
+									},
+									"authority": {
+										"type": "object",
+										"properties": {
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"fragments": {
+												"type": "object",
+												"additionalProperties": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "number"
+														},
+														{
+															"type": "boolean"
+														}
+													]
+												}
+											}
+										},
+										"required": [
+											"effects",
+											"capabilities",
+											"secrets",
+											"fragments"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"id",
+									"stepId",
+									"effect",
+									"maxAttempts",
+									"maxResumes",
+									"idempotency"
+								],
+								"additionalProperties": false,
+								"description": "H1-04 bounded effect retry/resume contract. Effectful replay must declare keyed idempotency or evidence."
+							},
+							"join": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"mode": {
+										"type": "string",
+										"enum": [
+											"all",
+											"any"
+										]
+									},
+									"branches": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"required": {
+													"type": "boolean"
+												},
+												"evidence": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"const": "evidence"
+															},
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"kind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"claim": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+															},
+															"artifactKind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"producers": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"enum": [
+																		"capability",
+																		"deterministic-step",
+																		"runner"
+																	]
+																},
+																"minItems": 1,
+																"maxItems": 3
+															},
+															"verification": {
+																"type": "string",
+																"const": "verified"
+															}
+														},
+														"required": [
+															"type",
+															"id",
+															"kind",
+															"producers",
+															"verification"
+														],
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												}
+											},
+											"required": [
+												"id",
+												"required"
+											],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 128
+									},
+									"outputs": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"branchId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"path": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															{
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															}
+														]
+													},
+													"maxItems": 64
+												},
+												"schema": {
+													"anyOf": [
+														{
+															"type": "boolean"
+														},
+														{
+															"type": "object",
+															"additionalProperties": {}
+														}
+													]
+												}
+											},
+											"required": [
+												"id",
+												"branchId",
+												"path",
+												"schema"
+											],
+											"additionalProperties": false
+										},
+										"maxItems": 128
+									},
+									"authority": {
+										"type": "object",
+										"properties": {
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"fragments": {
+												"type": "object",
+												"additionalProperties": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "number"
+														},
+														{
+															"type": "boolean"
+														}
+													]
+												}
+											}
+										},
+										"required": [
+											"effects",
+											"capabilities",
+											"secrets",
+											"fragments"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"id",
+									"mode",
+									"branches",
+									"outputs"
+								],
+								"additionalProperties": false,
+								"description": "Evidence-aware obligations and typed outputs for the child join."
 							},
 							"maxDuration": {
 								"anyOf": [
@@ -1318,6 +1980,239 @@
 								],
 								"additionalProperties": false,
 								"description": "forEach configuration."
+							},
+							"join": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"mode": {
+										"type": "string",
+										"enum": [
+											"all",
+											"any"
+										]
+									},
+									"branches": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"required": {
+													"type": "boolean"
+												},
+												"evidence": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"const": "evidence"
+															},
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"kind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"claim": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+															},
+															"artifactKind": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															"producers": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"enum": [
+																		"capability",
+																		"deterministic-step",
+																		"runner"
+																	]
+																},
+																"minItems": 1,
+																"maxItems": 3
+															},
+															"verification": {
+																"type": "string",
+																"const": "verified"
+															}
+														},
+														"required": [
+															"type",
+															"id",
+															"kind",
+															"producers",
+															"verification"
+														],
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												}
+											},
+											"required": [
+												"id",
+												"required"
+											],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 128
+									},
+									"outputs": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"branchId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"path": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128,
+																"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+															},
+															{
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															}
+														]
+													},
+													"maxItems": 64
+												},
+												"schema": {
+													"anyOf": [
+														{
+															"type": "boolean"
+														},
+														{
+															"type": "object",
+															"additionalProperties": {}
+														}
+													]
+												}
+											},
+											"required": [
+												"id",
+												"branchId",
+												"path",
+												"schema"
+											],
+											"additionalProperties": false
+										},
+										"maxItems": 128
+									},
+									"authority": {
+										"type": "object",
+										"properties": {
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"fragments": {
+												"type": "object",
+												"additionalProperties": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "number"
+														},
+														{
+															"type": "boolean"
+														}
+													]
+												}
+											}
+										},
+										"required": [
+											"effects",
+											"capabilities",
+											"secrets",
+											"fragments"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"id",
+									"mode",
+									"branches",
+									"outputs"
+								],
+								"additionalProperties": false,
+								"description": "Evidence-aware obligations and typed outputs for the collection join."
 							},
 							"active": {
 								"type": "boolean"
@@ -1935,6 +2830,202 @@
 								],
 								"additionalProperties": false,
 								"description": "H1-02 trusted evidence gate. Every declared artifact/version/producer requirement must be verified."
+							},
+							"retryResume": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"stepId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"effect": {
+										"type": "string",
+										"enum": [
+											"none",
+											"read",
+											"write",
+											"network",
+											"filesystem",
+											"process",
+											"secret",
+											"streaming",
+											"destructive"
+										]
+									},
+									"maxAttempts": {
+										"type": "integer",
+										"exclusiveMinimum": 0,
+										"maximum": 20
+									},
+									"maxResumes": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 100
+									},
+									"idempotency": {
+										"type": "object",
+										"properties": {
+											"mode": {
+												"type": "string",
+												"enum": [
+													"not-required",
+													"keyed",
+													"evidence-required"
+												]
+											},
+											"keyDeclared": {
+												"type": "boolean"
+											}
+										},
+										"required": [
+											"mode"
+										],
+										"additionalProperties": false
+									},
+									"evidence": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"const": "evidence"
+												},
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"kind": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"claim": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+												},
+												"artifactKind": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128,
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"producers": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"enum": [
+															"capability",
+															"deterministic-step",
+															"runner"
+														]
+													},
+													"minItems": 1,
+													"maxItems": 3
+												},
+												"verification": {
+													"type": "string",
+													"const": "verified"
+												}
+											},
+											"required": [
+												"type",
+												"id",
+												"kind",
+												"producers",
+												"verification"
+											],
+											"additionalProperties": false
+										},
+										"maxItems": 64
+									},
+									"authority": {
+										"type": "object",
+										"properties": {
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												}
+											},
+											"fragments": {
+												"type": "object",
+												"additionalProperties": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "number"
+														},
+														{
+															"type": "boolean"
+														}
+													]
+												}
+											}
+										},
+										"required": [
+											"effects",
+											"capabilities",
+											"secrets",
+											"fragments"
+										],
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"id",
+									"stepId",
+									"effect",
+									"maxAttempts",
+									"maxResumes",
+									"idempotency"
+								],
+								"additionalProperties": false,
+								"description": "H1-04 bounded effect retry/resume contract. Effectful replay must declare keyed idempotency or evidence."
 							},
 							"outputTrust": {
 								"type": "string",

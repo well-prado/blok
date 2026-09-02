@@ -5,6 +5,8 @@ import {
 	isStructuralTpl,
 	lowerRefs,
 	parseCapabilityManifest,
+	parseJoinContract,
+	parseRetryResumeIdempotencyContract,
 } from "@blokjs/shared";
 
 /**
@@ -1222,7 +1224,12 @@ function copyStepMeta(step: Record<string, unknown>): {
 	assertionGate?: import("@blokjs/shared").AssertionGateContract;
 	evidenceGate?: import("@blokjs/shared").EvidenceGateContract;
 	outputTrust?: import("@blokjs/shared").OutputTrust;
+	join?: import("@blokjs/shared").JoinContract;
+	retryResume?: import("@blokjs/shared").RetryResumeIdempotencyContract;
 } {
+	const join = step.join === undefined ? undefined : parseJoinContract(step.join);
+	const retryResume =
+		step.retryResume === undefined ? undefined : parseRetryResumeIdempotencyContract(step.retryResume);
 	return {
 		...(isPlainObject(step.ui) ? { ui: step.ui } : {}),
 		...(typeof step.description === "string" ? { description: step.description } : {}),
@@ -1239,6 +1246,8 @@ function copyStepMeta(step: Record<string, unknown>): {
 			? { evidenceGate: step.evidenceGate as unknown as import("@blokjs/shared").EvidenceGateContract }
 			: {}),
 		...(step.outputTrust === "model" || step.outputTrust === "trusted" ? { outputTrust: step.outputTrust } : {}),
+		...(join ? { join } : {}),
+		...(retryResume ? { retryResume } : {}),
 	};
 }
 

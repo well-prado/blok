@@ -30,7 +30,8 @@ export {
 	not,
 } from "./stepBuilder";
 export { defineNode } from "./defineNode";
-export type { TriggerHandle, SubworkflowOptions } from "./stepBuilder";
+export type { BranchOptions, TriggerHandle, SubworkflowOptions } from "./stepBuilder";
+export type { JoinContract, RetryResumeIdempotencyContract } from "@blokjs/shared";
 export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode } from "./handles";
 // `runtimeNode` is a REAL value (#424) — `step()` lowers it to a runtime step.
 export { runtimeNode } from "./handles";

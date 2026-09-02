@@ -1,3 +1,4 @@
+import type { JoinContract } from "@blokjs/shared";
 import type { V2ForEachStep, V2Step, V2StepUi } from "../types/StepOpts";
 import { assertNoForEachStateKeyCollisions } from "../utils/forEachScope";
 
@@ -34,6 +35,8 @@ export interface ForEachOpts {
 	active?: boolean;
 	/** Halt the workflow after this step completes. */
 	stop?: boolean;
+	/** Evidence-aware obligations and typed outputs for the collection join. */
+	join?: JoinContract;
 }
 
 /**
@@ -97,6 +100,7 @@ export function forEach(opts: ForEachOpts): V2ForEachStep {
 			...(opts.mode !== undefined ? { mode: opts.mode } : {}),
 			...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
 		},
+		...(opts.join !== undefined ? { join: opts.join as V2ForEachStep["join"] } : {}),
 		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};
 	if (opts.active === false) (result as V2ForEachStep & { active: boolean }).active = false;
