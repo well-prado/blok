@@ -357,12 +357,16 @@ export default class Configuration implements Config {
 				assertionGate?: NodeBase["assertionGate"];
 				evidenceGate?: NodeBase["evidenceGate"];
 				outputTrust?: NodeBase["outputTrust"];
+				join?: NodeBase["join"];
+				retryResume?: NodeBase["retryResume"];
 			};
 			if (enforcement.agentStep !== undefined) node.agentStep = enforcement.agentStep;
 			if (enforcement.approval !== undefined) node.approval = enforcement.approval;
 			if (enforcement.assertionGate !== undefined) node.assertionGate = enforcement.assertionGate;
 			if (enforcement.evidenceGate !== undefined) node.evidenceGate = enforcement.evidenceGate;
 			if (enforcement.outputTrust !== undefined) node.outputTrust = enforcement.outputTrust;
+			if (enforcement.join !== undefined) node.join = enforcement.join;
+			if (enforcement.retryResume !== undefined) node.retryResume = enforcement.retryResume;
 			// V2 idempotency cache + retry knobs — read by RunnerSteps before
 			// delegating to step.process(). Caching layers ABOVE
 			// PersistenceHelper; retry wraps the same call site.
@@ -378,6 +382,8 @@ export default class Configuration implements Config {
 				assertionGate?: NodeBase["assertionGate"];
 				evidenceGate?: NodeBase["evidenceGate"];
 				outputTrust?: NodeBase["outputTrust"];
+				join?: NodeBase["join"];
+				retryResume?: NodeBase["retryResume"];
 			};
 			if (v2Idem.idempotencyKey !== undefined) node.idempotencyKey = v2Idem.idempotencyKey;
 			if (v2Idem.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Idem.idempotencyKeyTTL;
@@ -550,6 +556,8 @@ export default class Configuration implements Config {
 			if (v2Flow.assertionGate !== undefined) node.assertionGate = v2Flow.assertionGate;
 			if (v2Flow.evidenceGate !== undefined) node.evidenceGate = v2Flow.evidenceGate;
 			if (v2Flow.outputTrust !== undefined) node.outputTrust = v2Flow.outputTrust;
+			if (v2Flow.join !== undefined) node.join = v2Flow.join;
+			if (v2Flow.retryResume !== undefined) node.retryResume = v2Flow.retryResume;
 			if (v2Flow.idempotencyKey !== undefined) node.idempotencyKey = v2Flow.idempotencyKey;
 			if (v2Flow.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Flow.idempotencyKeyTTL;
 			if (v2Flow.retry !== undefined) node.retry = v2Flow.retry;

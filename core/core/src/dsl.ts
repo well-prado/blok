@@ -40,6 +40,7 @@ export type {
 	AuthorSchema,
 	CompletionOptions,
 	CompletionRef,
+	BranchOptions,
 	EvidenceOptions,
 	EvidenceProducer,
 	EvidenceRef,
@@ -48,6 +49,7 @@ export type {
 	SubworkflowOptions,
 	TriggerHandle,
 } from "@blokjs/runner/stepBuilder";
+export type { JoinContract, RetryResumeIdempotencyContract } from "@blokjs/shared";
 export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, ModuleNode } from "@blokjs/runner/handles";
 // `runtimeNode` / `node` are REAL values — `step()` lowers them to runtime /
 // module steps respectively (#424; node() = the typed-handle counterpart of a

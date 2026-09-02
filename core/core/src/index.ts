@@ -60,6 +60,8 @@ export type {
 	EvidenceRef,
 	GateRef,
 	GateRequirement,
+	JoinContract,
+	RetryResumeIdempotencyContract,
 	Handle,
 	EphemeralHandle,
 	ErrorHandle,

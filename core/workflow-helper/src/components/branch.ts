@@ -1,3 +1,4 @@
+import type { JoinContract } from "@blokjs/shared";
 import type { V2BranchStep, V2Step, V2StepUi } from "../types/StepOpts";
 import { conditionToExpr } from "./eq";
 
@@ -26,6 +27,8 @@ export interface BranchOpts {
 	active?: boolean;
 	/** Halt the workflow after this branch step completes. */
 	stop?: boolean;
+	/** Evidence-aware obligations and typed outputs for the branch join. */
+	join?: JoinContract;
 }
 
 /**
@@ -84,6 +87,7 @@ export function branch(opts: BranchOpts): V2BranchStep {
 			then: thenSteps,
 			...(elseSteps ? { else: elseSteps } : {}),
 		},
+		...(opts.join !== undefined ? { join: opts.join as V2BranchStep["join"] } : {}),
 		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};
 	if (opts.active === false) (result as V2BranchStep & { active: boolean }).active = false;

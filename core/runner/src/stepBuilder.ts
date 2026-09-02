@@ -46,9 +46,11 @@ import type {
 	ApprovalContract,
 	AssertionGateContract,
 	EvidenceGateContract,
+	JoinContract,
 	OutputTrust,
+	RetryResumeIdempotencyContract,
 } from "@blokjs/shared";
-import { lowerRefs } from "@blokjs/shared";
+import { JoinContractSchema, RetryResumeIdempotencyContractSchema, lowerRefs } from "@blokjs/shared";
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { EphemeralHandle, ErrorHandle, Handle, OutputOf, SpreadHandle } from "./handles";
@@ -472,6 +474,11 @@ export interface BranchArms {
 	else?: () => unknown;
 }
 
+/** Optional contract evaluated when the branch arm has joined. */
+export interface BranchOptions {
+	join?: JoinContract;
+}
+
 /**
  * Callback-style `branch` over handles (#418, ADR 0003/0004). The condition is a
  * boolean handle (truthiness) or a typed op (`gt(a.x, b.y)`); it lowers to a BARE
@@ -487,7 +494,7 @@ export interface BranchArms {
  *   });
  *   branch("big", gt(order.qty, limit.max), { then: () => { ... } });
  */
-export function branch(id: string, condition: unknown, arms: BranchArms): void {
+export function branch(id: string, condition: unknown, arms: BranchArms, opts?: BranchOptions): void {
 	if (typeof id !== "string" || id.length === 0) throw new Error("branch() requires a non-empty string id.");
 	if (!arms || typeof arms.then !== "function") {
 		throw new Error(`branch("${id}") requires a \`then\` callback.`);
@@ -507,10 +514,12 @@ export function branch(id: string, condition: unknown, arms: BranchArms): void {
 
 	const thenSteps = runArm(parent, arms.then);
 	const elseSteps = arms.else ? runArm(parent, arms.else) : undefined;
+	if (opts?.join !== undefined) JoinContractSchema.parse(opts.join);
 
 	parent.steps.push({
 		id,
 		branch: { when, then: thenSteps, ...(elseSteps ? { else: elseSteps } : {}) },
+		...(opts?.join !== undefined ? { join: opts.join } : {}),
 	} as unknown as StepRecord);
 }
 
@@ -541,6 +550,8 @@ export interface ForEachOptions {
 	mode?: "sequential" | "parallel";
 	/** Max concurrent inner pipelines when `mode: "parallel"`. Default 10. */
 	concurrency?: number;
+	/** Required/optional branch obligations and typed outputs at the join. */
+	join?: JoinContract;
 }
 
 /** Lower a handle to its `js/ctx....` wire string (the `in` expression). */
@@ -635,6 +646,7 @@ export function forEach<T = unknown>(
 			...(opts?.mode !== undefined ? { mode: opts.mode } : {}),
 			...(opts?.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
 		},
+		...(opts?.join !== undefined ? { join: opts.join } : {}),
 	} as unknown as StepRecord);
 
 	// The results array lands at state[id] — a parent-owned handle, readable after.
@@ -932,6 +944,10 @@ export interface StepOptions {
 	evidenceGate?: EvidenceGateContract;
 	/** Implementation-declared output boundary; model output remains untrusted. */
 	outputTrust?: OutputTrust;
+	/** Evidence-aware obligations and typed outputs for a control-flow join. */
+	join?: JoinContract;
+	/** Bounded effect retry/resume safety contract. */
+	retryResume?: RetryResumeIdempotencyContract;
 	/** Escape hatch for the other v2 step knobs (idempotencyKey, retry, maxDuration, …). */
 	[opt: string]: unknown;
 }
@@ -1188,6 +1204,8 @@ function lowerExpressionSite(value: unknown, reader: Builder, site: string): unk
 
 function lowerStepOptions<O extends StepOptions | undefined>(opts: O, reader: Builder): O {
 	if (!opts || typeof opts !== "object") return opts;
+	if (opts.join !== undefined) JoinContractSchema.parse(opts.join);
+	if (opts.retryResume !== undefined) RetryResumeIdempotencyContractSchema.parse(opts.retryResume);
 	return {
 		...opts,
 		...(opts.idempotencyKey !== undefined
