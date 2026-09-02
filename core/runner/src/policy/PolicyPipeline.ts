@@ -1,5 +1,7 @@
 import {
 	type AuditSink,
+	type CapabilityAuthority,
+	CapabilityAuthorityError,
 	CapabilityManifestError,
 	type Context,
 	type InteractionAttribution,
@@ -27,8 +29,11 @@ import {
 	type StepIdentity,
 	type TurnIdentity,
 	type WorkflowIdentity,
+	assertCapabilityAuthoritySubset,
 	assessCapabilityManifest,
 	immutableInteractionSnapshot,
+	intersectCapabilityAuthorities,
+	parseCapabilityAuthority,
 	redactInteractionDecision,
 	redactInteractionRequest,
 	redactInteractionString,
@@ -51,9 +56,12 @@ export interface PolicyExecutionOptions {
 	layers?: readonly PolicyLayer[];
 	secretResolver?: SecretResolver;
 	attribution?: InteractionAttribution;
+	/** Parent authority envelope; child scopes may only narrow it. */
+	authority?: CapabilityAuthority;
 }
 interface PolicyState extends PolicyExecutionOptions {
 	origin: "agent";
+	authority?: CapabilityAuthority;
 }
 export interface PolicyToken {
 	request: PolicyRequest;
@@ -108,7 +116,13 @@ export function installPolicyExecution(ctx: Context, options: PolicyExecutionOpt
 	) {
 		throw new PolicyDeniedError("missing-security-state");
 	}
-	states.set(ctx, { ...options, origin: "agent", layers: normalizeLayers(options.layers) });
+	const authority = options.authority === undefined ? undefined : parseCapabilityAuthority(options.authority);
+	states.set(ctx, {
+		...options,
+		...(authority ? { authority } : {}),
+		origin: "agent",
+		layers: normalizeLayers(options.layers),
+	});
 	authorizedSecrets.delete(ctx);
 	// Agent execution must not inherit the ambient process environment. Keep
 	// this as an own property so the ABI remains unchanged for ordinary runs.
@@ -116,15 +130,28 @@ export function installPolicyExecution(ctx: Context, options: PolicyExecutionOpt
 		Object.defineProperty(ctx, "env", { value: Object.freeze({}), enumerable: true, configurable: true });
 	}
 }
-export function propagatePolicyExecution(parent: Context, child: Context): void {
+export function propagatePolicyExecution(
+	parent: Context,
+	child: Context,
+	childAuthority?: CapabilityAuthority,
+): CapabilityAuthority | undefined {
 	const state = states.get(parent);
 	if (state) {
-		states.set(child, state);
+		const parsedChild = childAuthority === undefined ? undefined : parseCapabilityAuthority(childAuthority);
+		if (parsedChild && state.authority) assertCapabilityAuthoritySubset(parsedChild, state.authority);
+		const authority = parsedChild
+			? state.authority
+				? intersectCapabilityAuthorities(state.authority, parsedChild)
+				: parsedChild
+			: state.authority;
+		states.set(child, { ...state, ...(authority ? { authority } : {}) });
 		const secrets = authorizedSecrets.get(parent);
 		if (secrets) authorizedSecrets.set(child, secrets);
 		const step = activeSteps.get(parent);
 		if (step) activeSteps.set(child, step);
+		return authority;
 	}
+	return undefined;
 }
 export function hasPolicyExecution(ctx: Context): boolean {
 	return states.has(ctx);
@@ -143,6 +170,10 @@ function scopeFor(node: NodeBase): RequestedCapabilityScope {
 		secrets: manifest?.secrets ?? [],
 		fragments: {},
 	};
+}
+function authorityForNode(state: PolicyState, node: NodeBase): RequestedCapabilityScope {
+	const requested = scopeFor(node);
+	return state.authority ? intersectCapabilityAuthorities(state.authority, requested) : requested;
 }
 function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: AbortSignal): PolicyRequest {
 	const state = states.get(ctx);
@@ -182,7 +213,7 @@ function requestFor(ctx: Context, node: NodeBase, attempt: number, signal?: Abor
 		workflow,
 		step: { id: node.name, attempt },
 		manifest: node.capabilityManifest ?? null,
-		scope: scopeFor(node),
+		scope: authorityForNode(state, node),
 		layers: state.layers ?? [],
 		signal,
 		...(node.approval ? { approval: node.approval } : {}),
@@ -252,9 +283,10 @@ export async function authorizeStep(
 	if (!state.secretResolver && (node.capabilityManifest?.secrets.length ?? 0) > 0)
 		throw new PolicyDeniedError("missing-secret-resolver");
 	const assessment = assessCapabilityManifest(node.capabilityManifestRaw ?? node.capabilityManifest);
-	if (!assessment.agentEligible || !assessment.manifest)
+	const isSubworkflowDispatch = typeof node.subworkflow === "string" && node.subworkflow.length > 0;
+	if ((!assessment.agentEligible || !assessment.manifest) && !isSubworkflowDispatch)
 		throw new CapabilityManifestError([`agent execution requires an eligible manifest (${assessment.reason})`]);
-	const request = requestFor(ctx, node, attempt, ctx.signal);
+	let request = requestFor(ctx, node, attempt, ctx.signal);
 	activeSteps.set(ctx, request.step);
 	let result: PolicyEvaluationResult;
 	try {
@@ -292,6 +324,17 @@ export async function authorizeStep(
 	) {
 		throw new PolicyDeniedError("malformed-policy-result");
 	}
+	if (result.scope !== undefined) {
+		try {
+			const policyScope = parseCapabilityAuthority(result.scope);
+			assertCapabilityAuthoritySubset(policyScope, request.scope, "active policy scope");
+			request = { ...request, scope: intersectCapabilityAuthorities(request.scope, policyScope) };
+		} catch (error) {
+			if (error instanceof CapabilityAuthorityError)
+				throw new PolicyDeniedError("malformed-policy-scope", error.message);
+			throw error;
+		}
+	}
 	const correlationId = uuid();
 	const pre = auditBase(request, result, correlationId, cached, "policy.pre") as PreExecutionAuditEvent;
 	try {
@@ -321,12 +364,26 @@ export async function authorizeStep(
 }
 
 /**
+ * Validate a workflow or branch delegation before a child context is created.
+ * Ordinary contexts have no authority state and retain compatibility with the
+ * existing composition behavior.
+ */
+export function validateChildPolicyAuthority(ctx: Context, childAuthority: unknown): CapabilityAuthority | undefined {
+	const state = states.get(ctx);
+	if (!state || childAuthority === undefined || childAuthority === null) return undefined;
+	const parsed = parseCapabilityAuthority(childAuthority);
+	if (state.authority) assertCapabilityAuthoritySubset(parsed, state.authority);
+	return state.authority ? intersectCapabilityAuthorities(state.authority, parsed) : parsed;
+}
+
+/**
  * Re-authorize a persisted interaction request without manufacturing a new
  * request id or changing its policy scope. Control-plane resume code injects
  * this function into InteractionResumeCoordinator before it invokes the
  * continuation that owns workflow/cursor rehydration.
  */
 export async function reauthorizePolicyRequest(ctx: Context, request: PolicyRequest): Promise<void> {
+	let effectiveRequest = request;
 	const state = states.get(ctx);
 	if (!state) throw new PolicyDeniedError("missing-security-state");
 	if (request.origin !== "agent") throw new PolicyDeniedError("invalid-interaction-origin");
@@ -372,10 +429,24 @@ export async function reauthorizePolicyRequest(ctx: Context, request: PolicyRequ
 	) {
 		throw new PolicyDeniedError("malformed-policy-result");
 	}
+	if (result.scope !== undefined) {
+		try {
+			const policyScope = parseCapabilityAuthority(result.scope);
+			assertCapabilityAuthoritySubset(policyScope, effectiveRequest.scope, "active policy scope");
+			effectiveRequest = {
+				...effectiveRequest,
+				scope: intersectCapabilityAuthorities(effectiveRequest.scope, policyScope),
+			};
+		} catch (error) {
+			if (error instanceof CapabilityAuthorityError)
+				throw new PolicyDeniedError("malformed-policy-scope", error.message);
+			throw error;
+		}
+	}
 	const correlationId = uuid();
 	try {
 		await state.auditSink.append(
-			auditBase(request, result, correlationId, false, "policy.pre") as PreExecutionAuditEvent,
+			auditBase(effectiveRequest, result, correlationId, false, "policy.pre") as PreExecutionAuditEvent,
 		);
 	} catch (error) {
 		throw new PolicyAuditError(`pre-execution audit failed: ${String(error)}`, false);
@@ -385,7 +456,9 @@ export async function reauthorizePolicyRequest(ctx: Context, request: PolicyRequ
 	if (result.decision.kind === "ask") throw new PolicyDeniedError("interaction-required");
 	if (
 		result.decision.kind === "require-sandbox" &&
-		(!result.sandbox || !state.sandboxVerifier || !(await state.sandboxVerifier.verify(result.sandbox, request)))
+		(!result.sandbox ||
+			!state.sandboxVerifier ||
+			!(await state.sandboxVerifier.verify(result.sandbox, effectiveRequest)))
 	) {
 		throw new PolicyDeniedError("invalid-sandbox-attestation");
 	}
@@ -559,6 +632,7 @@ export class InMemoryPolicyProvider implements PolicyProvider {
 	}
 	async evaluate(request: PolicyRequest): Promise<PolicyEvaluationResult> {
 		if (this.evaluateRequest) return await this.evaluateRequest(request);
+		let policyScope: CapabilityAuthority | undefined;
 		let decision: PolicyEvaluationResult = {
 			decision: { kind: "allow", id: uuid(), reasonCode: "no-rule", policyVersion: request.layers[0]?.version ?? "" },
 			matchedRules: [],
@@ -572,7 +646,15 @@ export class InMemoryPolicyProvider implements PolicyProvider {
 			const rank = (kind: string): number =>
 				kind === "deny" ? 3 : kind === "require-sandbox" ? 2 : kind === "ask" ? 1 : 0;
 			const selected = rank(next.decision.kind) >= rank(decision.decision.kind) ? next : decision;
-			decision = { ...selected, matchedRules: [...decision.matchedRules, ...next.matchedRules] };
+			if (next.scope !== undefined) {
+				const nextScope = parseCapabilityAuthority(next.scope);
+				policyScope = policyScope ? intersectCapabilityAuthorities(policyScope, nextScope) : nextScope;
+			}
+			decision = {
+				...selected,
+				matchedRules: [...decision.matchedRules, ...next.matchedRules],
+				...(policyScope ? { scope: policyScope } : {}),
+			};
 			if (next.decision.kind === "deny") break;
 		}
 		return decision;

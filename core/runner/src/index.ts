@@ -145,6 +145,7 @@ export {
 	recordPostExecution,
 	resolveSecret,
 	SecretResolutionError,
+	validateChildPolicyAuthority,
 	type PolicyExecutionOptions,
 	type PolicyToken,
 	type SandboxVerifier,
