@@ -1,0 +1,33 @@
+{
+	"name": "@blokjs/control-plane",
+	"version": "2.1.0",
+	"description": "Versioned gRPC control plane for Blok agent harness sessions.",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": ["dist", "proto"],
+	"scripts": {
+		"build": "rm -rf dist && bun run tsc && mkdir -p dist/proto/blok/harness/control/v1 && cp proto/blok/harness/control/v1/control.proto dist/proto/blok/harness/control/v1/control.proto",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["blok", "harness", "control-plane", "grpc"],
+	"license": "MIT",
+	"dependencies": {
+		"@blokjs/runner": "^2.1.0",
+		"@blokjs/shared": "^2.1.0",
+		"@grpc/grpc-js": "^1.12.0",
+		"@grpc/proto-loader": "^0.7.13",
+		"uuid": "^11.1.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"private": false,
+	"publishConfig": { "access": "public" }
+}
