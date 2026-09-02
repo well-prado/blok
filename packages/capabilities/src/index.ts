@@ -52,3 +52,17 @@ export {
 	workspaceFilesystemAuthority,
 	workspaceRelativePath,
 } from "./WorkspaceFilesystemCapability";
+
+export { BoundedGraphIndexer } from "./graph/BoundedGraphIndexer";
+export type {
+	BoundedGraphIndexerOptions,
+	GraphIndexJobHandle,
+	GraphIndexerEvent,
+	GraphIndexerEnqueueOptions,
+} from "./graph/BoundedGraphIndexer";
+export { FakeGraphProvider } from "./graph/FakeGraphProvider";
+export type { FakeGraphProviderOptions } from "./graph/FakeGraphProvider";
+export { GRAPH_INDEX_CAPABILITY_MANIFEST, GRAPH_QUERY_CAPABILITY_MANIFEST } from "./graph/GraphCapabilityManifests";
+export { GraphProviderError } from "./graph/GraphProviderError";
+export { TetrixGraphProvider } from "./graph/TetrixGraphProvider";
+export type { TetrixGraphProviderOptions, TetrixTransport } from "./graph/TetrixGraphProvider";
