@@ -25,6 +25,10 @@ graph-informed mutation code must reread the current source and compare its
 expected commit/content hash before it can proceed through the existing policy
 pipeline.
 
+The graph implementation is layered into the canonical `@blokjs/capabilities`
+workspace package established by H3-01; H3-03 does not redefine its manifest,
+filesystem boundary, or package ownership.
+
 `@blokjs/capabilities` provides:
 
 - `FakeGraphProvider`, a deterministic contract-test provider that models
