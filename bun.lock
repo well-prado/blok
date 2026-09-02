@@ -331,6 +331,23 @@
         "@blokjs/helper",
       ],
     },
+    "packages/control-plane": {
+      "name": "@blokjs/control-plane",
+      "version": "2.1.0",
+      "dependencies": {
+        "@blokjs/runner": "^2.1.0",
+        "@blokjs/shared": "^2.1.0",
+        "@grpc/grpc-js": "^1.12.0",
+        "@grpc/proto-loader": "^0.7.13",
+        "uuid": "^11.1.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "packages/lsp-server": {
       "name": "@blokjs/lsp-server",
       "version": "2.1.0",
@@ -1003,6 +1020,8 @@
     "@blokjs/browser": ["@blokjs/browser@workspace:nodes/web/browser@1.0.0"],
 
     "@blokjs/client": ["@blokjs/client@workspace:packages/client"],
+
+    "@blokjs/control-plane": ["@blokjs/control-plane@workspace:packages/control-plane"],
 
     "@blokjs/core": ["@blokjs/core@workspace:core/core"],
 

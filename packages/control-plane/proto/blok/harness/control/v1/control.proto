@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package blok.harness.control.v1;
+
+// This service is deliberately not NodeRuntime. It owns interactive harness
+// sessions and may be used by desktop, headless, or remote clients.
+service HarnessControlPlane {
+  rpc GetCapabilities(Empty) returns (CapabilitiesResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Readiness(HealthRequest) returns (HealthResponse);
+  rpc CreateSession(RequestEnvelope) returns (ResponseEnvelope);
+  rpc OpenSession(RequestEnvelope) returns (ResponseEnvelope);
+  rpc ForkSession(RequestEnvelope) returns (ResponseEnvelope);
+  rpc InspectSession(RequestEnvelope) returns (ResponseEnvelope);
+  rpc SubmitTurn(RequestEnvelope) returns (ResponseEnvelope);
+  rpc SteerTurn(RequestEnvelope) returns (ResponseEnvelope);
+  rpc StartWorkflow(RequestEnvelope) returns (ResponseEnvelope);
+  rpc StreamEvents(StreamEventsRequest) returns (stream EventEnvelope);
+  rpc AnswerInteraction(RequestEnvelope) returns (ResponseEnvelope);
+  rpc ResolveApproval(RequestEnvelope) returns (ResponseEnvelope);
+  rpc Cancel(RequestEnvelope) returns (ResponseEnvelope);
+  rpc Resume(RequestEnvelope) returns (ResponseEnvelope);
+}
+
+message Empty {}
+
+message RequestEnvelope {
+  string contract_version = 1;
+  string request_id = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  int64 deadline_unix_ms = 5;
+  bytes payload_json = 6;
+  map<string, string> metadata = 7;
+}
+
+message ResponseEnvelope {
+  string contract_version = 1;
+  string request_id = 2;
+  string status = 3;
+  string code = 4;
+  string message = 5;
+  bytes payload_json = 6;
+  int64 last_sequence = 7;
+}
+
+message StreamEventsRequest {
+  string contract_version = 1;
+  string request_id = 2;
+  string session_id = 3;
+  int64 after_sequence = 4;
+  uint32 limit = 5;
+  bool follow = 6;
+  int64 deadline_unix_ms = 7;
+}
+
+message EventEnvelope {
+  string contract_version = 1;
+  string session_id = 2;
+  int64 sequence = 3;
+  string event_id = 4;
+  string turn_id = 5;
+  string kind = 6;
+  string visibility = 7;
+  bytes payload_json = 8;
+  string occurred_at = 9;
+  bool replayed = 10;
+  bool terminal = 11;
+}
+
+message HealthRequest {
+  string contract_version = 1;
+  string service = 2;
+}
+
+message HealthResponse {
+  string contract_version = 1;
+  string server_instance_id = 2;
+  bool process_alive = 3;
+  bool store_ready = 4;
+  bool execution_ready = 5;
+  string status = 6;
+  string message = 7;
+}
+
+message CapabilitiesResponse {
+  string contract_version = 1;
+  repeated string supported_versions = 2;
+  repeated string operations = 3;
+  uint32 max_request_bytes = 4;
+  uint32 max_response_bytes = 5;
+  uint32 max_event_bytes = 6;
+  bool supports_cursor_resume = 7;
+  bool supports_authentication = 8;
+  bool supports_deadlines = 9;
+  bool supports_cancellation = 10;
+}
