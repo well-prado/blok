@@ -1,13 +1,20 @@
-import type { Context, ResponseContext } from "@blokjs/shared";
+import {
+	type CapabilityAuthority,
+	CapabilityManifestError,
+	type Context,
+	type ResponseContext,
+	assessCapabilityManifest,
+} from "@blokjs/shared";
 import { context, propagation } from "@opentelemetry/api";
 import Configuration from "./Configuration";
 import RunnerNode from "./RunnerNode";
 import { runContextCleanups } from "./contextCleanup";
 import { SubworkflowMetrics } from "./monitoring/SubworkflowMetrics";
-import { validateChildPolicyAuthority } from "./policy/PolicyPipeline";
+import { authorizeChildWorkflow, hasPolicyExecution } from "./policy/PolicyPipeline";
 import { RunTracker } from "./tracing/RunTracker";
 import type GlobalOptions from "./types/GlobalOptions";
-import { createChildContext } from "./utils/createChildContext";
+import { createChildContext, deriveNestedAttribution } from "./utils/createChildContext";
+import type { ExecutionBudget } from "./utils/createChildContext";
 import { nearestMatches } from "./workflow/NearestMatch";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
@@ -217,10 +224,10 @@ export class SubworkflowNode extends RunnerNode {
 				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${resolvedName}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
 			);
 		}
-		// H1-04 — validate the child's declared authority before materializing
-		// or dispatching it. A child may specialize its parent's envelope, never
-		// request a capability outside it.
-		const childAuthority = validateChildPolicyAuthority(ctx, workflowAuthority(entry.workflow));
+		// H1-04 — a child manifest is a request for authority, not a grant.
+		// Check it before materializing a Runner or making an HTTP self-call.
+		const childAttribution = deriveNestedAttribution(ctx, `subworkflow:${resolvedName}`);
+		const childAuthority = await this.authorizeChild(ctx, entry.workflow, resolvedName, childAttribution);
 
 		// === 2.6. G2 — HTTP self-call dispatch ===
 		// When `dispatch: "http-self"`, skip the in-process Configuration
@@ -230,7 +237,7 @@ export class SubworkflowNode extends RunnerNode {
 		// up. The receiving HttpTrigger registers the child run record;
 		// this side just makes the HTTP call.
 		if (this.dispatch === "http-self") {
-			return this.dispatchHttpSelf(ctx, entry, resolvedName, depth);
+			return this.dispatchHttpSelf(ctx, entry, resolvedName, depth, childAuthority, childAttribution);
 		}
 
 		// === 3. Materialize child Configuration + Runner ===
@@ -259,7 +266,9 @@ export class SubworkflowNode extends RunnerNode {
 			workflowPath: entry.source,
 			body: parentInputs,
 			config: childConfig.nodes,
-			...(childAuthority ? { childAuthority } : {}),
+			childAuthority: childAuthority ?? undefined,
+			budget: this.childBudget(ctx, entry.workflow),
+			attribution: childAttribution,
 		});
 		// Carry the depth counter forward so nested sub-workflows hit the cap.
 		(childCtx as Record<string, unknown>)[SUBWORKFLOW_DEPTH_KEY] = depth;
@@ -280,6 +289,12 @@ export class SubworkflowNode extends RunnerNode {
 				nodeCount: childConfig.steps.length,
 				parentRunId,
 				parentNodeRunId,
+				metadata: {
+					executionScope: {
+						lineage: childAttribution,
+						...(childAuthority ? { authority: childAuthority } : {}),
+					},
+				},
 			});
 			childRunId = childRun.id;
 			(childCtx as Record<string, unknown>)._traceRunId = childRun.id;
@@ -292,7 +307,7 @@ export class SubworkflowNode extends RunnerNode {
 
 		// === 6a. Synchronous dispatch (wait: true / default) ===
 		try {
-			await childRunner.run(childCtx);
+			await this.runWithBudget(childCtx, () => childRunner.run(childCtx));
 			if (childRunId) tracker.completeRun(childRunId, childCtx.response);
 		} catch (err) {
 			if (childRunId) tracker.failRun(childRunId, err);
@@ -326,6 +341,59 @@ export class SubworkflowNode extends RunnerNode {
 			data: childCtx.response,
 			error: childCtx.response?.error ?? null,
 		};
+	}
+
+	private async authorizeChild(
+		ctx: Context,
+		workflow: unknown,
+		workflowName: string,
+		attribution: import("@blokjs/shared").InteractionAttribution,
+	): Promise<CapabilityAuthority | null> {
+		if (!hasPolicyExecution(ctx)) return null;
+		const assessment = assessCapabilityManifest(workflowAuthority(workflow));
+		if (!assessment.agentEligible || !assessment.manifest) {
+			throw new CapabilityManifestError([
+				`child workflow "${workflowName}" requires an eligible capability manifest (${assessment.reason})`,
+			]);
+		}
+		return authorizeChildWorkflow(ctx, this, workflowName, assessment.manifest, attribution);
+	}
+
+	private childBudget(parentCtx: Context, workflow: unknown): ExecutionBudget | undefined {
+		const manifest = workflowAuthority(workflow);
+		const resources =
+			manifest && typeof manifest === "object"
+				? (manifest as { resources?: Record<string, unknown> }).resources
+				: undefined;
+		const parentBudget = (parentCtx._PRIVATE_ as { budget?: ExecutionBudget } | null)?.budget;
+		if (!resources && !parentBudget) return undefined;
+		const budget: Record<string, number> = {};
+		for (const key of ["maxDurationMs", "maxMemoryBytes", "maxInputBytes", "maxOutputBytes", "maxConcurrency"]) {
+			const requested = resources?.[key];
+			const inherited = parentBudget?.[key as keyof ExecutionBudget];
+			if (typeof requested === "number" && typeof inherited === "number") budget[key] = Math.min(requested, inherited);
+			else if (typeof requested === "number") budget[key] = requested;
+			else if (typeof inherited === "number") budget[key] = inherited;
+		}
+		return Object.keys(budget).length > 0 ? budget : undefined;
+	}
+
+	private async runWithBudget<T>(ctx: Context, run: () => Promise<T>): Promise<T> {
+		const scope = ctx._PRIVATE_ as { budget?: ExecutionBudget; abortController?: AbortController } | null;
+		const maxDurationMs = scope?.budget?.maxDurationMs;
+		if (maxDurationMs === undefined || !scope) return run();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => {
+				scope.abortController?.abort();
+				reject(new Error(`child workflow budget exceeded: maxDurationMs=${maxDurationMs}`));
+			}, maxDurationMs);
+		});
+		try {
+			return await Promise.race([run(), timeout]);
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
 	}
 
 	/**
@@ -444,6 +512,8 @@ export class SubworkflowNode extends RunnerNode {
 		entry: { name: string; source: string; workflow: unknown },
 		resolvedName: string,
 		depth: number,
+		childAuthority: CapabilityAuthority | null,
+		childAttribution: import("@blokjs/shared").InteractionAttribution,
 	): Promise<ResponseContext> {
 		// === 1. Validate the child has an HTTP trigger ===
 		const childWorkflow = entry.workflow as { trigger?: { http?: { method?: string; path?: string } } } | undefined;
@@ -472,6 +542,8 @@ export class SubworkflowNode extends RunnerNode {
 		};
 		if (parentRunId) headers["X-Blok-Parent-Run-Id"] = parentRunId;
 		if (parentNodeRunId) headers["X-Blok-Parent-Node-Run-Id"] = parentNodeRunId;
+		headers["X-Blok-Execution-Lineage"] = JSON.stringify(childAttribution);
+		if (childAuthority) headers["X-Blok-Execution-Authority"] = JSON.stringify(childAuthority);
 
 		// OBS-02 B2.3 — inject W3C trace context so a child workflow running in
 		// another process joins this trace instead of starting a fresh root.
@@ -557,7 +629,7 @@ export class SubworkflowNode extends RunnerNode {
 		setImmediate(() => {
 			void (async () => {
 				try {
-					await childRunner.run(childCtx);
+					await this.runWithBudget(childCtx, () => childRunner.run(childCtx));
 					if (childRunId) tracker.completeRun(childRunId, childCtx.response);
 				} catch (err) {
 					if (childRunId) {
