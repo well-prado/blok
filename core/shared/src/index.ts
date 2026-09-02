@@ -48,6 +48,16 @@ import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
 import NodeBase from "./NodeBase";
+export {
+	CapabilityAuthorityError,
+	CapabilityAuthoritySchema,
+	CapabilityFragmentValueSchema,
+	assertCapabilityAuthoritySubset,
+	intersectCapabilityAuthorities,
+	isCapabilityAuthoritySubset,
+	parseCapabilityAuthority,
+} from "./PermissionAlgebra";
+export type { CapabilityAuthority } from "./PermissionAlgebra";
 import Trigger from "./Trigger";
 // These `types/*` modules are `type X = {...}; export default X;` — a type
 // alias, not a runtime value (unlike `Trigger` above, a real class). Bun's
