@@ -43,6 +43,8 @@ import {
 } from "./runtime/PrimitiveStack";
 import { RunTracker } from "./tracing/RunTracker";
 import type { IterationContext, ParallelIterationContext, SequentialIterationContext } from "./tracing/types";
+import { createScopedExecutionContext, deriveNestedAttribution } from "./utils/createChildContext";
+import type { ExecutionBudget } from "./utils/createChildContext";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 /**
@@ -175,6 +177,14 @@ export class ForEachNode extends RunnerNode {
 
 		const runIteration = async (item: unknown, index: number, innerResumeIndex?: number): Promise<unknown> => {
 			const childCtx = this.cloneCtxForIteration(ctx, as, item, index);
+			const parentBudget = (ctx._PRIVATE_ as { budget?: ExecutionBudget } | null)?.budget;
+			createScopedExecutionContext(ctx, childCtx, {
+				attribution: deriveNestedAttribution(ctx, `forEach:${this.name}`, {
+					branchId: `${this.name}:${index}`,
+					branchIndex: index,
+				}),
+				...(parentBudget ? { budget: parentBudget } : {}),
+			});
 			// v0.6 Phase 2 — pass the inner-step resume cursor on the
 			// child ctx. Phase 4 — propagate even the index-0 case so
 			// the wait-re-entry detection can distinguish a resumed
@@ -362,20 +372,18 @@ export class ForEachNode extends RunnerNode {
 					poolSig: AbortSignal,
 				): Promise<unknown> => {
 					const childCtx = this.cloneCtxForIteration(ctx, as, item_, index);
-					const iterCtl = new AbortController();
-					const listenerCleanup = new AbortController();
-					// Chain from parent ctx.signal (user cancel cascade)
-					if (ctx.signal) {
-						if (ctx.signal.aborted) iterCtl.abort();
-						else
-							ctx.signal.addEventListener(
-								"abort",
-								() => {
-									if (!iterCtl.signal.aborted) iterCtl.abort();
-								},
-								{ once: true, signal: listenerCleanup.signal },
-							);
-					}
+					const attribution = deriveNestedAttribution(ctx, `forEach:${this.name}`, {
+						branchId: `${this.name}:${index}`,
+						branchIndex: index,
+					});
+					const parentBudget = (ctx._PRIVATE_ as { budget?: ExecutionBudget } | null)?.budget;
+					createScopedExecutionContext(ctx, childCtx, {
+						attribution,
+						...(parentBudget ? { budget: parentBudget } : {}),
+					});
+					const scope = childCtx._PRIVATE_ as { abortController: AbortController; listenerCleanup: AbortController };
+					const iterCtl = scope.abortController;
+					const listenerCleanup = scope.listenerCleanup;
 					// Chain from pool signal (peer wait cascade)
 					if (poolSig.aborted) iterCtl.abort();
 					else

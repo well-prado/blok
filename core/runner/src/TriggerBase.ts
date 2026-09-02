@@ -1,6 +1,14 @@
 import * as nodePath from "node:path";
 import type { NodeBase } from "@blokjs/shared";
-import { type Context, type LoggerContext, Metrics, Trigger } from "@blokjs/shared";
+import {
+	type CapabilityAuthority,
+	type Context,
+	type InteractionAttribution,
+	type LoggerContext,
+	Metrics,
+	Trigger,
+	parseCapabilityAuthority,
+} from "@blokjs/shared";
 import { metrics } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";
@@ -42,6 +50,7 @@ import { TracingLogger } from "./tracing/TracingLogger";
 import type { IterationContext } from "./tracing/types";
 import type GlobalOptions from "./types/GlobalOptions";
 import type TriggerResponse from "./types/TriggerResponse";
+import type { ExecutionBudget } from "./utils/createChildContext";
 import { getEnvForCtx } from "./utils/envAllowlist";
 import { loadDotenvFiles } from "./utils/loadDotenv";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
@@ -85,6 +94,55 @@ function pickHeader(headers: Record<string, string | string[] | undefined>, name
 		if (typeof value === "string") return value;
 	}
 	return undefined;
+}
+
+function parseExecutionLineage(value: string | undefined): InteractionAttribution | undefined {
+	if (!value) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(value);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+		const record = parsed as Record<string, unknown>;
+		if (typeof record.rootId !== "string" || record.rootId.length === 0) return undefined;
+		if (record.parentId !== undefined && typeof record.parentId !== "string") return undefined;
+		if (record.branchId !== undefined && typeof record.branchId !== "string") return undefined;
+		const branchIndex = record.branchIndex;
+		if (
+			branchIndex !== undefined &&
+			(typeof branchIndex !== "number" || !Number.isInteger(branchIndex) || branchIndex < 0)
+		)
+			return undefined;
+		if (!Number.isInteger(record.depth) || (record.depth as number) < 0 || (record.depth as number) > 32)
+			return undefined;
+		const branchPath = record.branchPath;
+		if (
+			branchPath !== undefined &&
+			(!Array.isArray(branchPath) ||
+				branchPath.length > 32 ||
+				branchPath.some((segment) => typeof segment !== "string"))
+		)
+			return undefined;
+		return {
+			rootId: record.rootId,
+			...(typeof record.parentId === "string" ? { parentId: record.parentId } : {}),
+			...(typeof record.branchId === "string" ? { branchId: record.branchId } : {}),
+			...(typeof branchIndex === "number" ? { branchIndex } : {}),
+			...(Array.isArray(branchPath) ? { branchPath: branchPath as string[] } : {}),
+			depth: record.depth as number,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function executionBudgetFromResources(resources: unknown): ExecutionBudget | undefined {
+	if (!resources || typeof resources !== "object" || Array.isArray(resources)) return undefined;
+	const record = resources as Record<string, unknown>;
+	const budget: Record<string, number> = {};
+	for (const key of ["maxDurationMs", "maxMemoryBytes", "maxInputBytes", "maxOutputBytes", "maxConcurrency"]) {
+		const value = record[key];
+		if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) budget[key] = value;
+	}
+	return Object.keys(budget).length > 0 ? budget : undefined;
 }
 
 function shouldRecordSample(trigger: unknown): boolean {
@@ -1004,6 +1062,7 @@ export default abstract class TriggerBase extends Trigger {
 		// as a fresh top-level run with no Studio breadcrumb.
 		const parentRunId = pickHeader(reqHeaders, "x-blok-parent-run-id");
 		const parentNodeRunId = pickHeader(reqHeaders, "x-blok-parent-node-run-id");
+		const executionLineage = parseExecutionLineage(pickHeader(reqHeaders, "x-blok-execution-lineage"));
 		const run = tracker.startRun({
 			workflowName: cfg.name || ctx.workflow_name || "unknown",
 			workflowPath: ctx.workflow_path || "",
@@ -1013,6 +1072,7 @@ export default abstract class TriggerBase extends Trigger {
 			replayOf,
 			parentRunId,
 			parentNodeRunId,
+			...(executionLineage ? { metadata: { executionScope: { lineage: executionLineage } } } : {}),
 			enforcementFactory: cfg.enforcement?.rule
 				? (runId, startedAt) => cfg.createEnforcementContract(runId, new Date(startedAt).toISOString())
 				: undefined,
@@ -1027,6 +1087,10 @@ export default abstract class TriggerBase extends Trigger {
 		const parsedDepth = depthHeader ? Number.parseInt(depthHeader, 10) : Number.NaN;
 		if (Number.isFinite(parsedDepth) && parsedDepth > 0) {
 			ctxRecord._subworkflowDepth = parsedDepth;
+		}
+		if (executionLineage) {
+			const privateSlot = ctx._PRIVATE_ as { lineage?: InteractionAttribution } | null;
+			if (privateSlot) privateSlot.lineage = executionLineage;
 		}
 
 		// Tier 2 follow-up · register the ctx's AbortController so the
@@ -2009,6 +2073,32 @@ export default abstract class TriggerBase extends Trigger {
 		// the run to `failed` (the tracker has already flipped it to
 		// `cancelled`).
 		const abortController = new AbortController();
+		const workflowManifest = (configuration.workflow as unknown as { capabilityManifest?: unknown } | undefined)
+			?.capabilityManifest;
+		const authority =
+			workflowManifest && typeof workflowManifest === "object"
+				? (() => {
+						try {
+							const manifest = workflowManifest as {
+								effects?: unknown;
+								capabilities?: unknown;
+								secrets?: unknown;
+							};
+							return parseCapabilityAuthority({
+								effects: manifest.effects ?? [],
+								capabilities: manifest.capabilities ?? [],
+								secrets: manifest.secrets ?? [],
+								fragments: {},
+							}) as CapabilityAuthority;
+						} catch {
+							return undefined;
+						}
+					})()
+				: undefined;
+		const budget =
+			workflowManifest && typeof workflowManifest === "object"
+				? executionBudgetFromResources((workflowManifest as { resources?: unknown }).resources)
+				: undefined;
 
 		const ctx: Context = {
 			id: requestId,
@@ -2028,7 +2118,11 @@ export default abstract class TriggerBase extends Trigger {
 			signal: abortController.signal,
 			// Stash the controller on _PRIVATE_ so TriggerBase.run can
 			// hand it to the tracker without exposing it on the public ctx.
-			_PRIVATE_: { abortController },
+			_PRIVATE_: {
+				abortController,
+				...(authority ? { authority } : {}),
+				...(budget ? { budget } : {}),
+			},
 		};
 
 		// V2 read-only aliases — same object reference, no copy.
