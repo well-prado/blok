@@ -1,3 +1,9 @@
+import {
+	type JoinContract,
+	JoinContractSchema,
+	type RetryResumeIdempotencyContract,
+	RetryResumeIdempotencyContractSchema,
+} from "@blokjs/shared";
 import { z } from "zod";
 import {
 	type V2AgentStep,
@@ -405,6 +411,9 @@ export const V2RegularStepSchema = z
 		evidenceGate: EvidenceGateContractSchema.optional().describe(
 			"H1-02 trusted evidence gate. Every declared artifact/version/producer requirement must be verified.",
 		),
+		retryResume: RetryResumeIdempotencyContractSchema.optional().describe(
+			"H1-04 bounded effect retry/resume contract. Effectful replay must declare keyed idempotency or evidence.",
+		),
 		outputTrust: z
 			.enum(["model", "trusted"])
 			.optional()
@@ -449,6 +458,7 @@ export type V2RegularStep = z.infer<typeof V2RegularStepSchema>;
 export const V2BranchStepSchema: z.ZodType<{
 	id: string;
 	branch: { when: string; then: unknown[]; else?: unknown[] };
+	join?: JoinContract;
 	description?: string;
 	ui?: V2StepUi;
 	active?: boolean;
@@ -471,6 +481,7 @@ export const V2BranchStepSchema: z.ZodType<{
 				})
 				.strict()
 				.describe("Conditional sub-pipeline."),
+			join: JoinContractSchema.optional().describe("Evidence-aware obligations and typed outputs for the branch join."),
 			description: V2StepDescriptionSchema,
 			ui: V2StepUiSchema,
 			active: z.boolean().optional(),
@@ -528,6 +539,8 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 	idempotencyKey?: string | StructuralRefValue;
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
+	retryResume?: RetryResumeIdempotencyContract;
+	join?: JoinContract;
 	allowList?: readonly string[];
 	/**
 	 * G2 (v0.6) — dispatch strategy. `in-process` (default) runs the
@@ -620,6 +633,10 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				"Retry the WHOLE sub-workflow on failure. Each retry creates a fresh " +
 					"child run record under the same parent.",
 			),
+			retryResume: RetryResumeIdempotencyContractSchema.optional().describe(
+				"H1-04 bounded effect retry/resume contract. Effectful replay must declare keyed idempotency or evidence.",
+			),
+			join: JoinContractSchema.optional().describe("Evidence-aware obligations and typed outputs for the child join."),
 			maxDuration: DurationSchema.optional().describe(
 				"OPTIONAL. Per-attempt execution timeout. Caps the synchronous wait for " +
 					"`wait: true` sub-workflows. No-op for `wait: false` (parent returns " +
@@ -848,6 +865,9 @@ export const V2ForEachStepSchema = z.lazy(() =>
 				})
 				.strict()
 				.describe("forEach configuration."),
+			join: JoinContractSchema.optional().describe(
+				"Evidence-aware obligations and typed outputs for the collection join.",
+			),
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
 			description: V2StepDescriptionSchema,

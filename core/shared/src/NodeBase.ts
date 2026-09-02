@@ -60,6 +60,10 @@ export default abstract class NodeBase {
 	public evidenceGate?: import("./EnforcementContracts").EvidenceGateContract;
 	/** Trust is a property of the node implementation, never model prose. */
 	public outputTrust: import("./EnforcementContracts").OutputTrust = "model";
+	/** H1-04 evidence-aware obligations and typed outputs at a join boundary. */
+	public join?: import("./JoinContracts").JoinContract;
+	/** H1-04 bounded effect retry/resume idempotency declaration. */
+	public retryResume?: import("./JoinContracts").RetryResumeIdempotencyContract;
 
 	// =========================================================================
 	// V2 persistence knobs — populated by Configuration.getSteps from the

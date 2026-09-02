@@ -15,6 +15,7 @@
 // runtime step/workflow types live behind `@blokjs/helper/internal` — tooling
 // occasionally needs them, authors don't.
 
+import type { JoinContract, RetryResumeIdempotencyContract } from "@blokjs/shared";
 import { type BranchOpts, branch } from "./components/branch";
 import { eq, gt, gte, lt, lte, ne, not } from "./components/eq";
 import { type ForEachOpts, forEach } from "./components/forEach";
@@ -142,6 +143,8 @@ export {
 	type V2AssertStep,
 	type V2CompletionStep,
 	type V2EvidenceStep,
+	type JoinContract,
+	type RetryResumeIdempotencyContract,
 	// advisory shared validator (CLI / registry / Studio / AI authoring checks)
 	validateWorkflow,
 	type WorkflowValidationResult,
