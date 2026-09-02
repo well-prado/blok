@@ -2073,7 +2073,8 @@ export default abstract class TriggerBase extends Trigger {
 		// the run to `failed` (the tracker has already flipped it to
 		// `cancelled`).
 		const abortController = new AbortController();
-		const workflowManifest = (configuration.workflow as unknown as { capabilityManifest?: unknown }).capabilityManifest;
+		const workflowManifest = (configuration.workflow as unknown as { capabilityManifest?: unknown } | undefined)
+			?.capabilityManifest;
 		const authority =
 			workflowManifest && typeof workflowManifest === "object"
 				? (() => {
