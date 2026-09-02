@@ -1,0 +1,18 @@
+{
+	"version": "1",
+	"cases": [
+		{ "name": "relative", "path": "src/index.ts", "valid": true },
+		{ "name": "posix absolute", "path": "/etc/passwd", "valid": false },
+		{
+			"name": "windows drive",
+			"path": "C:\\Windows\\system.ini",
+			"valid": false
+		},
+		{
+			"name": "windows UNC",
+			"path": "\\\\server\\share\\secret",
+			"valid": false
+		},
+		{ "name": "traversal", "path": "src/../../secret", "valid": false }
+	]
+}
