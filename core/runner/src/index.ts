@@ -215,6 +215,19 @@ export {
 } from "./enforcement/AgentEnforcement";
 export { EnforcementViolationError } from "@blokjs/shared";
 export { SqliteInteractionStore } from "./policy/SqliteInteractionStore";
+export { MemorySessionStore } from "./session/MemorySessionStore";
+export { PostgresSessionStore, type SessionPgClient, type SessionPgResult } from "./session/PostgresSessionStore";
+export { SqliteSessionStore } from "./session/SqliteSessionStore";
+export {
+	BaseSessionStore,
+	checkDuplicate,
+	eventFromInput,
+	isUniqueConstraintError,
+	makeForkEvent,
+	readPage,
+	validateAppend,
+	validateSnapshot,
+} from "./session/SessionStore";
 
 // Concurrency gate (Tier 2 #6)
 import {
