@@ -15,6 +15,11 @@ import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { enforceStepOutput } from "./enforcement/AgentEnforcement";
+import {
+	EnforcementBypassError,
+	consumeEnforcementOverride,
+	getEnforcementBinding,
+} from "./enforcement/EnforcementProfile";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import {
 	PolicyAuditError,
@@ -209,6 +214,22 @@ function sleep(ms: number): Promise<void> {
 	});
 }
 
+function isRequiredTransition(step: NodeBase): boolean {
+	return (
+		step.agentStep !== undefined ||
+		step.approval !== undefined ||
+		step.assertionGate !== undefined ||
+		step.evidenceGate !== undefined
+	);
+}
+
+function deviationReason(step: NodeBase): string {
+	if (step.agentStep) return "agent-step-skipped";
+	if (step.approval) return "approval-skipped";
+	if (step.assertionGate) return "assertion-gate-skipped";
+	return "evidence-gate-skipped";
+}
+
 /**
  * Unwrap a step result to the bare value that `applyStepOutput` persists to
  * `state[<id>]`.
@@ -320,9 +341,16 @@ export default abstract class RunnerSteps {
 				tracker,
 				traceRunId,
 			);
+			const binding = getEnforcementBinding(ctx);
+			if (binding && binding.profile !== "advisory" && !hasPolicyExecution(ctx)) {
+				throw new EnforcementBypassError(
+					`${binding.profile} enforcement requires an installed agent policy context before execution`,
+				);
+			}
 
 			for (let i = 0; i < steps.length; i++) {
 				const step: NodeBase = steps[i];
+				const binding = getEnforcementBinding(ctx);
 
 				// PR 4 — skip pre-wait steps on resume. State + NodeRuns
 				// from the first pass are still on `ctx.state` / in the
@@ -359,13 +387,64 @@ export default abstract class RunnerSteps {
 				}
 
 				if (!step.active) {
+					if (binding && isRequiredTransition(step)) {
+						const override = consumeEnforcementOverride(ctx, step.name);
+						if (binding.profile === "strict") {
+							throw new EnforcementBypassError(
+								`strict enforcement rejected skipped required transition "${step.name}"`,
+							);
+						}
+						if (binding.profile === "guided" && !override) {
+							throw new EnforcementBypassError(
+								`guided enforcement requires an authorized override for skipped transition "${step.name}"`,
+							);
+						}
+						if (override && tracker && traceRunId) tracker.recordEnforcementOverride(traceRunId, override);
+						if (tracker && traceRunId) {
+							tracker.recordEnforcementDeviation(traceRunId, {
+								stepId: step.name,
+								index: i,
+								reasonCode: deviationReason(step),
+								message: `required transition "${step.name}" was skipped`,
+								recordedAt: new Date().toISOString(),
+							});
+						}
+					}
 					// Track skipped nodes
 					if (tracker && traceRunId) {
 						tracker.skipNode(traceRunId, step.name, i, "inactive");
 					}
 					continue;
 				}
-				if (step.stop) break;
+				if (step.stop) {
+					const remainingRequired = steps.slice(i).find(isRequiredTransition);
+					if (binding && remainingRequired) {
+						if (binding.profile === "strict") {
+							throw new EnforcementBypassError(
+								`strict enforcement rejected stop before required transition "${remainingRequired.name}"`,
+							);
+						}
+						if (binding.profile === "guided") {
+							const override = consumeEnforcementOverride(ctx, remainingRequired.name);
+							if (!override) {
+								throw new EnforcementBypassError(
+									`guided enforcement requires an authorized override before stopping at "${step.name}"`,
+								);
+							}
+							if (tracker && traceRunId) tracker.recordEnforcementOverride(traceRunId, override);
+						}
+						if (tracker && traceRunId) {
+							tracker.recordEnforcementDeviation(traceRunId, {
+								stepId: remainingRequired.name,
+								index: i,
+								reasonCode: "required-transition-not-reached",
+								message: `runner stopped before required transition "${remainingRequired.name}"`,
+								recordedAt: new Date().toISOString(),
+							});
+						}
+					}
+					break;
+				}
 
 				const pause = this.beforeStep(ctx, step, i, steps.length, deep);
 				if (pause) await pause;

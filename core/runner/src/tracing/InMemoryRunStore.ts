@@ -67,7 +67,8 @@ export class InMemoryRunStore implements RunStore {
 	updateRun(runId: string, updates: Partial<WorkflowRun>): void {
 		const run = this.runs.get(runId);
 		if (!run) return;
-		Object.assign(run, updates);
+		const { enforcement: _ignored, ...mutableUpdates } = updates;
+		Object.assign(run, mutableUpdates);
 	}
 
 	saveNodeRun(nodeRun: NodeRun): void {

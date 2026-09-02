@@ -1,5 +1,6 @@
 import type { NodeBase } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
+import type { ResolvedEnforcementBinding } from "../enforcement/EnforcementProfile";
 import type Node from "./Node";
 import type Trigger from "./Trigger";
 
@@ -9,6 +10,7 @@ type Config = {
 	steps: NodeBase[] | RunnerNode[];
 	nodes: Node;
 	trigger: Trigger;
+	enforcement?: ResolvedEnforcementBinding;
 };
 
 export default Config;

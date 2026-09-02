@@ -119,6 +119,8 @@ interface RunRow {
 	 * cap and was skipped. Added in migration v11.
 	 */
 	state_snapshot: string | null;
+	enforcement_json: string | null;
+	enforcement_deviations_json: string | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -873,6 +875,14 @@ export class SqliteRunStore implements RunStore {
 					);
 				`,
 			},
+			{
+				// H1-03 — immutable run contract and permitted deviations.
+				version: 19,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN enforcement_json TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN enforcement_deviations_json TEXT;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -908,8 +918,8 @@ export class SqliteRunStore implements RunStore {
 			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
 			 parent_run_id, parent_node_run_id,
 			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count,
-			 last_completed_step_index, state_snapshot)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 last_completed_step_index, state_snapshot, enforcement_json, enforcement_deviations_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -937,6 +947,8 @@ export class SqliteRunStore implements RunStore {
 			run.pingCount ?? null,
 			run.lastCompletedStepIndex ?? null,
 			run.stateSnapshot ?? null,
+			run.enforcement ? JSON.stringify(run.enforcement) : null,
+			run.enforcementDeviations ? JSON.stringify(run.enforcementDeviations) : null,
 		);
 	}
 
@@ -1011,6 +1023,10 @@ export class SqliteRunStore implements RunStore {
 		if (updates.stateSnapshot !== undefined) {
 			setClauses.push("state_snapshot = ?");
 			values.push(updates.stateSnapshot);
+		}
+		if (updates.enforcementDeviations !== undefined) {
+			setClauses.push("enforcement_deviations_json = ?");
+			values.push(JSON.stringify(updates.enforcementDeviations));
 		}
 		if (updates.startedAt !== undefined) {
 			setClauses.push("started_at = ?");
@@ -2175,6 +2191,8 @@ export class SqliteRunStore implements RunStore {
 			pingCount: row.ping_count ?? undefined,
 			lastCompletedStepIndex: row.last_completed_step_index ?? undefined,
 			stateSnapshot: row.state_snapshot ?? undefined,
+			enforcement: row.enforcement_json ? JSON.parse(row.enforcement_json) : undefined,
+			enforcementDeviations: row.enforcement_deviations_json ? JSON.parse(row.enforcement_deviations_json) : undefined,
 		};
 	}
 
