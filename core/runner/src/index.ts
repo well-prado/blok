@@ -132,6 +132,8 @@ import { type RegisteredWorkflow, type WorkflowAuthorizeFn, WorkflowRegistry } f
 import { type MatchCandidate, type RankedMatch, levenshteinDistance, nearestMatches } from "./workflow/NearestMatch";
 export {
 	authorizeStep,
+	authorizeChildWorkflow,
+	validateChildPolicyAuthority,
 	hasPolicyExecution,
 	InMemoryAuditSink,
 	InMemorySecretResolver,
@@ -141,11 +143,12 @@ export {
 	PolicyDeniedError,
 	PolicyInteractionRequiredError,
 	propagatePolicyExecution,
+	getPolicyAuthority,
+	getPolicyAttribution,
 	reauthorizePolicyRequest,
 	recordPostExecution,
 	resolveSecret,
 	SecretResolutionError,
-	validateChildPolicyAuthority,
 	type PolicyExecutionOptions,
 	type PolicyToken,
 	type SandboxVerifier,

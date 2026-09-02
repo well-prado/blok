@@ -1,6 +1,82 @@
-import type { CapabilityAuthority, Context, LoggerContext } from "@blokjs/shared";
+import type { CapabilityAuthority, Context, InteractionAttribution, LoggerContext } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
 import { propagatePolicyExecution } from "../policy/PolicyPipeline";
+
+export interface ExecutionBudget {
+	readonly maxDurationMs?: number;
+	readonly maxMemoryBytes?: number;
+	readonly maxInputBytes?: number;
+	readonly maxOutputBytes?: number;
+	readonly maxConcurrency?: number;
+}
+
+export interface ExecutionScope {
+	readonly abortController: AbortController;
+	readonly listenerCleanup: AbortController;
+	readonly authority?: CapabilityAuthority;
+	readonly budget?: ExecutionBudget;
+	readonly lineage?: InteractionAttribution;
+}
+
+/** Build bounded, deterministic lineage for a nested scope. */
+export function deriveNestedAttribution(
+	parent: Context,
+	segment: string,
+	options?: { branchId?: string; branchIndex?: number },
+): InteractionAttribution {
+	const parentPrivate = parent._PRIVATE_ as { lineage?: InteractionAttribution } | null;
+	const inherited = parentPrivate?.lineage;
+	const parentRunId = (parent as Record<string, unknown>)._traceRunId;
+	const parentId = typeof parentRunId === "string" ? parentRunId : parent.id;
+	const rootId = inherited?.rootId ?? parentId;
+	const branchPath = [...(inherited?.branchPath ?? []), segment].slice(-32);
+	return {
+		rootId,
+		parentId,
+		...(options?.branchId ? { branchId: options.branchId } : {}),
+		...(options?.branchIndex !== undefined ? { branchIndex: options.branchIndex } : {}),
+		branchPath,
+		depth: (inherited?.depth ?? 0) + 1,
+	};
+}
+
+function attachCancellation(parent: Context, child: Context, scope: ExecutionScope): void {
+	if (parent.signal) {
+		if (parent.signal.aborted) scope.abortController.abort();
+		else
+			parent.signal.addEventListener(
+				"abort",
+				() => {
+					if (!scope.abortController.signal.aborted) scope.abortController.abort();
+				},
+				{ once: true, signal: scope.listenerCleanup.signal },
+			);
+	}
+	(child as { signal: AbortSignal }).signal = scope.abortController.signal;
+	(child as { _PRIVATE_: unknown })._PRIVATE_ = scope;
+}
+
+/** Create an isolated cancellation/metadata scope for a parallel branch. */
+export function createScopedExecutionContext(
+	parent: Context,
+	child: Context,
+	opts?: {
+		childAuthority?: CapabilityAuthority;
+		budget?: ExecutionBudget;
+		attribution?: InteractionAttribution;
+	},
+): Context {
+	const scope: ExecutionScope = {
+		abortController: new AbortController(),
+		listenerCleanup: new AbortController(),
+		...(opts?.childAuthority ? { authority: opts.childAuthority } : {}),
+		...(opts?.budget ? { budget: { ...opts.budget } } : {}),
+		...(opts?.attribution ? { lineage: opts.attribution } : {}),
+	};
+	attachCancellation(parent, child, scope);
+	propagatePolicyExecution(parent, child, opts?.childAuthority, opts?.attribution);
+	return child;
+}
 
 /**
  * Construct a fresh `Context` for a sub-workflow invocation.
@@ -36,6 +112,9 @@ export function createChildContext(
 		config: Context["config"];
 		/** Validated child authority, narrowed from the parent's policy state. */
 		childAuthority?: CapabilityAuthority;
+		budget?: ExecutionBudget;
+		/** Bounded audit lineage for the child scope. */
+		attribution?: InteractionAttribution;
 	},
 ): Context {
 	const id = uuid();
@@ -68,21 +147,13 @@ export function createChildContext(
 	// so the listener auto-removes when the child completes (the
 	// SubworkflowNode dispatch path calls `listenerCleanup.abort()` in
 	// its finally block).
-	const childAbortController = new AbortController();
-	const listenerCleanup = new AbortController();
-	if (parent.signal) {
-		if (parent.signal.aborted) {
-			childAbortController.abort();
-		} else {
-			parent.signal.addEventListener(
-				"abort",
-				() => {
-					if (!childAbortController.signal.aborted) childAbortController.abort();
-				},
-				{ once: true, signal: listenerCleanup.signal },
-			);
-		}
-	}
+	const scope: ExecutionScope = {
+		abortController: new AbortController(),
+		listenerCleanup: new AbortController(),
+		...(opts.childAuthority ? { authority: opts.childAuthority } : {}),
+		...(opts.budget ? { budget: { ...opts.budget } } : {}),
+		...(opts.attribution ? { lineage: opts.attribution } : {}),
+	};
 
 	const ctx: Context = {
 		id,
@@ -99,14 +170,14 @@ export function createChildContext(
 		state,
 		vars: state,
 		env: parent.env,
-		signal: childAbortController.signal,
+		signal: scope.abortController.signal,
 		// Stash the controller in a child-specific _PRIVATE_ slot so the
 		// tracker can fire it via abortRunningRun on direct sub-run cancel.
 		// Don't mutate the parent's _PRIVATE_ (intentional isolation).
 		// `listenerCleanup` is exposed so SubworkflowNode can abort it on
 		// child completion, which removes the parent.signal listener (PR 1
 		// A3 fix — prevents listener accumulation on long-lived parents).
-		_PRIVATE_: { abortController: childAbortController, listenerCleanup },
+		_PRIVATE_: scope,
 	};
 
 	// V2 read-only aliases — same object reference, no copy. Mirrors
@@ -131,7 +202,8 @@ export function createChildContext(
 	ctx.publish = (name: string, value: unknown): void => {
 		(ctx.state as Record<string, unknown>)[name] = value;
 	};
-	propagatePolicyExecution(parent, ctx, opts.childAuthority);
+	attachCancellation(parent, ctx, scope);
+	propagatePolicyExecution(parent, ctx, opts.childAuthority, opts.attribution);
 
 	return ctx;
 }
