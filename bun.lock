@@ -284,6 +284,18 @@
         "typescript": "^5.8.3",
         "vitest": "^4.0.18",
       },
+    "packages/capabilities": {
+      "name": "@blokjs/capabilities",
+      "version": "2.1.0",
+      "dependencies": {
+        "@blokjs/shared": "^2.1.0",
+        "uuid": "^11.1.0",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
     },
     "packages/capabilities": {
       "name": "@blokjs/capabilities",
