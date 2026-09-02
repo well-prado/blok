@@ -1,4 +1,4 @@
-import type { Context, LoggerContext } from "@blokjs/shared";
+import type { CapabilityAuthority, Context, LoggerContext } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
 import { propagatePolicyExecution } from "../policy/PolicyPipeline";
 
@@ -34,6 +34,8 @@ export function createChildContext(
 		body: unknown;
 		/** Child's resolved `nodes` map (from child Configuration). Powers blueprint mapper. */
 		config: Context["config"];
+		/** Validated child authority, narrowed from the parent's policy state. */
+		childAuthority?: CapabilityAuthority;
 	},
 ): Context {
 	const id = uuid();
@@ -129,7 +131,7 @@ export function createChildContext(
 	ctx.publish = (name: string, value: unknown): void => {
 		(ctx.state as Record<string, unknown>)[name] = value;
 	};
-	propagatePolicyExecution(parent, ctx);
+	propagatePolicyExecution(parent, ctx, opts.childAuthority);
 
 	return ctx;
 }

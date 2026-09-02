@@ -4,6 +4,7 @@ import Configuration from "./Configuration";
 import RunnerNode from "./RunnerNode";
 import { runContextCleanups } from "./contextCleanup";
 import { SubworkflowMetrics } from "./monitoring/SubworkflowMetrics";
+import { validateChildPolicyAuthority } from "./policy/PolicyPipeline";
 import { RunTracker } from "./tracing/RunTracker";
 import type GlobalOptions from "./types/GlobalOptions";
 import { createChildContext } from "./utils/createChildContext";
@@ -52,6 +53,14 @@ export function getSelfBaseUrl(): string {
  * read on entry to enforce the cap.
  */
 const SUBWORKFLOW_DEPTH_KEY = "_subworkflowDepth";
+
+function workflowAuthority(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (record._blokV2 === true && record._config !== null && typeof record._config === "object")
+		return (record._config as Record<string, unknown>).capabilityManifest;
+	return record.capabilityManifest;
+}
 
 /**
  * `SubworkflowNode` — the runner-side dispatch primitive that powers
@@ -208,6 +217,10 @@ export class SubworkflowNode extends RunnerNode {
 				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${resolvedName}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
 			);
 		}
+		// H1-04 — validate the child's declared authority before materializing
+		// or dispatching it. A child may specialize its parent's envelope, never
+		// request a capability outside it.
+		const childAuthority = validateChildPolicyAuthority(ctx, workflowAuthority(entry.workflow));
 
 		// === 2.6. G2 — HTTP self-call dispatch ===
 		// When `dispatch: "http-self"`, skip the in-process Configuration
@@ -246,6 +259,7 @@ export class SubworkflowNode extends RunnerNode {
 			workflowPath: entry.source,
 			body: parentInputs,
 			config: childConfig.nodes,
+			...(childAuthority ? { childAuthority } : {}),
 		});
 		// Carry the depth counter forward so nested sub-workflows hit the cap.
 		(childCtx as Record<string, unknown>)[SUBWORKFLOW_DEPTH_KEY] = depth;

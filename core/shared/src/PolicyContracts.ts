@@ -1,5 +1,6 @@
 import type { CapabilityEffect, CapabilityManifestV1 } from "./CapabilityManifest";
 import type { ApprovalContract } from "./EnforcementContracts";
+import type { CapabilityAuthority } from "./PermissionAlgebra";
 
 export type ExecutionOrigin = "ordinary" | "agent";
 
@@ -46,12 +47,8 @@ export interface StepIdentity {
 	readonly attempt?: number;
 }
 
-export interface RequestedCapabilityScope {
-	readonly effects: readonly CapabilityEffect[];
-	readonly capabilities: readonly string[];
-	readonly secrets: readonly string[];
-	readonly fragments: Readonly<Record<string, string | number | boolean>>;
-}
+/** Scope requested by a node or policy provider; structurally an authority envelope. */
+export type RequestedCapabilityScope = CapabilityAuthority;
 
 export type PolicyLayerName = "deployment" | "repository" | "workflow" | "phase" | "user";
 export interface PolicyLayer {
@@ -109,6 +106,8 @@ export interface PolicyRequest extends PolicyContext {
 export interface PolicyEvaluationResult {
 	readonly decision: PolicyDecision;
 	readonly matchedRules: readonly PolicyRuleMatch[];
+	/** Optional policy ceiling. It may only narrow the request scope. */
+	readonly scope?: RequestedCapabilityScope;
 	readonly sandbox?: SandboxAttestation;
 }
 

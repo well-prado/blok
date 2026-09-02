@@ -11,6 +11,7 @@ import {
 	PolicyInteractionRequiredError,
 	installPolicyExecution,
 	reauthorizePolicyRequest,
+	validateChildPolicyAuthority,
 } from "../../policy/PolicyPipeline";
 
 const manifest = {
@@ -61,6 +62,84 @@ function policy(allow: boolean, auditSink: InMemoryAuditSink) {
 }
 
 describe("runner policy boundary", () => {
+	it("narrows leaf requests by parent and active policy authority", async () => {
+		const node = defineNode({
+			name: "effect",
+			input: z.object({ value: z.string() }),
+			output: z.object({ ok: z.boolean() }),
+			capabilityManifest: {
+				...manifest,
+				effects: ["network", "read"],
+				capabilities: ["network.test", "workspace.read"],
+			},
+			execute: async () => ({ ok: true }),
+		});
+		const seen: PolicyRequest[] = [];
+		const audit = new InMemoryAuditSink();
+		const ctx = context("effect", { value: "x" });
+		installPolicyExecution(ctx, {
+			...policy(true, audit),
+			authority: {
+				effects: ["read", "network"],
+				capabilities: ["network.test"],
+				secrets: [],
+				fragments: {},
+			},
+			provider: new InMemoryPolicyProvider(async (request) => {
+				seen.push(request);
+				return {
+					decision: { kind: "allow", id: "decision-1", reasonCode: "allowed", policyVersion: "test-v1" },
+					matchedRules: [],
+					scope: { effects: ["network"], capabilities: ["network.test"], secrets: [], fragments: {} },
+				};
+			}),
+		});
+
+		await new Runner([node]).run(ctx);
+		expect(seen[0]?.scope).toEqual({
+			effects: ["network", "read"],
+			capabilities: ["network.test"],
+			secrets: [],
+			fragments: {},
+		});
+		expect(audit.read()[0]?.scope).toEqual({
+			effects: ["network"],
+			capabilities: ["network.test"],
+			secrets: [],
+			fragments: {},
+		});
+	});
+
+	it("validates a child authority before it can be propagated", () => {
+		const ctx = context("effect", { value: "x" });
+		installPolicyExecution(ctx, {
+			...policy(true, new InMemoryAuditSink()),
+			authority: {
+				effects: ["read"],
+				capabilities: ["workspace.read"],
+				secrets: [],
+				fragments: {},
+			},
+		});
+
+		expect(() =>
+			validateChildPolicyAuthority(ctx, {
+				effects: ["write"],
+				capabilities: ["workspace.write"],
+				secrets: [],
+				fragments: {},
+			}),
+		).toThrow(/child authority\.effects contains unauthorized value\(s\): write/);
+		expect(
+			validateChildPolicyAuthority(ctx, {
+				effects: ["read"],
+				capabilities: ["workspace.read"],
+				secrets: [],
+				fragments: {},
+			}),
+		).toEqual({ effects: ["read"], capabilities: ["workspace.read"], secrets: [], fragments: {} });
+	});
+
 	it("prepares, authorizes, and executes an agent node once", async () => {
 		let calls = 0;
 		const node = defineNode({
