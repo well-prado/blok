@@ -271,6 +271,20 @@
         "vitest": "^4.0.18",
       },
     },
+    "packages/agent-kernel": {
+      "name": "@blokjs/agent-kernel",
+      "version": "2.1.0",
+      "dependencies": {
+        "@blokjs/shared": "^2.1.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@blokjs/runner": "^2.1.0",
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "packages/cli": {
       "name": "blokctl",
       "version": "2.1.0",
@@ -1014,6 +1028,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@1.9.4", "", { "os": "win32", "cpu": "arm64" }, "sha512-tlbhLk+WXZmgwoIKwHIHEBZUwxml7bRJgk0X2sPyNR3S93cdRq6XulAZRQJ17FYGGzWne0fgrXBKpl7l4M87Hg=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@1.9.4", "", { "os": "win32", "cpu": "x64" }, "sha512-8Y5wMhVIPaWe6jw2H+KlEm4wP/f7EW3810ZLmDlrEEy5KvBsb9ECEfu/kMWD484ijfQ8+nIi0giMgu9g1UAuuA=="],
+
+    "@blokjs/agent-kernel": ["@blokjs/agent-kernel@workspace:packages/agent-kernel"],
 
     "@blokjs/api-call": ["@blokjs/api-call@workspace:nodes/web/api-call@1.0.0"],
 

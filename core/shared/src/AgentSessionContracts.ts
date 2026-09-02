@@ -22,6 +22,7 @@ export const AGENT_SESSION_EVENT_KINDS = [
 	"message.user",
 	"message.assistant",
 	"message.tool",
+	"model.call.started",
 	"model.stream",
 	"model.completed",
 	"tool.call.started",
