@@ -58,12 +58,13 @@ jobs:
           fetch-depth: 0
 
       # Pinned: bun.lock + bunfig linker are generated/validated with this
-      # version; "latest" drifted the linker default mid-flight (1.3.14).
+      # version; Bun 1.4.0 fixes frozen-lockfile validation for this workspace
+      # graph while bunfig.toml keeps the hoisted linker behavior.
       # Keep in lock-step with the other jobs below.
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.0'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -227,7 +228,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.0'
 
       # The whole point: the CONSUMER side runs on Node, not Bun.
       - name: Set up Node LTS
@@ -283,7 +284,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.0'
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -377,7 +378,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.0'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -404,7 +405,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.0'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
