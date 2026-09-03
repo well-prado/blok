@@ -79,6 +79,8 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	// Foundation — no internal deps.
 	{ dir: "core/shared", name: "@blokjs/shared" },
 	{ dir: "core/workflow-helper", name: "@blokjs/helper" },
+	// Trusted capability adapters (#927) — depends on shared contracts.
+	{ dir: "packages/capabilities", name: "@blokjs/capabilities" },
 	// Editor tooling (#697) — no internal deps, and nothing else in this list
 	// depends on them either, so their position here is arbitrary.
 	{ dir: "packages/syntax", name: "@blokjs/syntax" },
