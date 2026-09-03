@@ -1,0 +1,29 @@
+{
+	"name": "@blokjs/capabilities",
+	"version": "2.1.0",
+	"description": "Trusted, bounded capability adapters for Blok harnesses.",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": ["dist"],
+	"scripts": {
+		"build": "rm -rf dist && bun run tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["blok", "capabilities", "filesystem", "harness"],
+	"license": "MIT",
+	"dependencies": {
+		"@blokjs/shared": "^2.1.0",
+		"uuid": "^11.1.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"private": false,
+	"publishConfig": { "access": "public" }
+}
