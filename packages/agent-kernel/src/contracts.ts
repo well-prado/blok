@@ -107,6 +107,7 @@ export interface AssembledModelResponse {
 
 export type AgentErrorCode =
 	| "CONTEXT_OVERFLOW"
+	| "CONTEXT_COMPACTION_FAILED"
 	| "RATE_LIMIT"
 	| "PROVIDER_DISCONNECT"
 	| "MALFORMED_TOOL_CALL"
@@ -183,6 +184,8 @@ export interface AgentKernelOptions {
 	readonly maxRetries?: number;
 	readonly principalId?: string;
 	readonly now?: () => number;
+	/** Optional provider-neutral context sources and compaction seam. */
+	readonly context?: import("./context").ContextPipelineOptions;
 }
 
 export interface StartTurnInput {

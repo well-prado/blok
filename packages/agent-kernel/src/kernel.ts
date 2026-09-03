@@ -10,6 +10,16 @@ import type {
 	SessionStore,
 } from "@blokjs/shared";
 import { AgentSessionContractError, SessionConcurrencyError, SessionJsonValueSchema } from "@blokjs/shared";
+import {
+	type ContextAssemblyResult,
+	ContextContractError,
+	type ContextItem,
+	assembleContext,
+	assembleContextWithCompaction,
+	contextItem,
+	contextItemFromSessionEvent,
+	parseContextItem,
+} from "./context";
 import type {
 	AcceptedTurn,
 	AgentBudgetLimits,
@@ -46,6 +56,17 @@ interface TurnUsage {
 }
 
 const agentActor = { kind: "agent" as const, id: "agent-kernel" };
+const DURABLE_CONTEXT_FACTS: ReadonlySet<AgentSessionEventKind> = new Set([
+	"approval.requested",
+	"approval.resolved",
+	"policy.decision",
+	"workflow.run.started",
+	"workflow.run.completed",
+	"workflow.run.failed",
+	"budget.updated",
+	"budget.exhausted",
+	"artifact.attached",
+]);
 
 function jsonValue(value: unknown): SessionJsonValue {
 	let serialized: string;
@@ -66,6 +87,7 @@ function objectValue(value: SessionJsonValue): Readonly<Record<string, SessionJs
 
 function errorFor(error: unknown): AgentKernelError {
 	if (error instanceof AgentKernelError) return error;
+	if (error instanceof ContextContractError) return new AgentKernelError("INVALID_CONTRACT", error.message, error);
 	if (error instanceof AgentSessionContractError) return new AgentKernelError("INVALID_CONTRACT", error.message, error);
 	if (error instanceof Error && /context|window/i.test(error.message))
 		return new AgentKernelError("CONTEXT_OVERFLOW", error.message, error);
@@ -175,6 +197,8 @@ export class AgentKernel {
 	private readonly maxRetries: number;
 	private readonly principalId: string;
 	private readonly now: () => number;
+	private readonly context?: AgentKernelOptions["context"];
+	private readonly contextMetrics = new Map<string, ContextAssemblyResult["metrics"]>();
 	private readonly appendQueues = new Map<string, Promise<void>>();
 	private readonly active = new Map<string, ActiveTurn>();
 
@@ -190,6 +214,7 @@ export class AgentKernel {
 			throw new AgentKernelError("INVALID_CONTRACT", "maxRetries must be an integer from 0 to 8");
 		this.principalId = options.principalId ?? "agent-kernel";
 		this.now = options.now ?? Date.now;
+		this.context = options.context;
 		for (const [name, value] of Object.entries(this.budgets)) {
 			if (value !== undefined && (!Number.isFinite(value) || value < 0))
 				throw new AgentKernelError("INVALID_CONTRACT", `${name} must be non-negative`);
@@ -229,6 +254,7 @@ export class AgentKernel {
 		this.active.set(this.activeKey(input.sessionId, input.turnId), active);
 		try {
 			const result = await this.runLoop(input.sessionId, input.turnId, content, controller, active.startedAt);
+			await this.recordContextEvaluation(input.sessionId, input.turnId, result.status === "completed");
 			return result;
 		} catch (error) {
 			const kernelError = controller.signal.aborted
@@ -244,6 +270,7 @@ export class AgentKernel {
 				kernelError.code === "CANCELLED" ? "cancelled" : "failed",
 				kernelError,
 			);
+			await this.recordContextEvaluation(input.sessionId, input.turnId, false);
 			return {
 				sessionId: input.sessionId,
 				turnId: input.turnId,
@@ -341,6 +368,7 @@ export class AgentKernel {
 			} else {
 				if (modelCallStarted)
 					throw new AgentKernelError("RECOVERY_INCOMPLETE_CALL", `model call for step ${step} was already accepted`);
+				const messages = await this.messagesForRequest(sessionId, events, turnId, userContent, step, controller.signal);
 				await this.append(sessionId, [
 					this.event(
 						sessionId,
@@ -352,7 +380,6 @@ export class AgentKernel {
 						{ idempotencyKey: `${turnId}:model:${step}` },
 					),
 				]);
-				const messages = this.messagesForRequest(events, turnId, userContent);
 				const request: ModelRequest = {
 					contractVersion: "1",
 					idempotencyKey: `${turnId}:model:${step}`,
@@ -529,32 +556,152 @@ export class AgentKernel {
 		}
 	}
 
-	private messagesForRequest(
+	private async messagesForRequest(
+		sessionId: string,
 		events: readonly AgentSessionEvent[],
 		turnId: string,
 		userContent: SessionJsonValue,
-	): readonly ModelMessage[] {
-		const messages = events
-			.filter((event) => event.visibility === "model-visible" && event.turnId !== undefined)
+		step: number,
+		signal: AbortSignal,
+	): Promise<readonly ModelMessage[]> {
+		const replaced = new Set<string>();
+		const summaries: ContextItem[] = [];
+		for (const event of events) {
+			if (event.kind !== "compaction.completed") continue;
+			const payload = objectValue(event.payload);
+			const replacedIds = payload?.replacedItemIds;
+			if (Array.isArray(replacedIds)) for (const id of replacedIds) if (typeof id === "string") replaced.add(id);
+			const summary = payload?.summary;
+			if (summary !== undefined) {
+				try {
+					summaries.push(parseContextItem(summary));
+				} catch {
+					throw new AgentKernelError("CONTEXT_COMPACTION_FAILED", "persisted context summary is invalid");
+				}
+			}
+		}
+		const sessionItems: ContextItem[] = events
+			.filter(
+				(event) =>
+					!replaced.has(event.id) &&
+					((event.visibility === "model-visible" && event.turnId !== undefined) ||
+						DURABLE_CONTEXT_FACTS.has(event.kind)),
+			)
 			.map((event) => {
 				if (event.kind === "message.user" || event.kind === "message.assistant" || event.kind === "message.tool") {
-					return roleForMessage({
-						id: event.id,
-						turnId: event.turnId,
-						role: event.kind.split(".")[1] as SessionMessage["role"],
-						content: event.payload,
-						sequence: event.sequence,
-					});
+					return contextItemFromSessionEvent(
+						event,
+						roleForMessage({
+							id: event.id,
+							turnId: event.turnId,
+							role: event.kind.split(".")[1] as SessionMessage["role"],
+							content: event.payload,
+							sequence: event.sequence,
+						}),
+					);
 				}
+				if (DURABLE_CONTEXT_FACTS.has(event.kind))
+					return contextItemFromSessionEvent(event, {
+						role: "system",
+						content: [{ type: "json", value: event.payload }],
+					});
 				return undefined;
 			})
-			.filter((message): message is ModelMessage => message !== undefined);
+			.filter((item): item is ContextItem => item !== undefined);
 		const steering = events
 			.filter((event) => event.kind === "steering.received" && event.turnId === turnId)
-			.map((event) => ({ role: "user" as const, content: [{ type: "json" as const, value: event.payload }] }));
-		return messages.length === 0
-			? [{ role: "user", content: [{ type: "json", value: userContent }] }, ...steering]
-			: [...messages, ...steering];
+			.map((event) =>
+				contextItem({
+					id: event.id,
+					dedupeKey: `session:${event.id}`,
+					message: { role: "user", content: [{ type: "json", value: event.payload }] },
+					provenance: {
+						source: "session",
+						sourceId: event.id,
+						trust: "trusted",
+						freshness: "fresh",
+						truncated: false,
+						sessionSequence: event.sequence,
+					},
+					order: Number.MAX_SAFE_INTEGER,
+				}),
+			);
+		const supplied = this.context?.items
+			? typeof this.context.items === "function"
+				? await this.context.items({ sessionId, turnId, events, userContent })
+				: this.context.items
+			: [];
+		const allItems = [...summaries, ...sessionItems, ...steering, ...supplied].filter((item) => !replaced.has(item.id));
+		if (allItems.length === 0)
+			allItems.push(
+				contextItem({
+					id: `${turnId}:user`,
+					message: { role: "user", content: [{ type: "json", value: userContent }] },
+					provenance: {
+						source: "user",
+						sourceId: `${turnId}:user`,
+						trust: "untrusted",
+						freshness: "fresh",
+						truncated: false,
+					},
+				}),
+			);
+		const assemblyInput = {
+			items: allItems,
+			budgets: this.context?.budgets,
+			signal,
+			stalePolicy: this.context?.stalePolicy,
+			conflictPolicy: this.context?.conflictPolicy,
+			tokenEstimator: this.context?.tokenEstimator,
+			invalidation: this.context?.invalidation,
+		};
+		let result: ContextAssemblyResult;
+		if (this.context?.compactor) {
+			result = await assembleContextWithCompaction(assemblyInput, this.context.compactor, {
+				started: async (request) => {
+					await this.append(sessionId, [
+						this.event(
+							sessionId,
+							"compaction.started",
+							{ step, itemCount: request.items.length },
+							`${turnId}:compaction:started:${step}`,
+							turnId,
+						),
+					]);
+				},
+				completed: async (compaction) => {
+					await this.append(sessionId, [
+						this.event(
+							sessionId,
+							"compaction.completed",
+							{
+								step,
+								summary: compaction.summary,
+								preservedItemIds: compaction.preserved.map((item) => item.id),
+								replacedItemIds: compaction.replacedItemIds,
+							},
+							`${turnId}:compaction:completed:${step}`,
+							turnId,
+						),
+					]);
+				},
+			});
+		} else {
+			result = await assembleContext(assemblyInput);
+		}
+		this.contextMetrics.set(`${sessionId}:${turnId}`, result.metrics);
+		return result.messages;
+	}
+
+	private async recordContextEvaluation(sessionId: string, turnId: string, taskSuccess: boolean): Promise<void> {
+		const metrics = this.contextMetrics.get(`${sessionId}:${turnId}`);
+		this.contextMetrics.delete(`${sessionId}:${turnId}`);
+		if (!metrics || !this.context?.evaluation) return;
+		try {
+			await this.context.evaluation.record({ sessionId, turnId, taskSuccess, ...metrics });
+		} catch {
+			// Evaluation is observational and cannot change the durable turn result.
+		}
 	}
 
 	private async recordBudget(sessionId: string, turnId: string, usage: TurnUsage): Promise<void> {

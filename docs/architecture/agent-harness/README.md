@@ -124,6 +124,9 @@ The H1-03 shared profile and binding contract is documented in
 The H3-02 Git/worktree and bounded process capability contract is documented in
 [h3-02-git-and-process-capabilities.md](h3-02-git-and-process-capabilities.md).
 
+The H3-04 provenance-aware context and compaction contract is documented in
+[h3-04-context-compaction.md](h3-04-context-compaction.md).
+
 - [GitHub Project 11: Blok AI Harness & Enforced Workflows](https://github.com/users/well-prado/projects/11)
 - [Epic #913: Blok coding harness and enforced agent workflows](https://github.com/well-prado/blok/issues/913)
 

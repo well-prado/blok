@@ -20,6 +20,20 @@ turn; a boundary that has already accepted a tool call never invokes that call
 again during recovery. A stream must have contiguous indexes and a finish
 chunk. Usage chunks are deltas, and all persisted stream facts are bounded.
 
+`assembleContext` accepts typed context items for session facts, workflow
+instructions, current source, graph results, policy, skills, summaries, and
+user input. Items carry source, trust, freshness, truncation, content-hash,
+and invalidation provenance. Fixed precedence and logical keys make ordering
+and deduplication deterministic; stale/conflicting/missing items are visible
+as diagnostics and stale data is excluded by default. Repository content is
+labelled as untrusted data before it is sent to a model. Token, byte, item,
+and work-time budgets are bounded, with optional provider token estimation.
+
+`assembleContextWithCompaction` uses an injected provider-neutral
+`ContextCompactor`. Required policy/workflow items must survive compaction;
+the kernel persists the summary and replacement identities as observable
+`compaction.started` and `compaction.completed` session events.
+
 The stable error codes include `CONTEXT_OVERFLOW`, `RATE_LIMIT`,
 `PROVIDER_DISCONNECT`, `MALFORMED_TOOL_CALL`, `PARTIAL_STREAM`,
 `BUDGET_EXCEEDED`, `CANCELLED`, and `TIMEOUT`.
@@ -37,7 +51,12 @@ This package is governed by:
 The implementation note is
 `docs/architecture/agent-harness/h2-03-agent-kernel.md`.
 
-Conformance evidence is in `tests/agent-kernel.test.ts`: deterministic bounded
-stream assembly, observable event persistence, dispatcher routing, stable
+The context and compaction implementation note is
+`docs/architecture/agent-harness/h3-04-context-compaction.md`.
+
+Conformance evidence is in `tests/agent-kernel.test.ts` and
+`tests/context.test.ts`: deterministic bounded stream assembly and context
+ordering, provenance/freshness/invalidation handling, untrusted-content
+boundaries, budgets, observable compaction events, dispatcher routing, stable
 partial-stream errors, steering/cancellation-compatible turn boundaries, and
 recovery without repeating persisted stream facts or accepted tool calls.
