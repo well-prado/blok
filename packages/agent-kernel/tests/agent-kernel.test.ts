@@ -1,7 +1,7 @@
 import { MemorySessionStore } from "@blokjs/runner";
 import type { SessionEventInput, SessionStore } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
-import { AgentKernel, AgentKernelError, ModelStreamAssembler } from "../src";
+import { AgentKernel, AgentKernelError, ModelStreamAssembler, contextItem, contextItemFromSource } from "../src";
 import { FakeModelAdapter, adapterContractSuite, textResponse, toolResponse } from "../src/testing";
 
 const sessionCreated = (sessionId: string): SessionEventInput => ({
@@ -64,6 +64,56 @@ describe("AgentKernel", () => {
 		expect(persisted.filter((event) => event.kind === "model.stream")).toHaveLength(2);
 		expect(persisted.filter((event) => event.kind === "message.assistant")).toHaveLength(1);
 		expect(persisted.find((event) => event.kind === "turn.completed")?.payload).toMatchObject({ status: "completed" });
+	});
+
+	it("persists compaction boundaries and reuses an observable summary seam", async () => {
+		const store = await storeWithSession();
+		const source = contextItemFromSource(
+			"source-1",
+			{ role: "user", content: [{ type: "text", text: "repository context" }] },
+			{ freshness: "fresh", truncated: false },
+		);
+		const summary = contextItem({
+			id: "summary-1",
+			message: { role: "system", content: [{ type: "text", text: "compacted repository context" }] },
+			provenance: {
+				source: "summary",
+				sourceId: "summary-1",
+				trust: "derived",
+				freshness: "fresh",
+				truncated: false,
+			},
+		});
+		const evaluations: Array<{ readonly taskSuccess: boolean; readonly tokens: number; readonly latencyMs: number }> =
+			[];
+		const kernel = new AgentKernel({
+			sessionStore: store,
+			adapter: new FakeModelAdapter([textResponse("done")]),
+			context: {
+				items: [source],
+				budgets: { maxItems: 1 },
+				compactor: {
+					async compact() {
+						return { summary, preserved: [], replacedItemIds: [source.id] };
+					},
+				},
+				evaluation: {
+					record(record) {
+						evaluations.push(record);
+					},
+				},
+			},
+		});
+		const accepted = await kernel.startTurn({ sessionId: "session-1", content: "start", turnId: "turn-context" });
+		await expect(kernel.executeTurn(accepted)).resolves.toMatchObject({ status: "completed" });
+		const persisted = await events(store, "session-1");
+		expect(persisted.filter((event) => event.kind === "compaction.started")).toHaveLength(1);
+		expect(persisted.find((event) => event.kind === "compaction.completed")?.payload).toMatchObject({
+			summary: { id: "summary-1" },
+			replacedItemIds: ["source-1"],
+		});
+		expect(evaluations).toHaveLength(1);
+		expect(evaluations[0]).toMatchObject({ taskSuccess: true });
 	});
 
 	it("bounds provider retries before the first durable stream fact", async () => {
