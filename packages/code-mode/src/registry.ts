@@ -1,0 +1,582 @@
+import type { PolicyEvaluationResult, PolicyRequest } from "@blokjs/shared";
+import { CapabilityManifestError, parseCapabilityManifest } from "@blokjs/shared";
+import { z } from "zod";
+import {
+	CODE_MODE_CONTRACT_VERSION,
+	CODE_MODE_MAX_BINDINGS,
+	CODE_MODE_MAX_DECLARATION_BYTES,
+	CODE_MODE_PHASES,
+	type CodeModeBindingDefinitionBase,
+	CodeModeBindingError,
+	type CodeModeBindingExecutionResult,
+	type CodeModeBindingKind,
+	type CodeModeCallContext,
+	type CodeModeCatalog,
+	type CodeModeCatalogEntry,
+	type CodeModeGeneratedBinding,
+	type CodeModeGeneratedSurface,
+	type CodeModeGenerationOptions,
+	type CodeModeInvocationOptions,
+	type CodeModeOutputKind,
+	type CodeModeUnavailableBinding,
+	bindingName,
+	catalogDigest,
+	descriptorManifestDigest,
+	effectiveAuthority,
+	makeDescriptor,
+	parseCodeModeDescriptor,
+	policyDecisionAuthority,
+	policyRequestFor,
+	stableStringify,
+} from "./binding-contracts";
+type Invoker = (input: unknown, context: CodeModeCallContext) => unknown | Promise<unknown>;
+
+export interface CodeModeInvocationHandlers {
+	readonly workflow?: Invoker;
+	readonly capability?: Invoker;
+}
+
+export interface CodeModeBindingRegistryOptions extends CodeModeGenerationOptions {
+	readonly handlers?: CodeModeInvocationHandlers;
+}
+
+export interface CodeModeBindingHandle<TInput, TOutput> {
+	readonly name: string;
+	readonly kind: CodeModeBindingKind;
+	readonly call: (input: TInput) => Promise<TOutput>;
+}
+
+export interface CodeModeGeneratedBindings {
+	readonly workflows: Readonly<Record<string, CodeModeBindingHandle<unknown, unknown>>>;
+	readonly capabilities: Readonly<Record<string, CodeModeBindingHandle<unknown, unknown>>>;
+	readonly surface: CodeModeGeneratedSurface;
+}
+
+const generatedSurfaceCache = new Map<
+	string,
+	Pick<CodeModeGeneratedSurface, "declarations" | "prompt" | "truncated">
+>();
+
+function compareStrings(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function hashName(value: string): string {
+	let hash = 2166136261;
+	for (const character of value) {
+		hash ^= character.charCodeAt(0);
+		hash = Math.imul(hash, 16777619);
+	}
+	return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function stableBindingName(entry: CodeModeCatalogEntry, used: ReadonlySet<string>): string {
+	const base = bindingName(entry.descriptor.kind, entry.descriptor.id);
+	if (!used.has(base)) return base;
+	const identity = `${entry.descriptor.kind}:${entry.descriptor.id}:${entry.descriptor.version}`;
+	let attempt = 0;
+	let candidate = base;
+	do {
+		candidate = `${base}__${hashName(`${identity}:${attempt}`)}`;
+		attempt += 1;
+	} while (used.has(candidate));
+	return candidate;
+}
+
+function schemaType(schema: unknown, indent = ""): string {
+	if (schema === null || typeof schema !== "object") return "unknown";
+	const value = schema as Record<string, unknown>;
+	if (typeof value.$ref === "string") return "unknown";
+	if (Array.isArray(value.enum)) return value.enum.map((item) => JSON.stringify(item)).join(" | ");
+	if (Array.isArray(value.anyOf)) return value.anyOf.map((item) => schemaType(item, indent)).join(" | ");
+	if (Array.isArray(value.oneOf)) return value.oneOf.map((item) => schemaType(item, indent)).join(" | ");
+	if (value.type === "null") return "null";
+	if (Array.isArray(value.type)) return value.type.map((item) => schemaType({ type: item }, indent)).join(" | ");
+	if (value.type === "array") return `ReadonlyArray<${schemaType(value.items, indent)}>`;
+	if (value.type === "object" || value.properties !== undefined) {
+		const properties = value.properties;
+		if (properties === null || typeof properties !== "object" || Array.isArray(properties))
+			return "Record<string, unknown>";
+		const required = new Set(
+			Array.isArray(value.required) ? value.required.filter((item): item is string => typeof item === "string") : [],
+		);
+		const lines = Object.keys(properties as Record<string, unknown>)
+			.sort(compareStrings)
+			.map(
+				(key) =>
+					`${indent}\t${JSON.stringify(key)}${required.has(key) ? "" : "?"}: ${schemaType((properties as Record<string, unknown>)[key], `${indent}\t`)};`,
+			);
+		return lines.length === 0 ? "Record<string, unknown>" : `{\n${lines.join("\n")}\n${indent}}`;
+	}
+	if (value.type === "string") return "string";
+	if (value.type === "number" || value.type === "integer") return "number";
+	if (value.type === "boolean") return "boolean";
+	return "unknown";
+}
+
+function declarationFor(binding: CodeModeGeneratedBinding): string {
+	const descriptor = binding.descriptor;
+	const escapedDescription = descriptor.description.replaceAll("*/", "*\\/").replaceAll("\n", " ");
+	return `\t/** ${escapedDescription} Effects: ${descriptor.effects.join(", ") || "none"}. */\n\treadonly ${binding.stableName}: (input: ${schemaType(descriptor.inputSchema, "\t\t")}) => Promise<${schemaType(descriptor.outputSchema)}>;`;
+}
+
+function declarationsFor(
+	bindings: readonly CodeModeGeneratedBinding[],
+	maxBytes: number,
+): { declarations: string; truncated: boolean } {
+	const header = `// Generated by @blokjs/code-mode contract ${CODE_MODE_CONTRACT_VERSION}.\n`;
+	const workflows = bindings
+		.filter((binding) => binding.descriptor.kind === "workflow")
+		.sort((left, right) => compareStrings(left.stableName, right.stableName));
+	const capabilities = bindings
+		.filter((binding) => binding.descriptor.kind === "capability")
+		.sort((left, right) => compareStrings(left.stableName, right.stableName));
+	const selected = new Set<string>();
+	let truncated = false;
+	const render = (): string =>
+		`${header}export interface CodeModeBindings {\n\treadonly workflows: {\n${workflows
+			.filter((binding) => selected.has(binding.stableName))
+			.map(declarationFor)
+			.join("\n")}\n\t};\n\treadonly capabilities: {\n${capabilities
+			.filter((binding) => selected.has(binding.stableName))
+			.map(declarationFor)
+			.join("\n")}\n\t};\n}\n`;
+	for (const binding of [...workflows, ...capabilities]) {
+		selected.add(binding.stableName);
+		if (new TextEncoder().encode(render()).byteLength > maxBytes) {
+			selected.delete(binding.stableName);
+			truncated = true;
+		}
+	}
+	return { declarations: render(), truncated };
+}
+
+function pathError(
+	error: z.ZodError,
+	code: "INPUT_INVALID" | "OUTPUT_INVALID",
+	bindingId: string,
+): CodeModeBindingError {
+	const issues = error.issues
+		.map((issue) => `${issue.path.length ? issue.path.join(".") : "value"} ${issue.message}`)
+		.sort(compareStrings);
+	return new CodeModeBindingError(code, issues.join("; "), bindingId);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertOutputKind(value: unknown, kind: CodeModeOutputKind, bindingId: string): void {
+	const valid =
+		kind === "null"
+			? value === null
+			: kind === "scalar"
+				? typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+				: kind === "array"
+					? Array.isArray(value)
+					: isObject(value);
+	if (!valid)
+		throw new CodeModeBindingError("OUTPUT_KIND_MISMATCH", `output does not match declared ${kind} kind`, bindingId);
+	if (
+		kind === "artifact-reference" &&
+		(!isObject(value) ||
+			typeof value.id !== "string" ||
+			typeof value.version !== "string" ||
+			typeof value.digest !== "string")
+	)
+		throw new CodeModeBindingError(
+			"OUTPUT_KIND_MISMATCH",
+			"artifact-reference output is missing its identity",
+			bindingId,
+		);
+}
+
+function canonicalOutput<T>(value: T, schema: z.ZodTypeAny, kind: CodeModeOutputKind, bindingId: string): T {
+	let parsed: T;
+	try {
+		parsed = schema.parse(value) as T;
+	} catch (error) {
+		if (error instanceof z.ZodError) throw pathError(error, "OUTPUT_INVALID", bindingId);
+		throw error;
+	}
+	assertOutputKind(parsed, kind, bindingId);
+	try {
+		return JSON.parse(stableStringify(parsed)) as T;
+	} catch {
+		throw new CodeModeBindingError("OUTPUT_NOT_SERIALIZABLE", "output is not a bounded JSON value", bindingId);
+	}
+}
+
+function staticUnavailable(
+	entry: CodeModeCatalogEntry,
+	options: CodeModeGenerationOptions,
+): CodeModeUnavailableBinding | undefined {
+	const descriptor = entry.descriptor;
+	if (descriptor.implementationOnly)
+		return { id: descriptor.id, kind: descriptor.kind, name: descriptor.name, reasonCode: "implementation-only" };
+	if (!descriptor.phases.includes(options.phase))
+		return { id: descriptor.id, kind: descriptor.kind, name: descriptor.name, reasonCode: "phase-unavailable" };
+	if (entry.definition.principals && !entry.definition.principals.includes(options.identity.principal.id))
+		return { id: descriptor.id, kind: descriptor.kind, name: descriptor.name, reasonCode: "principal-unavailable" };
+	if (descriptor.runtime && options.runtime !== descriptor.runtime)
+		return { id: descriptor.id, kind: descriptor.kind, name: descriptor.name, reasonCode: "runtime-unavailable" };
+	const allowed = options.allowedMaturity ?? ["stable"];
+	if (!allowed.includes(descriptor.maturity))
+		return { id: descriptor.id, kind: descriptor.kind, name: descriptor.name, reasonCode: "maturity-unavailable" };
+	try {
+		parseCapabilityManifest(entry.manifest);
+		effectiveAuthority(options.identity.authority, entry.authority);
+	} catch (error) {
+		return {
+			id: descriptor.id,
+			kind: descriptor.kind,
+			name: descriptor.name,
+			reasonCode: error instanceof CapabilityManifestError ? "manifest-invalid" : "authority-unavailable",
+		};
+	}
+	return undefined;
+}
+
+function validateGenerationOptions(options: CodeModeGenerationOptions): void {
+	if (!CODE_MODE_PHASES.includes(options.phase))
+		throw new CodeModeBindingError("INVALID_CONTRACT", "Code Mode phase is invalid");
+	if (
+		options.maxBindings !== undefined &&
+		(!Number.isSafeInteger(options.maxBindings) ||
+			options.maxBindings < 1 ||
+			options.maxBindings > CODE_MODE_MAX_BINDINGS)
+	)
+		throw new CodeModeBindingError("CATALOG_LIMIT_EXCEEDED", "maxBindings is outside the Code Mode limit");
+	if (
+		options.maxDeclarationBytes !== undefined &&
+		(!Number.isSafeInteger(options.maxDeclarationBytes) ||
+			options.maxDeclarationBytes < 256 ||
+			options.maxDeclarationBytes > CODE_MODE_MAX_DECLARATION_BYTES)
+	)
+		throw new CodeModeBindingError("DECLARATION_LIMIT_EXCEEDED", "maxDeclarationBytes is outside the Code Mode limit");
+}
+
+export function defineWorkflowBinding<TInputSchema extends z.ZodTypeAny, TOutputSchema extends z.ZodTypeAny>(
+	definition: CodeModeBindingDefinitionBase<TInputSchema, TOutputSchema> & { readonly runtime?: string },
+): CodeModeCatalogEntry<TInputSchema, TOutputSchema> {
+	return makeDescriptor({ ...definition, kind: "workflow" });
+}
+
+export function defineCapabilityBinding<TInputSchema extends z.ZodTypeAny, TOutputSchema extends z.ZodTypeAny>(
+	definition: CodeModeBindingDefinitionBase<TInputSchema, TOutputSchema>,
+): CodeModeCatalogEntry<TInputSchema, TOutputSchema> {
+	return makeDescriptor({ ...definition, kind: "capability" });
+}
+
+export function createCodeModeCatalog<const TEntries extends readonly unknown[]>(
+	version: string,
+	entries: TEntries,
+): CodeModeCatalog<TEntries> {
+	if (
+		typeof version !== "string" ||
+		!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(version) ||
+		entries.length === 0 ||
+		entries.length > CODE_MODE_MAX_BINDINGS
+	)
+		throw new CodeModeBindingError("CATALOG_LIMIT_EXCEEDED", "Code Mode catalog must contain 1 to 128 bindings");
+	const ids = new Set<string>();
+	for (const candidate of entries) {
+		if (candidate === null || typeof candidate !== "object" || !("descriptor" in candidate))
+			throw new CodeModeBindingError("INVALID_CONTRACT", "Code Mode catalog entry is invalid");
+		const entry = candidate as CodeModeCatalogEntry;
+		try {
+			parseCodeModeDescriptor(entry.descriptor);
+		} catch {
+			throw new CodeModeBindingError("INVALID_CONTRACT", "Code Mode catalog entry descriptor is invalid");
+		}
+		const key = `${entry.descriptor.kind}:${entry.descriptor.id}`;
+		if (ids.has(key))
+			throw new CodeModeBindingError("INVALID_CONTRACT", "Code Mode binding ids must be unique", entry.descriptor.id);
+		ids.add(key);
+	}
+	return { version, entries };
+}
+
+async function evaluatePolicy(options: CodeModeInvocationOptions): Promise<{
+	request: PolicyRequest;
+	result: PolicyEvaluationResult;
+	authority: ReturnType<typeof policyDecisionAuthority>;
+}> {
+	const stepId = options.stepId ?? `code-mode:${options.binding.descriptor.name}`;
+	const { request } = policyRequestFor(options, stepId);
+	let result: PolicyEvaluationResult;
+	try {
+		if (options.identity.signal?.aborted)
+			throw new CodeModeBindingError(
+				"POLICY_DENIED",
+				"Code Mode invocation was cancelled",
+				options.binding.descriptor.id,
+			);
+		result = await options.provider.evaluate(request);
+	} catch (error) {
+		if (error instanceof CodeModeBindingError) throw error;
+		throw new CodeModeBindingError("POLICY_MALFORMED", "policy evaluation failed", options.binding.descriptor.id);
+	}
+	if (!result || result.decision?.policyVersion !== options.policyVersion)
+		throw new CodeModeBindingError(
+			"POLICY_STALE",
+			"policy decision does not match the active policy version",
+			options.binding.descriptor.id,
+		);
+	if (!["allow", "deny", "ask", "require-sandbox"].includes(result.decision.kind))
+		throw new CodeModeBindingError(
+			"POLICY_MALFORMED",
+			"policy decision kind is invalid",
+			options.binding.descriptor.id,
+		);
+	const authority = policyDecisionAuthority(request, result, options.binding.descriptor.id);
+	return { request, result, authority };
+}
+
+export class CodeModeBindingRegistry {
+	private readonly options: CodeModeBindingRegistryOptions;
+	private readonly catalog: CodeModeCatalog<readonly CodeModeCatalogEntry[]>;
+	private readonly names = new Map<string, CodeModeCatalogEntry>();
+
+	constructor(catalog: CodeModeCatalog<readonly unknown[]>, options: CodeModeBindingRegistryOptions) {
+		validateGenerationOptions(options);
+		this.catalog = catalog as CodeModeCatalog<readonly CodeModeCatalogEntry[]>;
+		this.options = options;
+		const used = new Set<string>();
+		for (const entry of [...this.catalog.entries].sort((left, right) =>
+			compareStrings(left.descriptor.id, right.descriptor.id),
+		)) {
+			const stableName = stableBindingName(entry, used);
+			if (used.has(stableName))
+				throw new CodeModeBindingError("NAME_COLLISION", "Code Mode binding names collide", entry.descriptor.id);
+			used.add(stableName);
+			this.names.set(stableName, entry);
+		}
+	}
+
+	async generate(): Promise<CodeModeGeneratedBindings> {
+		const unavailable: CodeModeUnavailableBinding[] = [];
+		const candidates: Array<{ entry: CodeModeCatalogEntry; stableName: string }> = [];
+		const policyFacts: string[] = [];
+		for (const [stableName, entry] of [...this.names.entries()].sort(([left], [right]) =>
+			compareStrings(left, right),
+		)) {
+			const reason = staticUnavailable(entry, this.options);
+			if (reason) {
+				unavailable.push(reason);
+				continue;
+			}
+			try {
+				const { result } = await evaluatePolicy({
+					...this.options,
+					catalogVersion: this.catalog.version,
+					binding: entry,
+				});
+				policyFacts.push(
+					`${entry.descriptor.kind}:${entry.descriptor.id}:${result.decision.kind}:${result.decision.id}`,
+				);
+				if (result.decision.kind === "deny") {
+					unavailable.push({
+						id: entry.descriptor.id,
+						kind: entry.descriptor.kind,
+						name: entry.descriptor.name,
+						reasonCode: "policy-denied",
+					});
+					continue;
+				}
+				if (result.decision.kind === "ask" || result.decision.kind === "require-sandbox") {
+					unavailable.push({
+						id: entry.descriptor.id,
+						kind: entry.descriptor.kind,
+						name: entry.descriptor.name,
+						reasonCode: "policy-approval-required",
+					});
+					continue;
+				}
+				candidates.push({ entry, stableName });
+			} catch (error) {
+				if (
+					error instanceof CodeModeBindingError &&
+					(error.code === "AUTHORITY_WIDENED" || error.code === "POLICY_MALFORMED")
+				) {
+					unavailable.push({
+						id: entry.descriptor.id,
+						kind: entry.descriptor.kind,
+						name: entry.descriptor.name,
+						reasonCode: error.code === "AUTHORITY_WIDENED" ? "authority-unavailable" : "policy-denied",
+					});
+					continue;
+				}
+				throw error;
+			}
+		}
+		const maxBindings = this.options.maxBindings ?? CODE_MODE_MAX_BINDINGS;
+		if (candidates.length > maxBindings) candidates.splice(maxBindings);
+		const generated: CodeModeGeneratedBinding[] = candidates.map(({ entry, stableName }) => ({
+			descriptor: entry.descriptor,
+			stableName,
+			invoke: (input: unknown) => this.invoke(stableName, input),
+		}));
+		const cacheKey = stableStringify({
+			catalog: catalogDigest(this.catalog),
+			phase: this.options.phase,
+			principal: this.options.identity.principal,
+			session: this.options.identity.session,
+			turn: this.options.identity.turn,
+			authority: this.options.identity.authority,
+			policyVersion: this.options.policyVersion,
+			runtime: this.options.runtime,
+			maturity: this.options.allowedMaturity ?? ["stable"],
+			maxDeclarationBytes: this.options.maxDeclarationBytes ?? CODE_MODE_MAX_DECLARATION_BYTES,
+			policyFacts: policyFacts.sort(compareStrings),
+			bindings: generated.map((item) => item.descriptor),
+		});
+		const cached = generatedSurfaceCache.get(cacheKey);
+		const declaration = cached
+			? { declarations: cached.declarations, truncated: cached.truncated }
+			: declarationsFor(generated, this.options.maxDeclarationBytes ?? CODE_MODE_MAX_DECLARATION_BYTES);
+		const surface: CodeModeGeneratedSurface = {
+			contractVersion: CODE_MODE_CONTRACT_VERSION,
+			catalogVersion: this.catalog.version,
+			phase: this.options.phase,
+			bindings: generated,
+			unavailable: unavailable.sort((left, right) =>
+				compareStrings(`${left.kind}:${left.id}`, `${right.kind}:${right.id}`),
+			),
+			declarations: declaration.declarations,
+			prompt: declaration.declarations,
+			truncated: declaration.truncated,
+			cacheKey,
+		};
+		if (!cached) {
+			generatedSurfaceCache.set(cacheKey, {
+				declarations: surface.declarations,
+				prompt: surface.prompt,
+				truncated: surface.truncated,
+			});
+		}
+		const workflows: Record<string, CodeModeBindingHandle<unknown, unknown>> = {};
+		const capabilities: Record<string, CodeModeBindingHandle<unknown, unknown>> = {};
+		for (const binding of generated) {
+			const handle: CodeModeBindingHandle<unknown, unknown> = {
+				name: binding.stableName,
+				kind: binding.descriptor.kind,
+				call: binding.invoke,
+			};
+			(binding.descriptor.kind === "workflow" ? workflows : capabilities)[binding.stableName] = handle;
+		}
+		return { workflows, capabilities, surface };
+	}
+
+	async invoke(stableName: string, input: unknown): Promise<unknown> {
+		return (await this.invokeWithProvenance(stableName, input)).value;
+	}
+
+	async invokeWithProvenance(stableName: string, input: unknown): Promise<CodeModeBindingExecutionResult<unknown>> {
+		const entry = this.names.get(stableName);
+		if (!entry) throw new CodeModeBindingError("BINDING_UNAVAILABLE", "Code Mode binding is unavailable");
+		const reason = staticUnavailable(entry, this.options);
+		if (reason)
+			throw new CodeModeBindingError("BINDING_UNAVAILABLE", "Code Mode binding is unavailable", entry.descriptor.id);
+		let validatedInput: unknown;
+		try {
+			validatedInput = entry.input.parse(input);
+		} catch (error) {
+			if (error instanceof z.ZodError) throw pathError(error, "INPUT_INVALID", entry.descriptor.id);
+			throw error;
+		}
+		const { request, result, authority } = await evaluatePolicy({
+			...this.options,
+			catalogVersion: this.catalog.version,
+			binding: entry,
+		});
+		if (result.decision.kind === "deny")
+			throw new CodeModeBindingError("POLICY_DENIED", "Code Mode binding denied by policy", entry.descriptor.id);
+		if (result.decision.kind === "ask")
+			throw new CodeModeBindingError(
+				"POLICY_APPROVAL_REQUIRED",
+				"Code Mode binding requires approval",
+				entry.descriptor.id,
+			);
+		if (result.decision.kind === "require-sandbox")
+			throw new CodeModeBindingError(
+				"SANDBOX_REQUIRED",
+				"Code Mode binding requires a sandbox attestation",
+				entry.descriptor.id,
+			);
+		const provenance = {
+			contractVersion: CODE_MODE_CONTRACT_VERSION,
+			kind: entry.descriptor.kind,
+			bindingId: entry.descriptor.id,
+			bindingVersion: entry.descriptor.version,
+			catalogVersion: this.catalog.version,
+			manifestDigest: descriptorManifestDigest(entry),
+			policyDecisionId: result.decision.id,
+			principal: this.options.identity.principal,
+			session: this.options.identity.session,
+			turn: this.options.identity.turn,
+			workflow: this.options.identity.workflow,
+			effects: entry.descriptor.effects,
+			capabilities: entry.descriptor.capabilities,
+		} as const;
+		const context: CodeModeCallContext = { request, policy: result, authority, provenance };
+		const handler =
+			this.options.handlers?.[entry.descriptor.kind] ??
+			((value: unknown, callContext: CodeModeCallContext) =>
+				entry.definition.invoke(entry.input.parse(value), callContext));
+		if (!handler)
+			throw new CodeModeBindingError(
+				"BINDING_UNAVAILABLE",
+				"Code Mode binding handler is unavailable",
+				entry.descriptor.id,
+			);
+		let output: unknown;
+		try {
+			output = await handler(validatedInput, context);
+		} catch (error) {
+			if (error instanceof CodeModeBindingError) throw error;
+			throw new CodeModeBindingError("OUTPUT_INVALID", "Code Mode binding execution failed", entry.descriptor.id);
+		}
+		return {
+			value: canonicalOutput(output, entry.output, entry.descriptor.outputKind, entry.descriptor.id),
+			provenance,
+		};
+	}
+}
+
+export async function generateCodeModeBindings<TEntries extends readonly unknown[]>(
+	catalog: CodeModeCatalog<TEntries>,
+	options: CodeModeBindingRegistryOptions,
+): Promise<CodeModeGeneratedBindings> {
+	return new CodeModeBindingRegistry(catalog, options).generate();
+}
+
+export function codeModeBindingHandle<TInput, TOutput>(
+	registry: CodeModeBindingRegistry,
+	name: string,
+	kind: CodeModeBindingKind = "capability",
+): CodeModeBindingHandle<TInput, TOutput> {
+	return { name, kind, call: (input) => registry.invoke(name, input) as Promise<TOutput> };
+}
+
+export {
+	CODE_MODE_CONTRACT_VERSION,
+	CODE_MODE_MAX_BINDINGS,
+	CODE_MODE_MAX_DECLARATION_BYTES,
+	CODE_MODE_MAX_DESCRIPTION_LENGTH,
+	CODE_MODE_MAX_ID_LENGTH,
+	CODE_MODE_MAX_SCHEMA_BYTES,
+	CODE_MODE_OUTPUT_KINDS,
+	CODE_MODE_PHASES,
+	CodeModeBindingError,
+	bindingName,
+	capabilityManifestDigest,
+	catalogDigest,
+	effectiveAuthority,
+	parseCodeModeDescriptor,
+	policyDecisionAuthority,
+	policyRequestFor,
+	serializeCodeModeDescriptor,
+	serializeCodeModeSurface,
+	stableStringify,
+} from "./binding-contracts";
