@@ -284,6 +284,7 @@
         "typescript": "^5.8.3",
         "vitest": "^4.0.18",
       },
+    },
     "packages/capabilities": {
       "name": "@blokjs/capabilities",
       "version": "2.1.0",
