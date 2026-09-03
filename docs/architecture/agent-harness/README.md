@@ -121,6 +121,9 @@ documented in [h1-02-reference-workflow.md](h1-02-reference-workflow.md).
 The H1-03 shared profile and binding contract is documented in
 [h1-03-enforcement-profiles-and-binding.md](h1-03-enforcement-profiles-and-binding.md).
 
+The H3-02 Git/worktree and bounded process capability contract is documented in
+[h3-02-git-and-process-capabilities.md](h3-02-git-and-process-capabilities.md).
+
 - [GitHub Project 11: Blok AI Harness & Enforced Workflows](https://github.com/users/well-prado/projects/11)
 - [Epic #913: Blok coding harness and enforced agent workflows](https://github.com/well-prado/blok/issues/913)
 
