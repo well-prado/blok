@@ -358,6 +358,19 @@
         "@blokjs/helper",
       ],
     },
+    "packages/code-mode": {
+      "name": "@blokjs/code-mode",
+      "version": "2.1.0",
+      "dependencies": {
+        "@blokjs/shared": "^2.1.0",
+        "typescript": "^5.8.3",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "vitest": "^4.0.18",
+      },
+    },
     "packages/control-plane": {
       "name": "@blokjs/control-plane",
       "version": "2.1.0",
@@ -1051,6 +1064,8 @@
     "@blokjs/capabilities": ["@blokjs/capabilities@workspace:packages/capabilities"],
 
     "@blokjs/client": ["@blokjs/client@workspace:packages/client"],
+
+    "@blokjs/code-mode": ["@blokjs/code-mode@workspace:packages/code-mode"],
 
     "@blokjs/control-plane": ["@blokjs/control-plane@workspace:packages/control-plane"],
 

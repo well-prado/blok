@@ -1,0 +1,55 @@
+# `@blokjs/code-mode`
+
+`@blokjs/code-mode` executes one ephemeral model-authored TypeScript function
+body in a fresh worker and VM context. The body receives only `input`, the
+phase-scoped `bindings` object, and the bounded `log`/`emit` functions. It does
+not receive a Node global, module loader, filesystem, process, network,
+environment, secret, or Blok mapper context.
+
+Every binding has a Zod input/output schema, an agent-compatible capability
+manifest, and a shared `CapabilityAuthority`. Before a handler runs, the
+runtime checks the parent authority, invokes the existing
+`CapabilityAuthorizationPort`, validates the returned decision/scope, and only
+then invokes the trusted host adapter. Nested host calls use that same path.
+
+The worker is terminated on cancellation, timeout, output/call/parallelism
+failure, host shutdown, or a memory-limit exit. Worker resource limits are a
+containment aid; the AST validator is mandatory and rejects imports, module
+loading, process/filesystem/network/environment access, dynamic code loading,
+constructors, regular expressions, timers, nondeterministic globals, and Blok
+expression escape hatches. This is a constrained runtime, not a general
+JavaScript shell.
+
+```ts
+const result = await executeCodeMode({
+	 source: `
+		const answer = await bindings.lookup({ key: input.key });
+		log({ lookedUp: input.key });
+		return answer;
+	`,
+	 input: { key: "alpha" },
+	 bindings: [lookupBinding],
+	 policy: { authorization, policyVersion: "policy-v1", context: agentPolicyContext },
+	 budgets: { maxCalls: 4, maxParallelism: 2 },
+});
+```
+
+## Architecture conformance
+
+This package is governed by:
+
+- `docs/architecture/agent-harness/adr/0001-layered-harness-boundaries.md`
+- `docs/architecture/agent-harness/adr/0003-capabilities-effects-and-policy.md`
+- `docs/architecture/agent-harness/adr/0004-constrained-code-mode.md`
+- `docs/architecture/agent-harness/adr/0005-event-sourced-agent-sessions.md`
+- `docs/architecture/agent-harness/adr/0007-graph-provider-and-tetrix.md`
+- `docs/architecture/agent-harness/adr/0008-parallel-and-child-permissions.md`
+- `docs/architecture/agent-harness/adr/0010-security-and-behavioral-conformance.md`
+
+The implementation note is
+`docs/architecture/agent-harness/h2-04-code-mode-runtime.md`.
+
+Conformance evidence is in `tests/code-mode.test.ts`: accepted typed bodies,
+forbidden construct rejection, absent ambient APIs, policy-before-handler
+ordering, schema normalization, independent call/parallel/output/time/memory
+bounds, cancellation cleanup, and nested authority non-escalation.
