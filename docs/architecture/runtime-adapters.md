@@ -9,7 +9,7 @@ The runtime adapter system is the foundation of Blok's multi-language workflow e
 
 ## Overview of the Adapter Pattern
 
-Blok uses the **Strategy pattern** to abstract runtime execution behind a common interface. Each language runtime provides its own adapter that implements the `RuntimeAdapter` interface, while the `RuntimeRegistry` serves as a central lookup for all registered adapters.
+Blok uses the **Strategy pattern** to abstract runtime execution behind a common interface. Each language runtime provides its own adapter that implements the `RuntimeAdapter` interface, while the `RuntimeRegistry` serves as a central lookup for all registered adapters. For the JavaScript targets, the orchestrator host and node execution target are separate axes; see [ADR 0016](./adr-0016-javascript-runtimes.md).
 
 This architecture enables:
 
@@ -26,6 +26,7 @@ The core abstraction is a two-method interface defined in `core/runner/src/adapt
 export type RuntimeKind =
   | "nodejs"
   | "bun"
+  | "deno"
   | "python3"
   | "go"
   | "java"
@@ -157,6 +158,22 @@ const result = await adapter.execute(node, ctx);
 **Performance characteristics:**
 - In-process (Bun host): sub-millisecond overhead
 - Subprocess (Node.js host): 50-200ms (process spawn + serialize)
+
+The subprocess fallback is retained for compatibility but is not a production
+worker topology. New deployments must use the persistent worker design in ADR
+0016 before selecting Bun out of process.
+
+### Deno runtime target
+
+**Project target:** `deno`
+**Step kind:** `runtime.deno`
+**Communication:** Persistent worker/sidecar (planned)
+
+Deno is a first-class schema and editor target. It is intentionally not
+silently implemented by the Node.js adapter: until the persistent Deno worker
+is registered, a `runtime.deno` step fails at resolution with a clear missing
+adapter diagnostic. Deno permissions will be derived from the shared capability
+manifest; unrestricted production permissions are not supported by default.
 
 ### DockerRuntimeAdapter
 

@@ -5,7 +5,7 @@ description: "Guide for migrating from single-runtime (Node.js only) to multi-ru
 
 # Migration: Single Runtime to Multi-Runtime
 
-This guide walks you through enabling multi-runtime support in your Blok workflows. By the end, you will be able to run workflow steps in Node.js, Python, Bun, Docker containers, or WebAssembly -- all within a single workflow.
+This guide walks you through enabling multi-runtime support in your Blok workflows. JavaScript projects now have an explicit, independent target: Node.js (`node`), Bun (`bun`), or Deno (`deno`). Cross-language steps can still use Python, Docker containers, or WebAssembly within a single workflow. See [ADR 0016](../architecture/adr-0016-javascript-runtimes.md) for the host/target and worker rules.
 
 ## Understanding Runtime Adapters
 
@@ -50,6 +50,11 @@ Without any `runtime` field, all steps run as `nodejs` in the same process:
 
 Both steps execute in-process via the `NodeJsRuntimeAdapter`. This is the fastest path and requires no additional infrastructure.
 
+At the project level, the equivalent explicit configuration is `"runtime":
+"node"`. The separate `"packageManager"` field controls dependency
+installation and does not change the execution target. Existing projects may
+omit both fields and retain the Node.js default.
+
 ## Adding the Runtime Field to Workflow JSON
 
 To use a different runtime for a step, add the `runtime` field:
@@ -87,11 +92,18 @@ In this example:
 
 | Runtime | Value | Communication | Requirements |
 |---|---|---|---|
-| Node.js | `nodejs` | In-process | None (default) |
-| Bun | `bun` | In-process or subprocess | Bun installed (auto-detected) |
+| Node.js | project `node`, step `runtime.nodejs` | In-process | None (default) |
+| Bun | project `bun`, step `runtime.bun` | Persistent worker (planned) | Bun worker configured |
+| Deno | project `deno`, step `runtime.deno` | Persistent worker (planned) | Deno worker + declared permissions |
 | Python 3 | `python3` | gRPC | Python gRPC server running |
 | Docker | `docker` | HTTP | Docker daemon running |
 | WebAssembly | `wasm` | In-process (WASM API) | `.wasm` module file |
+
+The compatibility aliases `nodejs`, `typescript`, and `ts` normalize to Node.js
+with a deprecation diagnostic. They do not select Bun or Deno. The current
+contract slice recognizes `runtime.bun` and `runtime.deno` but refuses a missing
+worker rather than falling back to Node.js; persistent worker support is a
+subsequent implementation slice.
 
 ## Configuring the Python 3 Runtime
 

@@ -79,6 +79,30 @@ import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
 import NodeBase from "./NodeBase";
 export {
+	JAVASCRIPT_RUNTIMES,
+	JavaScriptRuntimeSchema,
+	JavaScriptRuntimeSelectionSchema,
+	PackageManagerSchema,
+	PACKAGE_MANAGERS,
+	RUNTIME_KINDS,
+	RuntimeCapabilityManifestSchema,
+	RuntimeKindInputSchema,
+	RuntimeKindSchema,
+	normalizeJavaScriptRuntime,
+	normalizeRuntimeKind,
+	runtimeKindForJavaScriptRuntime,
+} from "./RuntimeContracts";
+export type {
+	JavaScriptRuntime,
+	JavaScriptRuntimeSelection,
+	PackageManager,
+	RuntimeCapabilityManifest,
+	RuntimeDiagnostic,
+	RuntimeKind,
+	RuntimeKindInput,
+	RuntimeNormalization,
+} from "./RuntimeContracts";
+export {
 	CapabilityAuthorityError,
 	CapabilityAuthoritySchema,
 	CapabilityFragmentValueSchema,

@@ -1,22 +1,12 @@
 import type { Context } from "@blokjs/shared";
+import type { RuntimeKind as SharedRuntimeKind } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 
 /**
  * RuntimeKind represents all supported runtime environments
  */
-export type RuntimeKind =
-	| "nodejs"
-	| "bun"
-	| "python3"
-	| "go"
-	| "java"
-	| "rust"
-	| "php"
-	| "csharp"
-	| "ruby"
-	| "docker"
-	| "wasm"
-	| "wasi";
+/** Canonical runtime kinds shared with the workflow schemas. */
+export type RuntimeKind = SharedRuntimeKind;
 
 /**
  * Wire transport an adapter uses to reach an SDK runtime. `module` is for

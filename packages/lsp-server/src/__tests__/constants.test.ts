@@ -46,6 +46,8 @@ describe("LSP Constants", () => {
 			expect(VALID_STEP_TYPES).toContain("local");
 			expect(VALID_STEP_TYPES).toContain("module");
 			expect(VALID_STEP_TYPES).toContain("runtime.nodejs");
+			expect(VALID_STEP_TYPES).toContain("runtime.bun");
+			expect(VALID_STEP_TYPES).toContain("runtime.deno");
 			expect(VALID_STEP_TYPES).toContain("runtime.python3");
 			expect(VALID_STEP_TYPES).toContain("runtime.go");
 			expect(VALID_STEP_TYPES).toContain("runtime.java");
@@ -54,10 +56,12 @@ describe("LSP Constants", () => {
 	});
 
 	describe("VALID_RUNTIMES", () => {
-		it("should include all 12 runtime kinds", () => {
-			expect(VALID_RUNTIMES).toHaveLength(12);
+		it("should include the project targets and all runtime kinds", () => {
+			expect(VALID_RUNTIMES).toHaveLength(14);
+			expect(VALID_RUNTIMES).toContain("node");
 			expect(VALID_RUNTIMES).toContain("nodejs");
 			expect(VALID_RUNTIMES).toContain("bun");
+			expect(VALID_RUNTIMES).toContain("deno");
 			expect(VALID_RUNTIMES).toContain("python3");
 			expect(VALID_RUNTIMES).toContain("go");
 			expect(VALID_RUNTIMES).toContain("java");

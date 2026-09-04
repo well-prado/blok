@@ -24,6 +24,13 @@ const SUPPORTED_RUNTIMES: RuntimeInfo[] = [
 		languages: ["TypeScript", "JavaScript"],
 	},
 	{
+		name: "Deno",
+		kind: "deno",
+		protocol: "Worker (planned)",
+		status: "Planned",
+		languages: ["TypeScript", "JavaScript"],
+	},
+	{
 		name: "Python 3",
 		kind: "python3",
 		protocol: "gRPC",

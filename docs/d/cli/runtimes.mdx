@@ -4,16 +4,28 @@ description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, R
 icon: "layer-group"
 ---
 
-Blok runs workflow steps across in-process Node/TypeScript, seven language
-gRPC sidecars, and the distinct `runtime.wasi` Component Model boundary. The
-WASI boundary is contract-first in the current release; its long-lived
-Rust/Wasmtime host is not bundled yet.
+Blok runs workflow steps across JavaScript targets (**Node.js, Bun, and Deno**)
+plus the supported language runtimes, including the distinct `runtime.wasi`
+Component Model boundary. JavaScript target selection is a project setting; it
+is separate from the package manager and from the language sidecars managed by
+the commands below. The WASI boundary is contract-first in the current
+release; its long-lived Rust/Wasmtime host is not bundled yet.
 
 You choose which runtimes you want when you scaffold a project (`create project --runtimes go,python3`). But you don't have to decide everything up front: the **`blokctl runtime`** commands let you **add or remove a language at any time**, in place, on a project that already exists.
 
 <Note>
-**Node / TypeScript is always available.** It runs in the same process as your triggers, so there's nothing to add or remove. The `runtime` commands manage the seven *sidecar* languages: `go`, `rust`, `java`, `csharp`, `php`, `ruby`, `python3`.
+Existing projects without an explicit setting continue to target Node.js. The
+canonical project values are `node`, `bun`, and `deno`; the canonical workflow
+step kinds are `runtime.nodejs`, `runtime.bun`, and `runtime.deno`. The runtime
+target does not select npm, pnpm, Yarn, or Bun as a package manager.
 </Note>
+
+<Warning>
+The persistent JavaScript worker implementation is being delivered in stages.
+This contract slice recognizes all three targets and refuses an unavailable
+target explicitly; it never silently executes a Bun or Deno selection with
+Node.js. See [ADR 0016](../../architecture/adr-0016-javascript-runtimes.md).
+</Warning>
 
 ## The commands at a glance
 

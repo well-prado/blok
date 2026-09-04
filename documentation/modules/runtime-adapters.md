@@ -22,7 +22,7 @@ interface RuntimeAdapter {
 }
 
 type RuntimeKind =
-  | "nodejs" | "bun" | "python3"
+  | "nodejs" | "bun" | "deno" | "python3"
   | "go" | "java" | "rust"
   | "php" | "csharp"
   | "docker" | "wasm";

@@ -123,7 +123,7 @@ const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
 	runtime: {
 		title: "Step Runtime",
 		description:
-			"Override the default runtime for this step. Available: nodejs, bun, python3, go, java, rust, php, csharp, ruby, docker, wasm.",
+			"Override the default runtime for this step. Available: nodejs, bun, deno, python3, go, java, rust, php, csharp, ruby, docker, wasm.",
 	},
 };
 

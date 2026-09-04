@@ -35,7 +35,7 @@ When you run `npx blokctl@latest create project`, the CLI will guide you through
 1. Assign a project name.
 2. Select a package manager: **npm** (default), yarn, pnpm, or bun.
 3. Select **triggers** to install — **HTTP** (default) plus, optionally, SSE, WebSocket, Pub/Sub, Worker, or Cron.
-4. Select **runtimes** — **NodeJS** is always included; add Python3, Go, Rust, Java, C#, PHP, or Ruby if you want cross-runtime nodes.
+4. The generated project records the Node.js target by default; add any cross-language sidecars (Python3, Go, Rust, Java, C#, PHP, or Ruby) when needed.
 5. Pick any **observability modules** to enable (all optional — see [`blokctl observability`](./observability.mdx)).
 6. **Install the examples? YES** (recommended for a first project — it adds runnable sample workflows and nodes beyond the one shipped by default).
 
@@ -45,7 +45,7 @@ When you run `npx blokctl@latest create project`, the CLI will guide you through
 | --- | --- |
 | `-n, --name <value>` | Project name |
 | `-T, --triggers <list>` | Comma-separated triggers (e.g. `http,worker`) |
-| `-r, --runtimes <list>` | Comma-separated runtimes (default `node`) |
+| `-r, --runtimes <list>` | Comma-separated language sidecars (default `node`) |
 | `-m, --package-manager <value>` | `npm` (default), `yarn`, `pnpm`, or `bun` |
 | `--pubsub-provider <value>` | Pub/Sub provider when `pubsub` is selected: `gcp` (default), `aws`, `azure` |
 | `--queue-provider <value>` | Queue provider when `queue`/`worker` is selected: `kafka` (default), `rabbitmq`, `sqs`, `redis` |

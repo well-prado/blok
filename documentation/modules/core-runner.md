@@ -153,7 +153,7 @@ defineNode<I, O>({
 
 ### RuntimeAdapter (adapter interface)
 - **File:** `adapters/RuntimeAdapter.ts`
-- **Types:** `RuntimeKind` = `nodejs | bun | python3 | go | java | rust | php | csharp | docker | wasm`
+- **Types:** `RuntimeKind` = `nodejs | bun | deno | python3 | go | java | rust | php | csharp | docker | wasm`
 - **Interface:** `{ kind: RuntimeKind; execute(node, ctx): Promise<ExecutionResult> }`
 
 ## Configuration

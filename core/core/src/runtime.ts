@@ -12,6 +12,9 @@
  */
 export * from "@blokjs/runner";
 export * from "@blokjs/shared";
+// Both barrels now expose the canonical RuntimeKind type. Keep the runner's
+// back-compat export explicit while the shared contract owns its schema.
+export type { RuntimeKind } from "@blokjs/runner";
 // Both barrels export a DIFFERENT `Trigger`: runner's is the public workflow
 // trigger-CONFIG type (`{ [k]: TriggerHttp }`), shared's is the internal base
 // CLASS only `TriggerBase` extends. Re-export runner's explicitly to resolve the

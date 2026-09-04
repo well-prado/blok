@@ -349,8 +349,12 @@ apply across trigger kinds when supported by their schema.
 
 ## Runtime Nodes
 
-TypeScript nodes run in-process. Other runtimes use `type: "runtime.<lang>"`
-through sidecars.
+JavaScript/TypeScript nodes target the project's explicit `runtime` selection
+(`node`, `bun`, or `deno`), while the orchestrator host is a separate concern.
+The canonical step kinds are `runtime.nodejs`, `runtime.bun`, and
+`runtime.deno`. Other runtimes use `type: "runtime.<lang>"` through sidecars.
+Legacy `nodejs`, `typescript`, and `ts` aliases normalize to Node.js with an
+actionable diagnostic; they never select Bun or Deno.
 
 | Runtime | Step type | Default port |
 |---|---|---|
@@ -361,6 +365,12 @@ through sidecars.
 | PHP | `runtime.php` | 9005 |
 | Ruby | `runtime.ruby` | 9006 |
 | Python3 | `runtime.python3` | 9007 |
+
+The JavaScript runtime contract, worker topology, package-manager separation,
+and permission boundary are governed by
+`docs/architecture/adr-0016-javascript-runtimes.md`. Deno is schema- and
+resolver-visible in the current contract slice; its persistent worker is a
+later implementation slice. No runtime may spawn a fresh process per step.
 
 Use generated runtime stubs when available, then pass the stub node value to
 `step()`.
