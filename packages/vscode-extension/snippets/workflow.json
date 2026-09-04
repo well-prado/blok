@@ -170,7 +170,7 @@
 			"{",
 			"\t\"name\": \"${1:step-name}\",",
 			"\t\"node\": \"${2:@blokjs/api-call}\",",
-			"\t\"type\": \"${3|module,local,runtime.nodejs,runtime.python3,runtime.go,runtime.java,runtime.rust|}\"",
+			"\t\"type\": \"${3|module,local,runtime.nodejs,runtime.bun,runtime.deno,runtime.python3,runtime.go,runtime.java,runtime.rust|}\"",
 			"}"
 		],
 		"description": "Add a step to a Blok workflow"

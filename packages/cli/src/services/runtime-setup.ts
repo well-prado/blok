@@ -1,6 +1,7 @@
 import child_process from "node:child_process";
 import path from "node:path";
 import util from "node:util";
+import { type JavaScriptRuntime, type PackageManager, normalizeJavaScriptRuntime } from "@blokjs/shared";
 import fsExtra from "fs-extra";
 import type { RuntimeInfo } from "./runtime-detector.js";
 import { detectRuntimeVersion } from "./runtime-detector.js";
@@ -93,6 +94,10 @@ export interface ObservabilityModuleConfig {
 }
 
 export interface ProjectConfig {
+	/** Canonical JavaScript execution target. Omitted means the legacy Node default. */
+	runtime?: JavaScriptRuntime;
+	/** Dependency manager policy; deliberately independent from `runtime`. */
+	packageManager?: PackageManager;
 	triggers?: Record<string, TriggerConfig>;
 	runtimes?: Record<string, RuntimeConfig>;
 	/** Opt-in observability modules enabled in this project (keyed by module id). */
@@ -101,6 +106,17 @@ export interface ProjectConfig {
 
 // Backwards compatibility alias
 export type ProjectRuntimeConfig = ProjectConfig;
+
+export type ProjectConfigInput = Omit<ProjectConfig, "runtime"> & { runtime?: string };
+
+/** Normalize project config aliases without changing unrelated user fields. */
+export function normalizeProjectConfig(config: ProjectConfigInput): ProjectConfig {
+	const { runtime, ...rest } = config;
+	if (!runtime) return rest;
+	const normalized = normalizeJavaScriptRuntime(runtime);
+	if (normalized.diagnostic) console.warn(`[blok] ${normalized.diagnostic.message}`);
+	return { ...rest, runtime: normalized.runtime };
+}
 
 /**
  * Setup a single runtime SDK in the project directory.
@@ -753,8 +769,10 @@ export function writeProjectConfig(
 	runtimeConfigs: RuntimeConfig[],
 	triggerConfigs?: TriggerConfig[],
 	observabilityConfigs?: Record<string, ObservabilityModuleConfig>,
+	javascriptRuntime: JavaScriptRuntime = "node",
+	packageManager?: PackageManager,
 ): void {
-	const config: ProjectConfig = {};
+	const config: ProjectConfig = { runtime: javascriptRuntime, ...(packageManager ? { packageManager } : {}) };
 
 	if (runtimeConfigs.length > 0) {
 		config.runtimes = {};
@@ -788,7 +806,7 @@ export function readProjectConfig(projectDir: string): ProjectConfig | null {
 	if (!fsExtra.existsSync(configPath)) {
 		return null;
 	}
-	return JSON.parse(fsExtra.readFileSync(configPath, "utf8"));
+	return normalizeProjectConfig(JSON.parse(fsExtra.readFileSync(configPath, "utf8")) as ProjectConfigInput);
 }
 
 /**

@@ -3,6 +3,7 @@ import {
 	JoinContractSchema,
 	type RetryResumeIdempotencyContract,
 	RetryResumeIdempotencyContractSchema,
+	RuntimeKindSchema,
 	WasiComponentManifestSchema,
 } from "@blokjs/shared";
 import { z } from "zod";
@@ -20,28 +21,14 @@ import {
 } from "./AgentContracts";
 import { DurationSchema, ResolvedKeySchema, type StructuralRefValue, StructuralRefValueSchema } from "./TriggerOpts";
 
+export { RuntimeKindSchema } from "@blokjs/shared";
+export type { RuntimeKind } from "@blokjs/shared";
+
 /**
  * RuntimeKind represents all supported runtime environments.
  *
  * Synced with `@blokjs/runner` `RuntimeKind` type.
  */
-export const RuntimeKindSchema = z.enum([
-	"nodejs",
-	"bun",
-	"python3",
-	"go",
-	"java",
-	"rust",
-	"php",
-	"csharp",
-	"ruby",
-	"docker",
-	"wasm",
-	"wasi",
-]);
-
-export type RuntimeKind = z.infer<typeof RuntimeKindSchema>;
-
 /**
  * Node type enum — includes both legacy types and new runtime types.
  */
@@ -50,9 +37,12 @@ export const NodeTypeSchema = z.enum([
 	"module",
 	// Legacy runtime types (backward compatible)
 	"runtime.python3",
+	"runtime.node",
+	"runtime.typescript",
 	// New runtime types
 	"runtime.nodejs",
 	"runtime.bun",
+	"runtime.deno",
 	"runtime.go",
 	"runtime.java",
 	"runtime.rust",

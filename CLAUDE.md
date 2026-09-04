@@ -58,6 +58,12 @@ The node-side `ctx` ABI is kept for runtime concerns: `ctx.request`,
 Never write `ctx.state` or `ctx.vars` inside a node. Return output and let the
 runner persist it.
 
+JavaScript/TypeScript execution targets are selected independently from the
+orchestrator host and package manager: project values are `node`, `bun`, and
+`deno`, with step kinds `runtime.nodejs`, `runtime.bun`, and `runtime.deno`.
+Legacy `nodejs`/`typescript`/`ts` aliases normalize to Node.js with a
+diagnostic. See `docs/architecture/adr-0016-javascript-runtimes.md`.
+
 Nodes and workflows may declare `capabilityManifest` v1 metadata. Declare only
 the effects and authority the implementation actually uses; secret entries are
 opaque reference names, never values. Missing metadata preserves ordinary

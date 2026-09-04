@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import util from "node:util";
+import { PackageManagerSchema } from "@blokjs/shared";
 import * as p from "@clack/prompts";
 import type { OptionValues } from "commander";
 import figlet from "figlet";
@@ -1281,7 +1282,14 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Write .blok/config.json with triggers, runtimes, and observability modules.
 		const obsConfigMap = Object.keys(obsSelection.configMap).length > 0 ? obsSelection.configMap : undefined;
-		writeProjectConfig(dirPath, runtimeConfigs, spawnedTriggerConfigs, obsConfigMap);
+		writeProjectConfig(
+			dirPath,
+			runtimeConfigs,
+			spawnedTriggerConfigs,
+			obsConfigMap,
+			"node",
+			PackageManagerSchema.parse(selectedManager),
+		);
 
 		// Append the observability env block (fenced, managed) to .env.local.
 		if (obsSelection.envBlocks.some((b) => b.trim())) {

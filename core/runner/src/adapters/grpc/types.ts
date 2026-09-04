@@ -105,6 +105,7 @@ export const GRPC_DEFAULTS = {
 export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
 	nodejs: 0, // in-process; no port
 	bun: 0,
+	deno: 0, // persistent worker target; no sidecar port until registered
 	go: 10001,
 	rust: 10002,
 	java: 10003,

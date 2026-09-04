@@ -163,13 +163,15 @@ function createStepTypeCompletions(): CompletionItem[] {
 		{ label: "module", docs: "Node from npm package (e.g., @blokjs/api-call)", priority: "1" },
 		{ label: "local", docs: "Node defined locally in the project (e.g., ./nodes/my-node)", priority: "2" },
 		{ label: "runtime.nodejs", docs: "Execute using Node.js runtime adapter", priority: "3" },
-		{ label: "runtime.python3", docs: "Execute using Python 3 runtime adapter (via gRPC)", priority: "4" },
-		{ label: "runtime.go", docs: "Execute using Go runtime adapter (Docker container)", priority: "5" },
-		{ label: "runtime.java", docs: "Execute using Java runtime adapter (Docker container)", priority: "6" },
-		{ label: "runtime.rust", docs: "Execute using Rust runtime adapter (Docker/WASM)", priority: "7" },
-		{ label: "runtime.php", docs: "Execute using PHP runtime adapter (Docker container)", priority: "8" },
-		{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "9" },
-		{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "a" },
+		{ label: "runtime.bun", docs: "Execute using Bun runtime worker", priority: "4" },
+		{ label: "runtime.deno", docs: "Execute using Deno runtime worker", priority: "5" },
+		{ label: "runtime.python3", docs: "Execute using Python 3 runtime adapter (via gRPC)", priority: "6" },
+		{ label: "runtime.go", docs: "Execute using Go runtime adapter (Docker container)", priority: "7" },
+		{ label: "runtime.java", docs: "Execute using Java runtime adapter (Docker container)", priority: "8" },
+		{ label: "runtime.rust", docs: "Execute using Rust runtime adapter (Docker/WASM)", priority: "9" },
+		{ label: "runtime.php", docs: "Execute using PHP runtime adapter (Docker container)", priority: "a" },
+		{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "b" },
+		{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "c" },
 	];
 
 	return types.map((t) => ({
@@ -182,8 +184,10 @@ function createStepTypeCompletions(): CompletionItem[] {
 
 function createRuntimeCompletions(): CompletionItem[] {
 	const runtimes = [
-		{ label: "nodejs", docs: "Node.js in-process execution (fastest)" },
+		{ label: "node", docs: "Project JavaScript target: Node.js (default)" },
+		{ label: "nodejs", docs: "Legacy project alias for node (deprecated)" },
 		{ label: "bun", docs: "Bun runtime execution" },
+		{ label: "deno", docs: "Deno runtime execution" },
 		{ label: "python3", docs: "Python 3 via gRPC protocol" },
 		{ label: "go", docs: "Go via Docker container" },
 		{ label: "java", docs: "Java via Docker container" },

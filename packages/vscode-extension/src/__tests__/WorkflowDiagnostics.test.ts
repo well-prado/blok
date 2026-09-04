@@ -443,6 +443,8 @@ describe("WorkflowDiagnostics", () => {
 				"local",
 				"module",
 				"runtime.nodejs",
+				"runtime.bun",
+				"runtime.deno",
 				"runtime.python3",
 				"runtime.go",
 				"runtime.java",
@@ -492,6 +494,7 @@ describe("WorkflowDiagnostics", () => {
 			const validRuntimes = [
 				"nodejs",
 				"bun",
+				"deno",
 				"python3",
 				"go",
 				"java",

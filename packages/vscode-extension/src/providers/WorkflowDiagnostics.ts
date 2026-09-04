@@ -17,6 +17,8 @@ const VALID_STEP_TYPES = [
 	"local",
 	"module",
 	"runtime.nodejs",
+	"runtime.bun",
+	"runtime.deno",
 	"runtime.python3",
 	"runtime.go",
 	"runtime.java",
@@ -24,11 +26,14 @@ const VALID_STEP_TYPES = [
 	"runtime.php",
 	"runtime.csharp",
 	"runtime.ruby",
+	"runtime.wasi",
 ];
 
 const VALID_RUNTIMES = [
+	"node",
 	"nodejs",
 	"bun",
+	"deno",
 	"python3",
 	"go",
 	"java",

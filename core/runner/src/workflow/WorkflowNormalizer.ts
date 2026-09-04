@@ -5,6 +5,7 @@ import {
 	isStructuralRef,
 	isStructuralTpl,
 	lowerRefs,
+	normalizeRuntimeKind,
 	parseCapabilityManifest,
 	parseJoinContract,
 	parseRetryResumeIdempotencyContract,
@@ -57,6 +58,7 @@ const IF_ELSE_NODE_REF = "@blokjs/if-else";
 
 let _wildcardWarnedFiles = new Set<string>();
 let _legacyExprWarnedFiles = new Set<string>();
+let _runtimeAliasWarnedFiles = new Set<string>();
 
 interface RetryConfig {
 	maxAttempts: number;
@@ -419,7 +421,7 @@ function normalizeRegularStep(
 
 	// Type — explicit `type` wins; otherwise inferred from the node ref.
 	const explicitType = pickString(step.type);
-	const type = explicitType ?? inferStepType(nodeRef);
+	const type = normalizeStepType(explicitType ?? inferStepType(nodeRef), sourcePathForWarning(step, index));
 
 	// Inputs — v2 inlines on the step; v1 lives at workflow.nodes[name].inputs.
 	const inlineInputs = isPlainObject(step.inputs) ? (step.inputs as Record<string, unknown>) : null;
@@ -1188,6 +1190,27 @@ function inferStepType(nodeRef: string): string {
 	return "module";
 }
 
+function sourcePathForWarning(step: Record<string, unknown>, index: number): string {
+	const id = pickString(step.id) ?? pickString(step.name);
+	return id ? `step:${id}` : `step-index:${index}`;
+}
+
+/** Canonicalize runtime step aliases before Configuration resolves node types. */
+function normalizeStepType(type: string, warningKey: string): string {
+	if (!type.startsWith("runtime.")) return type;
+	const rawKind = type.slice("runtime.".length);
+	try {
+		const normalized = normalizeRuntimeKind(rawKind);
+		if (normalized.diagnostic && !_runtimeAliasWarnedFiles.has(warningKey)) {
+			_runtimeAliasWarnedFiles.add(warningKey);
+			console.warn(`[blok] ${normalized.diagnostic.message} (at ${warningKey}).`);
+		}
+		return `runtime.${normalized.kind}`;
+	} catch {
+		return type;
+	}
+}
+
 function warnWildcardOnce(sourcePath?: string): void {
 	const key = sourcePath ?? "<unknown>";
 	if (_wildcardWarnedFiles.has(key)) return;
@@ -1372,6 +1395,11 @@ export function _resetWildcardWarningCache(): void {
  */
 export function _resetLegacyExprWarningCache(): void {
 	_legacyExprWarnedFiles = new Set<string>();
+}
+
+/** @internal */
+export function _resetRuntimeAliasWarningCache(): void {
+	_runtimeAliasWarnedFiles = new Set<string>();
 }
 
 /**

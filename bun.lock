@@ -310,8 +310,9 @@
       },
       "dependencies": {
         "@ai-sdk/openai": "^4.0.19",
-        "@blokjs/helper": "^1.7.0",
-        "@blokjs/runner": "^1.7.0",
+        "@blokjs/helper": "^2.1.0",
+        "@blokjs/runner": "^2.1.0",
+        "@blokjs/shared": "^2.1.0",
         "@clack/prompts": "^1.0.0",
         "ai": "^7.0.36",
         "better-sqlite3": "^12.6.2",

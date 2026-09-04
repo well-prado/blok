@@ -1,3 +1,4 @@
+import { normalizeRuntimeKind } from "@blokjs/shared";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 
 /**
@@ -40,24 +41,38 @@ export class RuntimeRegistry {
 	 * @throws Error if adapter with same kind is already registered
 	 */
 	public register(adapter: RuntimeAdapter): void {
-		if (this.adapters.has(adapter.kind)) {
-			throw new Error(`Runtime adapter for '${adapter.kind}' is already registered`);
+		const normalized = normalizeRuntimeKind(adapter.kind);
+		if (normalized.diagnostic) {
+			throw new Error(
+				`Runtime adapter kind '${adapter.kind}' is an alias; register the canonical '${normalized.kind}' adapter instead`,
+			);
 		}
-		this.adapters.set(adapter.kind, adapter);
+		if (this.adapters.has(normalized.kind)) {
+			throw new Error(`Runtime adapter for '${normalized.kind}' is already registered`);
+		}
+		this.adapters.set(normalized.kind, adapter);
 	}
 
 	/**
-	 * Get a runtime adapter by kind
+	 * Get a runtime adapter by canonical kind or a compatibility alias.
 	 *
 	 * @param kind - The runtime kind (nodejs, python3, go, etc.)
 	 * @returns The runtime adapter for the specified kind
 	 * @throws Error if no adapter is registered for the specified kind
 	 */
-	public get(kind: RuntimeKind): RuntimeAdapter {
-		const adapter = this.adapters.get(kind);
-		if (!adapter) {
+	public get(kind: string): RuntimeAdapter {
+		let canonical: RuntimeKind;
+		try {
+			canonical = normalizeRuntimeKind(kind).kind;
+		} catch {
 			throw new Error(
 				`No runtime adapter registered for '${kind}'. Available runtimes: ${Array.from(this.adapters.keys()).join(", ")}`,
+			);
+		}
+		const adapter = this.adapters.get(canonical);
+		if (!adapter) {
+			throw new Error(
+				`No runtime adapter registered for '${kind}' (canonical '${canonical}'). Available runtimes: ${Array.from(this.adapters.keys()).join(", ")}`,
 			);
 		}
 		return adapter;
@@ -69,8 +84,17 @@ export class RuntimeRegistry {
 	 * @param kind - The runtime kind to check
 	 * @returns true if adapter is registered, false otherwise
 	 */
-	public has(kind: RuntimeKind): boolean {
-		return this.adapters.has(kind);
+	public has(kind: string): boolean {
+		try {
+			return this.adapters.has(normalizeRuntimeKind(kind).kind);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Return the canonical kind and any compatibility diagnostic for input. */
+	public normalize(kind: string): ReturnType<typeof normalizeRuntimeKind> {
+		return normalizeRuntimeKind(kind);
 	}
 
 	/**
@@ -98,8 +122,8 @@ export class RuntimeRegistry {
 	 * @param kind - The runtime kind
 	 * @param version - The detected version string (e.g. "3.12.0")
 	 */
-	public setVersion(kind: RuntimeKind, version: string): void {
-		this.versions.set(kind, version);
+	public setVersion(kind: string, version: string): void {
+		this.versions.set(normalizeRuntimeKind(kind).kind, version);
 	}
 
 	/**
@@ -108,8 +132,12 @@ export class RuntimeRegistry {
 	 * @param kind - The runtime kind
 	 * @returns The version string, or undefined if not known
 	 */
-	public getVersion(kind: RuntimeKind): string | undefined {
-		return this.versions.get(kind);
+	public getVersion(kind: string): string | undefined {
+		try {
+			return this.versions.get(normalizeRuntimeKind(kind).kind);
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**
@@ -135,6 +163,12 @@ export class RuntimeRegistry {
 	 * @param adapter - The runtime adapter to replace
 	 */
 	public replace(adapter: RuntimeAdapter): void {
-		this.adapters.set(adapter.kind, adapter);
+		const normalized = normalizeRuntimeKind(adapter.kind);
+		if (normalized.diagnostic) {
+			throw new Error(
+				`Runtime adapter kind '${adapter.kind}' is an alias; register the canonical '${normalized.kind}' adapter instead`,
+			);
+		}
+		this.adapters.set(normalized.kind, adapter);
 	}
 }

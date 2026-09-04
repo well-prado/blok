@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { sep as pathSep, resolve as resolvePath } from "node:path";
 import { tryParseDuration } from "@blokjs/helper";
-import type { NodeBase, WasiComponentManifestV1 } from "@blokjs/shared";
+import { type NodeBase, type WasiComponentManifestV1, normalizeRuntimeKind } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
@@ -602,6 +602,15 @@ export default class Configuration implements Config {
 			local: {
 				resolver: async (node: RunnerNode, opts: GlobalOptions) => await this.localResolver(node),
 			},
+			"runtime.nodejs": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.bun": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.deno": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
 			"runtime.python3": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
@@ -668,6 +677,12 @@ export default class Configuration implements Config {
 		if (!runtimeKind) {
 			runtimeKind = "python3";
 		}
+
+		const normalized = normalizeRuntimeKind(runtimeKind);
+		if (normalized.diagnostic) {
+			console.warn(`[blok] ${normalized.diagnostic.message} (workflow: ${this.name}, step: ${node.name}).`);
+		}
+		runtimeKind = normalized.kind;
 
 		// Get the runtime adapter from registry
 		const registry = RuntimeRegistry.getInstance();

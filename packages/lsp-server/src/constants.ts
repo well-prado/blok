@@ -22,6 +22,8 @@ export const VALID_STEP_TYPES = [
 	"local",
 	"module",
 	"runtime.nodejs",
+	"runtime.bun",
+	"runtime.deno",
 	"runtime.python3",
 	"runtime.go",
 	"runtime.java",
@@ -33,8 +35,10 @@ export const VALID_STEP_TYPES = [
 ] as const;
 
 export const VALID_RUNTIMES = [
+	"node",
 	"nodejs",
 	"bun",
+	"deno",
 	"python3",
 	"go",
 	"java",
@@ -186,11 +190,11 @@ export const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
 	type: {
 		title: "Step Type",
 		description:
-			"How the node should be resolved.\n- **local**: Node defined in the project\n- **module**: npm package node\n- **runtime.X**: Language-specific runtime (nodejs, python3, go, java, rust, php, csharp, ruby)",
+			"How the node should be resolved.\n- **local**: Node defined in the project\n- **module**: npm package node\n- **runtime.X**: Language-specific runtime (nodejs, bun, deno, python3, go, java, rust, php, csharp, ruby)",
 	},
 	runtime: {
 		title: "Step Runtime",
 		description:
-			"Override the default runtime for this step. Available: nodejs, bun, python3, go, java, rust, php, csharp, ruby, docker, wasm.",
+			"Override the default runtime for this step. Available: nodejs, bun, deno, python3, go, java, rust, php, csharp, ruby, docker, wasm.",
 	},
 };

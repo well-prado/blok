@@ -41,6 +41,12 @@ describe("RuntimeRegistry", () => {
 	});
 
 	describe("register()", () => {
+		it("rejects alias kinds so registry entries stay canonical", () => {
+			const aliasAdapter = { ...createMockRuntimeAdapter("nodejs"), kind: "node" } as unknown as RuntimeAdapter;
+
+			expect(() => registry.register(aliasAdapter)).toThrow(/register the canonical 'nodejs'/);
+		});
+
 		it("should register a valid adapter", () => {
 			const mockAdapter = createMockRuntimeAdapter("nodejs");
 
@@ -76,6 +82,12 @@ describe("RuntimeRegistry", () => {
 			expect(registry.get("nodejs")).not.toBe(adapter1);
 		});
 
+		it("rejects aliases in replace() so entries stay canonical", () => {
+			const aliasAdapter = { ...createMockRuntimeAdapter("nodejs"), kind: "node" } as unknown as RuntimeAdapter;
+
+			expect(() => registry.replace(aliasAdapter)).toThrow(/register the canonical 'nodejs'/);
+		});
+
 		it("should throw error when registering adapter twice", () => {
 			const adapter1 = createMockRuntimeAdapter("nodejs");
 			const adapter2 = createMockRuntimeAdapter("nodejs");
@@ -88,6 +100,7 @@ describe("RuntimeRegistry", () => {
 			const kinds: RuntimeKind[] = [
 				"nodejs",
 				"bun",
+				"deno",
 				"python3",
 				"go",
 				"java",
@@ -110,6 +123,23 @@ describe("RuntimeRegistry", () => {
 	});
 
 	describe("get()", () => {
+		it("resolves the legacy node alias to the canonical nodejs adapter", () => {
+			const mockAdapter = createMockRuntimeAdapter("nodejs");
+			registry.register(mockAdapter);
+
+			expect(registry.get("node")).toBe(mockAdapter);
+			expect(registry.normalize("node").diagnostic?.canonical).toBe("nodejs");
+		});
+
+		it("recognizes deno as a first-class registry kind without aliasing it", () => {
+			const mockAdapter = createMockRuntimeAdapter("deno");
+			registry.register(mockAdapter);
+
+			expect(registry.has("deno")).toBe(true);
+			expect(registry.get("deno")).toBe(mockAdapter);
+			expect(registry.normalize("deno").diagnostic).toBeUndefined();
+		});
+
 		it("should return registered adapter", () => {
 			const mockAdapter = createMockRuntimeAdapter("nodejs");
 			registry.register(mockAdapter);
