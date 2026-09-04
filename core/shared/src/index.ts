@@ -44,6 +44,36 @@ import {
 	requireAgentEligibleManifest,
 	serializeCapabilityManifest,
 } from "./CapabilityManifest";
+export {
+	WASI_COMPONENT_CAPABILITIES,
+	WASI_COMPONENT_CONTRACT_VERSION,
+	WASI_COMPONENT_MANIFEST_VERSION,
+	WASI_COMPONENT_MEDIA_TYPE,
+	WASI_COMPONENT_WASI_VERSION,
+	WASI_COMPONENT_WIT_PACKAGE,
+	WASI_COMPONENT_WIT_VERSION,
+	WASI_COMPONENT_WIT_WORLD,
+	WasiComponentArtifactSchema,
+	WasiComponentErrorSchema,
+	WasiComponentExecutionRequestSchema,
+	WasiComponentExecutionResponseSchema,
+	WasiComponentLimitsSchema,
+	WasiComponentManifestSchema,
+	WasiComponentNodeSchema,
+	WasiComponentWorldSchema,
+	parseWasiComponentManifest,
+	serializeWasiComponentManifest,
+} from "./WasiComponentContracts";
+export type {
+	WasiComponentArtifact,
+	WasiComponentExecutionRequest,
+	WasiComponentExecutionResponse,
+	WasiComponentLimits,
+	WasiComponentManifestV1,
+	WasiComponentNode,
+	WasiComponentReadiness,
+	WasiComponentWorld,
+} from "./WasiComponentContracts";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";

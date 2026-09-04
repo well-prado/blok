@@ -96,6 +96,7 @@ describe("RuntimeRegistry", () => {
 				"csharp",
 				"docker",
 				"wasm",
+				"wasi",
 			];
 
 			kinds.forEach((kind) => {

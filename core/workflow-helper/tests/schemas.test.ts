@@ -711,6 +711,7 @@ describe("NodeTypeSchema", () => {
 			"runtime.ruby",
 			"runtime.docker",
 			"runtime.wasm",
+			"runtime.wasi",
 		];
 		for (const type of validTypes) {
 			expect(() => NodeTypeSchema.parse(type)).not.toThrow();
@@ -724,7 +725,20 @@ describe("NodeTypeSchema", () => {
 
 describe("RuntimeKindSchema", () => {
 	it("should accept all valid runtime kinds", () => {
-		const validKinds = ["nodejs", "bun", "python3", "go", "java", "rust", "php", "csharp", "ruby", "docker", "wasm"];
+		const validKinds = [
+			"nodejs",
+			"bun",
+			"python3",
+			"go",
+			"java",
+			"rust",
+			"php",
+			"csharp",
+			"ruby",
+			"docker",
+			"wasm",
+			"wasi",
+		];
 		for (const kind of validKinds) {
 			expect(() => RuntimeKindSchema.parse(kind)).not.toThrow();
 		}

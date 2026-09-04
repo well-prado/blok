@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { sep as pathSep, resolve as resolvePath } from "node:path";
 import { tryParseDuration } from "@blokjs/helper";
-import type { NodeBase } from "@blokjs/shared";
+import type { NodeBase, WasiComponentManifestV1 } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
@@ -11,6 +11,7 @@ import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
+import { WasiComponentRuntimeAdapter } from "./adapters/WasiComponentRuntimeAdapter";
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig } from "./adapters/grpc/types";
 import {
@@ -89,6 +90,12 @@ export default class Configuration implements Config {
 
 		if (!registry.has("nodejs")) {
 			registry.register(new NodeJsRuntimeAdapter());
+		}
+		if (!registry.has("wasi")) {
+			// The first slice exposes the identity and policy boundary but does
+			// not embed or spawn a Component Model engine. It therefore fails
+			// closed until a supported long-lived host is supplied.
+			registry.register(new WasiComponentRuntimeAdapter());
 		}
 
 		const sdkLanguages: Array<{
@@ -616,6 +623,9 @@ export default class Configuration implements Config {
 			"runtime.ruby": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
+			"runtime.wasi": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
 			subworkflow: {
 				resolver: async (node: RunnerNode) => await this.subworkflowResolver(node),
 			},
@@ -674,6 +684,8 @@ export default class Configuration implements Config {
 		targetNode.name = node.name;
 		targetNode.type = node.type;
 		targetNode.runtime = runtimeKind as RuntimeKind;
+		const wasi = (node as RunnerNode & { wasi?: WasiComponentManifestV1 }).wasi;
+		if (wasi !== undefined) targetNode.wasiComponent = wasi;
 		targetNode.active = node.active !== undefined ? node.active : true;
 		targetNode.stop = node.stop !== undefined ? node.stop : false;
 		// V2 persistence knobs — flow through to PersistenceHelper.

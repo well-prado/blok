@@ -19,7 +19,7 @@ const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 
 /** Kinds that can never be added/removed as a sidecar runtime. */
-export const NON_SIDECAR_KINDS = new Set(["node", "nodejs", "typescript", "ts", "bun", "docker", "wasm"]);
+export const NON_SIDECAR_KINDS = new Set(["node", "nodejs", "typescript", "ts", "bun", "docker", "wasm", "wasi"]);
 
 export class RuntimeCommandError extends Error {}
 

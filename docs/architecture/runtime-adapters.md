@@ -34,7 +34,8 @@ export type RuntimeKind =
   | "csharp"
   | "ruby"
   | "docker"
-  | "wasm";
+  | "wasm"
+  | "wasi";
 
 export type ExecutionResult = {
   success: boolean;
@@ -224,6 +225,24 @@ The adapter caches compiled `WebAssembly.Module` instances to avoid recompilatio
 - First call: 10-100ms (compile + instantiate)
 - Subsequent calls: sub-millisecond (cached module)
 - Memory: sandboxed WASM linear memory (640KB - 6.4MB default)
+
+### WasiComponentRuntimeAdapter
+
+**Kind:** `wasi` (`runtime.wasi`)
+**Communication:** canonical runtime host seam, intended for long-lived gRPC
+**Source:** `core/runner/src/adapters/WasiComponentRuntimeAdapter.ts`
+
+This is a distinct Component Model identity. It does not reinterpret the
+legacy `runtime.wasm` pointer/JSON ABI and it does not embed or spawn a
+Wasmtime process. The first slice validates a digest-pinned
+`blok:runtime@1.0.0` / WASI 0.2 manifest, checks the deployment capability
+allow-list, propagates workflow cancellation/deadlines, and validates the
+structured response from an injected `WasiComponentHost`.
+
+Without an injected long-lived host it reports `unavailable` readiness and
+returns `WASI_COMPONENT_HOST_NOT_CONFIGURED`. This is intentional until the
+Rust/Wasmtime host lands. See [ADR 0001](/architecture/runtime/adr/0001-wasi-component-runtime)
+and the [WASI Component Model reference](/d/reference/wasi-component-runtime).
 
 ## How to Create a Custom Adapter
 

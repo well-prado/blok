@@ -1,12 +1,14 @@
 import { parseDuration, unresolvableKeyShape } from "@blokjs/helper";
 import {
 	type CapabilityManifestV1,
+	type WasiComponentManifestV1,
 	isStructuralRef,
 	isStructuralTpl,
 	lowerRefs,
 	parseCapabilityManifest,
 	parseJoinContract,
 	parseRetryResumeIdempotencyContract,
+	parseWasiComponentManifest,
 } from "@blokjs/shared";
 
 /**
@@ -86,6 +88,7 @@ interface InternalStep {
 	idempotencyKey?: string;
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
+	wasi?: WasiComponentManifestV1;
 	subworkflow?: string;
 	wait?: boolean;
 	/**
@@ -1226,10 +1229,12 @@ function copyStepMeta(step: Record<string, unknown>): {
 	outputTrust?: import("@blokjs/shared").OutputTrust;
 	join?: import("@blokjs/shared").JoinContract;
 	retryResume?: import("@blokjs/shared").RetryResumeIdempotencyContract;
+	wasi?: WasiComponentManifestV1;
 } {
 	const join = step.join === undefined ? undefined : parseJoinContract(step.join);
 	const retryResume =
 		step.retryResume === undefined ? undefined : parseRetryResumeIdempotencyContract(step.retryResume);
+	const wasi = step.wasi === undefined ? undefined : parseWasiComponentManifest(step.wasi);
 	return {
 		...(isPlainObject(step.ui) ? { ui: step.ui } : {}),
 		...(typeof step.description === "string" ? { description: step.description } : {}),
@@ -1248,6 +1253,7 @@ function copyStepMeta(step: Record<string, unknown>): {
 		...(step.outputTrust === "model" || step.outputTrust === "trusted" ? { outputTrust: step.outputTrust } : {}),
 		...(join ? { join } : {}),
 		...(retryResume ? { retryResume } : {}),
+		...(wasi ? { wasi } : {}),
 	};
 }
 

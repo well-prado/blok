@@ -76,6 +76,10 @@ describe("CostEstimator", () => {
 			expect(getRuntimeCategory("go")).toBe("docker");
 		});
 
+		it("should categorize wasi as the gRPC host boundary", () => {
+			expect(getRuntimeCategory("wasi")).toBe("grpc");
+		});
+
 		it("should categorize java as docker", () => {
 			expect(getRuntimeCategory("java")).toBe("docker");
 		});

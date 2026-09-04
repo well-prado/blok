@@ -501,6 +501,7 @@ describe("WorkflowDiagnostics", () => {
 				"ruby",
 				"docker",
 				"wasm",
+				"wasi",
 			];
 			for (const runtime of validRuntimes) {
 				const doc = createMockDocument(

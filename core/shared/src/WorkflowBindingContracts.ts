@@ -30,6 +30,7 @@ export const WORKFLOW_RUNTIME_KINDS = [
 	"ruby",
 	"docker",
 	"wasm",
+	"wasi",
 ] as const;
 
 export type WorkflowSourceKind = (typeof WORKFLOW_SOURCE_KINDS)[number];

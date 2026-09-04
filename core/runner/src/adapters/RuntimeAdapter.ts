@@ -15,7 +15,8 @@ export type RuntimeKind =
 	| "csharp"
 	| "ruby"
 	| "docker"
-	| "wasm";
+	| "wasm"
+	| "wasi";
 
 /**
  * Wire transport an adapter uses to reach an SDK runtime. `module` is for
