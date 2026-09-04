@@ -1,10 +1,17 @@
 {
 	"name": "@blokjs/code-mode",
 	"version": "2.1.0",
-	"description": "Constrained, policy-gated TypeScript execution for Blok agent harnesses.",
+	"description": "Typed, policy-bound Code Mode workflow and capability bindings for Blok.",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"files": ["dist"],
 	"scripts": {
 		"build": "rm -rf dist && bun run tsc",
@@ -13,12 +20,20 @@
 		"test:dev": "vitest",
 		"typecheck": "tsc --noEmit"
 	},
-	"keywords": ["blok", "agent", "code-mode", "sandbox"],
+	"keywords": [
+		"blok",
+		"agent",
+		"code-mode",
+		"sandbox",
+		"workflow",
+		"capabilities"
+	],
 	"license": "MIT",
 	"dependencies": {
 		"@blokjs/shared": "^2.1.0",
 		"typescript": "^5.8.3",
-		"zod": "^3.24.2"
+		"zod": "^3.24.2",
+		"zod-to-json-schema": "^3.25.2"
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.21",

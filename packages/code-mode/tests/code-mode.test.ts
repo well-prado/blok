@@ -1,248 +1,275 @@
-import type { CapabilityAuthority, PolicyContext, PolicyEvaluationResult } from "@blokjs/shared";
-import { describe, expect, it, vi } from "vitest";
+import type { PolicyEvaluationResult, PolicyProvider } from "@blokjs/shared";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { executeCodeMode, validateCodeModeSource } from "../src";
-import type { CodeModeBinding } from "../src";
+import {
+	CodeModeBindingError,
+	CodeModeBindingRegistry,
+	createCodeModeCatalog,
+	defineCapabilityBinding,
+	defineWorkflowBinding,
+	generateCodeModeBindings,
+	serializeCodeModeDescriptor,
+} from "../src";
 
-const pureAuthority: CapabilityAuthority = { effects: [], capabilities: [], secrets: [], fragments: {} };
-const pureManifest = {
+const manifest = {
 	version: "1" as const,
 	classification: "agent-compatible" as const,
-	effects: [],
-	capabilities: [],
-	secrets: [],
-	determinism: "deterministic" as const,
+	effects: ["read"] as const,
+	capabilities: ["workspace.read"],
+	secrets: ["hidden.secret"],
+	determinism: "external" as const,
 	idempotency: "idempotent" as const,
 	maturity: "stable" as const,
 };
 
-function context(scope: CapabilityAuthority = pureAuthority): PolicyContext {
+const identity = {
+	principal: { id: "assistant", kind: "agent" },
+	session: { id: "session-1" },
+	turn: { id: "turn-1" },
+	workflow: { name: "coding", version: "1" },
+};
+
+function allowPolicy(): PolicyProvider {
 	return {
-		origin: "agent",
-		principal: { id: "principal-1", kind: "agent" },
-		session: { id: "session-1" },
-		turn: { id: "turn-1" },
-		workflow: { name: "code-mode-test", version: "1" },
-		step: { id: "code-mode" },
-		manifest: null,
-		scope,
-		layers: [{ name: "phase", version: "1" }],
+		evaluate: async (): Promise<PolicyEvaluationResult> => ({
+			decision: { kind: "allow", id: "decision-1", reasonCode: "allowed", policyVersion: "policy-1" },
+			matchedRules: [],
+		}),
 	};
 }
 
-function allowPolicy(calls: PolicyContext[] = []): {
-	context: PolicyContext;
-	authorize: { authorize: (request: PolicyContext) => Promise<PolicyEvaluationResult> };
-} {
+function options(overrides: Partial<Parameters<typeof generateCodeModeBindings>[1]> = {}) {
 	return {
-		context: context(),
-		authorize: {
-			async authorize(request) {
-				calls.push(request);
-				return {
-					decision: { kind: "allow", id: `decision-${calls.length}`, reasonCode: "test", policyVersion: "1" },
-					matchedRules: [],
-				};
-			},
+		phase: "implementing" as const,
+		identity,
+		provider: allowPolicy(),
+		policyVersion: "policy-1",
+		handlers: {
+			workflow: async (_input: unknown) => ({ content: "workflow" }),
+			capability: async (input: unknown) => ({ content: (input as { path: string }).path }),
 		},
+		...overrides,
 	};
 }
 
-function binding(
-	name: string,
-	invoke: CodeModeBinding["invoke"],
-	manifest = pureManifest,
-	authority = pureAuthority,
-	input = z.record(z.unknown()),
-): CodeModeBinding {
-	return {
-		name,
-		input,
-		output: z.record(z.unknown()),
-		manifest,
-		authority,
-		invoke,
-	};
-}
-
-describe("Code Mode source validation", () => {
-	it("accepts erasable TypeScript and reports source locations", () => {
-		const result = validateCodeModeSource("const value: number = input.value as number; return { value: value + 1 };");
-		expect(result.valid).toBe(true);
-		expect(result.transpiledSource).toContain("return { value: value + 1 }");
-	});
-
-	it.each([
-		["import fs from 'node:fs'", "construct"],
-		["return process.env.SECRET", "process"],
-		["return fs.readFile('secret')", "fs"],
-		["return fetch(input.url)", "fetch"],
-		["return globalThis", "globalThis"],
-		["return eval('1 + 1')", "eval"],
-		["return Function('return 1')()", "Function"],
-		["return new Date()", "object construction"],
-		["return import('node:fs')", "dynamic module loading"],
-		["return input.constructor", "constructor"],
-		["return /secret/.test(input.value)", "regular expressions"],
-		["return 'js/ctx.state.secret'", "Blok expression"],
-	] as const)("rejects %s", (source, expected) => {
-		const result = validateCodeModeSource(source);
-		expect(result.valid).toBe(false);
-		expect(result.issues.some((issue) => issue.message.includes(expected))).toBe(true);
-		expect(result.issues[0]?.line).toBeGreaterThan(0);
-	});
+const readFile = defineCapabilityBinding({
+	id: "workspace/read-file",
+	version: "1",
+	description: "Read a workspace file.",
+	input: z.object({ path: z.string().min(1) }),
+	output: z.object({ content: z.string() }),
+	outputKind: "object",
+	capabilityManifest: manifest,
+	invoke: async (input) => ({ content: input.path }),
 });
 
-describe("executeCodeMode", () => {
-	it("runs in a fresh context with schema validation and policy before the handler", async () => {
-		const calls: PolicyContext[] = [];
-		const order: string[] = [];
-		const policy = allowPolicy(calls);
-		const lookup = binding("lookup", async (input) => {
-			order.push(`handler:${JSON.stringify(input)}`);
-			return { result: "found" };
+const workflow = defineWorkflowBinding({
+	id: "workflow/plan",
+	version: "3",
+	description: "Create a bounded implementation plan.",
+	input: z.object({ task: z.string() }),
+	output: z.object({ content: z.string() }),
+	outputKind: "object",
+	capabilityManifest: { ...manifest, capabilities: [], effects: [] },
+	invoke: async (input) => ({ content: input.task }),
+});
+
+describe("@blokjs/code-mode", () => {
+	it("derives typed definitions from Zod input/output schemas", async () => {
+		const typed = defineCapabilityBinding({
+			id: "typed",
+			version: "1",
+			description: "A typed binding.",
+			input: z.object({ count: z.number() }),
+			output: z.object({ doubled: z.number() }),
+			outputKind: "object",
+			capabilityManifest: { ...manifest, capabilities: [], effects: [] },
+			invoke: (input) => ({ doubled: input.count * 2 }),
 		});
-		const result = await executeCodeMode({
-			source: "const found: { result: string } = await bindings.lookup({ key: input.key }); log(found); return found;",
-			input: { key: "alpha" },
-			bindings: [lookup],
-			policy: { authorization: policy.authorize, policyVersion: "1", context: policy.context },
-		});
-		expect(result.output).toEqual({ result: "found" });
-		expect(result.logs).toEqual([{ value: { result: "found" } }]);
-		expect(result.calls).toBe(1);
-		expect(calls).toHaveLength(1);
-		expect(order).toEqual(['handler:{"key":"alpha"}']);
+		const catalog = createCodeModeCatalog("catalog-1", [typed]);
+		const result = await generateCodeModeBindings(
+			catalog,
+			options({ handlers: { capability: async (input) => ({ doubled: (input as { count: number }).count * 2 }) } }),
+		);
+		expect(result.capabilities.capability_typed).toBeDefined();
+		expect(result.surface.declarations).toContain('"count": number');
 	});
 
-	it("fails closed when policy denies and never invokes the handler", async () => {
-		const handler = vi.fn(() => ({ result: "must-not-run" }));
-		const denied = {
-			async authorize(): Promise<PolicyEvaluationResult> {
+	it("filters implementation-only, phase, maturity, and policy-denied bindings", async () => {
+		const implementation = defineCapabilityBinding({
+			...readFile.definition,
+			id: "implementation",
+			implementationOnly: true,
+		});
+		const planningOnly = defineCapabilityBinding({
+			...readFile.definition,
+			id: "planning-only",
+			phases: ["planning"],
+		});
+		const denied = defineCapabilityBinding({ ...readFile.definition, id: "denied" });
+		const provider: PolicyProvider = {
+			evaluate: async (request) => ({
+				decision: {
+					kind: request.step.id.endsWith("denied") ? "deny" : "allow",
+					id: `decision-${request.step.id}`,
+					reasonCode: request.step.id.endsWith("denied") ? "forbidden" : "allowed",
+					policyVersion: "policy-1",
+				},
+				matchedRules: [],
+			}),
+		};
+		const result = await generateCodeModeBindings(
+			createCodeModeCatalog("catalog-1", [readFile, implementation, planningOnly, denied]),
+			options({ provider }),
+		);
+		expect(Object.keys(result.capabilities)).toEqual(["capability_workspace_read_file"]);
+		expect(result.surface.unavailable.map((item) => item.reasonCode)).toContain("implementation-only");
+		expect(result.surface.unavailable.map((item) => item.reasonCode)).toContain("phase-unavailable");
+		expect(result.surface.unavailable.map((item) => item.reasonCode)).toContain("policy-denied");
+	});
+
+	it("revalidates input, policy, output, authority, and records non-secret provenance", async () => {
+		let seenContext: Parameters<NonNullable<NonNullable<typeof readFile.definition.invoke>>>[1] | undefined;
+		const provider: PolicyProvider = {
+			evaluate: async (request) => {
+				expect(request.manifest?.secrets).toEqual(["hidden.secret"]);
+				expect(request.scope.capabilities).toEqual(["workspace.read"]);
 				return {
-					decision: { kind: "deny", id: "decision-1", reasonCode: "out-of-phase", policyVersion: "1" },
+					decision: { kind: "allow", id: "decision-runtime", reasonCode: "allowed", policyVersion: "policy-1" },
 					matchedRules: [],
 				};
 			},
 		};
-		await expect(
-			executeCodeMode({
-				source: "return await bindings.lookup({});",
-				bindings: [binding("lookup", handler)],
-				policy: { authorization: denied, policyVersion: "1", context: context() },
+		const registry = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [readFile]),
+			options({
+				provider,
+				handlers: {
+					capability: async (_input, context) => {
+						seenContext = context;
+						return { content: "ok" };
+					},
+				},
 			}),
-		).rejects.toMatchObject({ code: "CODE_MODE_POLICY_DENIED" });
-		expect(handler).not.toHaveBeenCalled();
+		);
+		await expect(registry.invoke("capability_workspace_read_file", { path: "" })).rejects.toMatchObject({
+			code: "INPUT_INVALID",
+		});
+		expect(await registry.invoke("capability_workspace_read_file", { path: "a.ts" })).toEqual({ content: "ok" });
+		expect(seenContext?.provenance.capabilities).toEqual(["workspace.read"]);
+		expect(JSON.stringify(seenContext?.provenance)).not.toContain("hidden.secret");
+		const detailed = await registry.invokeWithProvenance("capability_workspace_read_file", { path: "a.ts" });
+		expect(detailed.provenance.policyDecisionId).toBe("decision-runtime");
 	});
 
-	it("rejects secret bindings and validates binding schemas at the boundary", async () => {
-		const secretManifest = {
-			...pureManifest,
-			effects: ["secret"] as ["secret"],
-			capabilities: ["secret.resolve"],
-			secrets: ["db.password"],
+	it("propagates only a narrowed authority and rejects policy widening", async () => {
+		const provider: PolicyProvider = {
+			evaluate: async () => ({
+				decision: { kind: "allow", id: "decision-narrow", reasonCode: "allowed", policyVersion: "policy-1" },
+				matchedRules: [],
+				scope: {
+					effects: ["read"],
+					capabilities: ["workspace.read"],
+					secrets: [],
+					fragments: {},
+				},
+			}),
 		};
-		const secretAuthority: CapabilityAuthority = {
-			effects: ["secret"],
-			capabilities: ["secret.resolve"],
-			secrets: ["db.password"],
-			fragments: {},
+		const registry = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [readFile]),
+			options({
+				provider,
+				identity: {
+					...identity,
+					authority: {
+						effects: ["read", "write"],
+						capabilities: ["workspace.read", "workspace.write"],
+						secrets: ["hidden.secret"],
+						fragments: {},
+					},
+				},
+			}),
+		);
+		const result = await registry.invokeWithProvenance("capability_workspace_read_file", { path: "a.ts" });
+		expect(result.provenance.effects).toEqual(["read"]);
+		expect(result.value).toEqual({ content: "a.ts" });
+		const widening: PolicyProvider = {
+			evaluate: async () => ({
+				decision: { kind: "allow", id: "decision-widen", reasonCode: "allowed", policyVersion: "policy-1" },
+				matchedRules: [],
+				scope: {
+					effects: ["write"],
+					capabilities: ["workspace.write"],
+					secrets: [],
+					fragments: {},
+				},
+			}),
 		};
-		await expect(
-			executeCodeMode({
-				source: "return null;",
-				bindings: [binding("secret", async () => ({ value: "hidden" }), secretManifest, secretAuthority)],
-			}),
-		).rejects.toMatchObject({ code: "CODE_MODE_BINDING_REJECTED" });
-
-		const handler = vi.fn(() => ({ result: "found" }));
-		const typed = binding("typed", handler, pureManifest, pureAuthority, z.object({ key: z.string() }));
-		await expect(
-			executeCodeMode({
-				source: "try { return await bindings.typed({ key: 42 }); } catch { return { rejected: true }; }",
-				bindings: [typed],
-				policy: { authorization: allowPolicy().authorize, policyVersion: "1", context: context() },
-			}),
-		).resolves.toMatchObject({ output: { rejected: true }, calls: 1 });
-		expect(handler).not.toHaveBeenCalled();
-	});
-
-	it("enforces output, call, and parallelism budgets", async () => {
-		await expect(
-			executeCodeMode({ source: "return 'x'.repeat(100);", budgets: { maxOutputBytes: 16 } }),
-		).rejects.toMatchObject({ code: "CODE_MODE_OUTPUT_LIMIT" });
-		const policy = allowPolicy();
-		const read = binding("read", async () => {
-			await new Promise((resolve) => setTimeout(resolve, 50));
-			return { ok: true };
+		const widened = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [readFile]),
+			options({ provider: widening }),
+		);
+		await expect(widened.invoke("capability_workspace_read_file", { path: "a.ts" })).rejects.toMatchObject({
+			code: "POLICY_MALFORMED",
 		});
-		await expect(
-			executeCodeMode({
-				source: "return await bindings.read({});",
-				bindings: [read],
-				policy: { authorization: policy.authorize, policyVersion: "1", context: policy.context },
-				budgets: { maxCalls: 1 },
-			}),
-		).resolves.toMatchObject({ calls: 1 });
-		await expect(
-			executeCodeMode({
-				source: "return await Promise.all([bindings.read({}), bindings.read({})]);",
-				bindings: [read],
-				policy: { authorization: policy.authorize, policyVersion: "1", context: policy.context },
-				budgets: { maxParallelism: 1 },
-			}),
-		).rejects.toMatchObject({ code: "CODE_MODE_PARALLELISM_LIMIT" });
-		await expect(
-			executeCodeMode({
-				source: "return await Promise.all([bindings.read({}), bindings.read({})]);",
-				bindings: [read],
-				policy: { authorization: policy.authorize, policyVersion: "1", context: policy.context },
-				budgets: { maxCalls: 1 },
-			}),
-		).rejects.toMatchObject({ code: "CODE_MODE_CALL_LIMIT" });
 	});
 
-	it("enforces wall time and cancellation by terminating the worker", async () => {
-		await expect(executeCodeMode({ source: "while (true) {}", budgets: { maxWallTimeMs: 50 } })).rejects.toMatchObject({
-			code: "CODE_MODE_TIMEOUT",
-		});
-		const controller = new AbortController();
-		const pending = executeCodeMode({
-			source: "while (true) {}",
-			signal: controller.signal,
-			budgets: { maxWallTimeMs: 5_000 },
-		});
-		setTimeout(() => controller.abort(), 25);
-		await expect(pending).rejects.toMatchObject({ code: "CODE_MODE_CANCELLED" });
-	});
-
-	it("enforces the worker heap ceiling", async () => {
-		await expect(
-			executeCodeMode({
-				source: "const values: string[] = []; while (true) values.push('allocation'); return values.length;",
-				budgets: { maxMemoryBytes: 16 * 1024 * 1024, maxWallTimeMs: 5_000 },
+	it("rejects stale policy results and prevents implementation-only invocation", async () => {
+		const staleProvider: PolicyProvider = {
+			evaluate: async () => ({
+				decision: { kind: "allow", id: "decision-old", reasonCode: "allowed", policyVersion: "old" },
+				matchedRules: [],
 			}),
-		).rejects.toMatchObject({ code: "CODE_MODE_MEMORY_LIMIT" });
-	});
-
-	it("keeps nested calls on the parent authority and policy path", async () => {
-		const calls: PolicyContext[] = [];
-		const policy = allowPolicy(calls);
-		const writeAuthority: CapabilityAuthority = {
-			effects: ["write"],
-			capabilities: ["workspace.write"],
-			secrets: [],
-			fragments: {},
 		};
-		const writeManifest = { ...pureManifest, effects: ["write"] as ["write"], capabilities: ["workspace.write"] };
-		const outer = binding("outer", async (_input, callContext) => callContext.call("write", {}));
-		const write = binding("write", async () => ({ ok: true }), writeManifest, writeAuthority);
-		const result = await executeCodeMode({
-			source: "try { return await bindings.outer({}); } catch { return { denied: true }; }",
-			bindings: [outer, write],
-			policy: { authorization: policy.authorize, policyVersion: "1", context: context() },
+		const registry = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [workflow]),
+			options({ provider: staleProvider }),
+		);
+		await expect(registry.invoke("workflow_workflow_plan", { task: "x" })).rejects.toMatchObject({
+			code: "POLICY_STALE",
 		});
-		expect(result.output).toEqual({ denied: true });
-		expect(calls).toHaveLength(1);
+	});
+
+	it("uses deterministic collision-safe names and descriptor serialization", () => {
+		const left = defineCapabilityBinding({ ...readFile.definition, id: "foo-bar" });
+		const right = defineCapabilityBinding({ ...readFile.definition, id: "foo_bar" });
+		const catalog = createCodeModeCatalog("catalog-1", [right, left]);
+		const registry = new CodeModeBindingRegistry(catalog, options());
+		return registry.generate().then((result) => {
+			const names = Object.keys(result.capabilities);
+			expect(names).toHaveLength(2);
+			expect(new Set(names).size).toBe(2);
+			expect(names[1]).toMatch(/^capability_foo_bar__/);
+			expect(serializeCodeModeDescriptor(left.descriptor)).toBe(serializeCodeModeDescriptor({ ...left.descriptor }));
+		});
+	});
+
+	it("returns stable errors for policy denial and output contract violations", async () => {
+		const denied: PolicyProvider = {
+			evaluate: async () => ({
+				decision: { kind: "deny", id: "decision-denied", reasonCode: "forbidden", policyVersion: "policy-1" },
+				matchedRules: [],
+			}),
+		};
+		const registry = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [readFile]),
+			options({ provider: denied }),
+		);
+		await expect(registry.invoke("capability_workspace_read_file", { path: "a.ts" })).rejects.toMatchObject({
+			code: "POLICY_DENIED",
+		});
+		const broken = defineCapabilityBinding({
+			...readFile.definition,
+			id: "broken",
+			outputKind: "artifact-reference",
+			output: z.object({ content: z.string() }),
+		});
+		const brokenRegistry = new CodeModeBindingRegistry(
+			createCodeModeCatalog("catalog-1", [broken]),
+			options({ handlers: { capability: async () => ({ content: "not-an-artifact" }) } }),
+		);
+		await expect(brokenRegistry.invoke("capability_broken", { path: "a.ts" })).rejects.toMatchObject({
+			code: "OUTPUT_KIND_MISMATCH",
+		});
 	});
 });

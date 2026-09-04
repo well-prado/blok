@@ -34,6 +34,25 @@ const result = await executeCodeMode({
 });
 ```
 
+
+## Typed binding surface
+
+The package also exposes the H2-05 typed binding boundary. Workflow and
+capability definitions use Zod input/output schemas and explicit output kinds.
+The registry generates bounded, deterministic TypeScript declarations after
+phase, principal, runtime, maturity, manifest, authority, and policy filters.
+Generated names are namespaced and collision-safe; secret reference names remain
+only in trusted policy requests and never appear in model-facing declarations
+or provenance.
+
+Each generated handle revalidates input, asks the policy provider for a fresh
+decision, propagates only the intersection of active and binding authority,
+validates output, and returns canonical JSON. H2-04 owns sandbox execution,
+cancellation, and budgets; the registry is the typed binding/control-plane
+layer consumed by that runtime. See
+`docs/architecture/agent-harness/h2-05-code-mode-bindings.md`.
+
+
 ## Architecture conformance
 
 This package is governed by:
@@ -45,9 +64,11 @@ This package is governed by:
 - `docs/architecture/agent-harness/adr/0007-graph-provider-and-tetrix.md`
 - `docs/architecture/agent-harness/adr/0008-parallel-and-child-permissions.md`
 - `docs/architecture/agent-harness/adr/0010-security-and-behavioral-conformance.md`
+- `docs/architecture/agent-harness/adr/0009-desktop-packaging-and-runtime-packs.md`
 
-The implementation note is
-`docs/architecture/agent-harness/h2-04-code-mode-runtime.md`.
+The implementation notes are
+`docs/architecture/agent-harness/h2-04-code-mode-runtime.md` and
+`docs/architecture/agent-harness/h2-05-code-mode-bindings.md`.
 
 Conformance evidence is in `tests/code-mode.test.ts`: accepted typed bodies,
 forbidden construct rejection, absent ambient APIs, policy-before-handler
