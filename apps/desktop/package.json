@@ -1,0 +1,10 @@
+{
+	"name": "@blokjs/desktop",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"host:test": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features",
+		"tauri": "cargo tauri"
+	}
+}

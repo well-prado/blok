@@ -124,6 +124,9 @@ The H1-03 shared profile and binding contract is documented in
 The H3-02 Git/worktree and bounded process capability contract is documented in
 [h3-02-git-and-process-capabilities.md](h3-02-git-and-process-capabilities.md).
 
+The H4-01 trusted host boundary and sidecar supervision slice is documented in
+[h4-01-trusted-host.md](h4-01-trusted-host.md).
+
 The H3-04 provenance-aware context and compaction contract is documented in
 [h3-04-context-compaction.md](h3-04-context-compaction.md).
 

@@ -20,6 +20,8 @@
 			"sdks/*/.venv/**",
 			"sdks/python3/**/__pycache__/**",
 			"sdks/rust/target/**",
+			"apps/desktop/src-tauri/target/**",
+			"apps/desktop/src-tauri/gen/**",
 			"sdks/java/target/**",
 			"sdks/csharp/**/bin/**",
 			"sdks/csharp/**/obj/**"
