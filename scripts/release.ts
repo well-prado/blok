@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Lockstep publish for the 22 Blok public packages (8 pre-v0.6, plus 7
+ * Lockstep publish for the 24 Blok public packages (8 pre-v0.6, plus 7
  * added in v0.6.0 to support the new trigger surface — sse, websocket,
  * webhook, pubsub, cron, grpc, plus the helpers node — `trigger-mcp`,
  * added post-v0.6 and folded into the lockstep list here, and
@@ -72,7 +72,8 @@ export interface Publishable {
  * diagnostics are the grammar's only other consumer-facing half.
  *
  * `@blokjs/control-plane` (#923) and `@blokjs/agent-kernel` (#924) are the
- * public harness packages; they are listed here so the packaging invariant and
+ * public harness packages; `@blokjs/code-mode` (#925) is the constrained
+ * execution boundary. They are listed here so the packaging invariant and
  * lockstep release cover them.
  */
 export const PUBLISHABLE: readonly Publishable[] = [
@@ -99,6 +100,9 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	{ dir: "packages/control-plane", name: "@blokjs/control-plane" },
 	// Provider-neutral harness kernel (#924) — consumes shared session contracts.
 	{ dir: "packages/agent-kernel", name: "@blokjs/agent-kernel" },
+	// Constrained model-authored execution (#925) — consumes shared policy and
+	// capability contracts.
+	{ dir: "packages/code-mode", name: "@blokjs/code-mode" },
 	// Triggers (consume runner + shared + helper). Order amongst
 	// themselves doesn't matter — none depend on another trigger.
 	{ dir: "triggers/worker", name: "@blokjs/trigger-worker" },
@@ -126,7 +130,7 @@ interface CliFlags {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 22 Blok public packages to npm in dependency order using a
+Publishes the 24 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:

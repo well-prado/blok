@@ -1,0 +1,33 @@
+export {
+	CODE_MODE_CONTRACT_VERSION,
+	CODE_MODE_CLEANUP_TIMEOUT_MS,
+	CODE_MODE_DEFAULT_MAX_CALLS,
+	CODE_MODE_DEFAULT_MAX_NESTING,
+	CODE_MODE_DEFAULT_MAX_PARALLELISM,
+	CODE_MODE_DEFAULT_MEMORY_BYTES,
+	CODE_MODE_DEFAULT_WALL_TIME_MS,
+	CODE_MODE_MAX_CALLS,
+	CODE_MODE_MAX_INPUT_BYTES,
+	CODE_MODE_MAX_LOG_ENTRIES,
+	CODE_MODE_MAX_MEMORY_BYTES,
+	CODE_MODE_MAX_NESTING,
+	CODE_MODE_MAX_OUTPUT_BYTES,
+	CODE_MODE_MAX_PARALLELISM,
+	CODE_MODE_MAX_SOURCE_BYTES,
+	CODE_MODE_MAX_WALL_TIME_MS,
+	CODE_MODE_MIN_MEMORY_BYTES,
+	type CodeModeBinding,
+	type CodeModeBindingCallContext,
+	type CodeModeBudgets,
+	type CodeModeEffect,
+	type CodeModeExecutionOptions,
+	type CodeModeExecutionResult,
+	type CodeModeLogEntry,
+	type CodeModePolicy,
+	type CodeModeValidationIssue,
+	type CodeModeValidationOptions,
+	type CodeModeValidationResult,
+} from "./contracts";
+export { CODE_MODE_ERROR_CODES, CodeModeError, type CodeModeErrorCode } from "./errors";
+export { executeCodeMode } from "./runtime";
+export { validateCodeModeSource } from "./validator";
