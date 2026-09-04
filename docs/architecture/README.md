@@ -10,6 +10,7 @@ they must not silently contradict it.
 - [Observability](observability.md)
 - [Security model](security-model.md)
 - [Trigger system](trigger-system.md)
+- [WASI Component Model runtime](runtime/adr/0001-wasi-component-runtime.md)
 
 ## Decision governance
 

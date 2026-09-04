@@ -26,7 +26,20 @@ const VALID_STEP_TYPES = [
 	"runtime.ruby",
 ];
 
-const VALID_RUNTIMES = ["nodejs", "bun", "python3", "go", "java", "rust", "php", "csharp", "ruby", "docker", "wasm"];
+const VALID_RUNTIMES = [
+	"nodejs",
+	"bun",
+	"python3",
+	"go",
+	"java",
+	"rust",
+	"php",
+	"csharp",
+	"ruby",
+	"docker",
+	"wasm",
+	"wasi",
+];
 
 /**
  * Provides rich diagnostic validation for Blok workflow JSON files.

@@ -23,6 +23,7 @@ import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
+import { WasiComponentRuntimeAdapter } from "./adapters/WasiComponentRuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
 import { DEFAULT_HEALTH_SERVICE_CONFIG, buildChannelOptions } from "./adapters/grpc/GrpcChannelOptions";
 import { GrpcClientPool, buildCredentials } from "./adapters/grpc/GrpcClientPool";
@@ -358,6 +359,7 @@ export {
 	DockerRuntimeAdapter,
 	BunRuntimeAdapter,
 	WasmRuntimeAdapter,
+	WasiComponentRuntimeAdapter,
 	// gRPC runtime adapter
 	GrpcRuntimeAdapter,
 	GrpcClientPool,

@@ -66,6 +66,7 @@ describe("WorkflowCompletionProvider (LSP)", () => {
 			expect(labels).toContain("rust");
 			expect(labels).toContain("docker");
 			expect(labels).toContain("wasm");
+			expect(labels).toContain("wasi");
 		});
 	});
 

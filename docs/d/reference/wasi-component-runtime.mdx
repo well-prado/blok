@@ -1,0 +1,75 @@
+---
+title: "WASI Component Model runtime"
+description: "The versioned, capability-gated contract for runtime.wasi components"
+---
+
+# WASI Component Model runtime
+
+`runtime.wasi` is Blok's first-class WebAssembly Component Model identity. It is
+not an alias for legacy `runtime.wasm`, which uses a core-module pointer/JSON
+ABI and remains a bounded migration path.
+
+The first contract targets WASI 0.2 and `blok:runtime@1.0.0`, world `blok-node`.
+The canonical WIT source is [`world.wit`](https://github.com/well-prado/blok/blob/main/wit/blok-runtime/1.0/world.wit).
+WASI 0.3 async/future/stream support is not implied.
+
+## Step shape
+
+Attach a digest-pinned manifest to a `runtime.wasi` step:
+
+```json
+{
+  "id": "greet",
+  "use": "typed-greet",
+  "type": "runtime.wasi",
+  "wasi": {
+    "version": "1",
+    "runtime": "runtime.wasi",
+    "artifact": {
+      "uri": "./components/greet.wasm",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mediaType": "application/wasm-component"
+    },
+    "world": { "package": "blok:runtime", "world": "blok-node", "version": "1.0.0" },
+    "wasiVersion": "0.2",
+    "componentModelVersion": "0.2",
+    "exportName": "execute",
+    "node": { "name": "typed-greet" },
+    "capabilityManifest": {
+      "version": "1",
+      "classification": "agent-compatible",
+      "effects": [],
+      "capabilities": [],
+      "secrets": [],
+      "determinism": "deterministic",
+      "idempotency": "idempotent",
+      "maturity": "stable"
+    },
+    "limits": { "fuel": 100000, "maxDurationMs": 1000, "maxOutputBytes": 4096 }
+  }
+}
+```
+
+The manifest is validated at workflow load. Production hosts must verify the
+artifact bytes against the SHA-256 digest before compilation. A local URI is a
+development locator, not a production identity.
+
+## Boundary semantics
+
+The runner sends resolved input, a limited trigger request projection, content
+type, traceparent, and a deadline through the versioned host seam. The host
+returns output, structured logs/metrics, or a stable structured error. Host
+readiness is `ready`, `draining`, or `unavailable`; cancellation uses the
+workflow `AbortSignal` and must interrupt the guest.
+
+Capabilities are deny-by-default. Filesystem, network, environment, secrets,
+clock, randomness, sockets, subprocesses, persistence, and native extensions
+are not ambient. The host receives only deployment-approved logical
+capabilities. Secret values and host paths must never appear in manifests,
+logs, traces, errors, or cache keys.
+
+The current TypeScript adapter is intentionally host-less unless a supported
+long-lived Component Model host is injected. It returns
+`WASI_COMPONENT_HOST_NOT_CONFIGURED` rather than falling back to
+`runtime.wasm`. See [ADR 0001](../../architecture/runtime/adr/0001-wasi-component-runtime.md)
+for topology, limits, migration, and platform limitations.

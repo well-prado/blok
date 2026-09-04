@@ -29,6 +29,7 @@ export const VALID_STEP_TYPES = [
 	"runtime.php",
 	"runtime.csharp",
 	"runtime.ruby",
+	"runtime.wasi",
 ] as const;
 
 export const VALID_RUNTIMES = [
@@ -43,6 +44,7 @@ export const VALID_RUNTIMES = [
 	"ruby",
 	"docker",
 	"wasm",
+	"wasi",
 ] as const;
 
 export const QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk"] as const;

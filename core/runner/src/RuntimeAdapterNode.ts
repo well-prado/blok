@@ -51,6 +51,7 @@ export class RuntimeAdapterNode extends RunnerNode {
 		this.name = targetNode.name;
 		this.type = targetNode.type;
 		this.runtime = targetNode.runtime;
+		this.wasiComponent = targetNode.wasiComponent;
 		this.active = targetNode.active;
 		this.stop = targetNode.stop;
 		// V2 persistence knobs — flow through to PersistenceHelper.

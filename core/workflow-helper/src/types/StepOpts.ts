@@ -3,6 +3,7 @@ import {
 	JoinContractSchema,
 	type RetryResumeIdempotencyContract,
 	RetryResumeIdempotencyContractSchema,
+	WasiComponentManifestSchema,
 } from "@blokjs/shared";
 import { z } from "zod";
 import {
@@ -36,6 +37,7 @@ export const RuntimeKindSchema = z.enum([
 	"ruby",
 	"docker",
 	"wasm",
+	"wasi",
 ]);
 
 export type RuntimeKind = z.infer<typeof RuntimeKindSchema>;
@@ -59,6 +61,7 @@ export const NodeTypeSchema = z.enum([
 	"runtime.ruby",
 	"runtime.docker",
 	"runtime.wasm",
+	"runtime.wasi",
 ]);
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
@@ -93,6 +96,7 @@ export const StepOptsSchema = z.object({
 	type: NodeTypeSchema,
 	inputs: z.object({}).optional(),
 	runtime: RuntimeKindSchema.optional(),
+	wasi: WasiComponentManifestSchema.optional(),
 	active: z.boolean().optional(),
 	stop: z.boolean().optional(),
 	stream_logs: z.boolean().optional(),
@@ -345,6 +349,9 @@ export const V2RegularStepSchema = z
 			),
 		runtime: RuntimeKindSchema.optional().describe(
 			"Optional runtime hint. Most authors don't need this; the type already encodes it.",
+		),
+		wasi: WasiComponentManifestSchema.optional().describe(
+			"runtime.wasi component identity: digest-pinned artifact, WIT world/version, explicit capabilities, and resource limits.",
 		),
 		active: z.boolean().optional().describe("If false, the step is skipped at runtime. Default true."),
 		stop: z.boolean().optional().describe("If true, the workflow halts after this step completes. Default false."),

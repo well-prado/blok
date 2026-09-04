@@ -54,8 +54,8 @@ describe("LSP Constants", () => {
 	});
 
 	describe("VALID_RUNTIMES", () => {
-		it("should include all 11 runtime kinds", () => {
-			expect(VALID_RUNTIMES).toHaveLength(11);
+		it("should include all 12 runtime kinds", () => {
+			expect(VALID_RUNTIMES).toHaveLength(12);
 			expect(VALID_RUNTIMES).toContain("nodejs");
 			expect(VALID_RUNTIMES).toContain("bun");
 			expect(VALID_RUNTIMES).toContain("python3");
@@ -64,6 +64,7 @@ describe("LSP Constants", () => {
 			expect(VALID_RUNTIMES).toContain("rust");
 			expect(VALID_RUNTIMES).toContain("docker");
 			expect(VALID_RUNTIMES).toContain("wasm");
+			expect(VALID_RUNTIMES).toContain("wasi");
 		});
 	});
 

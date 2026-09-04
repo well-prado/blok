@@ -2506,7 +2506,8 @@
 									"runtime.csharp",
 									"runtime.ruby",
 									"runtime.docker",
-									"runtime.wasm"
+									"runtime.wasm",
+									"runtime.wasi"
 								],
 								"description": "Node type (module/local/runtime.*). When omitted, inferred from `use`: runtime.* prefixes are explicit; @blokjs/* and most others default to 'module'."
 							},
@@ -2564,9 +2565,290 @@
 									"csharp",
 									"ruby",
 									"docker",
-									"wasm"
+									"wasm",
+									"wasi"
 								],
 								"description": "Optional runtime hint. Most authors don't need this; the type already encodes it."
+							},
+							"wasi": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"type": "string",
+										"const": "1"
+									},
+									"runtime": {
+										"type": "string",
+										"const": "runtime.wasi"
+									},
+									"artifact": {
+										"type": "object",
+										"properties": {
+											"uri": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 2048
+											},
+											"digest": {
+												"type": "string",
+												"pattern": "^sha256:[a-f0-9]{64}$"
+											},
+											"mediaType": {
+												"type": "string",
+												"const": "application/wasm-component"
+											},
+											"sizeBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											}
+										},
+										"required": [
+											"uri",
+											"digest",
+											"mediaType"
+										],
+										"additionalProperties": false
+									},
+									"world": {
+										"type": "object",
+										"properties": {
+											"package": {
+												"type": "string",
+												"const": "blok:runtime"
+											},
+											"world": {
+												"type": "string",
+												"const": "blok-node"
+											},
+											"version": {
+												"type": "string",
+												"pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$"
+											}
+										},
+										"required": [
+											"package",
+											"world",
+											"version"
+										],
+										"additionalProperties": false
+									},
+									"wasiVersion": {
+										"type": "string",
+										"const": "0.2"
+									},
+									"componentModelVersion": {
+										"type": "string",
+										"const": "0.2"
+									},
+									"exportName": {
+										"type": "string",
+										"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+									},
+									"node": {
+										"type": "object",
+										"properties": {
+											"name": {
+												"type": "string",
+												"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+											},
+											"description": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"tags": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"pattern": "^[A-Za-z][A-Za-z0-9._:/-]{0,127}$"
+												},
+												"maxItems": 64
+											},
+											"inputSchema": {},
+											"outputSchema": {}
+										},
+										"required": [
+											"name"
+										],
+										"additionalProperties": false
+									},
+									"capabilityManifest": {
+										"type": "object",
+										"properties": {
+											"version": {
+												"type": "string",
+												"const": "1"
+											},
+											"classification": {
+												"type": "string",
+												"enum": [
+													"agent-compatible",
+													"trusted-legacy",
+													"denied-to-agents"
+												]
+											},
+											"effects": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"enum": [
+														"read",
+														"write",
+														"network",
+														"filesystem",
+														"process",
+														"secret",
+														"streaming",
+														"destructive"
+													]
+												}
+											},
+											"capabilities": {
+												"type": "array",
+												"items": {
+													"type": "string"
+												}
+											},
+											"secrets": {
+												"type": "array",
+												"items": {
+													"type": "string"
+												}
+											},
+											"determinism": {
+												"type": "string",
+												"enum": [
+													"deterministic",
+													"time-dependent",
+													"random",
+													"external",
+													"unknown"
+												]
+											},
+											"idempotency": {
+												"type": "string",
+												"enum": [
+													"idempotent",
+													"conditionally-idempotent",
+													"non-idempotent",
+													"unknown"
+												]
+											},
+											"maturity": {
+												"type": "string",
+												"enum": [
+													"stable",
+													"beta",
+													"experimental",
+													"deprecated"
+												]
+											},
+											"resources": {
+												"type": "object",
+												"properties": {
+													"maxDurationMs": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													},
+													"maxMemoryBytes": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													},
+													"maxInputBytes": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													},
+													"maxOutputBytes": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													},
+													"maxConcurrency": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"runtimes": {
+												"type": "array",
+												"items": {
+													"type": "string"
+												}
+											},
+											"triggers": {
+												"type": "array",
+												"items": {
+													"type": "string"
+												}
+											}
+										},
+										"required": [
+											"version",
+											"classification",
+											"effects",
+											"capabilities",
+											"secrets",
+											"determinism",
+											"idempotency",
+											"maturity"
+										],
+										"additionalProperties": false
+									},
+									"limits": {
+										"type": "object",
+										"properties": {
+											"fuel": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxDurationMs": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxMemoryBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxInputBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxOutputBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxLogBytes": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxHostCalls": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxConcurrentExecutions": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											},
+											"maxQueueDepth": {
+												"type": "integer",
+												"exclusiveMinimum": 0
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"required": [
+									"version",
+									"runtime",
+									"artifact",
+									"world",
+									"wasiVersion",
+									"componentModelVersion",
+									"exportName",
+									"node",
+									"capabilityManifest"
+								],
+								"additionalProperties": false,
+								"description": "runtime.wasi component identity: digest-pinned artifact, WIT world/version, explicit capabilities, and resource limits."
 							},
 							"active": {
 								"type": "boolean",

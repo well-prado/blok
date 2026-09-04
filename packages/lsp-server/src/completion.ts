@@ -193,6 +193,7 @@ function createRuntimeCompletions(): CompletionItem[] {
 		{ label: "ruby", docs: "Ruby via Docker container" },
 		{ label: "docker", docs: "Generic Docker container runtime" },
 		{ label: "wasm", docs: "WebAssembly runtime" },
+		{ label: "wasi", docs: "WASI Component Model runtime (WASI 0.2)" },
 	];
 
 	return runtimes.map((r) => ({

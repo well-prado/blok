@@ -114,4 +114,5 @@ export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
 	python3: 10007,
 	docker: 0,
 	wasm: 0,
+	wasi: 10008,
 };

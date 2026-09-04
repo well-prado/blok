@@ -1,0 +1,67 @@
+package blok:runtime@1.0.0;
+
+/// The stable, language-neutral node boundary. Arbitrary node schemas remain
+/// JSON because the workflow authoring surface is intentionally schema-driven.
+interface node {
+  record request {
+    component-digest: string,
+    export-name: string,
+    input-json: string,
+    request-json: string,
+    content-type: string,
+    deadline-ms: u64,
+    traceparent: option<string>,
+  }
+
+  record log-line {
+    level: string,
+    message: string,
+  }
+
+  record metrics {
+    duration-ms: option<float64>,
+    cpu-ms: option<float64>,
+    memory-bytes: option<u64>,
+  }
+
+  record error {
+    code: string,
+    category: string,
+    message: string,
+    retryable: bool,
+    details-json: option<string>,
+  }
+
+  record response {
+    success: bool,
+    output-json: option<string>,
+    content-type: option<string>,
+    logs: list<log-line>,
+    metrics: option<metrics>,
+    error: option<error>,
+  }
+
+  /// A component must return a structured response; raw linear-memory
+  /// pointer conventions are not part of the public Blok ABI.
+  execute: func(request: request) -> result<response, error>;
+}
+
+interface host {
+  record log-entry {
+    level: string,
+    message: string,
+  }
+
+  /// Logging is mediated by the host and remains bounded/redactable.
+  log: func(entry: log-entry);
+
+  /// Secret and blob access are capability-gated by the host. The guest only
+  /// receives a logical name or bounded bytes, never a host path.
+  get-secret: func(name: string) -> result<string, error>;
+  read-blob: func(id: string, max-bytes: u64) -> result<list<u8>, error>;
+}
+
+world blok-node {
+  import host;
+  export node;
+}

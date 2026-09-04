@@ -137,6 +137,7 @@
 						"group": "Reference",
 						"pages": [
 							"d/reference/v2-step-shapes",
+							"d/reference/wasi-component-runtime",
 							"d/reference/trace-storage",
 							"d/reference/workflow-registry",
 							"d/reference/run-states",
