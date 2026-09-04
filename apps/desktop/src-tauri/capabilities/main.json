@@ -1,0 +1,7 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "main-capability",
+	"description": "The main window receives only the explicitly registered host commands.",
+	"windows": ["main"],
+	"permissions": ["core:default"]
+}

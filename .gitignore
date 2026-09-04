@@ -187,6 +187,10 @@ sdks/go/examples/*/main
 # Rust SDK
 sdks/rust/target/
 
+# Tauri host build artifacts
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
 # Java SDK (Maven)
 sdks/java/target/
 

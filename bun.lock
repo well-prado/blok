@@ -28,6 +28,10 @@
         "ws": "^8.21.0",
       },
     },
+    "apps/desktop": {
+      "name": "@blokjs/desktop",
+      "version": "0.1.0",
+    },
     "apps/studio": {
       "name": "@blokjs/studio",
       "version": "0.1.0",
@@ -1071,6 +1075,8 @@
     "@blokjs/control-plane": ["@blokjs/control-plane@workspace:packages/control-plane"],
 
     "@blokjs/core": ["@blokjs/core@workspace:core/core"],
+
+    "@blokjs/desktop": ["@blokjs/desktop@workspace:apps/desktop"],
 
     "@blokjs/helper": ["@blokjs/helper@workspace:core/workflow-helper"],
 

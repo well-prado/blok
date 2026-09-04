@@ -1,0 +1,29 @@
+[package]
+name = "blok-desktop-host"
+version = "0.1.0"
+description = "Minimal Tauri 2 trusted host boundary for Blok"
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+
+[lib]
+name = "blok_desktop_host"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "blok-desktop-host"
+path = "src/main.rs"
+
+[features]
+default = ["tauri-host"]
+tauri-host = ["dep:tauri", "dep:tauri-build"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[dependencies]
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", optional = true, features = [] }
