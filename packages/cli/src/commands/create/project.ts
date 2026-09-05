@@ -88,6 +88,7 @@ const RUNTIME_HELLO_EXAMPLES: Record<string, string> = {
 	go: "runtime-go-hello.ts",
 	rust: "runtime-rust-hello.ts",
 	java: "runtime-java-hello.ts",
+	kotlin: "runtime-kotlin-hello.ts",
 	csharp: "runtime-csharp-hello.ts",
 	php: "runtime-php-hello.ts",
 	ruby: "runtime-ruby-hello.ts",

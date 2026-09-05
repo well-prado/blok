@@ -106,7 +106,7 @@ jobs:
       - name: Post-publish smoke (published CLI, all triggers + 7 runtimes, all required)
         env:
           SMOKE_PUBLISHED_VERSION: ${{ inputs.version }}
-          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
+          SMOKE_RUNTIMES: go,rust,java,csharp,kotlin,php,ruby,python3
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh

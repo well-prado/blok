@@ -73,6 +73,15 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Kotlin: produces sdks/kotlin/build/install/blok-kotlin/bin/blok-kotlin
+# -----------------------------------------------------------------------------
+if command -v java >/dev/null 2>&1; then
+	build_step "Kotlin SDK" bash -c "cd '$ROOT/sdks/kotlin' && ./gradlew installDist --no-daemon" || true
+else
+	skip "Kotlin SDK" "java not in PATH (install JDK 17+)"
+fi
+
+# -----------------------------------------------------------------------------
 # C#: produces sdks/csharp/bin/release/Blok.Core.dll
 # -----------------------------------------------------------------------------
 if command -v dotnet >/dev/null 2>&1; then

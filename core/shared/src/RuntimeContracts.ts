@@ -16,6 +16,7 @@ export const RUNTIME_KINDS = [
 	"bun",
 	"deno",
 	"python3",
+	"kotlin",
 	"go",
 	"java",
 	"rust",

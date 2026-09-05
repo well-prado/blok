@@ -187,6 +187,7 @@ describe("assertSidecarKind", () => {
 		expect(() => assertSidecarKind("typescript")).toThrow(/in-process/);
 		expect(() => assertSidecarKind("cobol")).toThrow(/Unknown runtime/);
 		expect(() => assertSidecarKind("go")).not.toThrow();
+		expect(() => assertSidecarKind("kotlin")).not.toThrow();
 		expect(() => assertSidecarKind("python3")).not.toThrow();
 	});
 });
@@ -208,6 +209,16 @@ describe("runtime add", () => {
 
 		expect(readSup(dir)).toContain("[program:go_runtime]");
 		expect(fs.existsSync(path.join(dir, ".blok", "runtimes", "go"))).toBe(true);
+	});
+
+	it("adds Kotlin with its JVM toolchain and gRPC port", async () => {
+		const dir = await makeProject();
+		await runtimeAdd("kotlin", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
+
+		const config = readConfig(dir);
+		expect(config.runtimes.kotlin.grpcPort).toBe(10008);
+		expect(readEnv(dir)).toContain("RUNTIME_KOTLIN_GRPC_PORT=10008");
+		expect(readSup(dir)).toContain("[program:kotlin_runtime]");
 	});
 
 	it("merges a second runtime without clobbering the first", async () => {

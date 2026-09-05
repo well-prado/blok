@@ -1,12 +1,13 @@
 # Cross-Runtime gRPC E2E Infrastructure
 #
-# Builds + boots all 7 SDK runtimes in gRPC mode — the transport the runner
+# Builds + boots all 8 SDK runtimes in gRPC mode — the transport the runner
 # actually uses (HttpRuntimeAdapter was removed in v0.5). Each container serves
 # the canonical `blok.runtime.v1.NodeRuntime` service; the spec-b harness drives
 # them through the runner's OWN GrpcRuntimeAdapter.
 #
 # gRPC port convention = HTTP port + 1000 (see sdks/CLAUDE.md): Go 10001,
-# Rust 10002, Java 10003, C# 10004, PHP 10005, Ruby 10006, Python3 10007.
+# Rust 10002, Java 10003, C# 10004, Kotlin 10008, PHP 10005, Ruby 10006,
+# Python3 10007.
 # Host ports mirror the container ports so the harness needs no env plumbing.
 #
 # Each build context is `.build/<lang>/` — produced by prepare-usernodes.ts with
@@ -76,6 +77,17 @@ services:
       <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10004"
+
+  sdk-kotlin:
+    build:
+      context: .build/kotlin/.blok/runtimes/kotlin
+    ports:
+      - "10008:10008"
+    volumes: *blob-volume
+    environment:
+      <<: *blob-env
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10008"
 
   sdk-php:
     # gRPC is served by RoadRunner (rr serve) — the image's default CMD.

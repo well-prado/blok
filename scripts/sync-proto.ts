@@ -27,6 +27,7 @@ const CONSUMERS = [
 	"sdks/go/proto/blok/runtime/v1/runtime.proto",
 	"sdks/rust/proto/blok/runtime/v1/runtime.proto",
 	"sdks/java/src/main/proto/blok/runtime/v1/runtime.proto",
+	"sdks/kotlin/src/main/proto/blok/runtime/v1/runtime.proto",
 	"sdks/csharp/proto/blok/runtime/v1/runtime.proto",
 	"sdks/python3/proto/blok/runtime/v1/runtime.proto",
 	"sdks/ruby/proto/blok/runtime/v1/runtime.proto",

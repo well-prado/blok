@@ -253,21 +253,21 @@ jobs:
 
   # ==========================================================================
   # Was scaffold-smoke.yml, job 1. The "scaffold → boot → curl" gate: create a
-  # real project with the local blokctl (every trigger + all 7 language
+  # real project with the local blokctl (every trigger + all 8 language
   # runtimes + --examples), boot it under `blokctl dev`, curl every endpoint.
   # Catches the class unit tests miss — a shipped scaffold whose
   # trigger/runtime/helper-node silently doesn't work.
   # BLOK_SMOKE_REQUIRE_ALL=1 fails the run if any applicable check fails, so a
   # trigger/runtime that stops booting can't pass as a skip.
   #
-  # All 7 runtimes boot inside ONE scaffolded project under one `blokctl dev` —
+  # All 8 runtimes boot inside ONE scaffolded project under one `blokctl dev` —
   # that's the shipped user experience this gate protects (found e.g. the Rust
   # sidecar compiling its gRPC server out, and the java-launcher spawn
   # mismatch). Per-language SDK unit/conformance coverage is the cross-runtime
   # job below.
   # ==========================================================================
   scaffold-smoke:
-    name: Scaffold → boot → curl (all triggers + 7 runtimes)
+    name: Scaffold → boot → curl (all triggers + 8 runtimes)
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
@@ -351,9 +351,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Scaffold smoke (7 runtimes, all applicable triggers, all required)
+      - name: Scaffold smoke (8 runtimes, all applicable triggers, all required)
         env:
-          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
+          SMOKE_RUNTIMES: go,rust,java,csharp,kotlin,php,ruby,python3
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh
@@ -387,7 +387,7 @@ jobs:
         run: bash tests/e2e/scaffold-smoke/combos.sh
 
   # ==========================================================================
-  # Was cross-runtime.yml. Builds all 7 SDK runtimes (Go/Rust/Java/C#/PHP/Ruby/
+  # Was cross-runtime.yml. Builds all 8 SDK runtimes (Go/Rust/Java/Kotlin/C#/PHP/Ruby/
   # Python3) in gRPC mode and drives them through the runner's own
   # GrpcRuntimeAdapter. This is the only lane that exercises the polyglot
   # runtimes end-to-end — without it they silently rot (the whole reason this
@@ -426,10 +426,10 @@ jobs:
       - name: Create the shared claim-check directory
         run: mkdir -p tests/e2e/cross-runtime/.blobs
 
-      - name: Build + start the 7 SDK gRPC runtimes
+      - name: Build + start the 8 SDK gRPC runtimes
         run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
 
-      - name: Run cross-runtime gRPC harness (all 7 required, user nodes + claim-check asserted)
+      - name: Run cross-runtime gRPC harness (all 8 required, user nodes + claim-check asserted)
         env:
           BLOK_E2E_REQUIRE_ALL: "1"
           BLOK_E2E_USERNODES: "1"

@@ -101,7 +101,7 @@ on all of them. A runtime on a **different host** has no shared filesystem, so
 it simply won't advertise the capability; use the manual mitigations below.
 
 <Warning>
-All seven SDKs resolve `$blokBlob` references. Only the **request** direction
+All eight SDKs resolve `$blokBlob` references. Only the **request** direction
 is offloaded — a node's *return value* still travels inline and is still
 bounded by the message limit.
 </Warning>

@@ -153,6 +153,7 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 			{ label: "runtime.python3", docs: "Execute using Python 3 runtime adapter (via gRPC)", priority: "6" },
 			{ label: "runtime.go", docs: "Execute using Go runtime adapter (Docker container)", priority: "7" },
 			{ label: "runtime.java", docs: "Execute using Java runtime adapter (Docker container)", priority: "8" },
+			{ label: "runtime.kotlin", docs: "Execute using Kotlin coroutine runtime adapter (gRPC sidecar)", priority: "9" },
 			{ label: "runtime.rust", docs: "Execute using Rust runtime adapter (Docker/WASM)", priority: "9" },
 			{ label: "runtime.php", docs: "Execute using PHP runtime adapter (Docker container)", priority: "a" },
 			{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "b" },

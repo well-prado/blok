@@ -131,6 +131,7 @@ A non-TS node runs in a per-language gRPC sidecar and is referenced from a step 
 | Go | `runtime.go` | 9001 |
 | Rust | `runtime.rust` | 9002 |
 | Java | `runtime.java` | 9003 |
+| Kotlin | `runtime.kotlin` | 9008 |
 | C# | `runtime.csharp` | 9004 |
 | PHP | `runtime.php` | 9005 |
 | Ruby | `runtime.ruby` | 9006 |

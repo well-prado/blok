@@ -1,6 +1,6 @@
 ---
 title: Language Runtimes
-description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, Ruby, Python) in an existing Blok project.
+description: Add, remove, and list language runtimes (Go, Rust, Java, Kotlin, C#, PHP, Ruby, Python) in an existing Blok project.
 icon: "layer-group"
 ---
 
@@ -117,7 +117,7 @@ After a successful add you'll see exactly what changed:
 ```
 
 <Note>
-**No application code changes are needed.** The runner already knows how to dispatch to all seven languages — adding one is purely configuration plus the SDK files. You never touch `@blokjs/runner` or your trigger code.
+**No application code changes are needed.** The runner already knows how to dispatch to all eight sidecar languages — adding one is purely configuration plus the SDK files. You never touch `@blokjs/runner` or your trigger code.
 </Note>
 
 ### Use it in a workflow
@@ -256,6 +256,7 @@ Each language has a fixed default gRPC port:
 | PHP | `10005` |
 | Ruby | `10006` |
 | Python 3 | `10007` |
+| Kotlin | `10008` |
 
 Because it's all configuration, a runtime added later is **indistinguishable** from one you picked at `create project` — same files, same shape, started the same way by `blokctl dev`.
 

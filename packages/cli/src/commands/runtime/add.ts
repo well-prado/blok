@@ -35,7 +35,7 @@ import {
  * `.env.local` + `supervisord.conf`. Projects scaffolded with `--examples`
  * also get the runtime's hello example workflow (copied + registered in
  * src/Workflows.ts, same as `create project`). No runner changes — the
- * framework already resolves all seven `runtime.<lang>` step types. When
+ * framework already resolves all eight `runtime.<lang>` step types. When
  * `lang` is omitted in interactive mode, an availability-aware picker is shown.
  */
 export async function runtimeAdd(kindArg: string | undefined, options: OptionValues): Promise<void> {
@@ -60,7 +60,9 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		let kind = kindArg?.trim().toLowerCase();
 		if (!kind) {
 			if (nonInteractive) {
-				throw new RuntimeCommandError("Specify a runtime: blokctl runtime add <go|rust|java|csharp|php|ruby|python3>");
+				throw new RuntimeCommandError(
+					"Specify a runtime: blokctl runtime add <go|rust|java|kotlin|csharp|php|ruby|python3>",
+				);
 			}
 			detected = await detectRuntimes();
 			const choices = detected
