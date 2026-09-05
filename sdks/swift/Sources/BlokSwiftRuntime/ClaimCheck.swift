@@ -20,7 +20,7 @@ public enum ClaimCheckResolver {
             throw BlokError(code: "BLOB_DIR_UNSET", category: .configuration, message: "BLOK_BLOB_DIR is required for claim-check inputs", httpStatus: 500)
         }
         guard let id = blob["id"] as? String,
-              id.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil else {
+              id.range(of: "^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$", options: .regularExpression) != nil else {
             throw BlokError(code: "BLOB_ID_INVALID", category: .data, message: "Claim-check id contains unsafe path characters", httpStatus: 400)
         }
         let maxBytes = min(

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import BlokSwiftRuntime
 
@@ -45,5 +46,21 @@ final class RuntimeTests: XCTestCase {
             let blokError = error as? BlokError
             XCTAssertEqual(blokError?.code, "CAPABILITY_NOT_APPROVED")
         }
+    }
+
+    func testClaimCheckResolvesRunScopedBlobID() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blok-claim-\(UUID().uuidString)", isDirectory: true)
+        let runDirectory = root.appendingPathComponent("spec-b-e2e", isDirectory: true)
+        let blobURL = runDirectory.appendingPathComponent("payload.json")
+        let payload = Data(#"{"name":"Ada","repeat":2}"#.utf8)
+        try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
+        try payload.write(to: blobURL)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let reference = Data(#"{"$blokBlob":{"id":"spec-b-e2e/payload.json","bytes":25,"codec":"json"}}"#.utf8)
+        let resolved = try ClaimCheckResolver.resolve(reference, environment: ["BLOK_BLOB_DIR": root.path])
+
+        XCTAssertEqual(resolved, payload)
     }
 }
