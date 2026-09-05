@@ -3,8 +3,9 @@ import { type OptionValues, program, withErrorBoundary } from "../../services/co
 import { runtimeAdd } from "./add.js";
 import { runtimeList } from "./list.js";
 import { runtimeRemove } from "./remove.js";
+import { runtimeUse } from "./use.js";
 
-const runtime = new Command("runtime").description("Add, remove, or list language runtimes in an existing project");
+const runtime = new Command("runtime").description("Select, add, remove, or list runtimes in an existing project");
 
 // Bare `blokctl runtime` shows the subcommand help instead of a terse usage line.
 runtime.action(
@@ -53,6 +54,18 @@ runtime
 	.action(
 		withErrorBoundary(async (options: OptionValues) => {
 			await runtimeList(options);
+		}),
+	);
+
+runtime
+	.command("use")
+	.description("Select the project's JavaScript execution target")
+	.argument("<runtime>", "JavaScript target: node, bun, or deno")
+	.option("-d, --directory <path>", "Project directory (default: current directory)")
+	.option("--json", "Output the selected target as JSON")
+	.action(
+		withErrorBoundary(async (runtimeArg: string, options: OptionValues) => {
+			await runtimeUse(runtimeArg, options);
 		}),
 	);
 

@@ -377,6 +377,24 @@
         "vitest": "^4.0.18",
       },
     },
+    "packages/conformance": {
+      "name": "@blokjs/conformance",
+      "version": "2.1.0",
+      "dependencies": {
+        "@blokjs/agent-kernel": "^2.1.0",
+        "@blokjs/capabilities": "^2.1.0",
+        "@blokjs/code-mode": "^2.1.0",
+        "@blokjs/runner": "^2.1.0",
+        "@blokjs/shared": "^2.1.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "better-sqlite3": "^12.6.2",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "packages/control-plane": {
       "name": "@blokjs/control-plane",
       "version": "2.1.0",
@@ -1072,6 +1090,8 @@
     "@blokjs/client": ["@blokjs/client@workspace:packages/client"],
 
     "@blokjs/code-mode": ["@blokjs/code-mode@workspace:packages/code-mode"],
+
+    "@blokjs/conformance": ["@blokjs/conformance@workspace:packages/conformance"],
 
     "@blokjs/control-plane": ["@blokjs/control-plane@workspace:packages/control-plane"],
 

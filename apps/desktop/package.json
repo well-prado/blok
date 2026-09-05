@@ -4,7 +4,23 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"build": "rm -rf dist && bun run tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run src",
 		"host:test": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features",
 		"tauri": "cargo tauri"
+	},
+	"dependencies": {
+		"@blokjs/agent-kernel": "^2.1.0",
+		"@blokjs/capabilities": "^2.1.0",
+		"@blokjs/code-mode": "^2.1.0",
+		"@blokjs/control-plane": "^2.1.0",
+		"@blokjs/runner": "^2.1.0",
+		"@blokjs/shared": "^2.1.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
 	}
 }

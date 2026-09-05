@@ -710,6 +710,7 @@ export class HarnessControlPlaneServer implements HarnessControlPlaneServerHandl
 				{
 					workflowRunId,
 					workflowName: input.workflowName,
+					...(input.input === undefined ? {} : { input: input.input }),
 				},
 				request.requestId,
 			),
@@ -802,6 +803,7 @@ export class HarnessControlPlaneServer implements HarnessControlPlaneServerHandl
 					"approval.resolved",
 					actor(principal),
 					{
+						approvalId: record.id,
 						interactionId: record.id,
 						status: record.status,
 						sequence: record.sequence,
@@ -843,6 +845,7 @@ export class HarnessControlPlaneServer implements HarnessControlPlaneServerHandl
 					"approval.resolved",
 					actor(principal),
 					{
+						approvalId: resumed.id,
 						interactionId: resumed.id,
 						status: "resumed",
 						sequence: resumed.sequence,

@@ -112,6 +112,7 @@ async function main() {
 			.option("-t, --trigger <value>", "Single trigger type (backwards compat, default: http)")
 			.option("-T, --triggers <value>", "Comma-separated trigger list: http,sse,pubsub,queue (default: http)")
 			.option("-r, --runtimes <value>", "Comma-separated runtime list (default: node)")
+			.option("--runtime <value>", "JavaScript execution target: node, bun, deno (default: node)")
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--pubsub-provider <value>", "Pub/Sub provider: gcp, aws, azure (default: gcp)")
 			.option("--queue-provider <value>", "Queue provider: kafka, rabbitmq, sqs, redis (default: kafka)")
@@ -136,6 +137,7 @@ async function main() {
 		project
 			.command(".")
 			.description("Create a new Project")
+			.option("--runtime <value>", "JavaScript execution target: node, bun, deno (default: node)")
 			.action(
 				withErrorBoundary(async (options: OptionValues) => {
 					await analytics.trackCommandExecution({

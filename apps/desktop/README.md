@@ -10,6 +10,14 @@ be ready, and supervises shutdown and bounded restarts. The credential is held
 in host memory and is never returned by a Tauri command, written to frontend
 storage, included in a URL, or emitted in host status.
 
+The TypeScript surface in `src` provides the H4-02 reference coding-harness
+workflow. It runs `understand -> plan -> approve -> implement -> test ->
+review` through the authenticated control plane, keeps mutations in a task
+worktree, and exposes ordered session events, approval callbacks, trusted test
+evidence, and the review diff to a renderer or headless client. See
+`docs/architecture/agent-harness/h4-02-desktop-vertical-slice.md` for the
+boundary and conformance contract.
+
 ## Local development
 
 The core host tests do not require a graphical desktop or Tauri system
