@@ -63,13 +63,15 @@ const timestamp = z.string().refine((value) => {
 	if (!Number.isFinite(Date.parse(value))) return false;
 	return new Date(value).toISOString() === value;
 }, "must be a canonical ISO timestamp");
+const sessionId = z.string().min(1).max(CAPABILITY_MAX_ID_LENGTH);
 const digest = z
 	.string()
 	.regex(/^(?:sha256):[0-9a-f]{64}$|^(?:sha512):[0-9a-f]{128}$/i)
 	.transform((value) => value.toLowerCase());
 const ownerSchema = z.object({
 	principal: z.object({ id: identifier, kind: identifier }),
-	sessionId: identifier,
+	// Session IDs are opaque references and the control plane uses UUIDs.
+	sessionId,
 	turnId: identifier.optional(),
 	taskId: identifier,
 });

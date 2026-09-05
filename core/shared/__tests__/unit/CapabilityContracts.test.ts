@@ -65,6 +65,24 @@ describe("H3 Git and process capability contracts", () => {
 		expect(processCapabilityId(parsed)).toBe("process.exec");
 	});
 
+	it("accepts opaque control-plane UUIDs as session ownership references", () => {
+		expect(() =>
+			parseProcessHandle({
+				version: "1",
+				id: "process-1",
+				owner: { ...owner, sessionId: "9334cb3e-c246-4b16-a13c-aea7d49c6ef2" },
+				specDigest: hash,
+				status: "running",
+				startedAt: "2026-09-02T12:00:00.000Z",
+				updatedAt: "2026-09-02T12:00:00.000Z",
+				terminal: "pipe",
+				background: "durable",
+				outputBytes: 0,
+				outputTruncated: false,
+			}),
+		).not.toThrow();
+	});
+
 	it("normalizes bounded process defaults and derives network/secret effects", () => {
 		const defaults = parseProcessSpec({
 			version: "1",
