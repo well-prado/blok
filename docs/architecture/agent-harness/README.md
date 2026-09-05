@@ -127,6 +127,9 @@ The H3-02 Git/worktree and bounded process capability contract is documented in
 The H4-01 trusted host boundary and sidecar supervision slice is documented in
 [h4-01-trusted-host.md](h4-01-trusted-host.md).
 
+The H4-02 desktop coding-harness vertical slice and its conformance evidence
+are documented in [h4-02-desktop-vertical-slice.md](h4-02-desktop-vertical-slice.md).
+
 The H3-04 provenance-aware context and compaction contract is documented in
 [h3-04-context-compaction.md](h3-04-context-compaction.md).
 
