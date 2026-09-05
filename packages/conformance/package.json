@@ -1,0 +1,40 @@
+{
+	"name": "@blokjs/conformance",
+	"version": "2.1.0",
+	"description": "Deterministic adversarial conformance campaign for Blok harness contracts.",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": ["dist"],
+	"scripts": {
+		"build": "rm -rf dist && bun run tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["blok", "conformance", "security", "harness", "adversarial"],
+	"license": "MIT",
+	"dependencies": {
+		"@blokjs/agent-kernel": "^2.1.0",
+		"@blokjs/capabilities": "^2.1.0",
+		"@blokjs/code-mode": "^2.1.0",
+		"@blokjs/runner": "^2.1.0",
+		"@blokjs/shared": "^2.1.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"better-sqlite3": "^12.6.2",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"private": true
+}
