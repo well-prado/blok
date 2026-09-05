@@ -23,6 +23,7 @@
  *       php     → 9005 / 10005   (via RoadRunner, opt-out)
  *       ruby    → 9006 / 10006
  *       python3 → 9007 / 10007
+ *       dart    → 9008 / 10008
  *
  *   - The trigger HTTP server in `triggers/http` on port 4000 (default
  *     `.env` value). With the Phase 6 default flip, runtime nodes
@@ -344,6 +345,28 @@ const ALL_PROFILES: RuntimeProfile[] = [
 					HOST: "127.0.0.1",
 					LOG_LEVEL: "INFO",
 					PYTHONUNBUFFERED: "1",
+				},
+			}),
+	},
+	{
+		id: "dart",
+		envKey: "DART",
+		label: "dart",
+		color: "\x1b[34m",
+		httpPort: 9008,
+		grpcPort: 10008,
+		buildHint: "cd sdks/dart && dart pub get && dart compile exe bin/serve.dart -o bin/blok-dart",
+		detect: () => detectCmd("dart", ["--version"]) && existsSync(path.join(REPO_ROOT, "sdks/dart/bin/serve.dart")),
+		spawn: () =>
+			spawn("dart", ["run", "bin/serve.dart"], {
+				cwd: path.join(REPO_ROOT, "sdks/dart"),
+				env: {
+					...process.env,
+					PORT: "9008",
+					GRPC_PORT: "10008",
+					BLOK_TRANSPORT: "grpc",
+					HOST: "127.0.0.1",
+					LOG_LEVEL: "INFO",
 				},
 			}),
 	},

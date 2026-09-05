@@ -151,6 +151,6 @@ neither is refused at load time.
 - Do not use a `queue` trigger; use `worker`.
 - Do not use `"*"` for HTTP wildcard; use `"ANY"` or `http.any()`.
 - Do not edit generated `.blok/runtimes/` files.
-- Do not use ESLint or Prettier; this repo uses Biome.
+- Do not use ESLint or Prettier; this repo uses Biome. Dart code is formatted and analyzed with the pinned Dart SDK toolchain.
 - Do not build with bare `bunx nx run-many -t build`; use `bun run build`, which
   appends the Node-ESM specifier fixup (#687).

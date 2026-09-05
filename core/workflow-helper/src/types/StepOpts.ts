@@ -49,6 +49,7 @@ export const NodeTypeSchema = z.enum([
 	"runtime.php",
 	"runtime.csharp",
 	"runtime.ruby",
+	"runtime.dart",
 	"runtime.docker",
 	"runtime.wasm",
 	"runtime.wasi",

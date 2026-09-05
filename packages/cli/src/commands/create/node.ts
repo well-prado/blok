@@ -11,6 +11,7 @@ import { isNonInteractive, resolveOrThrow } from "../../services/non-interactive
 import { manager as pm } from "../../services/package-manager.js";
 import {
 	csharp_node_file,
+	dart_node_file,
 	function_first_node_file,
 	go_node_file,
 	java_node_file,
@@ -107,6 +108,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 									{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
 									{ label: "PHP", value: "php", hint: "Production - Docker" },
 									{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
+									{ label: "Dart", value: "dart", hint: "Production - gRPC" },
 								],
 							}),
 			},
@@ -597,6 +599,20 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			// Create README
 			const readmeContent = `# ${nodeName}\n\nRuby-based Blok node, served by the Ruby runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/ruby/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
+		}
+
+		if (node_runtime === "dart") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				const currentDir = `${process.cwd()}/runtimes/dart`;
+				fsExtra.ensureDirSync(path.join(currentDir, "nodes"));
+				dirPath = path.join(currentDir, "nodes", nodeName);
+			}
+			if (!skipPrompts) s.message("Creating Dart node files...");
+			if (!currentPath && fsExtra.existsSync(dirPath)) throw new Error("ops2");
+			fsExtra.ensureDirSync(dirPath);
+			fsExtra.writeFileSync(`${dirPath}/node.dart`, dart_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName));
+			fsExtra.writeFileSync(`${dirPath}/README.md`, `# ${nodeName}\n\nDart-based Blok node served over gRPC.\n`);
 		}
 
 		if (!skipPrompts) s.stop(`Node "${nodeName}" created successfully.`);

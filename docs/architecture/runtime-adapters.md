@@ -34,6 +34,7 @@ export type RuntimeKind =
   | "php"
   | "csharp"
   | "ruby"
+  | "dart"
   | "docker"
   | "wasm"
   | "wasi";

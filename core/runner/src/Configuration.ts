@@ -110,6 +110,7 @@ export default class Configuration implements Config {
 			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", grpcPortEnv: "RUNTIME_PHP_GRPC_PORT" },
 			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", grpcPortEnv: "RUNTIME_RUBY_GRPC_PORT" },
 			{ kind: "python3", hostEnv: "RUNTIME_PYTHON3_HOST", grpcPortEnv: "RUNTIME_PYTHON3_GRPC_PORT" },
+			{ kind: "dart", hostEnv: "RUNTIME_DART_HOST", grpcPortEnv: "RUNTIME_DART_GRPC_PORT" },
 		];
 
 		for (const lang of sdkLanguages) {
@@ -630,6 +631,9 @@ export default class Configuration implements Config {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 			"runtime.ruby": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.dart": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 			"runtime.wasi": {

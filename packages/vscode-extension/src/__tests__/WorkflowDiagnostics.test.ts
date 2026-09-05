@@ -452,6 +452,7 @@ describe("WorkflowDiagnostics", () => {
 				"runtime.php",
 				"runtime.csharp",
 				"runtime.ruby",
+				"runtime.dart",
 			];
 			for (const stepType of validTypes) {
 				const doc = createMockDocument(
@@ -502,6 +503,7 @@ describe("WorkflowDiagnostics", () => {
 				"php",
 				"csharp",
 				"ruby",
+				"dart",
 				"docker",
 				"wasm",
 				"wasi",

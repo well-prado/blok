@@ -20,6 +20,7 @@ import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	csharp_node_file,
+	dart_node_file,
 	go_node_file,
 	java_node_file,
 	php_node_file,
@@ -29,6 +30,7 @@ import {
 } from "../../../packages/cli/src/commands/create/utils/Examples.js";
 import {
 	generateCSharpNodeRegistry,
+	generateDartNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
 	generateRustNodeRegistry,
@@ -65,6 +67,7 @@ const EXCLUDES: Record<string, string[]> = {
 	python3: ["__pycache__"],
 	ruby: [],
 	php: ["vendor"],
+	dart: [".dart_tool"],
 };
 
 function copySdk(lang: string, dest: string): void {
@@ -112,6 +115,7 @@ prepCompiled("go", "node.go", go_node_file, generateGoNodeRegistry);
 prepCompiled("rust", "node.rs", rust_node_file, generateRustNodeRegistry);
 prepCompiled("java", `src/main/java/com/blok/blok/nodes/${PASCAL}Node.java`, java_node_file, generateJavaNodeRegistry);
 prepCompiled("csharp", `${PASCAL}Node.cs`, csharp_node_file, generateCSharpNodeRegistry);
+prepCompiled("dart", "node.dart", dart_node_file, generateDartNodeRegistry);
 
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.
 prepDynamic("python3", "node.py", python3_file, { "__init__.py": "" });

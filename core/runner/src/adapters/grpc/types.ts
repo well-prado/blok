@@ -113,6 +113,7 @@ export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
 	php: 10005,
 	ruby: 10006,
 	python3: 10007,
+	dart: 10008,
 	docker: 0,
 	wasm: 0,
 	wasi: 10008,

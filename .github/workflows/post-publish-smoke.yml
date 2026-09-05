@@ -98,15 +98,20 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.3.0'
+
       # The smoke DRIVER (smoke.ts) runs from the repo and needs its deps;
       # the scaffold itself installs published packages from npm.
       - name: Install driver dependencies
         run: bun install --frozen-lockfile
 
-      - name: Post-publish smoke (published CLI, all triggers + 7 runtimes, all required)
+      - name: Post-publish smoke (published CLI, all triggers + 8 runtimes, all required)
         env:
           SMOKE_PUBLISHED_VERSION: ${{ inputs.version }}
-          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
+          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3,dart
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh

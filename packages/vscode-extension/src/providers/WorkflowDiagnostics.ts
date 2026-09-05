@@ -26,6 +26,7 @@ const VALID_STEP_TYPES = [
 	"runtime.php",
 	"runtime.csharp",
 	"runtime.ruby",
+	"runtime.dart",
 	"runtime.wasi",
 ];
 
@@ -41,6 +42,7 @@ const VALID_RUNTIMES = [
 	"php",
 	"csharp",
 	"ruby",
+	"dart",
 	"docker",
 	"wasm",
 	"wasi",

@@ -2508,6 +2508,7 @@
 									"runtime.php",
 									"runtime.csharp",
 									"runtime.ruby",
+									"runtime.dart",
 									"runtime.docker",
 									"runtime.wasm",
 									"runtime.wasi"
@@ -2568,6 +2569,7 @@
 									"php",
 									"csharp",
 									"ruby",
+									"dart",
 									"docker",
 									"wasm",
 									"wasi"
