@@ -52,12 +52,13 @@ describe("LSP Constants", () => {
 			expect(VALID_STEP_TYPES).toContain("runtime.go");
 			expect(VALID_STEP_TYPES).toContain("runtime.java");
 			expect(VALID_STEP_TYPES).toContain("runtime.rust");
+			expect(VALID_STEP_TYPES).toContain("runtime.dart");
 		});
 	});
 
 	describe("VALID_RUNTIMES", () => {
 		it("should include the project targets and all runtime kinds", () => {
-			expect(VALID_RUNTIMES).toHaveLength(15);
+			expect(VALID_RUNTIMES).toHaveLength(16);
 			expect(VALID_RUNTIMES).toContain("node");
 			expect(VALID_RUNTIMES).toContain("nodejs");
 			expect(VALID_RUNTIMES).toContain("bun");
@@ -67,6 +68,7 @@ describe("LSP Constants", () => {
 			expect(VALID_RUNTIMES).toContain("java");
 			expect(VALID_RUNTIMES).toContain("rust");
 			expect(VALID_RUNTIMES).toContain("swift");
+			expect(VALID_RUNTIMES).toContain("dart");
 			expect(VALID_RUNTIMES).toContain("docker");
 			expect(VALID_RUNTIMES).toContain("wasm");
 			expect(VALID_RUNTIMES).toContain("wasi");
