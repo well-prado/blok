@@ -68,7 +68,6 @@ const registry = RuntimeRegistry.getInstance();
 // Register adapters at startup
 registry.register(new NodeJsRuntimeAdapter());
 registry.register(new Python3RuntimeAdapter());
-registry.register(new BunRuntimeAdapter());
 registry.register(new WasmRuntimeAdapter());
 registry.register(new DockerRuntimeAdapter("go", "blok-go-runtime:latest"));
 
@@ -141,7 +140,7 @@ const adapter = new Python3RuntimeAdapter(
 ### BunRuntimeAdapter
 
 **Kind:** `bun`
-**Communication:** In-process (under Bun) or subprocess (under Node.js)
+**Communication:** In-process (under Bun) or compatibility subprocess (under Node.js)
 **Source:** `core/runner/src/adapters/BunRuntimeAdapter.ts`
 
 Provides dual execution modes:
@@ -159,9 +158,12 @@ const result = await adapter.execute(node, ctx);
 - In-process (Bun host): sub-millisecond overhead
 - Subprocess (Node.js host): 50-200ms (process spawn + serialize)
 
-The subprocess fallback is retained for compatibility but is not a production
-worker topology. New deployments must use the persistent worker design in ADR
-0016 before selecting Bun out of process.
+The adapter is exported for compatibility, but it is not registered by the
+default `Configuration` path: its Node-host subprocess fallback starts one
+`bun eval` process per call and is not a production worker topology. New
+deployments must use the persistent worker design in
+`docs/architecture/adr-0016-javascript-runtimes.md` before selecting Bun out of
+process.
 
 ### Deno runtime target
 

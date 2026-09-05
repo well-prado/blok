@@ -67,6 +67,7 @@ import { runtimeAdd } from "../../../src/commands/runtime/add.js";
 import { runtimeList } from "../../../src/commands/runtime/list.js";
 import { runtimeRemove } from "../../../src/commands/runtime/remove.js";
 import { assertSidecarKind } from "../../../src/commands/runtime/shared.js";
+import { runtimeUse } from "../../../src/commands/runtime/use.js";
 
 interface FixtureRuntime {
 	kind: string;
@@ -427,5 +428,42 @@ describe("runtime list --json", () => {
 		expect(out.installed.map((r: { kind: string }) => r.kind)).toContain("go");
 		expect(out.available.map((r: { kind: string }) => r.kind)).not.toContain("go");
 		expect(out.available.length).toBeGreaterThan(0);
+	});
+});
+
+describe("runtime use", () => {
+	it("switches the JavaScript target while preserving package policy and sidecars", async () => {
+		const dir = await makeProject({ runtimes: [goRuntime] });
+		const configPath = path.join(dir, ".blok", "config.json");
+		const config = readConfig(dir);
+		config.packageManager = "pnpm";
+		config.custom = { keep: true };
+		await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
+
+		await runtimeUse("deno", { directory: dir });
+
+		const next = readConfig(dir);
+		expect(next.runtime).toBe("deno");
+		expect(next.packageManager).toBe("pnpm");
+		expect(next.custom).toEqual({ keep: true });
+		expect(next.runtimes.go).toBeDefined();
+	});
+
+	it("normalizes the legacy nodejs project alias", async () => {
+		const dir = await makeProject();
+
+		await runtimeUse("nodejs", { directory: dir });
+
+		expect(readConfig(dir).runtime).toBe("node");
+	});
+
+	it("rejects unknown JavaScript targets without changing config", async () => {
+		const dir = await makeProject();
+		const before = readConfig(dir);
+
+		await runtimeUse("quickjs", { directory: dir });
+
+		expect(process.exitCode).toBe(1);
+		expect(readConfig(dir)).toEqual(before);
 	});
 });

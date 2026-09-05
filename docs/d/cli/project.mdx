@@ -34,10 +34,11 @@ When you run `npx blokctl@latest create project`, the CLI will guide you through
 
 1. Assign a project name.
 2. Select a package manager: **npm** (default), yarn, pnpm, or bun.
-3. Select **triggers** to install — **HTTP** (default) plus, optionally, SSE, WebSocket, Pub/Sub, Worker, or Cron.
-4. The generated project records the Node.js target by default; add any cross-language sidecars (Python3, Go, Rust, Java, C#, PHP, or Ruby) when needed.
-5. Pick any **observability modules** to enable (all optional — see [`blokctl observability`](./observability.mdx)).
-6. **Install the examples? YES** (recommended for a first project — it adds runnable sample workflows and nodes beyond the one shipped by default).
+3. Select the JavaScript execution target: **Node.js** (default), Bun, or Deno.
+4. Select **triggers** to install — **HTTP** (default) plus, optionally, SSE, WebSocket, Pub/Sub, Worker, or Cron.
+5. Add any cross-language sidecars (Python3, Go, Rust, Java, C#, PHP, or Ruby) when needed.
+6. Pick any **observability modules** to enable (all optional — see [`blokctl observability`](./observability.mdx)).
+7. **Install the examples? YES** (recommended for a first project — it adds runnable sample workflows and nodes beyond the one shipped by default).
 
 **Non-interactive flags** (for CI/scripts):
 
@@ -45,6 +46,7 @@ When you run `npx blokctl@latest create project`, the CLI will guide you through
 | --- | --- |
 | `-n, --name <value>` | Project name |
 | `-T, --triggers <list>` | Comma-separated triggers (e.g. `http,worker`) |
+| `--runtime <node\|bun\|deno>` | JavaScript execution target (default `node`) |
 | `-r, --runtimes <list>` | Comma-separated language sidecars (default `node`) |
 | `-m, --package-manager <value>` | `npm` (default), `yarn`, `pnpm`, or `bun` |
 | `--pubsub-provider <value>` | Pub/Sub provider when `pubsub` is selected: `gcp` (default), `aws`, `azure` |
@@ -56,6 +58,14 @@ When you run `npx blokctl@latest create project`, the CLI will guide you through
 <Note>
 **The dev stack defaults to `none`.** Earlier versions copied a full Prometheus/Grafana/Loki/Tempo stack into every project; now you opt in with `--obs-stack lite|full` (or add it later via `blokctl observability add obs-stack`).
 </Note>
+
+<Warning>
+The project target is recorded in `.blok/config.json` independently of the
+package manager. Node.js is executable today; Bun and Deno remain explicit,
+fail-closed contract targets until their persistent workers are registered.
+Use `blokctl runtime use node|bun|deno` to change an existing project's
+declared target without rewriting workflows or sidecar configuration.
+</Warning>
 
 <Note>
 `-l, --local <path>` scaffolds from a local Blok repo checkout instead of the published npm

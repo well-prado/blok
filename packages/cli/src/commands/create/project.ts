@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import util from "node:util";
-import { PackageManagerSchema } from "@blokjs/shared";
+import { type JavaScriptRuntime, PackageManagerSchema, normalizeJavaScriptRuntime } from "@blokjs/shared";
 import * as p from "@clack/prompts";
 import type { OptionValues } from "commander";
 import figlet from "figlet";
@@ -121,6 +121,14 @@ export async function createProject(opts: OptionValues, version: string, current
 			: ["http"];
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
+	let selectedJavaScriptRuntime: JavaScriptRuntime;
+	try {
+		const normalized = normalizeJavaScriptRuntime(String(opts.runtime ?? "node"));
+		selectedJavaScriptRuntime = normalized.runtime;
+		if (normalized.diagnostic) console.warn(`[blok] ${normalized.diagnostic.message}`);
+	} catch {
+		throw new Error(`Invalid --runtime "${String(opts.runtime)}". Supported targets: node, bun, deno.`);
+	}
 	let selectedManager: string = opts.packageManager || "npm";
 	// Default to NATS — the only pub/sub provider that runs with zero cloud
 	// setup (mirrors the worker trigger's in-memory default), so a scaffolded
@@ -284,6 +292,18 @@ export async function createProject(opts: OptionValues, version: string, current
 								initialValues: ["node"],
 								required: true,
 							}),
+				javascriptRuntime: () =>
+					opts.runtime
+						? Promise.resolve(String(opts.runtime))
+						: p.select({
+								message: "Select the JavaScript execution target",
+								options: [
+									{ label: "Node.js", value: "node", hint: "default, broadest compatibility" },
+									{ label: "Bun", value: "bun", hint: "Bun runtime worker" },
+									{ label: "Deno", value: "deno", hint: "Deno runtime worker" },
+								],
+								initialValue: "node",
+							}),
 				obsStack: () =>
 					opts.obsStack
 						? Promise.resolve(opts.obsStack)
@@ -326,6 +346,15 @@ export async function createProject(opts: OptionValues, version: string, current
 		explicitQueueProvider = blokctlProject.queueProvider != null;
 		queueProvider = (blokctlProject.queueProvider as string) || "kafka";
 		selectedRuntimeKinds = blokctlProject.runtimes;
+		try {
+			const normalized = normalizeJavaScriptRuntime(String(blokctlProject.javascriptRuntime));
+			selectedJavaScriptRuntime = normalized.runtime;
+			if (normalized.diagnostic) console.warn(`[blok] ${normalized.diagnostic.message}`);
+		} catch {
+			throw new Error(
+				`Invalid JavaScript runtime "${String(blokctlProject.javascriptRuntime)}". Supported targets: node, bun, deno.`,
+			);
+		}
 		selectedObsTier = parseObsTier(blokctlProject.obsStack as string);
 		selectedObsModules = (blokctlProject.observability as string[] | undefined) ?? [];
 		selectedManager = blokctlProject.selectedManager;
@@ -1287,7 +1316,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			runtimeConfigs,
 			spawnedTriggerConfigs,
 			obsConfigMap,
-			"node",
+			selectedJavaScriptRuntime,
 			PackageManagerSchema.parse(selectedManager),
 		);
 
