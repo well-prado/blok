@@ -27,7 +27,7 @@ public extension TypedNode {
     var description: String { "" }
     var capabilityManifest: CapabilityManifest? { nil }
 
-    func asHandler() -> any NodeHandler { TypedNodeHandler(self) }
+    func asHandler() -> any NodeHandler { TypedNodeHandler(node: self) }
 }
 
 private struct TypedNodeHandler<T: TypedNode>: NodeHandler {

@@ -95,7 +95,7 @@ public struct CapabilityPolicy: Sendable {
             throw BlokError.permission(
                 code: "CAPABILITY_NOT_APPROVED",
                 message: "Node '\(node)' requests capabilities that are not approved",
-                details: ["capabilities": denied]
+                details: ["capabilities": .strings(denied)]
             )
         }
     }

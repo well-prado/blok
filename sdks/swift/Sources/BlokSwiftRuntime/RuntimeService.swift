@@ -105,18 +105,18 @@ public final class NodeRuntimeService: Blok_Runtime_V1_NodeRuntime.SimpleService
                     cookies: trigger.cookies,
                     method: trigger.method,
                     url: trigger.url,
-                    baseURL: trigger.baseUrl,
+                    baseURL: trigger.baseURL,
                     kind: trigger.triggerKind
                 ),
                 state: RuntimeState(previousOutput: state.previousOutput, vars: state.vars, environment: state.env),
-                workflow: WorkflowContext(runID: workflow.runId, name: workflow.name, path: workflow.path, version: workflow.version),
+                workflow: WorkflowContext(runID: workflow.runID, name: workflow.name, path: workflow.path, version: workflow.version),
                 logger: logger
             )
             if context.cancellation.isCancelled {
                 throw BlokError.cancelled()
             }
             let data = try await executeWithDeadline(
-                nodeName: node.name,
+                nodeName: nodeName,
                 input: input,
                 context: executionContext,
                 deadlineMs: message.options.deadlineMs,
