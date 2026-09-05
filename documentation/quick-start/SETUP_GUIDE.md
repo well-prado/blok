@@ -1,6 +1,6 @@
 # Blok Quick-Start Setup Guide
 
-> Complete guide to running Blok locally with all 7 multi-language SDK runtimes, testing workflows, and measuring performance.
+> Complete guide to running Blok locally with all 8 multi-language SDK runtimes, testing workflows, and measuring performance.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@
 
 ## Quick Start (Full Stack)
 
-The fastest way to run Blok with all 7 language runtimes:
+The fastest way to run Blok with all 8 language runtimes:
 
 ```bash
 # 1. Clone and install
@@ -39,13 +39,13 @@ pnpm install
 pnpm core:build:dev
 pnpm nodes:build
 
-# 3. Start the 7 SDK runtime containers
+# 3. Start the 8 SDK runtime containers
 cd tests/e2e/cross-runtime
 docker compose up -d --build
 
 # 4. Wait for all containers to become healthy (~30-60s)
 docker compose ps
-# All 7 should show (healthy)
+# All 8 should show (healthy)
 
 # 5. Start the Blok HTTP server (in a new terminal)
 cd /path/to/blok
@@ -122,9 +122,9 @@ docker compose -f infra/docker-compose.production.yml --profile monitoring up -d
 
 ## Running the Multi-Language SDK Runtimes
 
-Blok supports 7 language runtimes as sidecar containers. Each runs a gRPC server (`blok.runtime.v1.NodeRuntime/Execute`) plus a `GET /health` endpoint for orchestrator readiness probes. The runner has spoken gRPC since v0.5; `HttpRuntimeAdapter` is gone.
+Blok supports 8 language runtimes as sidecar containers. Each runs a gRPC server (`blok.runtime.v1.NodeRuntime/Execute`) plus a `GET /health` endpoint for orchestrator readiness probes. The runner has spoken gRPC since v0.5; `HttpRuntimeAdapter` is gone.
 
-### Start All 7 SDK Containers
+### Start All 8 SDK Containers
 
 ```bash
 cd tests/e2e/cross-runtime
@@ -137,13 +137,14 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Expected output — all 7 should show `(healthy)`:
+Expected output — all 8 should show `(healthy)`:
 
 | Container | Language | Host Port | Container Port | Status |
 |-----------|----------|-----------|----------------|--------|
 | sdk-go | Go | 9001 | 8080 | (healthy) |
 | sdk-rust | Rust | 9002 | 8080 | (healthy) |
 | sdk-java | Java | 9003 | 8080 | (healthy) |
+| sdk-kotlin | Kotlin/JVM | 10008 | 9008 | (healthy) |
 | sdk-csharp | C# | 9004 | 8080 | (healthy) |
 | sdk-php | PHP | 9005 | 8080 | (healthy) |
 | sdk-ruby | Ruby | 9006 | 8080 | (healthy) |
@@ -348,7 +349,7 @@ docker compose -f infra/development/docker-compose.yml up -d
 
 ### SDK Runtimes (Multi-Language)
 ```bash
-# Start all 7 SDK containers
+# Start all 8 SDK containers
 cd tests/e2e/cross-runtime
 docker compose up -d --build
 # → Go SDK at localhost:9001
@@ -489,7 +490,7 @@ The workflow is defined at `triggers/http/workflows/json/cross-runtime-chain.jso
 # 1. SDK containers must be running
 cd tests/e2e/cross-runtime
 docker compose up -d --build
-# Wait for all 7 to show (healthy)
+# Wait for all 8 to show (healthy)
 docker compose ps
 
 # 2. Blok HTTP server must be running (separate terminal)
@@ -692,6 +693,7 @@ When a user runs `npx blokctl@latest create project`, the CLI:
 | Go SDK | 9001 | 8080 | gRPC |
 | Rust SDK | 9002 | 8080 | gRPC |
 | Java SDK | 9003 | 8080 | gRPC |
+| Kotlin SDK | 10008 | 9008 | gRPC |
 | C# SDK | 9004 | 8080 | gRPC |
 | PHP SDK | 9005 | 8080 | gRPC |
 | Ruby SDK | 9006 | 8080 | gRPC |

@@ -152,7 +152,7 @@ async function main() {
 			.description("Create a new Node")
 			.option("-n, --name <value>", "Create a default Node")
 			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
-			.option("-r, --runtime <value>", "Runtime: typescript, python3, go, java, rust, csharp, php, ruby")
+			.option("-r, --runtime <value>", "Runtime: typescript, python3, go, java, rust, kotlin, csharp, php, ruby")
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--node-type <value>", "Node type: module, class (TypeScript only)")
 			.option("--template <value>", "Template: standard, ui (TypeScript only)")

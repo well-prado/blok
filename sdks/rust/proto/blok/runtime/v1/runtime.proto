@@ -1,5 +1,5 @@
 // Blok Runtime v1 — the wire contract between the TypeScript runner and SDK
-// servers (Python, Go, Rust, Java, C#, PHP, Ruby).
+// servers (Python, Go, Rust, Java, Kotlin, C#, PHP, Ruby).
 //
 // Single source of truth for cross-language interop. Generated stubs in each
 // SDK are derived from this file via `make proto`.

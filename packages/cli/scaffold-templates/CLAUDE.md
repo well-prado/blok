@@ -9,7 +9,7 @@ and runtimes this project actually has, and author for those (don't default to H
 
 ```bash
 blokctl dev                              # Start trigger(s) + spawn configured runtimes
-blokctl create node <name>               # Scaffold a TS node (--runtime go|rust|java|csharp|php|ruby|python3)
+blokctl create node <name>               # Scaffold a node (--runtime go|rust|java|kotlin|csharp|php|ruby|python3)
 blokctl create workflow <name>           # Scaffold a workflow
 blokctl trace                            # Open Blok Studio (or visit /__blok on the running server)
 ```

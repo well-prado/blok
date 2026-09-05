@@ -1,7 +1,7 @@
 # Blok Framework
 
 Blok is a TypeScript-first workflow orchestration framework. It runs
-declarative workflows across NodeJS, Python3, Go, Rust, Java, C#, PHP, and Ruby
+declarative workflows across NodeJS, Python3, Go, Rust, Java, Kotlin, C#, PHP, and Ruby
 runtimes. This monorepo uses Bun, TypeScript, Hono, Vitest, Nx, and Biome.
 
 Keep this file, `CLAUDE.md`, and
@@ -361,6 +361,7 @@ actionable diagnostic; they never select Bun or Deno.
 | Go | `runtime.go` | 9001 |
 | Rust | `runtime.rust` | 9002 |
 | Java | `runtime.java` | 9003 |
+| Kotlin | `runtime.kotlin` | 9008 |
 | C# | `runtime.csharp` | 9004 |
 | PHP | `runtime.php` | 9005 |
 | Ruby | `runtime.ruby` | 9006 |

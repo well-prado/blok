@@ -106,6 +106,7 @@ export default class Configuration implements Config {
 			{ kind: "go", hostEnv: "RUNTIME_GO_HOST", grpcPortEnv: "RUNTIME_GO_GRPC_PORT" },
 			{ kind: "rust", hostEnv: "RUNTIME_RUST_HOST", grpcPortEnv: "RUNTIME_RUST_GRPC_PORT" },
 			{ kind: "java", hostEnv: "RUNTIME_JAVA_HOST", grpcPortEnv: "RUNTIME_JAVA_GRPC_PORT" },
+			{ kind: "kotlin", hostEnv: "RUNTIME_KOTLIN_HOST", grpcPortEnv: "RUNTIME_KOTLIN_GRPC_PORT" },
 			{ kind: "csharp", hostEnv: "RUNTIME_CSHARP_HOST", grpcPortEnv: "RUNTIME_CSHARP_GRPC_PORT" },
 			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", grpcPortEnv: "RUNTIME_PHP_GRPC_PORT" },
 			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", grpcPortEnv: "RUNTIME_RUBY_GRPC_PORT" },
@@ -621,6 +622,9 @@ export default class Configuration implements Config {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 			"runtime.java": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.kotlin": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 			"runtime.csharp": {

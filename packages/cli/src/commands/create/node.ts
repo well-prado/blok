@@ -14,6 +14,7 @@ import {
 	function_first_node_file,
 	go_node_file,
 	java_node_file,
+	kotlin_node_file,
 	php_node_file,
 	python3_file,
 	ruby_node_file,
@@ -103,6 +104,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 									{ label: "Python 3", value: "python3", hint: "Production - gRPC" },
 									{ label: "Go", value: "go", hint: "Production - Docker" },
 									{ label: "Java", value: "java", hint: "Production - Docker" },
+									{ label: "Kotlin", value: "kotlin", hint: "Production - JVM/gRPC" },
 									{ label: "Rust", value: "rust", hint: "Production - Docker" },
 									{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
 									{ label: "PHP", value: "php", hint: "Production - Docker" },
@@ -438,6 +440,30 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
+		if (node_runtime === "kotlin") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				const currentDir = `${process.cwd()}/runtimes/kotlin`;
+				if (!fsExtra.existsSync(currentDir)) fsExtra.ensureDirSync(currentDir);
+				const currentNodesDir = `${currentDir}/nodes`;
+				fsExtra.ensureDirSync(currentNodesDir);
+				dirPath = path.join(currentNodesDir, nodeName);
+			}
+			if (!skipPrompts) s.message("Creating Kotlin node files...");
+			if (!currentPath && fsExtra.existsSync(dirPath)) throw new Error("ops2");
+			const srcDir = `${dirPath}/src/main/kotlin/com/blok/kotlin/nodes`;
+			fsExtra.ensureDirSync(srcDir);
+			const pascalName = toPascalCase(nodeName);
+			fsExtra.writeFileSync(
+				`${srcDir}/${pascalName}Node.kt`,
+				kotlin_node_file.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName).replace(/\{\{NODE_NAME\}\}/g, nodeName),
+			);
+			fsExtra.writeFileSync(
+				`${dirPath}/README.md`,
+				`# ${nodeName}\n\nKotlin-based Blok node, compiled into the Kotlin runtime distribution.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/kotlin/nodes/\` and registered automatically.\n`,
+			);
+		}
+
 		if (node_runtime === "rust") {
 			let dirPath = process.cwd();
 			if (!currentPath) {
@@ -630,6 +656,11 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		if (!currentPath && node_runtime === "java") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/java/nodes/${nodeName}`);
 			console.log(`\nRun "blokctl dev" — the Java runtime discovers and registers this node automatically.`);
+		}
+
+		if (!currentPath && node_runtime === "kotlin") {
+			console.log(`\nNavigate to the node directory by running: cd runtimes/kotlin/nodes/${nodeName}`);
+			console.log(`\nRun "blokctl dev" — the Kotlin runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "rust") {

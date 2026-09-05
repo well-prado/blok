@@ -22,6 +22,7 @@ import {
 	csharp_node_file,
 	go_node_file,
 	java_node_file,
+	kotlin_node_file,
 	php_node_file,
 	python3_file,
 	ruby_node_file,
@@ -31,6 +32,7 @@ import {
 	generateCSharpNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
+	generateKotlinNodeRegistry,
 	generateRustNodeRegistry,
 } from "../../../packages/cli/src/services/runtime-setup.js";
 
@@ -61,6 +63,7 @@ const EXCLUDES: Record<string, string[]> = {
 	go: [],
 	rust: ["target"],
 	java: ["target"],
+	kotlin: ["build", ".gradle"],
 	csharp: ["bin", "obj"],
 	python3: ["__pycache__"],
 	ruby: [],
@@ -111,6 +114,12 @@ console.log("Preparing e2e-user node build contexts...");
 prepCompiled("go", "node.go", go_node_file, generateGoNodeRegistry);
 prepCompiled("rust", "node.rs", rust_node_file, generateRustNodeRegistry);
 prepCompiled("java", `src/main/java/com/blok/blok/nodes/${PASCAL}Node.java`, java_node_file, generateJavaNodeRegistry);
+prepCompiled(
+	"kotlin",
+	`src/main/kotlin/com/blok/kotlin/nodes/${PASCAL}Node.kt`,
+	kotlin_node_file,
+	generateKotlinNodeRegistry,
+);
 prepCompiled("csharp", `${PASCAL}Node.cs`, csharp_node_file, generateCSharpNodeRegistry);
 
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.

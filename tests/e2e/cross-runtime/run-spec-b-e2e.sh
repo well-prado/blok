@@ -9,8 +9,8 @@
 #     structured NODE_INPUT_VALIDATION error)
 #   - a cross-runtime chain threads ctx data through every runtime in order
 #
-# Boots whatever toolchains are present — all 7 polyglot runtimes:
-# Go, Rust, C#, Java, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3.
+# Boots whatever toolchains are present — all 8 polyglot runtimes:
+# Go, Rust, C#, Java, Kotlin, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3.
 # The harness probes reachability and runs against whatever subset is up.
 #
 # Usage:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
@@ -80,6 +80,14 @@ if command -v rr >/dev/null && command -v php >/dev/null && [ -f "$ROOT/sdks/php
   PIDS+=($!); wait_port 20005 && echo "PHP gRPC up :20005"
 fi
 
+# --- Kotlin/JVM (gRPC 20008) ---
+if command -v java >/dev/null && [ -x "$ROOT/sdks/kotlin/gradlew" ]; then
+  echo "--- building + booting Kotlin ---"
+  (cd "$ROOT/sdks/kotlin" && ./gradlew installDist --no-daemon -q)
+  (cd "$ROOT/sdks/kotlin" && GRPC_PORT=20008 PORT=19008 BLOK_TRANSPORT=grpc ./build/install/blok-kotlin/bin/blok-kotlin) >/tmp/blok-kotlin.log 2>&1 &
+  PIDS+=($!); wait_port 20008 && echo "Kotlin gRPC up :20008"
+fi
+
 # --- Ruby (gRPC 20006) — needs Ruby >= 3.1 + bundled grpc gem ---
 RUBY_BIN="$(command -v ruby || true)"
 for cand in /opt/homebrew/opt/ruby/bin/ruby /opt/homebrew/opt/ruby@3.4/bin/ruby /opt/homebrew/opt/ruby@3.3/bin/ruby; do
@@ -104,5 +112,5 @@ echo "--- running harness ---"
 # This script boots on 2000x (offset from a local dev stack's 1000x); the
 # harness defaults to the 1000x convention, so pass the boot ports explicitly.
 cd "$ROOT" && GO_GRPC_PORT=20001 RUST_GRPC_PORT=20002 JAVA_GRPC_PORT=20003 \
-	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 \
+	CS_GRPC_PORT=20004 KOTLIN_GRPC_PORT=20008 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 \
 	bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts

@@ -234,6 +234,32 @@ public class {{NODE_NAME_PASCAL}}Node implements NodeHandler {
 }
 `;
 
+const kotlin_node_file = `package com.blok.kotlin.nodes
+
+import com.blok.kotlin.NodeContext
+import com.blok.kotlin.NodeHandler
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+
+/** {{NODE_NAME}} — a coroutine-first Blok node for runtime.kotlin. */
+class {{NODE_NAME_PASCAL}}Node : NodeHandler {
+    override val name = "{{NODE_NAME}}"
+    override val description = "A Kotlin coroutine-first Blok node."
+
+    override suspend fun execute(ctx: NodeContext, input: JsonObject): JsonObject {
+        ctx.ensureActive()
+        val name = (input["name"] as? JsonPrimitive)?.contentOrNull ?: "World"
+        val prefix = (input["prefix"] as? JsonPrimitive)?.contentOrNull ?: "Hello"
+        return buildJsonObject {
+            put("message", JsonPrimitive("$prefix, $name!"))
+            put("language", JsonPrimitive("kotlin"))
+        }
+    }
+}
+`;
+
 const rust_node_file = `use async_trait::async_trait;
 use blok::registry::NodeRegistry;
 use blok::{Context, NodeHandler};
@@ -387,10 +413,10 @@ const agents_md = `
 Blok is a **multi-trigger, multi-runtime workflow framework**. A workflow is a declarative list of steps; each step runs a node; the runner resolves data between steps and persists state. Two facts shape everything you author here:
 
 - **HTTP is ONE of 9 triggers, NOT the default.** Every workflow declares exactly one trigger. Picking \`http\` reflexively is the most common mistake — start with the decision table below.
-- **Nodes can be written in 8 runtimes.** TypeScript runs in-process; the other 7 (\`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`) run as gRPC sidecar processes. A step routes to a sidecar via \`type: "runtime.<lang>"\`.
+- **Nodes can be written in 9 runtimes.** TypeScript runs in-process; the other 8 (\`go\`, \`rust\`, \`java\`, \`kotlin\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`) run as gRPC sidecar processes. A step routes to a sidecar via \`type: "runtime.<lang>"\`.
 
 The 9 trigger types: \`http\`, \`worker\`, \`cron\`, \`pubsub\`, \`sse\`, \`websocket\`, \`webhook\`, \`mcp\`, \`grpc\`.
-The 8 runtimes: \`typescript\` (in-process), \`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`.
+The 9 runtimes: \`typescript\` (in-process), \`go\`, \`rust\`, \`java\`, \`kotlin\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`.
 
 The canonical TypeScript form is the **typed-handle DSL** from \`@blokjs/core\`: \`workflow(name, { version, trigger }, (entry) => { ... })\`, where each \`step()\` returns a typed handle you reference directly — **no \`$\`, no \`js/\`, no raw \`ctx\` strings.** The object-style \`workflow({ name, version, trigger, steps: [...] })\` from \`@blokjs/helper\` and JSON workflows are equivalent (all three compile to the same IR) and remain fully supported. The same shape works for all 9 triggers — only the \`trigger:\` block changes.
 
@@ -941,12 +967,12 @@ TypeScript nodes live in \`src/nodes/\` and are referenced by \`use: "<name>"\` 
 
 ### 5.2 Nodes in other runtimes (gRPC sidecars)
 
-The 7 non-TS runtimes run as long-lived gRPC sidecar processes; the TypeScript runner is the client. A step routes to a sidecar with **\`type: "runtime.<lang>"\`** and \`use:\` = the registered node name. The step's resolved \`inputs\` arrive as the node's config / typed input (NOT \`ctx.request.body\` — that holds the original trigger payload). The node's return value lands in \`ctx.state[<step-id>]\`.
+The 8 non-TS runtimes run as long-lived gRPC sidecar processes; the TypeScript runner is the client. A step routes to a sidecar with **\`type: "runtime.<lang>"\`** and \`use:\` = the registered node name. The step's resolved \`inputs\` arrive as the node's config / typed input (NOT \`ctx.request.body\` — that holds the original trigger payload). The node's return value lands in \`ctx.state[<step-id>]\`.
 
 **Runtime nodes live in \`runtimes/<lang>/nodes/\`** and require that runtime to be scaffolded. Add a runtime with \`blokctl runtime add <lang>\` (or \`blokctl create <project> --runtimes go,python3,...\` at create time). Scaffold a node with \`blokctl create node <name> --runtime <lang>\`. Across all runtimes:
 
 - The runner speaks **gRPC only** (the legacy HTTP \`/execute\` path was removed in v0.5).
-- gRPC dispatch port = legacy HTTP port + 1000. **Dispatch ports:** go \`10001\`, rust \`10002\`, java \`10003\`, csharp \`10004\`, php \`10005\`, ruby \`10006\`, python3 \`10007\`. (Readiness/health HTTP ports are the legacy \`9001\`–\`9007\`; the CLI readiness check is a **TCP connect to the gRPC port**, not \`GET /health\`.)
+- gRPC dispatch port = legacy HTTP port + 1000. **Dispatch ports:** go \`10001\`, rust \`10002\`, java \`10003\`, kotlin \`10008\`, csharp \`10004\`, php \`10005\`, ruby \`10006\`, python3 \`10007\`. (Readiness/health HTTP ports are the legacy \`9001\`–\`9008\`; the CLI readiness check is a **TCP connect to the gRPC port**, not \`GET /health\`.)
 - \`blokctl dev\` sets \`BLOK_TRANSPORT=grpc\` + \`GRPC_PORT\` for each sidecar. Most SDKs default to HTTP transport if you launch them by hand — always let \`blokctl dev\` (or the env) set gRPC, or the runner can't reach the node.
 - Generated proto stubs ship with each SDK — you do **not** regenerate them to author a node.
 - Each SDK has a **typed** contract (the equivalent of \`defineNode\` — validated input, typed output, reflected JSON Schema) and a lower-level untyped contract. **Prefer the typed contract.** Bad input auto-fails with \`NODE_INPUT_VALIDATION\` / HTTP 400 before your code runs.
@@ -1418,6 +1444,7 @@ A non-TS node runs in a per-language sidecar and is referenced from a step with 
 | Go | \`runtime.go\` | 10001 |
 | Rust | \`runtime.rust\` | 10002 |
 | Java | \`runtime.java\` | 10003 |
+| Kotlin | \`runtime.kotlin\` | 10008 |
 | C# | \`runtime.csharp\` | 10004 |
 | PHP | \`runtime.php\` | 10005 |
 | Ruby | \`runtime.ruby\` | 10006 |
@@ -1589,6 +1616,7 @@ export {
 	supervisord_python,
 	go_node_file,
 	java_node_file,
+	kotlin_node_file,
 	rust_node_file,
 	csharp_node_file,
 	php_node_file,

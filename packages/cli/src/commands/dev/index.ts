@@ -10,6 +10,7 @@ import {
 	generateCSharpNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
+	generateKotlinNodeRegistry,
 	generateRustNodeRegistry,
 	readProjectConfig,
 	validateProjectRuntimes,
@@ -329,6 +330,15 @@ export async function devProject(opts: OptionValues) {
 					await exec("mvn package -q -DskipTests", { cwd: runtimeCwd, timeout: 300000 });
 				} catch (err) {
 					console.log(`  Warning: Java user-node codegen/build failed: ${(err as Error).message}`);
+				}
+			}
+
+			if (rt.kind === "kotlin") {
+				try {
+					generateKotlinNodeRegistry(currentPath);
+					await exec("./gradlew installDist --no-daemon", { cwd: runtimeCwd, timeout: 600000 });
+				} catch (err) {
+					console.log(`  Warning: Kotlin user-node codegen/build failed: ${(err as Error).message}`);
 				}
 			}
 

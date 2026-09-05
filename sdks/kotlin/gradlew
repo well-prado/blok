@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+# Minimal checked-in Gradle wrapper bootstrap. The distribution URL and version
+# are pinned in gradle/wrapper/gradle-wrapper.properties, so a system Gradle
+# installation is never required to build this SDK.
+set -eu
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VERSION=8.10.2
+CACHE_DIR=${GRADLE_USER_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/gradle}/wrapper/dists/gradle-${VERSION}-bin
+DIST_DIR="$CACHE_DIR/gradle-${VERSION}"
+if [ ! -x "$DIST_DIR/bin/gradle" ]; then
+    mkdir -p "$CACHE_DIR"
+    ARCHIVE="$CACHE_DIR/gradle-${VERSION}-bin.zip"
+    if [ ! -f "$ARCHIVE" ]; then
+        curl --fail --location --silent --show-error \
+            "https://services.gradle.org/distributions/gradle-${VERSION}-bin.zip" \
+            --output "$ARCHIVE"
+    fi
+    rm -rf "$CACHE_DIR/unpacked"
+    mkdir "$CACHE_DIR/unpacked"
+    unzip -q "$ARCHIVE" -d "$CACHE_DIR/unpacked"
+    mv "$CACHE_DIR/unpacked/gradle-${VERSION}" "$DIST_DIR"
+    rmdir "$CACHE_DIR/unpacked"
+fi
+exec "$DIST_DIR/bin/gradle" --project-dir "$ROOT_DIR" "$@"
