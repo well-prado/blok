@@ -62,7 +62,7 @@ blokctl runtime list
 │  Go           needs go             blokctl runtime add go      │
 │  Rust         needs rustc + cargo  blokctl runtime add rust    │
 │  Ruby         ruby + bundler ready blokctl runtime add ruby    │
-│  …                                                             │
+│  Swift        needs swift 6.1+     blokctl runtime add swift    │
 ├────────────────────────────────────────────────────────────────╯
 │
 └  Node / TypeScript runs in-process — always available, nothing to install.
@@ -256,6 +256,7 @@ Each language has a fixed default gRPC port:
 | PHP | `10005` |
 | Ruby | `10006` |
 | Python 3 | `10007` |
+| Swift | `10008` |
 
 Because it's all configuration, a runtime added later is **indistinguishable** from one you picked at `create project` — same files, same shape, started the same way by `blokctl dev`.
 

@@ -117,6 +117,10 @@ provenance. `outputTrust: "trusted"` is accepted only for a non-agent node with
 a deterministic capability manifest. Model-returned `provenance` fields never
 create trust; gates are validated before the current step is published.
 
+Cross-language nodes use `runtime.<lang>` sidecars over the canonical gRPC
+runtime contract. The Swift target is authored as `runtime.swift` and is a
+Linux-capable Swift 6.1+ sidecar; its default gRPC port is `10008`.
+
 ## Reading data
 
 Use the handle in the workflow, not runtime context strings.

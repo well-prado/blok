@@ -103,7 +103,7 @@ jobs:
       - name: Install driver dependencies
         run: bun install --frozen-lockfile
 
-      - name: Post-publish smoke (published CLI, all triggers + 7 runtimes, all required)
+      - name: Post-publish smoke (published CLI, all triggers + 8 runtimes, all required)
         env:
           SMOKE_PUBLISHED_VERSION: ${{ inputs.version }}
           SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3

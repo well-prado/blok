@@ -274,7 +274,7 @@ Every link in this chain is verified by the parity matrix at
 3. Wire the constant into every SDK's `errors/codes` module so
    authors can import it instead of typing the string.
 4. Add a row to the parity matrix's `error-paths.ts` battery
-   asserting the code round-trips identically across all 7 SDKs.
+   asserting the code round-trips identically across all 8 SDKs.
 5. Add an example to the demo node (`blok-error-demo` in every SDK)
    so the parity matrix exercises it in CI.
 

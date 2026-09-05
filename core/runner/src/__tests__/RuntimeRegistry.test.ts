@@ -102,6 +102,7 @@ describe("RuntimeRegistry", () => {
 				"bun",
 				"deno",
 				"python3",
+				"swift",
 				"go",
 				"java",
 				"rust",
