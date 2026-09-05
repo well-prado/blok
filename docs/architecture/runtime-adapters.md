@@ -35,6 +35,7 @@ export type RuntimeKind =
   | "csharp"
   | "ruby"
   | "swift"
+  | "dart"
   | "docker"
   | "wasm"
   | "wasi";

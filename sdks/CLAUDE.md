@@ -21,7 +21,7 @@ TCP-connect probe against the gRPC port, not this endpoint).
 
 ## Default gRPC Ports
 
-Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3: 10007, Swift: 10008.
+Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3: 10007, Swift: 10008, Dart: 10009.
 
 Convention: gRPC port = legacy HTTP port + 1000.
 

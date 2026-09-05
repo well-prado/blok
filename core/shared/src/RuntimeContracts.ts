@@ -23,6 +23,7 @@ export const RUNTIME_KINDS = [
 	"csharp",
 	"ruby",
 	"swift",
+	"dart",
 	"docker",
 	"wasm",
 	"wasi",

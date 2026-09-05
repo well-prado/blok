@@ -296,6 +296,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.3.0'
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -358,7 +363,7 @@ jobs:
 
       - name: Scaffold smoke (8 runtimes, all applicable triggers, all required)
         env:
-          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3,swift
+          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3,swift,dart
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh
@@ -393,7 +398,7 @@ jobs:
 
   # ==========================================================================
   # Was cross-runtime.yml. Builds all 8 SDK runtimes (Go/Rust/Java/C#/PHP/Ruby/
-  # Python3/Swift) in gRPC mode and drives them through the runner's own
+  # Python3/Swift/Dart) in gRPC mode and drives them through the runner's own
   # GrpcRuntimeAdapter. This is the only lane that exercises the polyglot
   # runtimes end-to-end — without it they silently rot (the whole reason this
   # gate exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if any single runtime

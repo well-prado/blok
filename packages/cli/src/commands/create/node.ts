@@ -11,6 +11,7 @@ import { isNonInteractive, resolveOrThrow } from "../../services/non-interactive
 import { manager as pm } from "../../services/package-manager.js";
 import {
 	csharp_node_file,
+	dart_node_file,
 	function_first_node_file,
 	go_node_file,
 	java_node_file,
@@ -109,6 +110,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 									{ label: "PHP", value: "php", hint: "Production - Docker" },
 									{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
 									{ label: "Swift", value: "swift", hint: "Production - Linux gRPC" },
+									{ label: "Dart", value: "dart", hint: "Production - gRPC" },
 								],
 							}),
 			},
@@ -623,6 +625,20 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				`${dirPath}/README.md`,
 				`# ${nodeName}\n\nSwift-based Blok node, compiled into the Swift gRPC runtime.\n\nRun \`blokctl dev\` to regenerate the registration shim and start the sidecar.\n`,
 			);
+		}
+
+		if (node_runtime === "dart") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				const currentDir = `${process.cwd()}/runtimes/dart`;
+				fsExtra.ensureDirSync(path.join(currentDir, "nodes"));
+				dirPath = path.join(currentDir, "nodes", nodeName);
+			}
+			if (!skipPrompts) s.message("Creating Dart node files...");
+			if (!currentPath && fsExtra.existsSync(dirPath)) throw new Error("ops2");
+			fsExtra.ensureDirSync(dirPath);
+			fsExtra.writeFileSync(`${dirPath}/node.dart`, dart_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName));
+			fsExtra.writeFileSync(`${dirPath}/README.md`, `# ${nodeName}\n\nDart-based Blok node served over gRPC.\n`);
 		}
 
 		if (!skipPrompts) s.stop(`Node "${nodeName}" created successfully.`);

@@ -10,8 +10,8 @@
 #                    (Docker: brings up postgres/redis/nats/kafka/rabbitmq/
 #                     localstack/gcp-pubsub via infra/testing/docker-compose.yml)
 #   cross-runtime  → .github/workflows/cross-runtime.yml
-#                    builds + drives the 8 SDK gRPC runtimes end-to-end
-#                    (HEAVY: builds 8 Docker images — Go/Rust/Java/C#/PHP/Ruby/Python3/Swift)
+#                    builds + drives the 9 SDK gRPC runtimes end-to-end
+#                    (HEAVY: builds 9 Docker images — Go/Rust/Java/C#/PHP/Ruby/Python3/Swift/Dart)
 #   fast           → no Docker: lint:check → proto:check → nx build → `bun run test`
 #                    (integration suites self-skip with no BLOK_INTEGRATION_* env)
 #   packaging      → .github/workflows/packaging.yml

@@ -79,6 +79,13 @@ const SUPPORTED_RUNTIMES: RuntimeInfo[] = [
 		status: "Production",
 		languages: ["Ruby"],
 	},
+	{
+		name: "Dart",
+		kind: "dart",
+		protocol: "gRPC",
+		status: "Production",
+		languages: ["Dart"],
+	},
 ];
 
 /**

@@ -1,7 +1,7 @@
 /**
  * SPEC-B end-to-end proof over REAL gRPC.
  *
- * Drives running SDK gRPC servers (all 8: Go/Rust/C#/Java/PHP/Ruby/Python3/Swift)
+ * Drives running SDK gRPC servers (all 9: Go/Rust/C#/Java/PHP/Ruby/Python3/Swift/Dart)
  * through the runner's OWN `GrpcRuntimeAdapter` — the client the runner uses per
  * step. Probes which runtimes are actually up and, per live runtime, proves:
  *   1. ListNodes returns the typed node WITH a real JSON Schema (SPEC-B P1.2 +
@@ -38,11 +38,12 @@ const RUNTIMES = [
 	{ kind: "ruby", port: Number(process.env.RUBY_GRPC_PORT ?? 10006) },
 	{ kind: "python3", port: Number(process.env.PY_GRPC_PORT ?? 10007) },
 	{ kind: "swift", port: Number(process.env.SWIFT_GRPC_PORT ?? 10008) },
+	{ kind: "dart", port: Number(process.env.DART_GRPC_PORT ?? 10009) },
 ] as const;
 
 // CI gate: a runtime named here MUST come up or the run fails (instead of
 // silently skipping — the exact rot the cross-runtime harness exists to catch).
-// `BLOK_E2E_REQUIRE_ALL=1` requires all 8; `BLOK_E2E_REQUIRE=go,rust` a subset.
+// `BLOK_E2E_REQUIRE_ALL=1` requires all 9; `BLOK_E2E_REQUIRE=go,rust` a subset.
 const REQUIRE_ALL = /^(1|true)$/i.test(process.env.BLOK_E2E_REQUIRE_ALL ?? "");
 const REQUIRED = new Set(
 	REQUIRE_ALL

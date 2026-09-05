@@ -246,6 +246,19 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		startCmd: "swift run blok-swift-runtime",
 		sdkDir: "swift",
 	},
+	{
+		kind: "dart",
+		label: "Dart",
+		minVersion: "3.3.0",
+		installHint: "Install Dart 3.3+: https://dart.dev/get-dart",
+		defaultPort: 9009,
+		defaultGrpcPort: 10009,
+		commands: ["dart --version"],
+		toolchain: "dart",
+		installDeps: "dart pub get",
+		startCmd: "dart run bin/serve.dart",
+		sdkDir: "dart",
+	},
 ];
 
 /**
@@ -302,6 +315,10 @@ function parseVersion(output: string, kind: string): string | undefined {
 		}
 		case "swift": {
 			const match = output.match(/Swift version (\d+\.\d+(?:\.\d+)?)/i);
+			return match ? match[1] : undefined;
+		}
+		case "dart": {
+			const match = output.match(/Dart SDK version:\s*(\d+\.\d+\.\d+)/i);
 			return match ? match[1] : undefined;
 		}
 		default:

@@ -213,6 +213,7 @@ const RUNTIME_LABEL: Record<string, string> = {
 	ruby: "Ruby",
 	python3: "Python3",
 	swift: "Swift",
+	dart: "Dart",
 	node: "Node",
 };
 
