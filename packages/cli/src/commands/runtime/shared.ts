@@ -261,10 +261,12 @@ export function reportRuntimeError(err: unknown): void {
 export function assertSidecarKind(kind: string): void {
 	if (NON_SIDECAR_KINDS.has(kind)) {
 		throw new RuntimeCommandError(
-			`"${kind}" runs in-process and is always available — there's no sidecar to add or remove. Sidecar runtimes: go, rust, java, csharp, php, ruby, python3.`,
+			`"${kind}" runs in-process and is always available — there's no sidecar to add or remove. Sidecar runtimes: go, rust, java, csharp, php, ruby, python3, dart.`,
 		);
 	}
 	if (!getRuntimeDefinition(kind)) {
-		throw new RuntimeCommandError(`Unknown runtime "${kind}". Supported: go, rust, java, csharp, php, ruby, python3.`);
+		throw new RuntimeCommandError(
+			`Unknown runtime "${kind}". Supported: go, rust, java, csharp, php, ruby, python3, dart.`,
+		);
 	}
 }

@@ -157,6 +157,7 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 			{ label: "runtime.php", docs: "Execute using PHP runtime adapter (Docker container)", priority: "a" },
 			{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "b" },
 			{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "c" },
+			{ label: "runtime.dart", docs: "Execute using Dart runtime adapter", priority: "d" },
 		];
 
 		return types.map((t) => {
@@ -180,6 +181,7 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 			{ label: "php", docs: "PHP via Docker container" },
 			{ label: "csharp", docs: "C#/.NET via Docker container" },
 			{ label: "ruby", docs: "Ruby via Docker container" },
+			{ label: "dart", docs: "Dart via gRPC sidecar" },
 			{ label: "docker", docs: "Generic Docker container runtime" },
 			{ label: "wasm", docs: "WebAssembly runtime" },
 			{ label: "wasi", docs: "WASI Component Model runtime (WASI 0.2)" },

@@ -60,7 +60,9 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		let kind = kindArg?.trim().toLowerCase();
 		if (!kind) {
 			if (nonInteractive) {
-				throw new RuntimeCommandError("Specify a runtime: blokctl runtime add <go|rust|java|csharp|php|ruby|python3>");
+				throw new RuntimeCommandError(
+					"Specify a runtime: blokctl runtime add <go|rust|java|csharp|php|ruby|python3|dart>",
+				);
 			}
 			detected = await detectRuntimes();
 			const choices = detected

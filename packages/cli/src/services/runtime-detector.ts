@@ -233,6 +233,19 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 			installHint: "Install Bundler: gem install bundler",
 		},
 	},
+	{
+		kind: "dart",
+		label: "Dart",
+		minVersion: "3.3.0",
+		installHint: "Install Dart 3.3+: https://dart.dev/get-dart",
+		defaultPort: 9008,
+		defaultGrpcPort: 10008,
+		commands: ["dart --version"],
+		toolchain: "dart",
+		installDeps: "dart pub get",
+		startCmd: "dart run bin/serve.dart",
+		sdkDir: "dart",
+	},
 ];
 
 /**
@@ -285,6 +298,10 @@ function parseVersion(output: string, kind: string): string | undefined {
 		case "python3": {
 			// "Python 3.12.0" → "3.12.0"
 			const match = output.match(/Python\s+(\d+\.\d+\.\d+)/);
+			return match ? match[1] : undefined;
+		}
+		case "dart": {
+			const match = output.match(/Dart SDK version:\s*(\d+\.\d+\.\d+)/i);
 			return match ? match[1] : undefined;
 		}
 		default:

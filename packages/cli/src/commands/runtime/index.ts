@@ -15,7 +15,7 @@ runtime.action(
 
 runtime
 	.command("add")
-	.description("Add a language runtime (go, rust, java, csharp, php, ruby, python3) to this project")
+	.description("Add a language runtime (go, rust, java, csharp, php, ruby, python3, dart) to this project")
 	.argument("[runtime]", "Runtime to add (omit for an interactive picker)")
 	.option("-d, --directory <path>", "Project directory (default: current directory)")
 	.option("--local <path>", "Use a local blok repo for SDK source instead of fetching by version")

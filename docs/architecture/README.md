@@ -12,6 +12,8 @@ they must not silently contradict it.
 - [Trigger system](trigger-system.md)
 - [WASI Component Model runtime](runtime/adr/0001-wasi-component-runtime.md)
 - [ADR 0016 — Selectable JavaScript execution runtimes](adr-0016-javascript-runtimes.md)
+- [ADR 0002 — Dart runtime sidecar](runtime/adr/0002-dart-runtime.md)
+- [Dart runtime conformance](runtime/dart-conformance.md)
 
 ## Decision governance
 

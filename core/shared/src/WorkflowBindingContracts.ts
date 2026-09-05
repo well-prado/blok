@@ -28,6 +28,7 @@ export const WORKFLOW_RUNTIME_KINDS = [
 	"php",
 	"csharp",
 	"ruby",
+	"dart",
 	"docker",
 	"wasm",
 	"wasi",

@@ -48,7 +48,7 @@ truncation. `pubsub` needs a NATS broker; each runtime needs its toolchain
 
 | Var | Effect |
 |---|---|
-| `SMOKE_RUNTIMES=go,python3` | limit to these runtimes (default: all detected) |
+| `SMOKE_RUNTIMES=go,python3,dart` | limit to these runtimes (default: all detected) |
 | `SMOKE_TRIGGERS=http,grpc` | limit to these triggers (default: all applicable) |
 | `SMOKE_SKIP_BUILD=1` | skip `bun run build` (assume `dist/` is current) |
 | `SMOKE_KEEP=1` | keep the scaffolded project + `dev.log` for inspection |
@@ -65,7 +65,7 @@ fails the build instead of quietly dropping out of the matrix.
 - **bun** (runs the CLI, the dev server, and this driver).
 - A built monorepo — `run.sh` runs `bun run build` first unless `SMOKE_SKIP_BUILD=1`.
 - **NATS** on `localhost:4222` for the pubsub trigger (`docker compose -f infra/development/docker-compose.yml up -d nats`, or the shared `blok-nats` container).
-- Per-runtime toolchains for the sidecars you want covered (Go, Rust, Java+Maven, .NET, PHP+Composer+RoadRunner, Ruby ≥ 3.1, Python 3).
+- Per-runtime toolchains for the sidecars you want covered (Go, Rust, Java+Maven, .NET, PHP+Composer+RoadRunner, Ruby ≥ 3.1, Python 3, Dart ≥ 3.3).
 
 ## Design notes
 

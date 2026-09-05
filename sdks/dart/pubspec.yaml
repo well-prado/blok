@@ -1,0 +1,13 @@
+name: blok_dart
+description: Dart SDK and production runtime sidecar for Blok workflows.
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+dependencies:
+  grpc: ^4.1.0
+  protobuf: ^4.2.0
+  shelf: ^1.4.2
+dev_dependencies:
+  lints: ^5.1.1
+  test: ^1.25.15

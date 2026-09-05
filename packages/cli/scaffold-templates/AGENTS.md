@@ -12,8 +12,8 @@ Two facts shape everything here:
 - **HTTP is ONE of 9 triggers, not the default.** Every workflow declares exactly one
   trigger. Reflexively picking `http` is the most common mistake — start from the
   decision table in §6.
-- **Nodes run in 8 runtimes.** TypeScript runs in-process; the other 7 (`go`, `rust`,
-  `java`, `csharp`, `php`, `ruby`, `python3`) run as gRPC sidecars. A step routes to a
+- **Nodes run in 9 runtimes.** TypeScript runs in-process; the other 8 (`go`, `rust`,
+  `java`, `csharp`, `php`, `ruby`, `python3`, `dart`) run as gRPC sidecars. A step routes to a
   sidecar with `type: "runtime.<lang>"`.
 
 > **Read `.blok/config.json` first.** It records which triggers and runtimes this project
@@ -135,6 +135,7 @@ A non-TS node runs in a per-language gRPC sidecar and is referenced from a step 
 | PHP | `runtime.php` | 9005 |
 | Ruby | `runtime.ruby` | 9006 |
 | Python3 | `runtime.python3` | 9007 |
+| Dart | `runtime.dart` | 9008 |
 
 ```ts
 // In a workflow, route a step to a Python node:

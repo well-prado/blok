@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build every SDK artifact `bun run dev` needs.
 #
-# Skips toolchains that aren't installed locally (Java, .NET, Ruby, PHP
+# Skips toolchains that aren't installed locally (Java, .NET, Ruby, PHP, Dart
 # are common omissions on a fresh machine). Doesn't build Python or
 # Ruby — they run from source against the system interpreter.
 #
@@ -129,6 +129,15 @@ if [ -n "$RUBY_BIN" ]; then
 	fi
 else
 	skip "Ruby SDK" "ruby 3.x not found (brew install ruby@3.3)"
+fi
+
+# -----------------------------------------------------------------------------
+# Dart: resolve packages and compile the standalone gRPC sidecar.
+# -----------------------------------------------------------------------------
+if command -v dart >/dev/null 2>&1; then
+	build_step "Dart SDK" bash -c "cd '$ROOT/sdks/dart' && dart pub get && dart compile exe bin/serve.dart -o bin/blok-dart" || true
+else
+	skip "Dart SDK" "dart 3.3+ not in PATH (https://dart.dev/get-dart)"
 fi
 
 echo -e "${HDR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

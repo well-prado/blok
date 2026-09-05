@@ -212,6 +212,7 @@ const RUNTIME_LABEL: Record<string, string> = {
 	php: "PHP",
 	ruby: "Ruby",
 	python3: "Python3",
+	dart: "Dart",
 	node: "Node",
 };
 
