@@ -185,7 +185,7 @@ async function detectInfrastructure(): Promise<void> {
 	const sdkPorts = [9001, 9002, 9003, 9004, 9005, 9006];
 	const sdkChecks = await Promise.all(sdkPorts.map((port) => isReachable(`http://localhost:${port}/health`)));
 	infra.runtimeSdks = sdkChecks.every(Boolean) && infra.python3;
-	console.log(`  ${infra.runtimeSdks ? "+" : "-"} All runtime SDKs (Go, Rust, Java, C#, PHP, Ruby, Python3)`);
+	console.log(`  ${infra.runtimeSdks ? "+" : "-"} All runtime SDKs (Go, Rust, Java, C#, PHP, Ruby, Python3, Swift)`);
 
 	console.log("");
 }

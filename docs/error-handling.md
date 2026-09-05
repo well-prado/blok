@@ -121,7 +121,7 @@ and OTEL labelling.
 
 ## Per-SDK reference — the same idiomatic shape
 
-The fluent builder API is consistent across all 7 SDKs. The only
+The fluent builder API is consistent across all 8 SDKs. The only
 language-specific bits are:
 
 - Constructor style (kwargs vs builder).

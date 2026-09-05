@@ -34,6 +34,7 @@ export type RuntimeKind =
   | "php"
   | "csharp"
   | "ruby"
+  | "swift"
   | "docker"
   | "wasm"
   | "wasi";
@@ -405,6 +406,8 @@ Runtime adapters are configured via environment variables and the workflow JSON 
 |---|---|---|
 | `RUNTIME_PYTHON3_HOST` | Python3 | gRPC server hostname |
 | `RUNTIME_PYTHON3_PORT` | Python3 | gRPC server port |
+| `RUNTIME_SWIFT_HOST` | Swift | gRPC server hostname |
+| `RUNTIME_SWIFT_GRPC_PORT` | Swift | gRPC server port (default `10008`) |
 | `BLOK_WASM_CACHE_SIZE` | WASM | Max compiled module cache entries |
 
 ### Workflow JSON

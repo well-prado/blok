@@ -57,7 +57,7 @@ describe("LSP Constants", () => {
 
 	describe("VALID_RUNTIMES", () => {
 		it("should include the project targets and all runtime kinds", () => {
-			expect(VALID_RUNTIMES).toHaveLength(14);
+			expect(VALID_RUNTIMES).toHaveLength(15);
 			expect(VALID_RUNTIMES).toContain("node");
 			expect(VALID_RUNTIMES).toContain("nodejs");
 			expect(VALID_RUNTIMES).toContain("bun");
@@ -66,6 +66,7 @@ describe("LSP Constants", () => {
 			expect(VALID_RUNTIMES).toContain("go");
 			expect(VALID_RUNTIMES).toContain("java");
 			expect(VALID_RUNTIMES).toContain("rust");
+			expect(VALID_RUNTIMES).toContain("swift");
 			expect(VALID_RUNTIMES).toContain("docker");
 			expect(VALID_RUNTIMES).toContain("wasm");
 			expect(VALID_RUNTIMES).toContain("wasi");

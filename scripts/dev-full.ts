@@ -23,6 +23,7 @@
  *       php     → 9005 / 10005   (via RoadRunner, opt-out)
  *       ruby    → 9006 / 10006
  *       python3 → 9007 / 10007
+ *       swift   → 9008 / 10008 (Linux production sidecar)
  *
  *   - The trigger HTTP server in `triggers/http` on port 4000 (default
  *     `.env` value). With the Phase 6 default flip, runtime nodes
@@ -117,6 +118,10 @@ function detectPython3(): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function detectSwift(): boolean {
+	return detectCmd("swift") && existsSync(path.join(REPO_ROOT, "sdks/swift/.build/release/blok-swift-runtime"));
 }
 
 function detectRuby(): string | null {
@@ -344,6 +349,25 @@ const ALL_PROFILES: RuntimeProfile[] = [
 					HOST: "127.0.0.1",
 					LOG_LEVEL: "INFO",
 					PYTHONUNBUFFERED: "1",
+				},
+			}),
+	},
+	{
+		id: "swift",
+		envKey: "SWIFT",
+		label: "swift",
+		color: "\x1b[91m",
+		httpPort: 9008,
+		grpcPort: 10008,
+		buildHint: "cd sdks/swift && swift build -c release",
+		detect: detectSwift,
+		spawn: () =>
+			spawn(path.join(REPO_ROOT, "sdks/swift/.build/release/blok-swift-runtime"), [], {
+				cwd: path.join(REPO_ROOT, "sdks/swift"),
+				env: {
+					...process.env,
+					GRPC_PORT: "10008",
+					HOST: "127.0.0.1",
 				},
 			}),
 	},

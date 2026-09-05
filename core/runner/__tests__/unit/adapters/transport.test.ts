@@ -24,7 +24,7 @@ describe("assertGrpcOnlyTransport", () => {
 	});
 
 	it("accepts per-kind RUNTIME_<KIND>_TRANSPORT=grpc", () => {
-		const kinds = ["go", "rust", "java", "csharp", "php", "ruby", "python3"] as const;
+		const kinds = ["go", "rust", "java", "csharp", "php", "ruby", "python3", "swift"] as const;
 		for (const kind of kinds) {
 			const env = { [`RUNTIME_${kind.toUpperCase()}_TRANSPORT`]: "grpc" } as NodeJS.ProcessEnv;
 			expect(() => assertGrpcOnlyTransport(env)).not.toThrow();
@@ -209,7 +209,7 @@ describe("loadTlsConfigForKind", () => {
 	});
 
 	it("supports every standard runtime kind", () => {
-		const kinds = ["go", "rust", "java", "csharp", "php", "ruby", "python3"] as const;
+		const kinds = ["go", "rust", "java", "csharp", "php", "ruby", "python3", "swift"] as const;
 		for (const kind of kinds) {
 			const env = { [`RUNTIME_${kind.toUpperCase()}_TLS_CA`]: "/path/ca.pem" };
 			expect(loadTlsConfigForKind(kind, env)?.caCertPath).toBe("/path/ca.pem");
