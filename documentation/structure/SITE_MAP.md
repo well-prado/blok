@@ -79,13 +79,14 @@
 | 36 | Python 3 | `/runtimes/python` | runtimes/python3/, Python3RuntimeAdapter.ts | runtime-adapters.md | 34 |
 | 37 | Go SDK | `/runtimes/go` | sdks/go/, examples/runtimes/go/ | sdks.md | 34 |
 | 38 | Java SDK | `/runtimes/java` | sdks/java/, examples/runtimes/java/ | sdks.md | 34 |
-| 39 | Rust SDK | `/runtimes/rust` | sdks/rust/, examples/runtimes/rust/ | sdks.md | 34 |
-| 40 | C# / .NET SDK | `/runtimes/csharp` | sdks/csharp/, examples/runtimes/csharp/ | sdks.md | 34 |
-| 41 | PHP SDK | `/runtimes/php` | sdks/php/, examples/runtimes/php/ | sdks.md | 34 |
-| 42 | Ruby SDK | `/runtimes/ruby` | sdks/ruby/, examples/runtimes/ruby/ | sdks.md | 34 |
-| 43 | Docker Runtime | `/runtimes/docker` | DockerRuntimeAdapter.ts | runtime-adapters.md | 34 |
-| 44 | WASM Runtime | `/runtimes/wasm` | WasmRuntimeAdapter.ts | runtime-adapters.md | 34 |
-| 45 | Custom Runtime | `/runtimes/custom` | RUNTIME_ADAPTER_EXAMPLE.md | runtime-adapters.md | 34 |
+| 39 | Kotlin SDK | `/runtimes/kotlin` | sdks/kotlin/, examples/runtimes/kotlin/ | sdks.md | 34 |
+| 40 | Rust SDK | `/runtimes/rust` | sdks/rust/, examples/runtimes/rust/ | sdks.md | 34 |
+| 41 | C# / .NET SDK | `/runtimes/csharp` | sdks/csharp/, examples/runtimes/csharp/ | sdks.md | 34 |
+| 42 | PHP SDK | `/runtimes/php` | sdks/php/, examples/runtimes/php/ | sdks.md | 34 |
+| 43 | Ruby SDK | `/runtimes/ruby` | sdks/ruby/, examples/runtimes/ruby/ | sdks.md | 34 |
+| 44 | Docker Runtime | `/runtimes/docker` | DockerRuntimeAdapter.ts | runtime-adapters.md | 34 |
+| 45 | WASM Runtime | `/runtimes/wasm` | WasmRuntimeAdapter.ts | runtime-adapters.md | 34 |
+| 46 | Custom Runtime | `/runtimes/custom` | RUNTIME_ADAPTER_EXAMPLE.md | runtime-adapters.md | 34 |
 
 ## Security
 

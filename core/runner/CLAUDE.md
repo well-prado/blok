@@ -44,6 +44,7 @@ nodeTypes() returns:
   "runtime.go"       → runtimeResolver()
   "runtime.rust"     → runtimeResolver()
   "runtime.java"     → runtimeResolver()
+  "runtime.kotlin"   → runtimeResolver()
   "runtime.csharp"   → runtimeResolver()
   "runtime.php"      → runtimeResolver()
   "runtime.ruby"     → runtimeResolver()

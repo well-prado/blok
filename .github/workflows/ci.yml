@@ -356,9 +356,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Scaffold smoke (8 runtimes, all applicable triggers, all required)
+      - name: Scaffold smoke (9 runtimes, all applicable triggers, all required)
         env:
-          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3,swift
+          SMOKE_RUNTIMES: go,rust,java,csharp,kotlin,php,ruby,python3,swift
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh
@@ -392,15 +392,15 @@ jobs:
         run: bash tests/e2e/scaffold-smoke/combos.sh
 
   # ==========================================================================
-  # Was cross-runtime.yml. Builds all 8 SDK runtimes (Go/Rust/Java/C#/PHP/Ruby/
-  # Python3/Swift) in gRPC mode and drives them through the runner's own
+  # Was cross-runtime.yml. Builds all 9 SDK runtimes (Go/Rust/Java/Kotlin/C#/
+  # PHP/Ruby/Python3/Swift) in gRPC mode and drives them through the runner's own
   # GrpcRuntimeAdapter. This is the only lane that exercises the polyglot
   # runtimes end-to-end — without it they silently rot (the whole reason this
   # gate exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if any single runtime
   # fails to come up, so a broken Dockerfile can't pass as a skip.
   # ==========================================================================
   cross-runtime:
-    name: Cross-runtime chain over gRPC (8 languages)
+    name: Cross-runtime chain over gRPC (9 languages)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 

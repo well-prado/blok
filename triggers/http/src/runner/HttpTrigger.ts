@@ -1988,6 +1988,9 @@ export default class HttpTrigger extends TriggerBase {
 							case "runtime.java":
 								set_node_type = NodeTypes.JAVA;
 								break;
+							case "runtime.kotlin":
+								set_node_type = NodeTypes.KOTLIN;
+								break;
 							case "runtime.csharp":
 								set_node_type = NodeTypes.CSHARP;
 								break;

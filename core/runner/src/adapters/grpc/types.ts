@@ -109,6 +109,7 @@ export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
 	go: 10001,
 	rust: 10002,
 	java: 10003,
+	kotlin: 10008,
 	csharp: 10004,
 	php: 10005,
 	ruby: 10006,

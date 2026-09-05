@@ -1,7 +1,7 @@
 # Module Reference: Multi-Language SDKs
 
 > **Path:** `sdks/` (production SDKs) + `examples/runtimes/` (example implementations)
-> **Purpose:** Enable node development in Go, Java, Rust, C#, PHP, and Ruby
+> **Purpose:** Enable node development in Go, Java, Kotlin, Rust, C#, PHP, and Ruby
 
 ## What It Does
 
@@ -16,19 +16,19 @@ Each SDK provides a complete toolkit for developing Blok nodes in a specific pro
 
 ## SDK Parity Matrix
 
-| Feature | Go | Java | Rust | C# | PHP | Ruby |
-|---------|-----|------|------|-----|-----|------|
-| Types/Context | yes | yes | yes | yes | yes | yes |
-| Node Interface | yes | yes | yes | yes | yes | yes |
-| Node Registry | yes | yes | yes | yes | yes | yes |
-| gRPC Server | yes | yes | yes | yes | no | no |
-| HTTP Server | yes | yes | yes | yes | yes | yes |
-| Middleware | yes | yes | yes | yes | yes | yes |
-| Logging | yes | yes | yes | yes | yes | yes |
-| Validation | yes | yes | yes | yes | yes | yes |
-| Testing Utils | yes | yes | yes | yes | yes | yes |
-| Dockerfile | yes | yes | yes | yes | yes | yes |
-| Config | yes | yes | yes | yes | yes | yes |
+| Feature | Go | Java | Kotlin | Rust | C# | PHP | Ruby |
+|---------|-----|------|--------|------|-----|-----|------|
+| Types/Context | yes | yes | yes | yes | yes | yes | yes |
+| Node Interface | yes | yes | yes | yes | yes | yes | yes |
+| Node Registry | yes | yes | yes | yes | yes | yes | yes |
+| gRPC Server | yes | yes | yes | yes | yes | no | no |
+| HTTP Server | yes | yes | yes | yes | yes | yes | yes |
+| Middleware | yes | yes | yes | yes | yes | yes | yes |
+| Logging | yes | yes | yes | yes | yes | yes | yes |
+| Validation | yes | yes | yes | yes | yes | yes | yes |
+| Testing Utils | yes | yes | yes | yes | yes | yes | yes |
+| Dockerfile | yes | yes | yes | yes | yes | yes | yes |
+| Config | yes | yes | yes | yes | yes | yes | yes |
 
 ---
 

@@ -49,6 +49,9 @@ export default workflow("Process Order", { version: "1.0.0", trigger: http.post(
 
 ## Nodes
 
+Kotlin uses the coroutine-first `sdks/kotlin` sidecar and `runtime.kotlin`; it
+targets JVM 17+ and does not claim Android, Kotlin/JS, or Kotlin/Native.
+
 Use `defineNode()` from `@blokjs/core`. Keep `input` and `output` Zod schemas.
 Inside `execute(ctx, input)`, upstream workflow values arrive through `input`.
 The node-side `ctx` ABI is kept for runtime concerns: `ctx.request`,
