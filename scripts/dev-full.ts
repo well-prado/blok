@@ -25,6 +25,7 @@
  *       python3 → 9007 / 10007
  *       swift   → 9008 / 10008 (Linux production sidecar)
  *       dart    → 9009 / 10009
+ *       elixir  → 9010 / 10010
  *
  *   - The trigger HTTP server in `triggers/http` on port 4000 (default
  *     `.env` value). With the Phase 6 default flip, runtime nodes
@@ -350,6 +351,27 @@ const ALL_PROFILES: RuntimeProfile[] = [
 					HOST: "127.0.0.1",
 					LOG_LEVEL: "INFO",
 					PYTHONUNBUFFERED: "1",
+				},
+			}),
+	},
+	{
+		id: "elixir",
+		envKey: "ELIXIR",
+		label: "elixir",
+		color: "\x1b[91m",
+		httpPort: 9010,
+		grpcPort: 10010,
+		buildHint: "cd sdks/elixir && mix deps.get && mix compile",
+		detect: () => detectCmd("elixir") && detectFile(path.join(REPO_ROOT, "sdks/elixir/mix.exs")),
+		spawn: () =>
+			spawn("mix", ["run", "--no-halt"], {
+				cwd: path.join(REPO_ROOT, "sdks/elixir"),
+				env: {
+					...process.env,
+					MIX_ENV: "dev",
+					PORT: "9010",
+					GRPC_PORT: "10010",
+					HOST: "127.0.0.1",
 				},
 			}),
 	},

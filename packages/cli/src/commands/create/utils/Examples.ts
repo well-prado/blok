@@ -413,16 +413,47 @@ public enum {{NODE_NAME_PASCAL}}Node {
 }
 `;
 
+const elixir_node_file = `defmodule Blok.UserNodes.{{NODE_NAME_PASCAL}}Input do
+  use Blok.Schema
+
+  field :name, :string, required: false
+  field :prefix, :string, default: "Hello"
+end
+
+defmodule Blok.UserNodes.{{NODE_NAME_PASCAL}}Output do
+  use Blok.Schema
+
+  field :message, :string, required: true
+  field :language, :string, required: true
+end
+
+defmodule Blok.UserNodes.{{NODE_NAME_PASCAL}} do
+  use Blok.Node,
+    name: "{{NODE_NAME}}",
+    description: "{{NODE_NAME}} Elixir/BEAM workflow node",
+    input: Blok.UserNodes.{{NODE_NAME_PASCAL}}Input,
+    output: Blok.UserNodes.{{NODE_NAME_PASCAL}}Output
+
+  @impl Blok.Node
+  def execute(_ctx, input) do
+    {:ok, %Blok.UserNodes.{{NODE_NAME_PASCAL}}Output{
+      message: "#{input.prefix}, #{input.name || \"World\"}!",
+      language: "Elixir"
+    }}
+  end
+end
+`;
+
 const agents_md = `
 # AGENTS.md — Blok Framework AI Context
 
 Blok is a **multi-trigger, multi-runtime workflow framework**. A workflow is a declarative list of steps; each step runs a node; the runner resolves data between steps and persists state. Two facts shape everything you author here:
 
 - **HTTP is ONE of 9 triggers, NOT the default.** Every workflow declares exactly one trigger. Picking \`http\` reflexively is the most common mistake — start with the decision table below.
-- **Nodes can be written in 10 runtimes.** TypeScript runs in-process; the other 9 (\`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`, \`swift\`, \`dart\`) run as gRPC sidecar processes. A step routes to a sidecar via \`type: "runtime.<lang>"\`.
+- **Nodes can be written in 11 runtimes.** TypeScript runs in-process; the other 10 (\`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`, \`swift\`, \`dart\`, \`elixir\`) run as gRPC sidecar processes. A step routes to a sidecar via \`type: "runtime.<lang>"\`.
 
 The 9 trigger types: \`http\`, \`worker\`, \`cron\`, \`pubsub\`, \`sse\`, \`websocket\`, \`webhook\`, \`mcp\`, \`grpc\`.
-The 10 runtimes: \`typescript\` (in-process), \`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`, \`swift\`, \`dart\`.
+The 11 runtimes: \`typescript\` (in-process), \`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`, \`swift\`, \`dart\`, \`elixir\`.
 
 The canonical TypeScript form is the **typed-handle DSL** from \`@blokjs/core\`: \`workflow(name, { version, trigger }, (entry) => { ... })\`, where each \`step()\` returns a typed handle you reference directly — **no \`$\`, no \`js/\`, no raw \`ctx\` strings.** The object-style \`workflow({ name, version, trigger, steps: [...] })\` from \`@blokjs/helper\` and JSON workflows are equivalent (all three compile to the same IR) and remain fully supported. The same shape works for all 9 triggers — only the \`trigger:\` block changes.
 
@@ -973,12 +1004,12 @@ TypeScript nodes live in \`src/nodes/\` and are referenced by \`use: "<name>"\` 
 
 ### 5.2 Nodes in other runtimes (gRPC sidecars)
 
-The 9 non-TS runtimes run as long-lived gRPC sidecar processes; the TypeScript runner is the client. A step routes to a sidecar with **\`type: "runtime.<lang>"\`** and \`use:\` = the registered node name. The step's resolved \`inputs\` arrive as the node's config / typed input (NOT \`ctx.request.body\` — that holds the original trigger payload). The node's return value lands in \`ctx.state[<step-id>]\`.
+The 10 non-TS runtimes run as long-lived gRPC sidecar processes; the TypeScript runner is the client. A step routes to a sidecar with **\`type: "runtime.<lang>"\`** and \`use:\` = the registered node name. The step's resolved \`inputs\` arrive as the node's config / typed input (NOT \`ctx.request.body\` — that holds the original trigger payload). The node's return value lands in \`ctx.state[<step-id>]\`.
 
 **Runtime nodes live in \`runtimes/<lang>/nodes/\`** and require that runtime to be scaffolded. Add a runtime with \`blokctl runtime add <lang>\` (or \`blokctl create <project> --runtimes go,python3,...\` at create time). Scaffold a node with \`blokctl create node <name> --runtime <lang>\`. Across all runtimes:
 
 - The runner speaks **gRPC only** (the legacy HTTP \`/execute\` path was removed in v0.5).
-- gRPC dispatch port = legacy HTTP port + 1000. **Dispatch ports:** go \`10001\`, rust \`10002\`, java \`10003\`, csharp \`10004\`, php \`10005\`, ruby \`10006\`, python3 \`10007\`, swift \`10008\`, dart \`10009\`. (The CLI readiness check is a **TCP connect to the gRPC port**, not \`GET /health\`.)
+- gRPC dispatch port = legacy HTTP port + 1000. **Dispatch ports:** go \`10001\`, rust \`10002\`, java \`10003\`, csharp \`10004\`, php \`10005\`, ruby \`10006\`, python3 \`10007\`, swift \`10008\`, dart \`10009\`, elixir \`10010\`. (The CLI readiness check is a **TCP connect to the gRPC port**, not \`GET /health\`.)
 - \`blokctl dev\` sets \`BLOK_TRANSPORT=grpc\` + \`GRPC_PORT\` for each sidecar. Most SDKs default to HTTP transport if you launch them by hand — always let \`blokctl dev\` (or the env) set gRPC, or the runner can't reach the node.
 - Generated proto stubs ship with each SDK — you do **not** regenerate them to author a node.
 - Each SDK has a **typed** contract (the equivalent of \`defineNode\` — validated input, typed output, reflected JSON Schema) and a lower-level untyped contract. **Prefer the typed contract.** Bad input auto-fails with \`NODE_INPUT_VALIDATION\` / HTTP 400 before your code runs.
@@ -1476,6 +1507,7 @@ A non-TS node runs in a per-language sidecar and is referenced from a step with 
 | Python3 | \`runtime.python3\` | 10007 |
 | Swift | \`runtime.swift\` | 10008 |
 | Dart | \`runtime.dart\` | 10009 |
+| Elixir | \`runtime.elixir\` | 10010 |
 
 **Inline cross-runtime example (Python3 — \`@node\` is the Python \`defineNode\`):**
 
@@ -1649,6 +1681,7 @@ export {
 	ruby_node_file,
 	swift_node_file,
 	dart_node_file,
+	elixir_node_file,
 	function_first_node_file,
 	agents_md,
 	claude_md,

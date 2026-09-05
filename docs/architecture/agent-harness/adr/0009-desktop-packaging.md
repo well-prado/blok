@@ -6,7 +6,7 @@
 ## Context
 
 Tauri provides a small cross-platform shell and a Rust trust boundary. Blok is
-TypeScript-first and supports seven additional language sidecars. Bundling every
+TypeScript-first and supports eight additional language sidecars. Bundling every
 runtime in the first desktop application would increase download size, update
 complexity, startup time, and attack surface.
 

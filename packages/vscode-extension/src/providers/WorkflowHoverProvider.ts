@@ -118,12 +118,12 @@ const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
 	type: {
 		title: "Step Type",
 		description:
-			"How the node should be resolved.\n- **local**: Node defined in the project\n- **module**: npm package node\n- **runtime.X**: Language-specific runtime (nodejs, python3, go, java, rust, php, csharp, ruby)",
+			"How the node should be resolved.\n- **local**: Node defined in the project\n- **module**: npm package node\n- **runtime.X**: Language-specific runtime (nodejs, python3, go, java, rust, php, csharp, ruby, elixir)",
 	},
 	runtime: {
 		title: "Step Runtime",
 		description:
-			"Override the default runtime for this step. Available: nodejs, bun, deno, python3, go, java, rust, php, csharp, ruby, docker, wasm.",
+			"Override the default runtime for this step. Available: nodejs, bun, deno, python3, go, java, rust, php, csharp, ruby, elixir, docker, wasm.",
 	},
 };
 

@@ -149,6 +149,15 @@ else
 	skip "Dart SDK" "dart 3.3+ not in PATH (https://dart.dev/get-dart)"
 fi
 
+# -----------------------------------------------------------------------------
+# Elixir: compile the OTP application and generated gRPC bindings.
+# -----------------------------------------------------------------------------
+if command -v mix >/dev/null 2>&1 && command -v elixir >/dev/null 2>&1; then
+	build_step "Elixir SDK" bash -c "cd '$ROOT/sdks/elixir' && mix deps.get --only prod && mix compile" || true
+else
+	skip "Elixir SDK" "elixir/mix not in PATH (https://elixir-lang.org/install.html)"
+fi
+
 echo -e "${HDR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${HDR}Done. Run ${OK}bun run dev${HDR} to start the stack.${RESET}"
 echo -e "${HDR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

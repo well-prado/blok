@@ -33,6 +33,7 @@ const CONSUMERS = [
 	"sdks/php/proto/blok/runtime/v1/runtime.proto",
 	"sdks/swift/Sources/BlokSwiftRuntime/Protos/blok/runtime/v1/runtime.proto",
 	"sdks/dart/proto/blok/runtime/v1/runtime.proto",
+	"sdks/elixir/proto/blok/runtime/v1/runtime.proto",
 ];
 
 const check = process.argv.includes("--check");

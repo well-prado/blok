@@ -12,6 +12,7 @@ import { manager as pm } from "../../services/package-manager.js";
 import {
 	csharp_node_file,
 	dart_node_file,
+	elixir_node_file,
 	function_first_node_file,
 	go_node_file,
 	java_node_file,
@@ -109,6 +110,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 									{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
 									{ label: "PHP", value: "php", hint: "Production - Docker" },
 									{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
+									{ label: "Elixir / BEAM", value: "elixir", hint: "Production - gRPC" },
 									{ label: "Swift", value: "swift", hint: "Production - Linux gRPC" },
 									{ label: "Dart", value: "dart", hint: "Production - gRPC" },
 								],
@@ -641,6 +643,28 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			fsExtra.writeFileSync(`${dirPath}/README.md`, `# ${nodeName}\n\nDart-based Blok node served over gRPC.\n`);
 		}
 
+		if (node_runtime === "elixir") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				const currentDir = `${process.cwd()}/runtimes/elixir`;
+				fsExtra.ensureDirSync(currentDir);
+				const currentNodesDir = `${currentDir}/nodes`;
+				fsExtra.ensureDirSync(currentNodesDir);
+				dirPath = path.join(currentNodesDir, nodeName);
+			}
+			if (!skipPrompts) s.message("Creating Elixir node files...");
+			if (!currentPath && fsExtra.existsSync(dirPath)) throw new Error("ops2");
+			fsExtra.ensureDirSync(dirPath);
+			const elixirNodeContent = elixir_node_file
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, toPascalCase(nodeName))
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			fsExtra.writeFileSync(`${dirPath}/node.ex`, elixirNodeContent);
+			fsExtra.writeFileSync(
+				`${dirPath}/README.md`,
+				`# ${nodeName}\n\nElixir/BEAM node served by the supervised Blok runtime. Run blokctl dev after blokctl runtime add elixir.\n`,
+			);
+		}
+
 		if (!skipPrompts) s.stop(`Node "${nodeName}" created successfully.`);
 
 		// Show navigation instructions based on runtime
@@ -697,6 +721,11 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		if (!currentPath && node_runtime === "swift") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/swift/nodes/${nodeName}`);
 			console.log(`\nRun "blokctl dev" — the Swift runtime compiles and registers this node automatically.`);
+		}
+
+		if (!currentPath && node_runtime === "elixir") {
+			console.log(`\nNavigate to the node directory by running: cd runtimes/elixir/nodes/${nodeName}`);
+			console.log(`\nRun "blokctl dev" — the Elixir runtime compiles and registers this node automatically.`);
 		}
 
 		console.log("\nFor more documentation, visit https://blok.build/docs/d/core-concepts/nodes");

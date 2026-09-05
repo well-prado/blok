@@ -33,6 +33,7 @@ export const VALID_STEP_TYPES = [
 	"runtime.ruby",
 	"runtime.swift",
 	"runtime.dart",
+	"runtime.elixir",
 	"runtime.wasi",
 ] as const;
 
@@ -50,6 +51,7 @@ export const VALID_RUNTIMES = [
 	"ruby",
 	"swift",
 	"dart",
+	"elixir",
 	"docker",
 	"wasm",
 	"wasi",

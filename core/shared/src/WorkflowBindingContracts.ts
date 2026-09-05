@@ -30,6 +30,7 @@ export const WORKFLOW_RUNTIME_KINDS = [
 	"ruby",
 	"swift",
 	"dart",
+	"elixir",
 	"docker",
 	"wasm",
 	"wasi",

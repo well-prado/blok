@@ -86,6 +86,13 @@ const SUPPORTED_RUNTIMES: RuntimeInfo[] = [
 		status: "Production",
 		languages: ["Dart"],
 	},
+	{
+		name: "Elixir / BEAM",
+		kind: "elixir",
+		protocol: "gRPC",
+		status: "Production",
+		languages: ["Elixir"],
+	},
 ];
 
 /**

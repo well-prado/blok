@@ -159,6 +159,7 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 			{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "c" },
 			{ label: "runtime.swift", docs: "Execute using Swift runtime adapter (Linux gRPC sidecar)", priority: "d" },
 			{ label: "runtime.dart", docs: "Execute using Dart runtime adapter", priority: "d" },
+			{ label: "runtime.elixir", docs: "Execute using supervised Elixir/BEAM runtime adapter", priority: "d" },
 		];
 
 		return types.map((t) => {

@@ -185,6 +185,9 @@ export async function setupRuntime(
 		case "dart":
 			await setupDart(blokctlRuntimeDir, spinner);
 			break;
+		case "elixir":
+			await setupElixir(blokctlRuntimeDir, spinner);
+			break;
 	}
 
 	// Compiled runtimes can't fs-scan user nodes at boot like Python — generate
@@ -201,6 +204,8 @@ export async function setupRuntime(
 		generateSwiftNodeRegistry(projectDir);
 	} else if (runtime.kind === "dart") {
 		generateDartNodeRegistry(projectDir);
+	} else if (runtime.kind === "elixir") {
+		generateElixirNodeRegistry(projectDir);
 	}
 
 	spinner.message(`${runtime.label} runtime setup complete.`);
@@ -358,6 +363,41 @@ ${callLines.join("\n")}
 
 	fsExtra.ensureDirSync(path.dirname(registryFile));
 	fsExtra.writeFileSync(registryFile, content);
+	return registryFile;
+}
+
+/**
+ * Compile-time Elixir registration: copy user modules into the SDK's lib tree
+ * and generate a config module. The BEAM sidecar never scans user files at
+ * boot, so a deleted/renamed node cannot remain registered accidentally.
+ */
+export function generateElixirNodeRegistry(projectDir: string): string {
+	const sdkDir = path.join(projectDir, ".blok", "runtimes", "elixir");
+	const nodesSrcDir = path.join(projectDir, "runtimes", "elixir", "nodes");
+	const usernodesDir = path.join(sdkDir, "lib", "blok", "user_nodes");
+	const registryFile = path.join(sdkDir, "config", "nodes.exs");
+	fsExtra.removeSync(usernodesDir);
+	fsExtra.ensureDirSync(usernodesDir);
+	const modules: string[] = ["Blok.Examples.HelloWorld"];
+	if (fsExtra.existsSync(nodesSrcDir)) {
+		for (const entry of fsExtra.readdirSync(nodesSrcDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const sourceDir = path.join(nodesSrcDir, entry.name);
+			const sourceFile = fsExtra.readdirSync(sourceDir).find((name) => name.endsWith(".ex"));
+			if (!sourceFile) continue;
+			const source = fsExtra.readFileSync(path.join(sourceDir, sourceFile), "utf8");
+			const matches = [...source.matchAll(/defmodule\s+([A-Z][A-Za-z0-9_.]*)/g)];
+			const moduleName = matches.at(-1)?.[1];
+			if (!moduleName) {
+				console.warn(`[blokctl] skipping Elixir node '${entry.name}': no defmodule declaration found`);
+				continue;
+			}
+			fsExtra.copySync(path.join(sourceDir, sourceFile), path.join(usernodesDir, `${entry.name}.ex`));
+			modules.push(moduleName);
+		}
+	}
+	fsExtra.ensureDirSync(path.dirname(registryFile));
+	fsExtra.writeFileSync(registryFile, `import Config\n\nconfig :blok, nodes: [${modules.join(", ")}]\n`);
 	return registryFile;
 }
 
@@ -806,6 +846,13 @@ async function setupSwift(sdkDir: string, spinner: SpinnerHandler): Promise<void
 	spinner.message("Building Swift runtime...");
 	await exec("swift build -c release", { cwd: sdkDir, timeout: 600000 });
 	spinner.message("Swift runtime built.");
+}
+
+async function setupElixir(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
+	spinner.message("Installing Elixir dependencies...");
+	await exec("mix deps.get", { cwd: sdkDir, timeout: 120000 });
+	spinner.message("Compiling Elixir runtime...");
+	await exec("mix compile", { cwd: sdkDir, timeout: 120000 });
 }
 
 /**

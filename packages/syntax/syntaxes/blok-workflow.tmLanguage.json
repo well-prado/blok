@@ -39,7 +39,7 @@
 			}
 		},
 		"runtime-kinds": {
-			"match": "\"(local|module|runtime\\.nodejs|runtime\\.python3|runtime\\.go|runtime\\.java|runtime\\.rust|runtime\\.php|runtime\\.csharp|runtime\\.ruby|runtime\\.bun|runtime\\.wasm|runtime\\.docker)\"",
+			"match": "\"(local|module|runtime\\.nodejs|runtime\\.python3|runtime\\.go|runtime\\.java|runtime\\.rust|runtime\\.php|runtime\\.csharp|runtime\\.ruby|runtime\\.elixir|runtime\\.bun|runtime\\.wasm|runtime\\.docker)\"",
 			"captures": {
 				"1": { "name": "constant.other.runtime-kind.blok" }
 			}

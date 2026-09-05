@@ -364,6 +364,7 @@ actionable diagnostic; they never select Bun or Deno.
 | C# | `runtime.csharp` | 9004 |
 | PHP | `runtime.php` | 9005 |
 | Ruby | `runtime.ruby` | 9006 |
+| Elixir | `runtime.elixir` | 10010 |
 | Python3 | `runtime.python3` | 9007 |
 | Swift | `runtime.swift` | 9008 |
 | Dart | `runtime.dart` | 9009 |

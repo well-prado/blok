@@ -454,6 +454,7 @@ describe("WorkflowDiagnostics", () => {
 				"runtime.ruby",
 				"runtime.swift",
 				"runtime.dart",
+				"runtime.elixir",
 			];
 			for (const stepType of validTypes) {
 				const doc = createMockDocument(

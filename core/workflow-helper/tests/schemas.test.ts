@@ -714,6 +714,7 @@ describe("NodeTypeSchema", () => {
 			"runtime.ruby",
 			"runtime.swift",
 			"runtime.dart",
+			"runtime.elixir",
 			"runtime.docker",
 			"runtime.wasm",
 			"runtime.wasi",

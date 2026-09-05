@@ -12,6 +12,7 @@ const SUPPORTED_KINDS: readonly RuntimeKind[] = [
 	"python3",
 	"swift",
 	"dart",
+	"elixir",
 ];
 
 /**
