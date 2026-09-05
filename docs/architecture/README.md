@@ -12,6 +12,7 @@ they must not silently contradict it.
 - [Trigger system](trigger-system.md)
 - [WASI Component Model runtime](runtime/adr/0001-wasi-component-runtime.md)
 - [ADR 0016 — Selectable JavaScript execution runtimes](adr-0016-javascript-runtimes.md)
+- [ADR 0016 conformance evidence](adr-0016-javascript-runtimes-conformance.md)
 
 ## Decision governance
 

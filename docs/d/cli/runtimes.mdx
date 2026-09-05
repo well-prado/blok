@@ -31,11 +31,29 @@ Node.js. See [ADR 0016](../../architecture/adr-0016-javascript-runtimes.md).
 
 | Command | What it does |
 | --- | --- |
+| `blokctl runtime use <node\|bun\|deno>` | Change the project's JavaScript execution target |
 | `blokctl runtime add <lang>` | Install a language sidecar into this project |
 | `blokctl runtime remove <lang>` | Remove a language sidecar from this project |
 | `blokctl runtime list` | Show what's installed and what you can add |
 
 Run them from your project's root (or point at it with `-d <path>`). `remove` has the alias `rm`, and `list` has `ls`.
+
+### `runtime use` — select the JavaScript target
+
+The selection is written to `.blok/config.json` without changing the package
+manager, trigger configuration, or language sidecars:
+
+```bash
+blokctl runtime use node
+blokctl runtime use bun
+blokctl runtime use deno
+```
+
+Legacy `nodejs`, `typescript`, and `ts` inputs are accepted once and normalized
+to the canonical project value `node` with a deprecation warning. The command
+does not install a JavaScript worker. Bun and Deno therefore remain fail-closed
+until their persistent adapters are registered; a project never silently runs
+those selections under Node.js.
 
 <Tip>
 Not sure where to start? Run `blokctl runtime list` to see what's installed and which languages your machine already has the toolchain for — then `blokctl runtime add` (with no argument) to pick one from an interactive menu.
