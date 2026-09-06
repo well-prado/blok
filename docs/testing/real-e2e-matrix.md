@@ -33,7 +33,7 @@ docker compose -f infra/testing/azure-servicebus.docker-compose.yml up -d
 # Azure Service Bus emulator: AMQP 5674, health/management 5300
 ```
 
-**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10008):
+**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10009):
 ```bash
 bun tests/e2e/cross-runtime/prepare-usernodes.ts
 docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
@@ -81,7 +81,7 @@ checks** — response shape, broker state, metric value, log line, Studio run tr
 
 ## Coverage summary
 
-9 runtimes (node + 8 gRPC) · 9 triggers (http/sse/websocket/webhook/mcp/cron/grpc/pubsub/worker) ·
+10 runtimes (node + 9 gRPC) · 9 triggers (http/sse/websocket/webhook/mcp/cron/grpc/pubsub/worker) ·
 8 worker backends · 6 pubsub backends · the full handle-DSL feature surface (branch/forEach/switchOn/
 tryCatch/ephemeral/spread/as/idempotencyKey/retry/maxDuration/concurrencyKey/delay/ttl/debounce/
 sub-workflows) · the observability pipeline (metrics/traces/logs/Studio/alerting) · the CLI.

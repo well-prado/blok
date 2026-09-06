@@ -16,9 +16,9 @@ WORKDIR /app
 COPY --from=build /app/bin/blok-dart /app/bin/blok-dart
 USER blok
 ENV HOST=0.0.0.0 \
-    PORT=9008 \
-    GRPC_PORT=10008 \
+    PORT=9009 \
+    GRPC_PORT=10009 \
     BLOK_TRANSPORT=grpc
-EXPOSE 9008 10008
+EXPOSE 9009 10009
 HEALTHCHECK --interval=5s --timeout=2s --retries=12 CMD /bin/sh -c 'nc -z 127.0.0.1 "$${GRPC_PORT}"'
 ENTRYPOINT ["/app/bin/blok-dart"]

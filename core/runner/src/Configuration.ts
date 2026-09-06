@@ -635,6 +635,8 @@ export default class Configuration implements Config {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 			"runtime.swift": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
 			"runtime.dart": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},

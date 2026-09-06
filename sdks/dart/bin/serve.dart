@@ -12,8 +12,8 @@ import 'package:blok_dart/src/generated_user_nodes.dart';
 Future<void> main() async {
   final env = Platform.environment;
   final host = env['HOST'] ?? '0.0.0.0';
-  final grpcPort = int.tryParse(env['GRPC_PORT'] ?? '') ?? 10008;
-  final httpPort = int.tryParse(env['PORT'] ?? '') ?? 9008;
+  final grpcPort = int.tryParse(env['GRPC_PORT'] ?? '') ?? 10009;
+  final httpPort = int.tryParse(env['PORT'] ?? '') ?? 9009;
   final version = env['VERSION'] ?? '1.0.0';
   final maxMessageBytes =
       int.tryParse(env['BLOK_GRPC_MAX_MESSAGE_BYTES'] ?? '') ??

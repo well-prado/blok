@@ -27,13 +27,13 @@ Convention: gRPC port = legacy HTTP port + 1000.
 
 ## Cross-runtime E2E + CI gate
 
-[`tests/e2e/cross-runtime/`](../tests/e2e/cross-runtime) proves all 8 runtimes
+[`tests/e2e/cross-runtime/`](../tests/e2e/cross-runtime) proves all 9 runtimes
 serve the gRPC contract and a single chain threads `ctx` through every language.
 Two ways to run it:
 
 - **Docker (CI):** `docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build`
   then `BLOK_E2E_REQUIRE_ALL=1 bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts`.
-  The compose builds each SDK in gRPC mode on its convention port (10001–10008).
+  The compose builds each SDK in gRPC mode on its convention port (10001–10009).
 - **Host toolchains:** `bash tests/e2e/cross-runtime/run-spec-b-e2e.sh` (boots on
   2000x to avoid clashing with a local dev stack; runs against whatever is up).
 

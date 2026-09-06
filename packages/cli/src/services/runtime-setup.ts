@@ -855,6 +855,7 @@ export function generateSwiftNodeRegistry(projectDir: string): string {
 	fsExtra.ensureDirSync(path.dirname(registryFile));
 	fsExtra.writeFileSync(registryFile, content);
 	return registryFile;
+}
 
 /** Dart: resolve the pinned pub dependencies before the sidecar is spawned. */
 async function setupDart(sdkDir: string, spinner: SpinnerHandler): Promise<void> {

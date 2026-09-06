@@ -13,7 +13,7 @@ dart run tool/generate_proto.dart
 BLOK_TRANSPORT=grpc dart run bin/serve.dart
 ```
 
-The default gRPC port is `10008` (the legacy HTTP slot is `9008`). `GET
+The default gRPC port is `10009` (the legacy HTTP slot is `9009`). `GET
 /health` is served on `PORT` for container readiness probes; the runner uses
 the gRPC Health RPC and a TCP probe for readiness.
 

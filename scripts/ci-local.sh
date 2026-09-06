@@ -77,11 +77,11 @@ run_cross_runtime() {
   local CR="tests/e2e/cross-runtime"
   step "Build @blokjs/runner (the harness imports GrpcRuntimeAdapter)"; bunx nx build @blokjs/runner
   step "Prepare user-node build contexts"; bun "$CR/prepare-usernodes.ts"
-  step "Build + start the 8 SDK gRPC runtimes (docker compose --build)"
+  step "Build + start the 9 SDK gRPC runtimes (docker compose --build)"
   docker compose -f "$CR/docker-compose.yml" up -d --build
   # Always tear the runtimes down, even if the harness fails.
   trap 'docker compose -f "'"$CR"'/docker-compose.yml" down -v >/dev/null 2>&1 || true' EXIT
-  step "Cross-runtime gRPC harness (all 8 required, user nodes asserted)"
+  step "Cross-runtime gRPC harness (all 9 required, user nodes asserted)"
   BLOK_E2E_REQUIRE_ALL=1 BLOK_E2E_USERNODES=1 bun "$CR/spec-b-typed-e2e.ts"
 }
 
