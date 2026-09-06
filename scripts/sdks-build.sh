@@ -131,6 +131,15 @@ else
 	skip "Ruby SDK" "ruby 3.x not found (brew install ruby@3.3)"
 fi
 
+# -----------------------------------------------------------------------------
+# Swift: SwiftPM resolves and builds the Linux-capable gRPC sidecar.
+# -----------------------------------------------------------------------------
+if command -v swift >/dev/null 2>&1; then
+	build_step "Swift SDK" bash -c "cd '$ROOT/sdks/swift' && swift build -c release" || true
+else
+	skip "Swift SDK" "swift not in PATH (https://swift.org/install/)"
+fi
+
 echo -e "${HDR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${HDR}Done. Run ${OK}bun run dev${HDR} to start the stack.${RESET}"
 echo -e "${HDR}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

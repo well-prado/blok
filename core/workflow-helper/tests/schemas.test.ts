@@ -712,6 +712,7 @@ describe("NodeTypeSchema", () => {
 			"runtime.php",
 			"runtime.csharp",
 			"runtime.ruby",
+			"runtime.swift",
 			"runtime.docker",
 			"runtime.wasm",
 			"runtime.wasi",

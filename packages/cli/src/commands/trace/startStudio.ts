@@ -155,7 +155,7 @@ async function buildStandaloneApp(dbPath: string): Promise<express.Application> 
  *      Triggered by `--db <path>`, `--standalone`, or auto-detected
  *      from `.blok/trace.db` when no proxy backend is reachable. Lets
  *      operators inspect historical runs without spinning up the
- *      trigger + all 7 SDKs.
+ *      trigger + all 8 SDKs.
  */
 export async function startStudio(options: StudioOptions): Promise<void> {
 	const { port, url: backendUrl, open: shouldOpen } = options;

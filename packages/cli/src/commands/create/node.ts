@@ -18,6 +18,7 @@ import {
 	python3_file,
 	ruby_node_file,
 	rust_node_file,
+	swift_node_file,
 } from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);
@@ -107,6 +108,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 									{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
 									{ label: "PHP", value: "php", hint: "Production - Docker" },
 									{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
+									{ label: "Swift", value: "swift", hint: "Production - Linux gRPC" },
 								],
 							}),
 			},
@@ -599,6 +601,30 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
+		if (node_runtime === "swift") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				const currentDir = `${process.cwd()}/runtimes/swift`;
+				fsExtra.ensureDirSync(currentDir);
+				const currentNodesDir = `${currentDir}/nodes`;
+				fsExtra.ensureDirSync(currentNodesDir);
+				dirPath = path.join(currentNodesDir, nodeName);
+			}
+
+			if (!skipPrompts) s.message("Creating Swift node files...");
+			if (!currentPath && fsExtra.existsSync(dirPath)) throw new Error("ops2");
+			fsExtra.ensureDirSync(dirPath);
+
+			const swiftNodeContent = swift_node_file
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, toPascalCase(nodeName))
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			fsExtra.writeFileSync(`${dirPath}/node.swift`, swiftNodeContent);
+			fsExtra.writeFileSync(
+				`${dirPath}/README.md`,
+				`# ${nodeName}\n\nSwift-based Blok node, compiled into the Swift gRPC runtime.\n\nRun \`blokctl dev\` to regenerate the registration shim and start the sidecar.\n`,
+			);
+		}
+
 		if (!skipPrompts) s.stop(`Node "${nodeName}" created successfully.`);
 
 		// Show navigation instructions based on runtime
@@ -650,6 +676,11 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		if (!currentPath && node_runtime === "ruby") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/ruby/nodes/${nodeName}`);
 			console.log(`\nRun "blokctl dev" — the Ruby runtime discovers and registers this node automatically.`);
+		}
+
+		if (!currentPath && node_runtime === "swift") {
+			console.log(`\nNavigate to the node directory by running: cd runtimes/swift/nodes/${nodeName}`);
+			console.log(`\nRun "blokctl dev" — the Swift runtime compiles and registers this node automatically.`);
 		}
 
 		console.log("\nFor more documentation, visit https://blok.build/docs/d/core-concepts/nodes");

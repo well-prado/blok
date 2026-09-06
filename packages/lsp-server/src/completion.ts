@@ -172,6 +172,7 @@ function createStepTypeCompletions(): CompletionItem[] {
 		{ label: "runtime.php", docs: "Execute using PHP runtime adapter (Docker container)", priority: "a" },
 		{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "b" },
 		{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "c" },
+		{ label: "runtime.swift", docs: "Execute using Swift runtime adapter (Linux gRPC sidecar)", priority: "d" },
 	];
 
 	return types.map((t) => ({

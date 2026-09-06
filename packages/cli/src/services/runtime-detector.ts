@@ -233,6 +233,19 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 			installHint: "Install Bundler: gem install bundler",
 		},
 	},
+	{
+		kind: "swift",
+		label: "Swift",
+		installHint: "Install Swift 6.1+ for Linux: https://swift.org/install/",
+		minVersion: "6.1.0",
+		defaultPort: 9008,
+		defaultGrpcPort: 10008,
+		commands: ["swift --version"],
+		toolchain: "swift",
+		installDeps: "swift package resolve",
+		startCmd: "swift run blok-swift-runtime",
+		sdkDir: "swift",
+	},
 ];
 
 /**
@@ -285,6 +298,10 @@ function parseVersion(output: string, kind: string): string | undefined {
 		case "python3": {
 			// "Python 3.12.0" → "3.12.0"
 			const match = output.match(/Python\s+(\d+\.\d+\.\d+)/);
+			return match ? match[1] : undefined;
+		}
+		case "swift": {
+			const match = output.match(/Swift version (\d+\.\d+(?:\.\d+)?)/i);
 			return match ? match[1] : undefined;
 		}
 		default:

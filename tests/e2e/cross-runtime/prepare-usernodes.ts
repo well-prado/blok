@@ -26,12 +26,14 @@ import {
 	python3_file,
 	ruby_node_file,
 	rust_node_file,
+	swift_node_file,
 } from "../../../packages/cli/src/commands/create/utils/Examples.js";
 import {
 	generateCSharpNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
 	generateRustNodeRegistry,
+	generateSwiftNodeRegistry,
 } from "../../../packages/cli/src/services/runtime-setup.js";
 
 const HERE = import.meta.dir;
@@ -65,6 +67,7 @@ const EXCLUDES: Record<string, string[]> = {
 	python3: ["__pycache__"],
 	ruby: [],
 	php: ["vendor"],
+	swift: [".build"],
 };
 
 function copySdk(lang: string, dest: string): void {
@@ -112,6 +115,7 @@ prepCompiled("go", "node.go", go_node_file, generateGoNodeRegistry);
 prepCompiled("rust", "node.rs", rust_node_file, generateRustNodeRegistry);
 prepCompiled("java", `src/main/java/com/blok/blok/nodes/${PASCAL}Node.java`, java_node_file, generateJavaNodeRegistry);
 prepCompiled("csharp", `${PASCAL}Node.cs`, csharp_node_file, generateCSharpNodeRegistry);
+prepCompiled("swift", "node.swift", swift_node_file, generateSwiftNodeRegistry);
 
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.
 prepDynamic("python3", "node.py", python3_file, { "__init__.py": "" });
