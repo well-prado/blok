@@ -33,7 +33,7 @@ docker compose -f infra/testing/azure-servicebus.docker-compose.yml up -d
 # Azure Service Bus emulator: AMQP 5674, health/management 5300
 ```
 
-**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10008):
+**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10009):
 ```bash
 bun tests/e2e/cross-runtime/prepare-usernodes.ts
 docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build

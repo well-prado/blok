@@ -408,6 +408,8 @@ Runtime adapters are configured via environment variables and the workflow JSON 
 |---|---|---|
 | `RUNTIME_PYTHON3_HOST` | Python3 | gRPC server hostname |
 | `RUNTIME_PYTHON3_PORT` | Python3 | gRPC server port |
+| `RUNTIME_KOTLIN_HOST` | Kotlin | gRPC server hostname |
+| `RUNTIME_KOTLIN_GRPC_PORT` | Kotlin | gRPC server port (default `10009`) |
 | `RUNTIME_SWIFT_HOST` | Swift | gRPC server hostname |
 | `RUNTIME_SWIFT_GRPC_PORT` | Swift | gRPC server port (default `10008`) |
 | `BLOK_WASM_CACHE_SIZE` | WASM | Max compiled module cache entries |

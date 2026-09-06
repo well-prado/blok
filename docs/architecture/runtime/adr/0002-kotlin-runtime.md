@@ -14,8 +14,8 @@ and admission while Kotlin owns node dispatch and the JVM lifecycle.
 
 ## Decisions
 
-`runtime.kotlin` is a distinct canonical runtime kind on gRPC port `10008`
-(readiness HTTP port `9008`). The Kotlin SDK is built under `sdks/kotlin` with
+`runtime.kotlin` is a distinct canonical runtime kind on gRPC port `10009`
+(readiness HTTP port `9009`). The Kotlin SDK is built under `sdks/kotlin` with
 a pinned Gradle wrapper and Kotlin DSL. Its generated protobuf and
 grpc-kotlin sources are derived from the canonical
 [`proto/blok/runtime/v1/runtime.proto`](../../../../proto/blok/runtime/v1/runtime.proto)
@@ -64,7 +64,7 @@ payload path.
 - `packages/cli/tests/services/kotlin-node-registry.test.ts` covers scaffold
   code generation and stale-node cleanup.
 - `packages/cli/tests/commands/runtime/runtime.test.ts` covers Kotlin runtime
-  detection/configuration, port `10008`, and `runtime add kotlin` vocabulary.
+  detection/configuration, port `10009`, and `runtime add kotlin` vocabulary.
 - `bun run proto:check` proves the Kotlin proto copy remains synchronized.
 
 The implementation does not claim Android lifecycle integration, Kotlin/JS,

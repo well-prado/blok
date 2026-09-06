@@ -1,4 +1,5 @@
 import com.google.protobuf.gradle.*
+import org.gradle.api.file.DuplicatesStrategy
 
 plugins {
     kotlin("jvm") version "1.9.25"
@@ -20,7 +21,7 @@ application {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("io.grpc:grpc-kotlin-stub:1.4.1")
     implementation("io.grpc:grpc-netty-shaded:1.69.0")
     implementation("io.grpc:grpc-protobuf:1.69.0")
@@ -71,3 +72,7 @@ tasks.register<Copy>("copyRuntimeProto") {
 }
 
 tasks.named("generateProto") { dependsOn("copyRuntimeProto") }
+tasks.named<org.gradle.language.jvm.tasks.ProcessResources>("processResources") {
+    dependsOn("copyRuntimeProto")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

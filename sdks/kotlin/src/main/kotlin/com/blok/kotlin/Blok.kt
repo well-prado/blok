@@ -31,8 +31,10 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
+import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -45,6 +47,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -220,7 +223,7 @@ private object JsonSchema {
                 put("enum", JsonArray((0 until descriptor.elementsCount).map { JsonPrimitive(descriptor.getElementName(it)) }))
             }
         }
-        if (kind == SerialKind.LIST) {
+        if (kind == StructureKind.LIST) {
             val child = if (descriptor.elementsCount > 0) descriptor.getElementDescriptor(0) else null
             return buildJsonObject {
                 put("type", "array")
@@ -330,7 +333,7 @@ private val blobId = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-
 private fun blobDir(): Path? = System.getenv("BLOK_BLOB_DIR")?.takeIf { it.isNotBlank() }?.let(Path::of)
 private fun blobMaxBytes(): Long = System.getenv("BLOK_BLOB_MAX_BYTES")?.toLongOrNull()?.coerceAtLeast(1) ?: 256L * 1024 * 1024
 
-private fun resolveBlob(input: JsonObject): JsonObject {
+internal fun resolveBlob(input: JsonObject): JsonObject {
     if (input.size != 1) return input
     val ref = input["\$blokBlob"] as? JsonObject ?: return input
     val root = blobDir() ?: throw IllegalArgumentException("received a \$blokBlob claim-check ref but BLOK_BLOB_DIR is not set")
@@ -499,7 +502,7 @@ class RuntimeServer private constructor(
                 if (exchange.requestMethod != "GET") {
                     exchange.sendResponseHeaders(405, -1)
                 } else {
-                    val body = "{\"status\":\"healthy\",\"sdk_version\":\"$version\",\"registered_nodes\":${Json.encodeToString(registry.names())}}"
+                    val body = "{\"status\":\"healthy\",\"sdk_version\":\"$version\",\"registered_nodes\":${Json.encodeToString(ListSerializer(String.serializer()), registry.names())}}"
                         .toByteArray(StandardCharsets.UTF_8)
                     exchange.responseHeaders.set("Content-Type", "application/json")
                     exchange.sendResponseHeaders(200, body.size.toLong())
@@ -526,7 +529,7 @@ class RuntimeServer private constructor(
     companion object {
         fun fromEnv(): RuntimeServer = RuntimeServer(
             host = System.getenv("HOST")?.takeIf { it.isNotBlank() } ?: "0.0.0.0",
-            port = envInt("PORT", 9008), grpcPort = envInt("GRPC_PORT", 10008),
+            port = envInt("PORT", 9009), grpcPort = envInt("GRPC_PORT", 10009),
             version = System.getenv("VERSION")?.takeIf { it.isNotBlank() } ?: "1.0.0",
             maxMessageBytes = envInt("BLOK_GRPC_MAX_MESSAGE_BYTES", 16 * 1024 * 1024),
             dispatcherThreads = envInt("BLOK_RUNTIME_DISPATCHER_THREADS", 4).coerceIn(1, 64),

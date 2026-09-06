@@ -1476,7 +1476,7 @@ A non-TS node runs in a per-language sidecar and is referenced from a step with 
 | Go | \`runtime.go\` | 10001 |
 | Rust | \`runtime.rust\` | 10002 |
 | Java | \`runtime.java\` | 10003 |
-| Kotlin | \`runtime.kotlin\` | 10008 |
+| Kotlin | \`runtime.kotlin\` | 10009 |
 | C# | \`runtime.csharp\` | 10004 |
 | PHP | \`runtime.php\` | 10005 |
 | Ruby | \`runtime.ruby\` | 10006 |

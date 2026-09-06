@@ -99,7 +99,7 @@ export const GRPC_DEFAULTS = {
 
 /**
  * Default port mapping per language. We use `HTTP_PORT + 1000` for symmetry
- * with the existing HTTP ports (9001–9008 → 10001–10008). Operators can
+ * with the existing HTTP ports (9001–9009 → 10001–10009). Operators can
  * override per language via `RUNTIME_<KIND>_GRPC_PORT`.
  */
 export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
@@ -109,7 +109,7 @@ export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
 	go: 10001,
 	rust: 10002,
 	java: 10003,
-	kotlin: 10008,
+	kotlin: 10009,
 	csharp: 10004,
 	php: 10005,
 	ruby: 10006,

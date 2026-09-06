@@ -144,7 +144,7 @@ Expected output — all 8 should show `(healthy)`:
 | sdk-go | Go | 9001 | 8080 | (healthy) |
 | sdk-rust | Rust | 9002 | 8080 | (healthy) |
 | sdk-java | Java | 9003 | 8080 | (healthy) |
-| sdk-kotlin | Kotlin/JVM | 10008 | 9008 | (healthy) |
+| sdk-kotlin | Kotlin/JVM | 10009 | 9009 | (healthy) |
 | sdk-csharp | C# | 9004 | 8080 | (healthy) |
 | sdk-php | PHP | 9005 | 8080 | (healthy) |
 | sdk-ruby | Ruby | 9006 | 8080 | (healthy) |
@@ -693,7 +693,7 @@ When a user runs `npx blokctl@latest create project`, the CLI:
 | Go SDK | 9001 | 8080 | gRPC |
 | Rust SDK | 9002 | 8080 | gRPC |
 | Java SDK | 9003 | 8080 | gRPC |
-| Kotlin SDK | 10008 | 9008 | gRPC |
+| Kotlin SDK | 10009 | 9009 | gRPC |
 | C# SDK | 9004 | 8080 | gRPC |
 | PHP SDK | 9005 | 8080 | gRPC |
 | Ruby SDK | 9006 | 8080 | gRPC |
