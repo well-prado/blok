@@ -13,7 +13,7 @@ interface WorkflowSchema {
 	steps?: Array<{
 		name: string;
 		node: string;
-		type: "local" | "module" | "runtime.python3" | "runtime.swift";
+		type: "local" | "module" | "runtime.python3" | "runtime.swift" | "runtime.dart";
 		inputs?: Record<string, unknown>;
 	}>;
 	nodes?: Record<

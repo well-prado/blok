@@ -12,7 +12,7 @@ This file is the index. It was seeded by a multi-agent authoring pass (52 detail
 
 | Area | Proof | Result |
 |---|---|---|
-| **All 8 gRPC runtimes** | `tests/e2e/cross-runtime` — builds 8 SDK Docker images and drives them through the runner's real `GrpcRuntimeAdapter` | CI gate includes Go/Rust/Java/C#/PHP/Ruby/Python3/Swift; ListNodes + typed execute + validation-error envelope + user-node discovery per language, plus the 8-runtime cross-runtime chain |
+| **All 9 gRPC runtimes** | `tests/e2e/cross-runtime` — builds 9 SDK Docker images and drives them through the runner's real `GrpcRuntimeAdapter` | Strict all-runtime gate: ListNodes + typed execute + validation-error envelope + user-node discovery per language, plus the `go→rust→csharp→java→php→ruby→python3→swift→dart` cross-runtime chain (9 ordered entries) |
 | **Node runtime (in-process)** | Scaffolded HTTP project E2E (`apiCall` → handle → `RespondNode`) | both nodes executed; run traced; metrics + logs emitted |
 | **Worker queue (BullMQ / Redis)** | Real `BullMQAdapter` against a live Redis container | enqueue→consume; flaky job threw on attempt 1 → redelivered through Redis → succeeded on attempt 2 |
 | **Observability stack** | `infra/metrics` — Prometheus/Grafana/Tempo/Loki/Alloy/Alertmanager all `Up` | (live signal verification in E5) |
@@ -33,7 +33,7 @@ docker compose -f infra/testing/azure-servicebus.docker-compose.yml up -d
 # Azure Service Bus emulator: AMQP 5674, health/management 5300
 ```
 
-**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10008):
+**C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10009):
 ```bash
 bun tests/e2e/cross-runtime/prepare-usernodes.ts
 docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
@@ -54,7 +54,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 APP_NAME=blok-http bun run htt
 | **E1** | Streaming & web triggers (HTTP / SSE / WebSocket) | 11 | port-4000 Hono multiplex |
 | **E2** | Event/RPC triggers (Webhook / MCP / Cron / gRPC) | 22 | HMAC signers, MCP SSE+Streamable-HTTP, cron clock-firing, Connect gRPC |
 | **E3** | PubSub real brokers (NATS / Redis / Kafka / GCP / AWS / Azure) | 10 | `infra/testing` brokers |
-| **E4** | Cross-runtime SDK sidecars (node + 8 gRPC) | 8 | `tests/e2e/cross-runtime` — strict CI gate |
+| **E4** | Cross-runtime SDK sidecars (node + 9 gRPC) | 9 | `tests/e2e/cross-runtime` — strict all-runtime gate |
 | **E5** | Observability (metrics / tracing / logs / Studio / alerting) | 13 | `infra/metrics` stack |
 | **E6** | Worker / queues (8 backends: BullMQ/Redis-Streams/pg-boss/NATS/RabbitMQ/Kafka/SQS/in-memory) | TODO¹ | single-container brokers — **BullMQ proven live** |
 | **E7** | CLI + node packaging (`create`/`dev`/`nodes sync`/`runtime add`/auto-discovery) | TODO¹ | local CLI |
@@ -81,7 +81,7 @@ checks** — response shape, broker state, metric value, log line, Studio run tr
 
 ## Coverage summary
 
-9 runtimes (node + 8 gRPC) · 9 triggers (http/sse/websocket/webhook/mcp/cron/grpc/pubsub/worker) ·
+10 runtimes (node + 9 gRPC) · 9 triggers (http/sse/websocket/webhook/mcp/cron/grpc/pubsub/worker) ·
 8 worker backends · 6 pubsub backends · the full handle-DSL feature surface (branch/forEach/switchOn/
 tryCatch/ephemeral/spread/as/idempotencyKey/retry/maxDuration/concurrencyKey/delay/ttl/debounce/
 sub-workflows) · the observability pipeline (metrics/traces/logs/Studio/alerting) · the CLI.

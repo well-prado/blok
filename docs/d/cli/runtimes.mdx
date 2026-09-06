@@ -1,11 +1,11 @@
 ---
 title: Language Runtimes
-description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, Ruby, Python) in an existing Blok project.
+description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, Ruby, Python, Dart) in an existing Blok project.
 icon: "layer-group"
 ---
 
 Blok runs workflow steps across JavaScript targets (**Node.js, Bun, and Deno**)
-plus the supported language runtimes, including the distinct `runtime.wasi`
+plus the supported language runtimes, including **Dart** and the distinct `runtime.wasi`
 Component Model boundary. JavaScript target selection is a project setting; it
 is separate from the package manager and from the language sidecars managed by
 the commands below. The WASI boundary is contract-first in the current
@@ -81,6 +81,8 @@ blokctl runtime list
 │  Rust         needs rustc + cargo  blokctl runtime add rust    │
 │  Ruby         ruby + bundler ready blokctl runtime add ruby    │
 │  Swift        needs swift 6.1+     blokctl runtime add swift    │
+│  Dart         needs dart 3.3+      blokctl runtime add dart     │
+│  …                                                             │
 ├────────────────────────────────────────────────────────────────╯
 │
 └  Node / TypeScript runs in-process — always available, nothing to install.

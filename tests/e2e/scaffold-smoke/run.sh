@@ -95,6 +95,7 @@ detect_runtimes() {
   { command -v php >/dev/null 2>&1 && command -v composer >/dev/null 2>&1 && command -v rr >/dev/null 2>&1; } && rts+=(php)
   have_ruby_31 && rts+=(ruby)
   command -v python3 >/dev/null 2>&1 && rts+=(python3)
+  command -v dart >/dev/null 2>&1 && rts+=(dart)
   echo "${rts[*]:-}"
 }
 

@@ -47,6 +47,7 @@ nodeTypes() returns:
   "runtime.csharp"   → runtimeResolver()
   "runtime.php"      → runtimeResolver()
   "runtime.ruby"     → runtimeResolver()
+  "runtime.dart"     → runtimeResolver()
 ```
 
 gRPC has been the sole runtime transport since v0.5 — `HttpRuntimeAdapter`

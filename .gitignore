@@ -209,6 +209,9 @@ sdks/ruby/.bundle/
 sdks/ruby/Gemfile.lock
 sdks/ruby/pkg/
 
+# Dart SDK package cache and test/build artifacts
+sdks/dart/.dart_tool/
+
 # Lockfiles — bun project
 package-lock.json
 pnpm-lock.yaml

@@ -173,6 +173,7 @@ function createStepTypeCompletions(): CompletionItem[] {
 		{ label: "runtime.csharp", docs: "Execute using C#/.NET runtime adapter", priority: "b" },
 		{ label: "runtime.ruby", docs: "Execute using Ruby runtime adapter", priority: "c" },
 		{ label: "runtime.swift", docs: "Execute using Swift runtime adapter (Linux gRPC sidecar)", priority: "d" },
+		{ label: "runtime.dart", docs: "Execute using Dart runtime adapter", priority: "d" },
 	];
 
 	return types.map((t) => ({
@@ -196,6 +197,7 @@ function createRuntimeCompletions(): CompletionItem[] {
 		{ label: "php", docs: "PHP via Docker container" },
 		{ label: "csharp", docs: "C#/.NET via Docker container" },
 		{ label: "ruby", docs: "Ruby via Docker container" },
+		{ label: "dart", docs: "Dart via gRPC sidecar" },
 		{ label: "docker", docs: "Generic Docker container runtime" },
 		{ label: "wasm", docs: "WebAssembly runtime" },
 		{ label: "wasi", docs: "WASI Component Model runtime (WASI 0.2)" },

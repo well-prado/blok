@@ -50,6 +50,7 @@ export const NodeTypeSchema = z.enum([
 	"runtime.csharp",
 	"runtime.ruby",
 	"runtime.swift",
+	"runtime.dart",
 	"runtime.docker",
 	"runtime.wasm",
 	"runtime.wasi",
