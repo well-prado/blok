@@ -91,6 +91,7 @@ const RUNTIME_HELLO_EXAMPLES: Record<string, string> = {
 	csharp: "runtime-csharp-hello.ts",
 	php: "runtime-php-hello.ts",
 	ruby: "runtime-ruby-hello.ts",
+	elixir: "runtime-elixir-hello.ts",
 	python3: "runtime-python3-hello.ts",
 };
 

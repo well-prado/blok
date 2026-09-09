@@ -39,6 +39,7 @@ const VALID_STEP_TYPES = [
 	"runtime.ruby",
 	"runtime.swift",
 	"runtime.dart",
+	"runtime.elixir",
 ];
 const VALID_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY", "*"];
 const VALID_QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk", "nats"];
