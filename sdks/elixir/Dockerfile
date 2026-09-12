@@ -1,4 +1,4 @@
-FROM hexpm/elixir:1.20.4-erlang-29.0.6-ubuntu-jammy-20260120 AS build
+FROM hexpm/elixir:1.20.4-erlang-29.0.6-ubuntu-jammy-20260810 AS build
 
 WORKDIR /app
 ENV MIX_ENV=prod

@@ -378,7 +378,7 @@ export function generateElixirNodeRegistry(projectDir: string): string {
 	const registryFile = path.join(sdkDir, "config", "nodes.exs");
 	fsExtra.removeSync(usernodesDir);
 	fsExtra.ensureDirSync(usernodesDir);
-	const modules: string[] = ["Blok.Examples.HelloWorld"];
+	const modules: string[] = ["Blok.Examples.HelloWorld", "Blok.Examples.TypedGreet", "Blok.Examples.ChainTest"];
 	if (fsExtra.existsSync(nodesSrcDir)) {
 		for (const entry of fsExtra.readdirSync(nodesSrcDir, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;

@@ -9,8 +9,8 @@
 #     structured NODE_INPUT_VALIDATION error)
 #   - a cross-runtime chain threads ctx data through every runtime in order
 #
-# Boots whatever toolchains are present — all 9 polyglot runtimes:
-# Go, Rust, C#, Java, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3, Swift, Dart.
+# Boots whatever toolchains are present — all 10 polyglot runtimes:
+# Go, Rust, C#, Java, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3, Swift, Dart, Elixir.
 # The harness probes reachability and runs against whatever subset is up.
 #
 # Usage:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
@@ -115,9 +115,16 @@ if command -v dart >/dev/null && [ -f "$ROOT/sdks/dart/pubspec.yaml" ]; then
   PIDS+=($!); wait_port 20009 && echo "Dart gRPC up :20009"
 fi
 
+# --- Elixir (gRPC 20010) ---
+if command -v mix >/dev/null && [ -f "$ROOT/sdks/elixir/mix.exs" ]; then
+  echo "--- building + booting Elixir ---"
+  (cd "$ROOT/sdks/elixir" && mix deps.get && GRPC_PORT=20010 mix run --no-halt) >/tmp/blok-elixir.log 2>&1 &
+  PIDS+=($!); wait_port 20010 && echo "Elixir gRPC up :20010"
+fi
+
 echo "--- running harness ---"
 # This script boots on 2000x (offset from a local dev stack's 1000x); the
 # harness defaults to the 1000x convention, so pass the boot ports explicitly.
 cd "$ROOT" && GO_GRPC_PORT=20001 RUST_GRPC_PORT=20002 JAVA_GRPC_PORT=20003 \
-	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 SWIFT_GRPC_PORT=20008 DART_GRPC_PORT=20009 \
+	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 SWIFT_GRPC_PORT=20008 DART_GRPC_PORT=20009 ELIXIR_GRPC_PORT=20010 \
 	bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
