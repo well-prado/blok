@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, lstatSync, realpathSync, statSync, watch as watchPath } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync, statSync, watch as watchPath } from "node:fs";
 import type { Stats } from "node:fs";
 import { lstat, open, readdir, rename, rm } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve, win32 } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, win32 } from "node:path";
 import {
 	type CapabilityAuthority,
 	type CapabilityEffect,
@@ -588,6 +588,11 @@ export class WorkspaceFilesystemCapability {
 		const emit = (watchDirectory: string, eventType: "rename" | "change", filename: string | Buffer | null): void => {
 			if (closed || filename === null) return;
 			const absolute = join(watchDirectory, filename.toString());
+			// macOS (kqueue) reports a change to the watched directory itself with
+			// the directory's own name as `filename`; joined onto the directory that
+			// is a path that never existed. It carries no entry information and
+			// would eat the event budget ahead of the real per-file event.
+			if (filename.toString() === basename(watchDirectory) && !existsSync(absolute)) return;
 			if (!filter(absolute)) return;
 			const path = this.pathFromAbsolute(target.root, absolute);
 			const oldTimer = timers.get(path);
