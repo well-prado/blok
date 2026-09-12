@@ -89,6 +89,7 @@ async function check(
 
 const PASS = (detail: string) => ({ status: "pass" as const, detail });
 const FAIL = (detail: string) => ({ status: "fail" as const, detail });
+const SKIP = (detail: string) => ({ status: "skip" as const, detail });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -232,6 +233,11 @@ async function run(): Promise<void> {
 			const r = await http("GET", "/countries-dsl");
 			const data = (r.json as { data?: unknown[] })?.data;
 			if (r.status === 200 && Array.isArray(data) && data.length > 0) return PASS(`${data.length} countries`);
+			// The example calls a third-party API (countriesnow.space); its rate
+			// limit / outage is relayed as-is and is not a Blok defect. The api-call
+			// node still ran — the health check above covers the HTTP trigger.
+			if ((r.status === 429 || r.status >= 500) && r.text.includes("countriesnow.space"))
+				return SKIP(`upstream countriesnow.space returned ${r.status} (rate-limited/unavailable)`);
 			return FAIL(`status=${r.status} body=${r.text.slice(0, 80)}`);
 		});
 	}
