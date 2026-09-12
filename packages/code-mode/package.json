@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/code-mode",
-	"version": "2.2.0",
+	"version": "2.2.1",
 	"description": "Typed, policy-bound Code Mode workflow and capability bindings for Blok.",
 	"type": "module",
 	"main": "dist/index.js",
@@ -30,7 +30,7 @@
 	],
 	"license": "MIT",
 	"dependencies": {
-		"@blokjs/shared": "^2.2.0",
+		"@blokjs/shared": "^2.2.1",
 		"typescript": "^5.8.3",
 		"zod": "^3.24.2",
 		"zod-to-json-schema": "^3.25.2"

@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/control-plane",
-	"version": "2.2.0",
+	"version": "2.2.1",
 	"description": "Versioned gRPC control plane for Blok agent harness sessions.",
 	"type": "module",
 	"main": "dist/index.js",
@@ -16,8 +16,8 @@
 	"keywords": ["blok", "harness", "control-plane", "grpc"],
 	"license": "MIT",
 	"dependencies": {
-		"@blokjs/runner": "^2.1.0",
-		"@blokjs/shared": "^2.1.0",
+		"@blokjs/runner": "^2.2.1",
+		"@blokjs/shared": "^2.2.1",
 		"@grpc/grpc-js": "^1.12.0",
 		"@grpc/proto-loader": "^0.7.13",
 		"uuid": "^11.1.0",
