@@ -246,7 +246,10 @@ async function main(): Promise<void> {
 
 			const big = "z".repeat(OVERSIZED_BYTES);
 			const offloaded = await run(adapter, "typed-greet", kind, { name: big, repeat: 1 });
-			check(offloaded.success === true, `${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check`);
+			check(
+				offloaded.success === true,
+				`${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check${offloaded.success ? "" : ` (${JSON.stringify(offloaded.errors ?? offloaded.error ?? null).slice(0, 300)})`}`,
+			);
 			// typed-greet returns `("Hello, " + name) * repeat`, so at repeat=1 the
 			// echoed length is the payload PLUS the prefix. Comparing against
 			// `big.length` alone was off by exactly "Hello, " and failed even when

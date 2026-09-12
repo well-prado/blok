@@ -117,10 +117,20 @@ defmodule Blok.Runtime do
   end
 
   defp decode_inputs(bytes) do
-    with {:ok, value} <- Jason.decode(if(bytes in [nil, ""], do: "{}", else: bytes)),
-         {:ok, resolved} <- Blok.Blob.resolve(value) do
-      {:ok, resolved}
-    else
+    case Jason.decode(if(bytes in [nil, ""], do: "{}", else: bytes)) do
+      {:ok, value} ->
+        case Blok.Blob.resolve(value) do
+          {:ok, resolved} ->
+            {:ok, resolved}
+
+          # A claim-check failure is not a JSON problem; say what actually broke.
+          {:error, reason} ->
+            {:error,
+             Blok.Error.validation("claim-check inputs could not be resolved: #{reason}", %{
+               reason: reason
+             })}
+        end
+
       {:error, reason} ->
         {:error, Blok.Error.validation("inputs are not valid JSON", %{reason: inspect(reason)})}
     end
