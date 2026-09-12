@@ -97,6 +97,8 @@ const RUNTIME_GITIGNORE_GLOBS = [
 	".blok/runtimes/**/bin/",
 	".blok/runtimes/**/obj/",
 	".blok/runtimes/**/target/",
+	".blok/runtimes/**/.build/",
+	".blok/runtimes/**/.dart_tool/",
 	".blok/runtimes/**/__pycache__/",
 	".blok/runtimes/**/python3_runtime/",
 	".blok/runtimes/**/vendor/",

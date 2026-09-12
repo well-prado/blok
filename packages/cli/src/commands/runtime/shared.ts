@@ -19,7 +19,17 @@ const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 
 /** Kinds that can never be added/removed as a sidecar runtime. */
-export const NON_SIDECAR_KINDS = new Set(["node", "nodejs", "typescript", "ts", "bun", "docker", "wasm", "wasi"]);
+export const NON_SIDECAR_KINDS = new Set([
+	"node",
+	"nodejs",
+	"typescript",
+	"ts",
+	"bun",
+	"deno",
+	"docker",
+	"wasm",
+	"wasi",
+]);
 
 export class RuntimeCommandError extends Error {}
 
@@ -261,7 +271,7 @@ export function reportRuntimeError(err: unknown): void {
 export function assertSidecarKind(kind: string): void {
 	if (NON_SIDECAR_KINDS.has(kind)) {
 		throw new RuntimeCommandError(
-			`"${kind}" runs in-process and is always available — there's no sidecar to add or remove. Sidecar runtimes: go, rust, java, csharp, php, ruby, python3, swift, dart, elixir.`,
+			`"${kind}" is not a language sidecar. Select JavaScript targets with \`blokctl runtime use <node|bun|deno>\`. Sidecar runtimes: go, rust, java, csharp, php, ruby, python3, swift, dart, elixir.`,
 		);
 	}
 	if (!getRuntimeDefinition(kind)) {

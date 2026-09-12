@@ -9,9 +9,11 @@ import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	generateCSharpNodeRegistry,
 	generateDartNodeRegistry,
+	generateElixirNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
 	generateRustNodeRegistry,
+	generateSwiftNodeRegistry,
 	readProjectConfig,
 	validateProjectRuntimes,
 } from "../../services/runtime-setup.js";
@@ -327,6 +329,22 @@ export async function devProject(opts: OptionValues) {
 					generateDartNodeRegistry(currentPath);
 				} catch (err) {
 					console.log(`  Warning: Dart user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			if (rt.kind === "swift") {
+				try {
+					generateSwiftNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: Swift user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			if (rt.kind === "elixir") {
+				try {
+					generateElixirNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: Elixir user-node codegen failed: ${(err as Error).message}`);
 				}
 			}
 

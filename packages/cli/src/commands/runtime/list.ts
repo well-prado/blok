@@ -11,7 +11,9 @@ import { readConfigSafe, reportRuntimeError, resolveProjectRoot } from "./shared
 export async function runtimeList(options: OptionValues): Promise<void> {
 	try {
 		const root = resolveProjectRoot(options.directory);
-		const installed = readConfigSafe(root).runtimes ?? {};
+		const config = readConfigSafe(root);
+		const installed = config.runtimes ?? {};
+		const javascriptTarget = config.runtime ?? "node";
 		const detected = await detectRuntimes();
 		const detectedByKind = new Map(detected.map((d) => [d.kind, d]));
 		const installedKinds = Object.keys(installed);
@@ -20,6 +22,11 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 			console.log(
 				JSON.stringify(
 					{
+						javascript: {
+							target: javascriptTarget,
+							execution: javascriptTarget === "node" ? "in-process" : "persistent-worker",
+							available: javascriptTarget === "node",
+						},
 						installed: installedKinds.map((kind) => ({
 							kind,
 							label: installed[kind].label,
@@ -69,7 +76,13 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 			p.note(rows.join("\n"), `Available to add (${available.length})`);
 		}
 
-		p.outro(color.dim("Node / TypeScript runs in-process — always available, nothing to install."));
+		p.outro(
+			color.dim(
+				javascriptTarget === "node"
+					? "JavaScript target: Node.js (in-process)."
+					: `JavaScript target: ${javascriptTarget} (persistent worker availability is checked at boot).`,
+			),
+		);
 	} catch (err) {
 		reportRuntimeError(err);
 	}
