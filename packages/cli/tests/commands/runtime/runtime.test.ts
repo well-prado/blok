@@ -217,7 +217,7 @@ describe("runtime add", () => {
 		await runtimeAdd("kotlin", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
 
 		const config = readConfig(dir);
-		expect(config.runtimes.kotlin.grpcPort).toBe(10009);
+		expect(config.runtimes.kotlin.grpcPort).toBe(10011);
 		expect(readEnv(dir)).toContain("RUNTIME_KOTLIN_GRPC_PORT=10011");
 		expect(readSup(dir)).toContain("[program:kotlin_runtime]");
 	});
