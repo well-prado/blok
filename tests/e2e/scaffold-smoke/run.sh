@@ -186,7 +186,7 @@ sleep 3
 
 # ── 7. drive the assertions ───────────────────────────────────────────────────
 log "running smoke.ts …"
-SMOKE_PROJECT_DIR="$PROJECT" SMOKE_DEV_LOG="$DEV_LOG" SMOKE_TRIGGERS="$TRIGGERS" STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+SMOKE_PROJECT_DIR="$PROJECT" SMOKE_DEV_LOG="$DEV_LOG" SMOKE_TRIGGERS="$TRIGGERS" SMOKE_RUNTIMES="$RUNTIMES" STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
   SMOKE_BASE_URL="${SMOKE_BASE_URL:-http://localhost:$HTTP_PORT}" \
   bun "$ROOT/tests/e2e/scaffold-smoke/smoke.ts"
 CODE=$?

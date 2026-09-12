@@ -378,6 +378,19 @@ async function run(): Promise<void> {
 	const stillWarming = (r: HttpResp) =>
 		r.status === 503 || (r.status === 502 && r.text.includes("GRPC_RUNTIME_UNAVAILABLE"));
 	const runtimeDeadline = Date.now() + Number(process.env.SMOKE_RUNTIME_WAIT_MS ?? 300_000);
+	// A sidecar that was REQUESTED (SMOKE_RUNTIMES) but never reached
+	// .blok/config.json was silently skipped by `create` (toolchain floor, SDK
+	// build failure). Without this it would simply not be asserted — the run
+	// would go green while proving nothing about that runtime.
+	for (const kind of (process.env.SMOKE_RUNTIMES ?? "")
+		.split(",")
+		.map((k) => k.trim())
+		.filter(Boolean)) {
+		if (kind === "node" || runtimeKinds.includes(kind)) continue;
+		await check("runtime", `${kind} sidecar scaffolded`, async () =>
+			FAIL("requested but absent from .blok/config.json — create skipped it; see scaffold.log"),
+		);
+	}
 	for (const kind of runtimeKinds) {
 		if (kind === "node") continue; // node is in-process, no /runtimes route
 		const label = RUNTIME_LABEL[kind] ?? cap(kind);
