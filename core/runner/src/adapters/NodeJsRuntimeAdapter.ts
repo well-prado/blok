@@ -1,4 +1,6 @@
 import type { Context } from "@blokjs/shared";
+import BlokService from "../Blok";
+import type { IBlokResponse } from "../BlokResponse";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
 
@@ -15,6 +17,10 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "nodejs";
 	public readonly transport = "module" as const;
 
+	static isAvailable(): boolean {
+		return typeof process !== "undefined" && process.release?.name === "node" && !("Bun" in globalThis);
+	}
+
 	/**
 	 * Execute a Node.js node in-process
 	 *
@@ -23,6 +29,16 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 	 * @returns Promise that resolves to ExecutionResult
 	 */
 	async execute(node: RunnerNode, ctx: Context): Promise<ExecutionResult> {
+		if (!NodeJsRuntimeAdapter.isAvailable()) {
+			return {
+				success: false,
+				data: null,
+				errors: {
+					message:
+						"runtime.nodejs requires the Blok runner to be hosted by Node.js until the persistent Node.js worker is configured",
+				},
+			};
+		}
 		const startTime = performance.now();
 
 		try {
@@ -35,7 +51,7 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 			// Response can be either:
 			// 1. ResponseContext with nested data: { data: { success, data, error } }
 			// 2. Direct response: { success, data, error }
-			const responseData = response.data as { error?: unknown; success?: boolean; data?: unknown } | null | undefined;
+			const responseData = node instanceof BlokService ? (response.data as IBlokResponse) : undefined;
 			const topLevelResponse = response as { error?: unknown; success?: boolean; data?: unknown };
 
 			// Check for errors at both nested level (response.data.error) and top level (response.error)
@@ -47,13 +63,14 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 			const nestedSuccess = responseData?.success;
 			const topLevelSuccess = topLevelResponse?.success;
 			const success = hasError ? false : (nestedSuccess ?? topLevelSuccess ?? true);
+			const data = responseData ? responseData.data : response.data;
 
 			// Get error from whichever level has it
 			const errorValue = responseData?.error || topLevelResponse?.error || null;
 
 			return {
 				success,
-				data: response.data,
+				data,
 				errors: errorValue,
 				metrics: {
 					duration_ms,

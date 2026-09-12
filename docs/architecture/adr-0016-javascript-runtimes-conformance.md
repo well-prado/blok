@@ -16,7 +16,7 @@ runtime is executable.
 | Alias boundary | `core/runner/src/workflow/WorkflowNormalizer.ts`; `core/runner/src/__tests__/WorkflowNormalizer.runtime-alias.test.ts`; `core/runner/src/RuntimeRegistry.ts` | Pass: `node`/`typescript`/`ts` aliases normalize to canonical Node.js with diagnostics; Bun and Deno are never rewritten to Node.js. |
 | Existing-project selection | `packages/cli/src/commands/runtime/use.ts`; `packages/cli/tests/commands/runtime/runtime.test.ts` | Pass: `runtime use` is idempotent, preserves unrelated config, and keeps package-manager policy independent. |
 | Project creation selection | `packages/cli/src/commands/create/project.ts`; `packages/cli/src/index.ts`; `docs/d/cli/project.mdx` | Contract pass: interactive and non-interactive creation record the selected target. Runtime-specific build/start commands still require the worker slice below. |
-| Registry resolution | `core/runner/src/__tests__/RuntimeRegistry.test.ts`; `core/runner/src/Configuration.ts` | Partial: canonical kinds resolve through one registry API, but the default configuration registers only Node.js plus existing non-JavaScript adapters. Bun and Deno fail closed as unavailable. |
+| Registry resolution | `core/runner/src/__tests__/RuntimeRegistry.test.ts`; `core/runner/__tests__/javascript-runtime-resolution.test.ts`; `core/runner/src/Configuration.ts` | Partial: `runtime.nodejs` executes the registered portable node, and Bun-hosted runners register the in-process Bun adapter through the same resolver. Deno and cross-host Bun fail closed as unavailable. |
 | Editor surfaces | `packages/lsp-server/src/constants.ts`; `packages/vscode-extension/src/providers/WorkflowDiagnostics.ts`; `packages/vscode-extension/schemas/workflow.v2.json`; `packages/vscode-extension/snippets/workflow.json` | Pass for canonical completion/validation coverage; compatibility aliases remain schema-only inputs where legacy workflows require them. |
 | Architecture and migration | `docs/architecture/adr-0016-javascript-runtimes.md`; `docs/migration/single-to-multi-runtime.md`; `docs/d/cli/runtimes.mdx` | Pass: host/target separation, naming, package-manager separation, fail-closed behavior, portability boundary, and permission policy are documented. |
 
@@ -31,9 +31,9 @@ The following issue criteria are not claimed by this slice:
   manifests.
 - Cross-runtime execution of one portable fixture, including mixed Node.js →
   Bun → Deno workflows and trace/deadline/error propagation.
-- A regression proof that production runtime execution reuses workers and does
-  not spawn a process per step. The exported Bun compatibility adapter still
-  has a Node-host `bun eval` per-call path and is deliberately not registered.
+- A regression proof that cross-host production runtime execution reuses
+  workers with bounded process count. The old Node-host `bun eval` per-call
+  path has been removed; Bun is registered only for Bun-hosted in-process use.
 - Runtime-specific install/type-check/build/test/start commands, pinned
   deployment/container metadata, packed-consumer smoke tests under Bun and
   Deno, and CI jobs pinned to supported Bun/Deno versions.
