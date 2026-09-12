@@ -71,7 +71,7 @@ diagnostic. See `docs/architecture/adr-0016-javascript-runtimes.md`.
 Cross-language sidecars use the canonical `runtime.<lang>` gRPC contract.
 Swift is a Linux-capable Swift 6.1+ sidecar at `runtime.swift` (default gRPC
 port `10008`); Apple source compatibility is not a production-platform claim.
-Dart is a Dart 3.3+ sidecar at `runtime.dart` (default gRPC port `10009`).
+Dart is a Dart 3.11+ sidecar at `runtime.dart` (default gRPC port `10009`).
 The Elixir SDK is a first-class `runtime.elixir` gRPC sidecar on port 10010;
 see `docs/architecture/adr-0017-elixir-beam-runtime.md`.
 

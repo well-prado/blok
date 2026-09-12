@@ -280,8 +280,8 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 	{
 		kind: "dart",
 		label: "Dart",
-		minVersion: "3.3.0",
-		installHint: "Install Dart 3.3+: https://dart.dev/get-dart",
+		minVersion: "3.11.0",
+		installHint: "Install Dart 3.11+: https://dart.dev/get-dart",
 		defaultPort: 9009,
 		defaultGrpcPort: 10009,
 		commands: ["dart --version"],
