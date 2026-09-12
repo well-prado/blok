@@ -23,7 +23,7 @@ vi.mock("../../../src/services/runtime-detector.js", async (orig) => {
 		...actual,
 		// Pretend every toolchain is present so tests don't depend on the host.
 		detectRuntimes: vi.fn(async () =>
-			actual.getAllRuntimeDefinitions().map((d) => ({ ...d, available: true, version: "1.0.0" })),
+			actual.getAllRuntimeDefinitions().map((d) => ({ ...d, available: true, version: "99.0.0" })),
 		),
 	};
 });
@@ -68,6 +68,7 @@ import { runtimeList } from "../../../src/commands/runtime/list.js";
 import { runtimeRemove } from "../../../src/commands/runtime/remove.js";
 import { assertSidecarKind } from "../../../src/commands/runtime/shared.js";
 import { runtimeUse } from "../../../src/commands/runtime/use.js";
+import { detectRuntimes, getAllRuntimeDefinitions } from "../../../src/services/runtime-detector.js";
 
 interface FixtureRuntime {
 	kind: string;
@@ -183,9 +184,10 @@ const readEnv = (dir: string) => fs.readFileSync(path.join(dir, ".env.local"), "
 const readSup = (dir: string) => fs.readFileSync(path.join(dir, "supervisord.conf"), "utf8");
 
 describe("assertSidecarKind", () => {
-	it("rejects in-process kinds and unknown languages, allows sidecars", () => {
-		expect(() => assertSidecarKind("node")).toThrow(/in-process/);
-		expect(() => assertSidecarKind("typescript")).toThrow(/in-process/);
+	it("rejects JavaScript targets and unknown languages, allows sidecars", () => {
+		expect(() => assertSidecarKind("node")).toThrow(/runtime use/);
+		expect(() => assertSidecarKind("typescript")).toThrow(/runtime use/);
+		expect(() => assertSidecarKind("deno")).toThrow(/runtime use/);
 		expect(() => assertSidecarKind("cobol")).toThrow(/Unknown runtime/);
 		expect(() => assertSidecarKind("go")).not.toThrow();
 		expect(() => assertSidecarKind("python3")).not.toThrow();
@@ -193,6 +195,32 @@ describe("assertSidecarKind", () => {
 });
 
 describe("runtime add", () => {
+	it.each(["python3", "go", "rust", "java", "csharp", "php", "ruby", "elixir", "swift", "dart"])(
+		"adds and removes the %s sidecar through the same lifecycle",
+		async (kind) => {
+			const dir = await makeProject();
+			await runtimeAdd(kind, { directory: dir, yes: true, local: fakeSrc });
+			expect(readConfig(dir).runtimes[kind]).toBeDefined();
+			await runtimeRemove(kind, { directory: dir, yes: true });
+			expect(readConfig(dir).runtimes).toBeUndefined();
+		},
+	);
+
+	it("rejects an installed toolchain below the SDK version floor", async () => {
+		const dir = await makeProject();
+		vi.mocked(detectRuntimes).mockResolvedValueOnce(
+			getAllRuntimeDefinitions().map((d) => ({
+				...d,
+				available: true,
+				version: d.kind === "swift" ? "6.0.0" : "99.0.0",
+			})),
+		);
+
+		await runtimeAdd("swift", { directory: dir, yes: true, local: fakeSrc });
+
+		expect(process.exitCode).toBe(1);
+		expect(readConfig(dir).runtimes).toBeUndefined();
+	});
 	it("adds a runtime, preserving triggers + user env vars", async () => {
 		const dir = await makeProject();
 		await runtimeAdd("go", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
@@ -417,6 +445,9 @@ describe("runtime remove", () => {
 describe("runtime list --json", () => {
 	it("reports installed + available runtimes", async () => {
 		const dir = await makeProject({ runtimes: [goRuntime] });
+		const config = readConfig(dir);
+		config.runtime = "deno";
+		await fsp.writeFile(path.join(dir, ".blok", "config.json"), JSON.stringify(config, null, 2));
 		const lines: string[] = [];
 		const spy = vi.spyOn(console, "log").mockImplementation((m) => {
 			lines.push(String(m));
@@ -425,6 +456,7 @@ describe("runtime list --json", () => {
 		spy.mockRestore();
 
 		const out = JSON.parse(lines.join("\n"));
+		expect(out.javascript).toEqual({ target: "deno", execution: "persistent-worker", available: false });
 		expect(out.installed.map((r: { kind: string }) => r.kind)).toContain("go");
 		expect(out.available.map((r: { kind: string }) => r.kind)).not.toContain("go");
 		expect(out.available.length).toBeGreaterThan(0);

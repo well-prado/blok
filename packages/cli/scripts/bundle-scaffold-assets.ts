@@ -40,6 +40,8 @@ const EXCLUDE = new Set([
 	"__pycache__",
 	"obj", // dotnet build output
 	".gradle",
+	".build", // SwiftPM
+	".dart_tool",
 	"coverage",
 	".nx",
 ]);

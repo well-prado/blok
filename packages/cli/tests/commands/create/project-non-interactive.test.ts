@@ -73,6 +73,17 @@ describe("create project (non-interactive)", () => {
 		await expect(createProject({})).rejects.toThrow("Missing required flag --name (non-interactive mode)");
 	});
 
+	it("rejects unknown sidecar selections", async () => {
+		await expect(
+			createProject(
+				{ name: "bad-runtime", packageManager: "npm", runtimes: "go,cobol" },
+				"0.0.0-test",
+				false,
+				REPO_ROOT,
+			),
+		).rejects.toThrow("Invalid --runtimes value: cobol");
+	});
+
 	it(
 		"should accept trigger flag in non-interactive mode",
 		async () => {

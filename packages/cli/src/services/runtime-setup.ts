@@ -148,7 +148,9 @@ export async function setupRuntime(
 
 	// 1. Copy SDK source to .blok/runtimes/{language}/
 	fsExtra.ensureDirSync(path.dirname(blokctlRuntimeDir));
-	fsExtra.copySync(sdkSourcePath, blokctlRuntimeDir);
+	fsExtra.copySync(sdkSourcePath, blokctlRuntimeDir, {
+		filter: (src) => ![".build", ".dart_tool"].includes(path.basename(src)),
+	});
 
 	// 2. Create project-level runtimes directory for user nodes
 	fsExtra.ensureDirSync(projectRuntimeDir);
