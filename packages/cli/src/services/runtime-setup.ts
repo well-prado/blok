@@ -911,7 +911,9 @@ async function setupSwift(sdkDir: string, spinner: SpinnerHandler): Promise<void
 	spinner.message("Resolving Swift Package Manager dependencies...");
 	await exec("swift package resolve", { cwd: sdkDir, timeout: 300000 });
 	spinner.message("Building Swift runtime...");
-	await exec("swift build -c release", { cwd: sdkDir, timeout: 600000 });
+	// A cold grpc-swift + SwiftProtobuf release build takes >10 min on a 4-core
+	// CI runner; 600s silently dropped the sidecar (create only warns).
+	await exec("swift build -c release", { cwd: sdkDir, timeout: 1800000, maxBuffer: 64 * 1024 * 1024 });
 	spinner.message("Swift runtime built.");
 }
 

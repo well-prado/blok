@@ -154,7 +154,7 @@ fi
 # `create` skips a sidecar it cannot set up (toolchain floor, SDK build
 # failure) with exit 0. Surface those lines here so a REQUIRE_ALL failure on
 # "<kind> sidecar scaffolded" is diagnosable from the CI log alone.
-grep -E 'Skipping|Warning: Failed to setup|Required:|Found:|^\s+x ' "$WORKDIR/scaffold.log" | sed 's/^/[smoke][scaffold] /' || true
+grep -E -A6 'Skipping|Warning: Failed to setup|Required:|Found:|^\s+x ' "$WORKDIR/scaffold.log" | sed 's/^/[smoke][scaffold] /' || true
 # Belt for CLIs that swallow scaffold failures with exit 0 (pre-1.3.1 create
 # did exactly that): no project dir = failed scaffold, whatever the exit code.
 if [ ! -d "$PROJECT" ]; then

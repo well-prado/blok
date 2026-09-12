@@ -1295,7 +1295,13 @@ export async function createProject(opts: OptionValues, version: string, current
 					const config = await setupRuntime(rt, repoSource, dirPath, s);
 					runtimeConfigs.push(config);
 				} catch (error) {
-					console.log(color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${(error as Error).message}`));
+					const e = error as Error & { killed?: boolean; signal?: string; stderr?: string };
+					const why = e.killed ? ` (timed out, ${e.signal ?? "killed"})` : "";
+					console.log(
+						color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${e.message.split("\n")[0]}${why}`),
+					);
+					const tail = (e.stderr ?? "").trim().split("\n").slice(-6).join("\n    ");
+					if (tail) console.log(color.dim(`    ${tail}`));
 					console.log(color.yellow("  You can set it up manually later.\n"));
 				}
 			}
