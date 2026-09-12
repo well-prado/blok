@@ -1,6 +1,6 @@
 # Cross-Runtime gRPC E2E Infrastructure
 #
-# Builds + boots all 9 SDK runtimes in gRPC mode — the transport the runner
+# Builds + boots all 10 SDK runtimes in gRPC mode — the transport the runner
 # actually uses (HttpRuntimeAdapter was removed in v0.5). Each container serves
 # the canonical `blok.runtime.v1.NodeRuntime` service; the spec-b harness drives
 # them through the runner's OWN GrpcRuntimeAdapter.
@@ -137,3 +137,13 @@ services:
       <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10009"
+
+  sdk-elixir:
+    build:
+      context: .build/elixir/.blok/runtimes/elixir
+    ports:
+      - "10010:10010"
+    volumes: *blob-volume
+    environment:
+      <<: *blob-env
+      GRPC_PORT: "10010"

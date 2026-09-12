@@ -21,6 +21,7 @@ import { dirname, join } from "node:path";
 import {
 	csharp_node_file,
 	dart_node_file,
+	elixir_node_file,
 	go_node_file,
 	java_node_file,
 	php_node_file,
@@ -32,6 +33,7 @@ import {
 import {
 	generateCSharpNodeRegistry,
 	generateDartNodeRegistry,
+	generateElixirNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
 	generateRustNodeRegistry,
@@ -71,6 +73,7 @@ const EXCLUDES: Record<string, string[]> = {
 	php: ["vendor"],
 	swift: [".build"],
 	dart: [".dart_tool"],
+	elixir: ["_build", "deps"],
 };
 
 function copySdk(lang: string, dest: string): void {
@@ -120,6 +123,7 @@ prepCompiled("java", `src/main/java/com/blok/blok/nodes/${PASCAL}Node.java`, jav
 prepCompiled("csharp", `${PASCAL}Node.cs`, csharp_node_file, generateCSharpNodeRegistry);
 prepCompiled("swift", "node.swift", swift_node_file, generateSwiftNodeRegistry);
 prepCompiled("dart", "node.dart", dart_node_file, generateDartNodeRegistry);
+prepCompiled("elixir", "node.ex", elixir_node_file, generateElixirNodeRegistry);
 
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.
 prepDynamic("python3", "node.py", python3_file, { "__init__.py": "" });

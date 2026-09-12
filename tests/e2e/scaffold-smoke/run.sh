@@ -96,6 +96,7 @@ detect_runtimes() {
   have_ruby_31 && rts+=(ruby)
   command -v python3 >/dev/null 2>&1 && rts+=(python3)
   command -v dart >/dev/null 2>&1 && rts+=(dart)
+  command -v mix >/dev/null 2>&1 && rts+=(elixir)
   echo "${rts[*]:-}"
 }
 
