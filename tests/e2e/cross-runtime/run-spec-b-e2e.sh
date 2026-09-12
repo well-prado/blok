@@ -103,7 +103,9 @@ fi
 # --- Swift (gRPC 20008) ---
 if command -v swift >/dev/null && [ -f "$ROOT/sdks/swift/Package.swift" ]; then
   echo "--- building + booting Swift ---"
-  (cd "$ROOT/sdks/swift" && GRPC_PORT=20008 swift run -c release blok-swift-runtime) >/tmp/blok-swift.log 2>&1 &
+  (cd "$ROOT/sdks/swift" && swift build -c release --product blok-swift-runtime >/tmp/blok-swift-build.log 2>&1)
+  # Exec the binary directly: `swift run` leaves an orphan that survives the PID teardown below.
+  (cd "$ROOT/sdks/swift" && GRPC_PORT=20008 PORT=19008 exec ./.build/release/blok-swift-runtime) >/tmp/blok-swift.log 2>&1 &
   PIDS+=($!); wait_port 20008 && echo "Swift gRPC up :20008"
 fi
 

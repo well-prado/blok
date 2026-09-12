@@ -186,6 +186,9 @@ export async function setupRuntime(
 			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner);
 			break;
 		case "swift":
+			// Codegen BEFORE the build so the build stamp covers the generated
+			// registry; otherwise the first `dev` boot rebuilds for minutes.
+			generateSwiftNodeRegistry(projectDir);
 			await setupSwift(blokctlRuntimeDir, spinner);
 			break;
 		case "dart":
