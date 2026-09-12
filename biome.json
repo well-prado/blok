@@ -18,6 +18,7 @@
 			"**/routeTree.gen.ts",
 			"sdks/*/vendor/**",
 			"sdks/*/.dart_tool/**",
+			"sdks/*/.build/**",
 			"sdks/*/.venv/**",
 			"sdks/python3/**/__pycache__/**",
 			"sdks/rust/target/**",
