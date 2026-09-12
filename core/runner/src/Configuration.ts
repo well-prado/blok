@@ -9,6 +9,7 @@ import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
 import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
+import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasiComponentRuntimeAdapter } from "./adapters/WasiComponentRuntimeAdapter";
@@ -88,8 +89,11 @@ export default class Configuration implements Config {
 		assertGrpcOnlyTransport();
 		const registry = RuntimeRegistry.getInstance();
 
-		if (!registry.has("nodejs")) {
+		if (NodeJsRuntimeAdapter.isAvailable() && !registry.has("nodejs")) {
 			registry.register(new NodeJsRuntimeAdapter());
+		}
+		if (BunRuntimeAdapter.isAvailable() && !registry.has("bun")) {
+			registry.register(new BunRuntimeAdapter());
 		}
 		if (!registry.has("wasi")) {
 			// The first slice exposes the identity and policy boundary but does
@@ -700,13 +704,16 @@ export default class Configuration implements Config {
 		const registry = RuntimeRegistry.getInstance();
 		const adapter = registry.get(runtimeKind as RuntimeKind);
 
-		// Create a minimal node instance to pass to the adapter
-		// The adapter will execute this node
-		const targetNode = new (class extends RunnerNode {
-			async run() {
-				return { success: false, data: null, error: null };
-			}
-		})();
+		// Module transports execute the registered node in-process. Remote
+		// adapters receive a lightweight reference for their sidecar registry.
+		const targetNode =
+			adapter.transport === "module"
+				? await this.moduleResolver(node, this.globalOptions as GlobalOptions)
+				: new (class extends RunnerNode {
+						async run() {
+							return { success: false, data: null, error: null };
+						}
+					})();
 		targetNode.node = node.node;
 		targetNode.name = node.name;
 		targetNode.type = node.type;
