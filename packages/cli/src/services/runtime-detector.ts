@@ -170,6 +170,19 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		},
 	},
 	{
+		kind: "kotlin",
+		label: "Kotlin",
+		minVersion: "17.0.0",
+		installHint: "Install JDK 17+: https://adoptium.net/",
+		defaultPort: 9011,
+		defaultGrpcPort: 10011,
+		commands: ["java --version", "/opt/homebrew/opt/openjdk/bin/java --version"],
+		toolchain: "JDK 17+ + Gradle wrapper",
+		installDeps: "./gradlew installDist --no-daemon",
+		startCmd: "./build/install/blok-kotlin/bin/blok-kotlin",
+		sdkDir: "kotlin",
+	},
+	{
 		kind: "csharp",
 		label: "C# / .NET",
 		installHint: "Install .NET SDK: https://dotnet.microsoft.com/download",
@@ -261,14 +274,14 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["swift --version"],
 		toolchain: "swift",
 		installDeps: "swift package resolve",
-		startCmd: "swift run blok-swift-runtime",
+		startCmd: "./.build/release/blok-swift-runtime", // prebuilt by setup/dev (buildSwiftIfChanged); `swift run` rebuilds for minutes
 		sdkDir: "swift",
 	},
 	{
 		kind: "dart",
 		label: "Dart",
-		minVersion: "3.3.0",
-		installHint: "Install Dart 3.3+: https://dart.dev/get-dart",
+		minVersion: "3.11.0",
+		installHint: "Install Dart 3.11+: https://dart.dev/get-dart",
 		defaultPort: 9009,
 		defaultGrpcPort: 10009,
 		commands: ["dart --version"],
@@ -294,7 +307,7 @@ async function tryExec(command: string): Promise<string | null> {
 /**
  * Parse version string from common version command outputs.
  */
-function parseVersion(output: string, kind: string): string | undefined {
+export function parseVersion(output: string, kind: string): string | undefined {
 	switch (kind) {
 		case "go": {
 			// "go version go1.22.5 darwin/arm64" → "1.22.5"
@@ -306,9 +319,15 @@ function parseVersion(output: string, kind: string): string | undefined {
 			const match = output.match(/rustc\s+(\d+\.\d+\.\d+)/);
 			return match ? match[1] : undefined;
 		}
-		case "java": {
+		case "java":
+		case "kotlin": {
 			// "openjdk 17.0.11 2024-04-16" or "java 21.0.1 2023-10-17" → "17.0.11"
 			const match = output.match(/(?:openjdk|java)\s+(\d+[\d.]*)/);
+			return match ? match[1] : undefined;
+		}
+		case "elixir": {
+			// "Erlang/OTP 27 [erts-15.0] …\nElixir 1.17.2 (compiled with Erlang/OTP 27)" → "1.17.2"
+			const match = output.match(/Elixir\s+(\d+\.\d+\.\d+)/);
 			return match ? match[1] : undefined;
 		}
 		case "csharp": {

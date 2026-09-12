@@ -21,6 +21,7 @@
 #   SMOKE_TRIGGERS=http,grpc    limit to these triggers (default: all applicable)
 #   SMOKE_SKIP_BUILD=1          skip `bun run build` (assume dist is current)
 #   SMOKE_KEEP=1                keep the scaffolded project dir for inspection
+#   SMOKE_HTTP_PORT=4100        HTTP trigger port (default 4000) — when :4000 is taken locally
 #   BLOK_SMOKE_REQUIRE_ALL=1    fail unless every applicable check passes (CI)
 #   NATS_SERVERS=host:port      NATS for the pubsub trigger (default localhost:4222)
 #   SMOKE_PUBLISHED_VERSION=x.y.z  post-publish mode: scaffold with the PUBLISHED
@@ -43,6 +44,7 @@ exec_dev() {
   if [ -n "$PUBLISHED" ]; then exec bunx --yes "blokctl@$PUBLISHED" dev; else exec bun "$CLI" dev; fi
 }
 NATS_SERVERS="${NATS_SERVERS:-localhost:4222}"
+HTTP_PORT="${SMOKE_HTTP_PORT:-4000}"
 STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_test}"
 WORKDIR=""
 DEV_PID=""
@@ -149,6 +151,10 @@ if ! (cd "$WORKDIR" && run_cli create project \
       --examples --package-manager bun --non-interactive </dev/null) >"$WORKDIR/scaffold.log" 2>&1; then
   log "scaffold failed — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
 fi
+# `create` skips a sidecar it cannot set up (toolchain floor, SDK build
+# failure) with exit 0. Surface those lines here so a REQUIRE_ALL failure on
+# "<kind> sidecar scaffolded" is diagnosable from the CI log alone.
+grep -E -A6 'Skipping|Warning: Failed to setup|Required:|Found:|^\s+x ' "$WORKDIR/scaffold.log" | sed 's/^/[smoke][scaffold] /' || true
 # Belt for CLIs that swallow scaffold failures with exit 0 (pre-1.3.1 create
 # did exactly that): no project dir = failed scaffold, whatever the exit code.
 if [ ! -d "$PROJECT" ]; then
@@ -157,6 +163,9 @@ fi
 
 # ── 5. boot `blokctl dev` (own process group so cleanup kills the tree) ───────
 DEV_LOG="$WORKDIR/dev.log"
+if [ "$HTTP_PORT" != "4000" ]; then
+  sed -i.bak -E "s/^(PORT|TRIGGER_HTTP_PORT)=4000$/\1=$HTTP_PORT/" "$PROJECT/.env.local" && rm -f "$PROJECT/.env.local.bak"
+fi
 log "booting blokctl dev …"
 ( cd "$PROJECT" && \
   BLOK_TRACING_DISABLED=1 \
@@ -167,10 +176,10 @@ log "booting blokctl dev …"
 DEV_PID=$!
 
 # ── 6. wait for the HTTP trigger, then let sidecars warm up ───────────────────
-log "waiting for http://localhost:4000/health-check …"
+log "waiting for http://localhost:$HTTP_PORT/health-check …"
 READY=""
 for _ in $(seq 1 120); do
-  if curl -fsS http://localhost:4000/health-check >/dev/null 2>&1; then READY=1; break; fi
+  if curl -fsS "http://localhost:$HTTP_PORT/health-check" >/dev/null 2>&1; then READY=1; break; fi
   # bail early if the dev process died
   kill -0 "$DEV_PID" 2>/dev/null || { log "blokctl dev exited early — tail of dev.log:"; tail -30 "$DEV_LOG"; exit 1; }
   sleep 1
@@ -181,7 +190,8 @@ sleep 3
 
 # ── 7. drive the assertions ───────────────────────────────────────────────────
 log "running smoke.ts …"
-SMOKE_PROJECT_DIR="$PROJECT" SMOKE_DEV_LOG="$DEV_LOG" SMOKE_TRIGGERS="$TRIGGERS" STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+SMOKE_PROJECT_DIR="$PROJECT" SMOKE_DEV_LOG="$DEV_LOG" SMOKE_TRIGGERS="$TRIGGERS" SMOKE_RUNTIMES="$RUNTIMES" STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+  SMOKE_BASE_URL="${SMOKE_BASE_URL:-http://localhost:$HTTP_PORT}" \
   bun "$ROOT/tests/e2e/scaffold-smoke/smoke.ts"
 CODE=$?
 

@@ -88,11 +88,14 @@ const RUNTIME_HELLO_EXAMPLES: Record<string, string> = {
 	go: "runtime-go-hello.ts",
 	rust: "runtime-rust-hello.ts",
 	java: "runtime-java-hello.ts",
+	kotlin: "runtime-kotlin-hello.ts",
 	csharp: "runtime-csharp-hello.ts",
 	php: "runtime-php-hello.ts",
 	ruby: "runtime-ruby-hello.ts",
 	elixir: "runtime-elixir-hello.ts",
 	python3: "runtime-python3-hello.ts",
+	swift: "runtime-swift-hello.ts",
+	dart: "runtime-dart-hello.ts",
 };
 
 fsExtra.ensureDirSync(HOME_DIR);
@@ -1292,7 +1295,13 @@ export async function createProject(opts: OptionValues, version: string, current
 					const config = await setupRuntime(rt, repoSource, dirPath, s);
 					runtimeConfigs.push(config);
 				} catch (error) {
-					console.log(color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${(error as Error).message}`));
+					const e = error as Error & { killed?: boolean; signal?: string; stderr?: string };
+					const why = e.killed ? ` (timed out, ${e.signal ?? "killed"})` : "";
+					console.log(
+						color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${e.message.split("\n")[0]}${why}`),
+					);
+					const tail = (e.stderr ?? "").trim().split("\n").slice(-6).join("\n    ");
+					if (tail) console.log(color.dim(`    ${tail}`));
 					console.log(color.yellow("  You can set it up manually later.\n"));
 				}
 			}

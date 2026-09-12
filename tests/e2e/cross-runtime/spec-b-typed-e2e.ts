@@ -1,7 +1,7 @@
 /**
  * SPEC-B end-to-end proof over REAL gRPC.
  *
- * Drives running SDK gRPC servers (all 10: Go/Rust/C#/Java/PHP/Ruby/Python3/Swift/Dart/Elixir)
+ * Drives running SDK gRPC servers (all 11: Go/Rust/C#/Java/Kotlin/PHP/Ruby/Python3/Swift/Dart/Elixir)
  * through the runner's OWN `GrpcRuntimeAdapter` — the client the runner uses per
  * step. Probes which runtimes are actually up and, per live runtime, proves:
  *   1. ListNodes returns the typed node WITH a real JSON Schema (SPEC-B P1.2 +
@@ -34,6 +34,7 @@ const RUNTIMES = [
 	{ kind: "rust", port: Number(process.env.RUST_GRPC_PORT ?? 10002) },
 	{ kind: "csharp", port: Number(process.env.CS_GRPC_PORT ?? 10004) },
 	{ kind: "java", port: Number(process.env.JAVA_GRPC_PORT ?? 10003) },
+	{ kind: "kotlin", port: Number(process.env.KOTLIN_GRPC_PORT ?? 10011) },
 	{ kind: "php", port: Number(process.env.PHP_GRPC_PORT ?? 10005) },
 	{ kind: "ruby", port: Number(process.env.RUBY_GRPC_PORT ?? 10006) },
 	{ kind: "python3", port: Number(process.env.PY_GRPC_PORT ?? 10007) },
@@ -245,7 +246,10 @@ async function main(): Promise<void> {
 
 			const big = "z".repeat(OVERSIZED_BYTES);
 			const offloaded = await run(adapter, "typed-greet", kind, { name: big, repeat: 1 });
-			check(offloaded.success === true, `${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check`);
+			check(
+				offloaded.success === true,
+				`${kind}: ${OVERSIZED_BYTES >> 20} MiB inputs → success via claim-check${offloaded.success ? "" : ` (${JSON.stringify(offloaded.errors ?? offloaded.error ?? null).slice(0, 300)})`}`,
+			);
 			// typed-greet returns `("Hello, " + name) * repeat`, so at repeat=1 the
 			// echoed length is the payload PLUS the prefix. Comparing against
 			// `big.length` alone was off by exactly "Hello, " and failed even when

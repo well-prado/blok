@@ -10,7 +10,7 @@
 #   - a cross-runtime chain threads ctx data through every runtime in order
 #
 # Boots whatever toolchains are present — all 10 polyglot runtimes:
-# Go, Rust, C#, Java, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3, Swift, Dart, Elixir.
+# Go, Rust, C#, Java, Kotlin, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3, Swift, Dart, Elixir.
 # The harness probes reachability and runs against whatever subset is up.
 #
 # Usage:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
@@ -103,7 +103,9 @@ fi
 # --- Swift (gRPC 20008) ---
 if command -v swift >/dev/null && [ -f "$ROOT/sdks/swift/Package.swift" ]; then
   echo "--- building + booting Swift ---"
-  (cd "$ROOT/sdks/swift" && GRPC_PORT=20008 swift run -c release blok-swift-runtime) >/tmp/blok-swift.log 2>&1 &
+  (cd "$ROOT/sdks/swift" && swift build -c release --product blok-swift-runtime >/tmp/blok-swift-build.log 2>&1)
+  # Exec the binary directly: `swift run` leaves an orphan that survives the PID teardown below.
+  (cd "$ROOT/sdks/swift" && GRPC_PORT=20008 PORT=19008 exec ./.build/release/blok-swift-runtime) >/tmp/blok-swift.log 2>&1 &
   PIDS+=($!); wait_port 20008 && echo "Swift gRPC up :20008"
 fi
 
@@ -113,6 +115,14 @@ if command -v dart >/dev/null && [ -f "$ROOT/sdks/dart/pubspec.yaml" ]; then
   (cd "$ROOT/sdks/dart" && dart pub get >/dev/null 2>&1)
   (cd "$ROOT/sdks/dart" && BLOK_TRANSPORT=grpc GRPC_PORT=20009 PORT=19009 dart run bin/serve.dart) >/tmp/blok-dart.log 2>&1 &
   PIDS+=($!); wait_port 20009 && echo "Dart gRPC up :20009"
+fi
+
+# --- Kotlin/JVM (gRPC 20011) ---
+if command -v java >/dev/null && [ -x "$ROOT/sdks/kotlin/gradlew" ]; then
+  echo "--- building + booting Kotlin ---"
+  (cd "$ROOT/sdks/kotlin" && ./gradlew installDist --no-daemon -q)
+  (cd "$ROOT/sdks/kotlin" && GRPC_PORT=20011 PORT=19011 BLOK_TRANSPORT=grpc ./build/install/blok-kotlin/bin/blok-kotlin) >/tmp/blok-kotlin.log 2>&1 &
+  PIDS+=($!); wait_port 20011 && echo "Kotlin gRPC up :20011"
 fi
 
 # --- Elixir (gRPC 20010) ---
@@ -126,5 +136,5 @@ echo "--- running harness ---"
 # This script boots on 2000x (offset from a local dev stack's 1000x); the
 # harness defaults to the 1000x convention, so pass the boot ports explicitly.
 cd "$ROOT" && GO_GRPC_PORT=20001 RUST_GRPC_PORT=20002 JAVA_GRPC_PORT=20003 \
-	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 SWIFT_GRPC_PORT=20008 DART_GRPC_PORT=20009 ELIXIR_GRPC_PORT=20010 \
+	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 SWIFT_GRPC_PORT=20008 DART_GRPC_PORT=20009 KOTLIN_GRPC_PORT=20011 ELIXIR_GRPC_PORT=20010 \
 	bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts

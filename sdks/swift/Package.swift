@@ -4,6 +4,9 @@ import PackageDescription
 
 let package = Package(
     name: "blok-swift-runtime",
+    // grpc-swift-2 needs Swift Concurrency + macOS 15 APIs when built on Apple hosts
+    // (blokctl create/dev on a Mac). Ignored on Linux, the production platform.
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "BlokSwiftRuntime", targets: ["BlokSwiftRuntime"]),
         .executable(name: "blok-swift-runtime", targets: ["BlokSwiftRuntimeCLI"]),

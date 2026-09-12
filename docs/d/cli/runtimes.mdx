@@ -1,6 +1,6 @@
 ---
 title: Language Runtimes
-description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, Ruby, Python, Elixir, Swift, and Dart) in an existing Blok project.
+description: Add, remove, and list language runtimes (Go, Rust, Java, Kotlin, C#, PHP, Ruby, Python, Elixir, Swift, and Dart) in an existing Blok project.
 icon: "layer-group"
 ---
 
@@ -81,7 +81,7 @@ blokctl runtime list
 │  Rust         needs rustc + cargo  blokctl runtime add rust    │
 │  Ruby         ruby + bundler ready blokctl runtime add ruby    │
 │  Swift        needs swift 6.1+     blokctl runtime add swift    │
-│  Dart         needs dart 3.3+      blokctl runtime add dart     │
+│  Dart         needs dart 3.11+     blokctl runtime add dart     │
 │  …                                                             │
 ├────────────────────────────────────────────────────────────────╯
 │
@@ -277,6 +277,7 @@ Each language has a fixed default gRPC port:
 | Go | `10001` |
 | Rust | `10002` |
 | Java | `10003` |
+| Kotlin | `10011` |
 | C# / .NET | `10004` |
 | PHP | `10005` |
 | Ruby | `10006` |

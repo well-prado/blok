@@ -24,6 +24,7 @@ export const WORKFLOW_RUNTIME_KINDS = [
 	"python3",
 	"go",
 	"java",
+	"kotlin",
 	"rust",
 	"php",
 	"csharp",

@@ -52,7 +52,7 @@ message.
 
 ## Platform limitations
 
-- The supported production target is Dart 3.3+ on Linux. Flutter is neither
+- The supported production target is Dart 3.11+ on Linux. Flutter is neither
   required nor loaded.
 - Windows and macOS are useful for local SDK tests, but the sidecar release
   images and strict conformance lane target Linux.

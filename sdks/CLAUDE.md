@@ -21,7 +21,7 @@ TCP-connect probe against the gRPC port, not this endpoint).
 
 ## Default gRPC Ports
 
-Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3: 10007, Swift: 10008, Dart: 10009.
+Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3: 10007, Swift: 10008, Dart: 10009, Elixir: 10010, Kotlin: 10011.
 
 Convention: gRPC port = legacy HTTP port + 1000.
 
@@ -33,7 +33,7 @@ Two ways to run it:
 
 - **Docker (CI):** `docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build`
   then `BLOK_E2E_REQUIRE_ALL=1 bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts`.
-  The compose builds each SDK in gRPC mode on its convention port (10001–10009).
+  The compose builds each SDK in gRPC mode on its convention port (10001–10011, excluding Elixir from this lane).
 - **Host toolchains:** `bash tests/e2e/cross-runtime/run-spec-b-e2e.sh` (boots on
   2000x to avoid clashing with a local dev stack; runs against whatever is up).
 

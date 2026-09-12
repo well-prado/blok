@@ -156,7 +156,7 @@ async function main() {
 			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
 			.option(
 				"-r, --runtime <value>",
-				"Runtime: typescript, python3, go, java, rust, csharp, php, ruby, swift, dart, elixir",
+				"Runtime: typescript, python3, go, java, rust, kotlin, csharp, php, ruby, swift, dart, elixir",
 			)
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--node-type <value>", "Node type: module, class (TypeScript only)")

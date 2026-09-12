@@ -4,8 +4,8 @@
 > truth for every stable error code shipped with the framework.
 
 This document is the registry of every well-known `BlokError.code`
-emitted by Blok itself or any of its 7 SDKs (TypeScript, Python, Go,
-Rust, Java, C#, Ruby, PHP). It exists for two audiences:
+emitted by Blok itself or any of its 8 SDKs (TypeScript, Python, Go,
+Rust, Java, Kotlin, C#, Ruby, PHP). It exists for two audiences:
 
 - **Node authors** browsing for a code that already covers their
   failure mode — reuse over reinvent.

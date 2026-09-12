@@ -190,12 +190,13 @@ describe("assertSidecarKind", () => {
 		expect(() => assertSidecarKind("deno")).toThrow(/runtime use/);
 		expect(() => assertSidecarKind("cobol")).toThrow(/Unknown runtime/);
 		expect(() => assertSidecarKind("go")).not.toThrow();
+		expect(() => assertSidecarKind("kotlin")).not.toThrow();
 		expect(() => assertSidecarKind("python3")).not.toThrow();
 	});
 });
 
 describe("runtime add", () => {
-	it.each(["python3", "go", "rust", "java", "csharp", "php", "ruby", "elixir", "swift", "dart"])(
+	it.each(["python3", "go", "rust", "java", "kotlin", "csharp", "php", "ruby", "elixir", "swift", "dart"])(
 		"adds and removes the %s sidecar through the same lifecycle",
 		async (kind) => {
 			const dir = await makeProject();
@@ -237,6 +238,16 @@ describe("runtime add", () => {
 
 		expect(readSup(dir)).toContain("[program:go_runtime]");
 		expect(fs.existsSync(path.join(dir, ".blok", "runtimes", "go"))).toBe(true);
+	});
+
+	it("adds Kotlin with its JVM toolchain and gRPC port", async () => {
+		const dir = await makeProject();
+		await runtimeAdd("kotlin", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
+
+		const config = readConfig(dir);
+		expect(config.runtimes.kotlin.grpcPort).toBe(10011);
+		expect(readEnv(dir)).toContain("RUNTIME_KOTLIN_GRPC_PORT=10011");
+		expect(readSup(dir)).toContain("[program:kotlin_runtime]");
 	});
 
 	it("merges a second runtime without clobbering the first", async () => {

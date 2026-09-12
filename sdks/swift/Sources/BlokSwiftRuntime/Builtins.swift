@@ -96,7 +96,35 @@ public struct StandardDataNode: NodeHandler {
     }
 }
 
+/// Canonical cross-runtime greeting, same contract as every other SDK:
+/// `inputs.prefix` + the trigger body's `name` → `{message, timestamp, language}`.
+public struct HelloWorldNode: NodeHandler {
+    public let name = "hello-world"
+    public let description = "Returns a greeting from the Swift runtime."
+    public let inputSchema: Data? = schema("""
+    {"type":"object","properties":{"prefix":{"type":"string","default":"Hello from the Swift runtime"}}}
+    """)
+    public let outputSchema: Data? = schema("""
+    {"type":"object","required":["message","timestamp","language"],"properties":{"message":{"type":"string"},"timestamp":{"type":"string"},"language":{"type":"string"}}}
+    """)
+    public let capabilityManifest: CapabilityManifest? = nil
+
+    public func execute(context: ExecutionContext, input: Data) async throws -> Data {
+        try context.checkCancellation()
+        let object = (try? JSONSerialization.jsonObject(with: input) as? [String: Any]) ?? [:]
+        let prefix = (object["prefix"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Hello from the Swift runtime"
+        let body = (try? JSONSerialization.jsonObject(with: context.trigger.body) as? [String: Any]) ?? [:]
+        let who = (body["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "World"
+        return try JSONSerialization.data(withJSONObject: [
+            "message": "\(prefix), \(who)!",
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "language": "swift",
+        ])
+    }
+}
+
 public func registerBuiltins(_ registry: NodeRegistry) {
+    registry.register("hello-world", HelloWorldNode())
     registry.register(TypedGreetNode())
     registry.register("chain-test", ChainTestNode())
     registry.register("standard-data", StandardDataNode())

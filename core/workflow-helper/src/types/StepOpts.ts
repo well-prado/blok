@@ -45,6 +45,7 @@ export const NodeTypeSchema = z.enum([
 	"runtime.deno",
 	"runtime.go",
 	"runtime.java",
+	"runtime.kotlin",
 	"runtime.rust",
 	"runtime.php",
 	"runtime.csharp",

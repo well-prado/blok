@@ -6,7 +6,8 @@
 # them through the runner's OWN GrpcRuntimeAdapter.
 #
 # gRPC port convention = HTTP port + 1000 (see sdks/CLAUDE.md): Go 10001,
-# Rust 10002, Java 10003, C# 10004, PHP 10005, Ruby 10006, Python3 10007, Swift 10008, Dart 10009.
+# Rust 10002, Java 10003, C# 10004, PHP 10005, Ruby 10006, Python3 10007,
+# Swift 10008, Dart 10009, Kotlin 10011.
 # Host ports mirror the container ports so the harness needs no env plumbing.
 #
 # Each build context is `.build/<lang>/` — produced by prepare-usernodes.ts with
@@ -138,6 +139,16 @@ services:
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10009"
 
+  sdk-kotlin:
+    build:
+      context: .build/kotlin/.blok/runtimes/kotlin
+    ports:
+      - "10011:10011"
+    volumes: *blob-volume
+    environment:
+      <<: *blob-env
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10011"
   sdk-elixir:
     build:
       context: .build/elixir/.blok/runtimes/elixir

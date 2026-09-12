@@ -39,7 +39,7 @@ value.
 
 ## Consequences and limitations
 
-- Linux with Dart 3.3+ is the production support target; Flutter is not a
+- Linux with Dart 3.11+ is the production support target; Flutter is not a
   dependency. macOS and Windows are local development targets only until a
   platform-specific deployment lane is added.
 - grpc-dart's server API does not expose the same transport-level max-message

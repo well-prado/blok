@@ -33,6 +33,7 @@ const VALID_STEP_TYPES = [
 	"runtime.python3",
 	"runtime.go",
 	"runtime.java",
+	"runtime.kotlin",
 	"runtime.rust",
 	"runtime.csharp",
 	"runtime.php",

@@ -59,6 +59,44 @@ Future<void> main() async {
 }
 
 void registerBuiltIns(NodeRegistry registry) {
+  // Canonical cross-runtime greeting, same contract as every other SDK:
+  // `inputs.prefix` + the trigger body's `name` -> {message, timestamp, language}.
+  registry.register(defineNode<Map<String, Object?>, Map<String, Object?>>(
+    name: 'hello-world',
+    description: 'Returns a greeting from the Dart runtime.',
+    inputSchema: const {
+      'type': 'object',
+      'properties': {
+        'prefix': {'type': 'string', 'default': 'Hello from the Dart runtime'},
+      }
+    },
+    outputSchema: const {
+      'type': 'object',
+      'required': ['message', 'timestamp', 'language'],
+      'properties': {
+        'message': {'type': 'string'},
+        'timestamp': {'type': 'string'},
+        'language': {'type': 'string'},
+      }
+    },
+    decodeInput: (value) => (value as Map).cast<String, Object?>(),
+    execute: (context, input) async {
+      final prefix = switch (input['prefix']) {
+        final String p when p.isNotEmpty => p,
+        _ => 'Hello from the Dart runtime',
+      };
+      final body = context.request.body;
+      final who = switch (body is Map ? body['name'] : null) {
+        final String n when n.isNotEmpty => n,
+        _ => 'World',
+      };
+      return {
+        'message': '$prefix, $who!',
+        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'language': 'dart',
+      };
+    },
+  ));
   registry.register(defineNode<Map<String, Object?>, Map<String, Object?>>(
     name: 'typed-greet',
     description: 'Greets a person with a typed response.',

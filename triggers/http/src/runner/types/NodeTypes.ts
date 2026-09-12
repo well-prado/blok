@@ -5,6 +5,7 @@ enum NodeTypes {
 	GO = "runtime.go",
 	RUST = "runtime.rust",
 	JAVA = "runtime.java",
+	KOTLIN = "runtime.kotlin",
 	CSHARP = "runtime.csharp",
 	PHP = "runtime.php",
 	RUBY = "runtime.ruby",

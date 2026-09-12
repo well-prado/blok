@@ -271,12 +271,12 @@ export function reportRuntimeError(err: unknown): void {
 export function assertSidecarKind(kind: string): void {
 	if (NON_SIDECAR_KINDS.has(kind)) {
 		throw new RuntimeCommandError(
-			`"${kind}" is not a language sidecar. Select JavaScript targets with \`blokctl runtime use <node|bun|deno>\`. Sidecar runtimes: go, rust, java, csharp, php, ruby, python3, swift, dart, elixir.`,
+			`"${kind}" is not a language sidecar. Select JavaScript targets with \`blokctl runtime use <node|bun|deno>\`. Sidecar runtimes: go, rust, java, kotlin, csharp, php, ruby, python3, swift, dart, elixir.`,
 		);
 	}
 	if (!getRuntimeDefinition(kind)) {
 		throw new RuntimeCommandError(
-			`Unknown runtime "${kind}". Supported: go, rust, java, csharp, php, ruby, python3, swift, dart, elixir.`,
+			`Unknown runtime "${kind}". Supported: go, rust, java, kotlin, csharp, php, ruby, python3, swift, dart, elixir.`,
 		);
 	}
 }

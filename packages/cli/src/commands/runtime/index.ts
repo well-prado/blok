@@ -17,7 +17,7 @@ runtime.action(
 runtime
 	.command("add")
 	.description(
-		"Add a language runtime (go, rust, java, csharp, php, ruby, python3, swift, dart, elixir) to this project",
+		"Add a language runtime (go, rust, java, kotlin, csharp, php, ruby, python3, swift, dart, elixir) to this project",
 	)
 	.argument("[runtime]", "Runtime to add (omit for an interactive picker)")
 	.option("-d, --directory <path>", "Project directory (default: current directory)")

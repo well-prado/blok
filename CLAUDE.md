@@ -49,6 +49,10 @@ export default workflow("Process Order", { version: "1.0.0", trigger: http.post(
 
 ## Nodes
 
+Kotlin uses the coroutine-first `sdks/kotlin` sidecar and `runtime.kotlin` on
+default gRPC port `10011`; it targets JVM 17+ and does not claim Android,
+Kotlin/JS, or Kotlin/Native.
+
 Use `defineNode()` from `@blokjs/core`. Keep `input` and `output` Zod schemas.
 Inside `execute(ctx, input)`, upstream workflow values arrive through `input`.
 The node-side `ctx` ABI is kept for runtime concerns: `ctx.request`,
@@ -67,7 +71,7 @@ diagnostic. See `docs/architecture/adr-0016-javascript-runtimes.md`.
 Cross-language sidecars use the canonical `runtime.<lang>` gRPC contract.
 Swift is a Linux-capable Swift 6.1+ sidecar at `runtime.swift` (default gRPC
 port `10008`); Apple source compatibility is not a production-platform claim.
-Dart is a Dart 3.3+ sidecar at `runtime.dart` (default gRPC port `10009`).
+Dart is a Dart 3.11+ sidecar at `runtime.dart` (default gRPC port `10009`).
 The Elixir SDK is a first-class `runtime.elixir` gRPC sidecar on port 10010;
 see `docs/architecture/adr-0017-elixir-beam-runtime.md`.
 
