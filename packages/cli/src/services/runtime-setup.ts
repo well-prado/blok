@@ -1,4 +1,5 @@
 import child_process from "node:child_process";
+import crypto from "node:crypto";
 import path from "node:path";
 import util from "node:util";
 import { type JavaScriptRuntime, type PackageManager, normalizeJavaScriptRuntime } from "@blokjs/shared";
@@ -911,10 +912,59 @@ async function setupSwift(sdkDir: string, spinner: SpinnerHandler): Promise<void
 	spinner.message("Resolving Swift Package Manager dependencies...");
 	await exec("swift package resolve", { cwd: sdkDir, timeout: 300000 });
 	spinner.message("Building Swift runtime...");
-	// A cold grpc-swift + SwiftProtobuf release build takes >10 min on a 4-core
-	// CI runner; 600s silently dropped the sidecar (create only warns).
-	await exec("swift build -c release", { cwd: sdkDir, timeout: 1800000, maxBuffer: 64 * 1024 * 1024 });
+	await buildSwiftIfChanged(sdkDir);
 	spinner.message("Swift runtime built.");
+}
+
+const SWIFT_BINARY = path.join(".build", "release", "blok-swift-runtime");
+const SWIFT_STAMP = path.join(".build", "blok-sources.sha256");
+
+/** Content digest of everything that feeds the Swift sidecar binary. */
+export function swiftSourcesDigest(sdkDir: string): string {
+	const hash = crypto.createHash("sha256");
+	const files = [
+		path.join(sdkDir, "Package.swift"),
+		path.join(sdkDir, "Package.resolved"),
+		...collectFilesRecursive(path.join(sdkDir, "Sources"), ".swift"),
+	]
+		.filter((f) => fsExtra.existsSync(f))
+		.sort();
+	for (const f of files) {
+		hash.update(path.relative(sdkDir, f));
+		hash.update("\0");
+		hash.update(fsExtra.readFileSync(f));
+		hash.update("\0");
+	}
+	return hash.digest("hex");
+}
+
+/**
+ * Build the Swift sidecar only when its sources changed since the last build.
+ *
+ * `swift build -c release` is never a no-op for this package: the
+ * GRPCProtobufGenerator plugin re-runs and swift-protobuf's vendored C++
+ * recompiles every time (minutes on a 4-core runner), so `dev` cannot simply
+ * rebuild on every boot the way Java/Kotlin do. Returns true when a build ran.
+ */
+export async function buildSwiftIfChanged(
+	sdkDir: string,
+	build: () => Promise<unknown> = () =>
+		exec("swift build -c release", { cwd: sdkDir, timeout: 1800000, maxBuffer: 64 * 1024 * 1024 }),
+): Promise<boolean> {
+	const digest = swiftSourcesDigest(sdkDir);
+	const stamp = path.join(sdkDir, SWIFT_STAMP);
+	const binary = path.join(sdkDir, SWIFT_BINARY);
+	if (
+		fsExtra.existsSync(binary) &&
+		fsExtra.existsSync(stamp) &&
+		fsExtra.readFileSync(stamp, "utf8").trim() === digest
+	) {
+		return false;
+	}
+	await build();
+	fsExtra.ensureDirSync(path.dirname(stamp));
+	fsExtra.writeFileSync(stamp, `${digest}\n`);
+	return true;
 }
 
 async function setupElixir(sdkDir: string, spinner: SpinnerHandler): Promise<void> {

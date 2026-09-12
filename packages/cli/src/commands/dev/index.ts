@@ -7,6 +7,7 @@ import fsExtra from "fs-extra";
 import { findOccupiedGrpcPorts, waitForGrpcPort } from "../../services/health-probe.js";
 import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
+	buildSwiftIfChanged,
 	generateCSharpNodeRegistry,
 	generateDartNodeRegistry,
 	generateElixirNodeRegistry,
@@ -333,11 +334,14 @@ export async function devProject(opts: OptionValues) {
 				}
 			}
 
+			// Swift boots a prebuilt binary; rebuild only when the sources changed
+			// (a SwiftPM release build is minutes even when nothing did).
 			if (rt.kind === "swift") {
 				try {
 					generateSwiftNodeRegistry(currentPath);
+					if (await buildSwiftIfChanged(runtimeCwd)) console.log("  Swift runtime rebuilt (sources changed).");
 				} catch (err) {
-					console.log(`  Warning: Swift user-node codegen failed: ${(err as Error).message}`);
+					console.log(`  Warning: Swift user-node codegen/build failed: ${(err as Error).message}`);
 				}
 			}
 
