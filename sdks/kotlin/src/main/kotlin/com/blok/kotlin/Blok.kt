@@ -107,6 +107,10 @@ data class CapabilityResourceBounds(
     val maxConcurrency: Long? = null,
 )
 
+/** Canonical v1 wire form: empty lists are explicit, absent bounds are omitted (the runner rejects nulls). */
+private val manifestJson = Json { encodeDefaults = true; explicitNulls = false }
+fun encodeCapabilityManifest(manifest: CapabilityManifest): String = manifestJson.encodeToString(CapabilityManifest.serializer(), manifest)
+
 @Serializable
 data class CapabilityManifest(
     val version: String,
@@ -456,7 +460,7 @@ class BlokNodeRuntimeService(
                     .apply {
                         handler?.inputSchemaJson?.let { inputSchemaJson = ByteString.copyFromUtf8(it) }
                         handler?.outputSchemaJson?.let { outputSchemaJson = ByteString.copyFromUtf8(it) }
-                        handler?.capabilityManifest?.let { capabilityManifestJson = ByteString.copyFromUtf8(Json.encodeToString(CapabilityManifest.serializer(), it)) }
+                        handler?.capabilityManifest?.let { capabilityManifestJson = ByteString.copyFromUtf8(encodeCapabilityManifest(it)) }
                     }.build()
             }).build()
 }

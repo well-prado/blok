@@ -71,4 +71,15 @@ class BlokTest {
         }
         assertFailsWith<IllegalArgumentException> { resolveBlob(input) }
     }
+
+    @Test
+    fun typedGreetManifestMatchesCanonicalFixture() {
+        // Mirrors tests/fixtures/capability-manifest/typed-greet.v1.json: empty lists explicit, no nulls.
+        val expected = Json.parseToJsonElement(
+            """{"version":"1","classification":"agent-compatible","effects":[],"capabilities":[],"secrets":[],""" +
+                """"determinism":"deterministic","idempotency":"idempotent","maturity":"stable",""" +
+                """"resources":{"maxDurationMs":5000,"maxInputBytes":4194304,"maxOutputBytes":4194304,"maxConcurrency":64}}""",
+        )
+        assertEquals(expected, Json.parseToJsonElement(encodeCapabilityManifest(TypedGreetNode().capabilityManifest!!)))
+    }
 }
