@@ -24,6 +24,8 @@
 			"apps/desktop/src-tauri/target/**",
 			"apps/desktop/src-tauri/gen/**",
 			"sdks/java/target/**",
+			"sdks/kotlin/build/**",
+			"sdks/kotlin/.gradle/**",
 			"sdks/csharp/**/bin/**",
 			"sdks/csharp/**/obj/**"
 		]
