@@ -274,7 +274,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["swift --version"],
 		toolchain: "swift",
 		installDeps: "swift package resolve",
-		startCmd: "swift run blok-swift-runtime",
+		startCmd: "swift run -c release blok-swift-runtime", // reuse the release build from setup; a bare `swift run` does a second, debug build
 		sdkDir: "swift",
 	},
 	{
