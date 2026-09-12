@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/api-call",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"files": ["dist"],
 	"description": "Node module for making API calls",
 	"type": "module",

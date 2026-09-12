@@ -1,5 +1,18 @@
 # @blokjs/client
 
+## 2.2.0
+
+### Minor Changes
+
+- Lockstep 2.2.0 release alongside the new runtime sidecars (no package-local changes).
+
+
+### Patch Changes
+
+- Updated dependencies [a3cf6e5]
+- Updated dependencies
+  - @blokjs/helper@2.2.0
+
 ## 1.6.2
 
 ### Patch Changes

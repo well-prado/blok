@@ -1,5 +1,17 @@
 # @blokjs/trigger-grpc
 
+## 2.2.0
+
+### Minor Changes
+
+- Lockstep 2.2.0 release alongside the new runtime sidecars (no package-local changes).
+
+### Patch Changes
+
+- Updated dependencies
+  - @blokjs/api-call@2.2.0
+  - @blokjs/if-else@2.2.0
+
 ## 1.6.2
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @blokjs/api-call
 
+## 2.2.0
+
+### Minor Changes
+
+- Lockstep 2.2.0 release alongside the new runtime sidecars (no package-local changes).
+
 ## 1.6.2
 
 ### Patch Changes
