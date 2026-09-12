@@ -1,5 +1,79 @@
 # @blokjs/shared
 
+## 2.2.0
+
+### Minor Changes
+
+- 8608279: Add the provider-neutral, headless agent kernel and model adapter contracts,
+  including deterministic stream assembly, session-backed turn recovery, effect
+  dispatch, steering, cancellation, budgets, stable errors, and test adapters.
+- 3d6ab7b: Add language-neutral H1-03 enforcement profiles, workflow binding inputs and
+  rules, immutable pinned run contract identities, and authorized guided override
+  events. Parsers bound and canonicalize caller-controlled data before a runner
+  or control plane persists it.
+- a3cf6e5: Add H1-04 evidence-aware join and bounded retry/resume idempotency contracts.
+  Required and optional branch obligations, verified evidence, declared typed
+  outputs, canonical capability authorities, and effect retry evidence are
+  validated at authoring and workflow-load boundaries.
+- Four new first-class runtime sidecars and a modular JavaScript execution target.
+
+  - **Swift** (`runtime.swift`, gRPC 10008), **Dart** (`runtime.dart`, 10009),
+    **Elixir/BEAM** (`runtime.elixir`, 10010) and **Kotlin** (`runtime.kotlin`, 10011) ship as canonical gRPC sidecars with typed node APIs, capability
+    manifests, claim-check support, user-node discovery and the `blokctl create`
+    / `blokctl runtime add` lifecycle. All eleven sidecars are exercised by the
+    cross-runtime gRPC harness and the scaffold smoke in CI.
+  - Node.js, Bun and Deno are explicit JavaScript execution targets
+    (`runtime.nodejs`, `runtime.bun`, `runtime.deno`; ADR 0016). `runtime.nodejs`
+    runs the registered portable node in-process; a Bun-hosted runner registers
+    the in-process Bun adapter; cross-host Bun and Deno fail closed until their
+    persistent workers land. The per-step `bun eval` path is gone.
+  - CLI: `blokctl dev` regenerates Swift and Elixir user-node registries,
+    `runtime add` enforces SDK version floors, `create` rejects unknown
+    `--runtimes`, `runtime list` reports the JavaScript target separately, and
+    Swift/Dart build caches no longer leak into scaffolds. Dart's floor is 3.11.
+
+### Patch Changes
+
+- f38e2b0: ADR 0015 follow-through — the input gate's failure is now a named, exported error.
+
+  `WorkflowInputValidationError` (from `@blokjs/core/runtime` / `@blokjs/shared`) replaces the
+  anonymous `GlobalError` the trigger-boundary input gate used to throw. It **extends**
+  `GlobalError` — same code `400`, same `WORKFLOW_INPUT_VALIDATION` tag on
+  `context.name`, same structured `validation_errors` json — so every existing
+  transport translation (HTTP 400, MCP `isError`, gRPC status, worker DLQ, pub/sub
+  dead-letter, webhook 4xx) is unchanged. What's new is that callers can
+  `instanceof` it and read `err.info.workflowName` / `err.info.issues`, and the
+  rejection now names the workflow: the message reads
+  `Input validation failed for workflow 'search': query (Required)` and the 400 body
+  gained `error` and `workflowName` alongside `validation_errors`.
+
+  Scope is documented where it was previously only implied: the `runWorkflow`
+  testing path is **not** gated (it drives the runner directly, the same position a
+  `subworkflow:` child occupies — neither passes through `TriggerBase.run()`), so a
+  test runs the payload its author wrote, verbatim.
+
+- 84fabc0: A step's `retry.nonRetryableErrorNames` now stops the worker JOB, not just the step (#679).
+
+  Two things were broken. First, `WorkflowNormalizer` copied only the four timing
+  keys off a step's `retry` block and silently dropped `nonRetryableErrorNames` —
+  the field was validated by the v2 schema and honoured by `RunnerSteps`, but it
+  never reached the runner from any authored workflow, so selective retry was dead
+  end to end. It is carried through now (non-string entries filtered).
+
+  Second, the worker trigger's job-level retry ignored the declaration even when the
+  step-level loop honoured it: BullMQ re-ran the entire workflow `retries` more
+  times, replaying a guard whose outcome cannot change. `handleJob` now routes a
+  declared non-retryable failure to the same terminal `job.fail(err, false)` path
+  ADR-0015 validation failures take — BullMQ discards the remaining attempts (the
+  same check `UnrecoverableError` trips), and the NATS/Kafka/Redis/Rabbit/SQS/pg-boss
+  adapters route to their dead-letter queue. Retryable errors honour `retries`
+  unchanged.
+
+  The two layers cannot drift: the matcher moved to `@blokjs/shared` as
+  `isNonRetryableError` and is called exactly once, by `RunnerSteps`, which stamps
+  its verdict on the propagating error (`markNonRetryableStepError`). The worker
+  reads that verdict back (`isNonRetryableStepError`) rather than re-deriving it.
+
 ## 1.6.2
 
 ### Patch Changes

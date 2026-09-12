@@ -1,5 +1,41 @@
 # @blokjs/core
 
+## 2.2.0
+
+### Minor Changes
+
+- Four new first-class runtime sidecars and a modular JavaScript execution target.
+
+  - **Swift** (`runtime.swift`, gRPC 10008), **Dart** (`runtime.dart`, 10009),
+    **Elixir/BEAM** (`runtime.elixir`, 10010) and **Kotlin** (`runtime.kotlin`, 10011) ship as canonical gRPC sidecars with typed node APIs, capability
+    manifests, claim-check support, user-node discovery and the `blokctl create`
+    / `blokctl runtime add` lifecycle. All eleven sidecars are exercised by the
+    cross-runtime gRPC harness and the scaffold smoke in CI.
+  - Node.js, Bun and Deno are explicit JavaScript execution targets
+    (`runtime.nodejs`, `runtime.bun`, `runtime.deno`; ADR 0016). `runtime.nodejs`
+    runs the registered portable node in-process; a Bun-hosted runner registers
+    the in-process Bun adapter; cross-host Bun and Deno fail closed until their
+    persistent workers land. The per-step `bun eval` path is gone.
+  - CLI: `blokctl dev` regenerates Swift and Elixir user-node registries,
+    `runtime add` enforces SDK version floors, `create` rejects unknown
+    `--runtimes`, `runtime list` reports the JavaScript target separately, and
+    Swift/Dart build caches no longer leak into scaffolds. Dart's floor is 3.11.
+
+### Patch Changes
+
+- Updated dependencies [8608279]
+- Updated dependencies [dead9d9]
+- Updated dependencies [0774a31]
+- Updated dependencies [3d6ab7b]
+- Updated dependencies [a3cf6e5]
+- Updated dependencies [f38e2b0]
+- Updated dependencies [516c720]
+- Updated dependencies
+- Updated dependencies [84fabc0]
+  - @blokjs/shared@2.2.0
+  - @blokjs/runner@2.2.0
+  - @blokjs/helper@2.2.0
+
 ## 1.6.2
 
 ### Patch Changes

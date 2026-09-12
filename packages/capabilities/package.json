@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/capabilities",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"description": "Trusted, bounded capability adapters for Blok harnesses.",
 	"type": "module",
 	"main": "dist/index.js",
@@ -25,5 +25,7 @@
 		"vitest": "^4.0.18"
 	},
 	"private": false,
-	"publishConfig": { "access": "public" }
+	"publishConfig": {
+		"access": "public"
+	}
 }

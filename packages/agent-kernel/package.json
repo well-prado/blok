@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/agent-kernel",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"description": "Provider-neutral, headless Blok agent kernel and model adapter contracts.",
 	"type": "module",
 	"main": "dist/index.js",
@@ -27,15 +27,17 @@
 	"keywords": ["blok", "agent", "kernel", "model", "harness"],
 	"license": "MIT",
 	"dependencies": {
-		"@blokjs/shared": "^2.1.0",
+		"@blokjs/shared": "^2.2.0",
 		"zod": "^3.24.2"
 	},
 	"devDependencies": {
-		"@blokjs/runner": "^2.1.0",
+		"@blokjs/runner": "^2.2.0",
 		"@types/node": "^22.15.21",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"
 	},
 	"private": false,
-	"publishConfig": { "access": "public" }
+	"publishConfig": {
+		"access": "public"
+	}
 }

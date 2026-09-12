@@ -1,5 +1,59 @@
 # @blokjs/trigger-websocket
 
+## 2.2.0
+
+### Minor Changes
+
+- Lockstep 2.2.0 release alongside the new runtime sidecars (no package-local changes).
+
+### Patch Changes
+
+- Updated dependencies
+  - @blokjs/trigger-pubsub@2.2.0
+
+## 2.1.1
+
+### Patch Changes
+
+- 45939b1: Trigger constructors no longer require the caller's `Hono` to be the _same copy
+  on disk_ as the trigger's.
+
+  `hono`'s public types include a `unique symbol` (`HonoRequest[GET_MATCH_RESULT]`),
+  so two installs of hono — even at identical versions — produce two nominally
+  distinct `Hono` types. `SSETrigger`/`WebSocketTrigger`/`McpTrigger`/
+  `WebhookTrigger` declared `constructor(app: Hono<any, any, any>)`, so a generated
+  project that builds `new Hono()` from its own `node_modules/hono` failed `tsc`
+  outright whenever the trigger package's `hono` resolved elsewhere:
+
+  ```
+  error TS2345: Argument of type 'Hono<BlankEnv, BlankSchema, "/">' is not
+  assignable to parameter of type 'Hono<any, any, any>'.
+    Property '[GET_MATCH_RESULT]' is missing in type 'HonoRequest<any, any>' …
+  ```
+
+  That is every `blokctl create --local` scaffold whose trigger set includes sse,
+  websocket, mcp or webhook (the `file:` link makes tsc resolve the trigger's
+  `hono` through the monorepo realpath), and any npm tree where hono lands nested
+  rather than hoisted.
+
+  Fixes #886. The constructors now take the structural slice of Hono they actually call
+  (`get`/`post`/`all`), the same treatment the cross-package `HttpTriggerLike`
+  parameter already had. Any concrete `Hono` still satisfies it, the `app` field
+  keeps its real `Hono` type internally, and there is no runtime change.
+
+- Updated dependencies [8608279]
+- Updated dependencies [dead9d9]
+- Updated dependencies [0774a31]
+- Updated dependencies [3d6ab7b]
+- Updated dependencies [a3cf6e5]
+- Updated dependencies [f38e2b0]
+- Updated dependencies [516c720]
+- Updated dependencies
+- Updated dependencies [84fabc0]
+  - @blokjs/shared@2.2.0
+  - @blokjs/runner@2.2.0
+  - @blokjs/helper@2.2.0
+
 ## 1.6.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/if-else",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"files": ["dist"],
 	"description": "blok if-else",
 	"type": "module",
