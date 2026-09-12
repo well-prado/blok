@@ -15,7 +15,7 @@ import { setupObservabilityStack } from "../../services/obs-setup.js";
 import { type ObsStackTier, parseObsTier } from "../../services/obs-tiers.js";
 import { rewriteObservabilityEnvBlock } from "../../services/observability-mutations.js";
 import { manager as pm } from "../../services/package-manager.js";
-import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
+import { type RuntimeInfo, detectRuntimes, getRuntimeDefinition } from "../../services/runtime-detector.js";
 import {
 	type RuntimeConfig,
 	type TriggerConfig,
@@ -123,6 +123,10 @@ export async function createProject(opts: OptionValues, version: string, current
 			: ["http"];
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
+	const unknownRuntimeKinds = selectedRuntimeKinds.filter((kind) => kind !== "node" && !getRuntimeDefinition(kind));
+	if (unknownRuntimeKinds.length > 0) {
+		throw new Error(`Invalid --runtimes value: ${unknownRuntimeKinds.join(", ")}.`);
+	}
 	let selectedJavaScriptRuntime: JavaScriptRuntime;
 	try {
 		const normalized = normalizeJavaScriptRuntime(String(opts.runtime ?? "node"));

@@ -116,7 +116,10 @@ describe("rewriteSupervisordRuntimes", () => {
 
 describe("ensureRuntimeGitignore", () => {
 	it("appends missing artifact globs", () => {
-		expect(ensureRuntimeGitignore("node_modules\n")).toContain(".blok/runtimes/**/target/");
+		const result = ensureRuntimeGitignore("node_modules\n");
+		expect(result).toContain(".blok/runtimes/**/target/");
+		expect(result).toContain(".blok/runtimes/**/.build/");
+		expect(result).toContain(".blok/runtimes/**/.dart_tool/");
 	});
 
 	it("is idempotent", () => {

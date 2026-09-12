@@ -28,7 +28,16 @@ mix test
 mix release
 ```
 
-Then boot the release with `GRPC_PORT=10010`, call Health, ListNodes, and
-Execute using the canonical proto client. CI should include the Elixir lane in
-the complete cross-runtime chain when the toolchain is installed; a missing
-toolchain is a reported platform limitation, never a passing silent skip.
+Elixir is required in both the scaffold smoke lane and the Docker cross-runtime
+chain. `prepare-usernodes.ts` uses the actual CLI generator to register the
+canonical `typed-greet`, `chain-test`, and scaffolded `e2e-user` nodes. The
+harness checks canonical capability metadata, valid/invalid inputs, a 2 MiB
+claim-check round trip, user-node execution, and chain data preservation.
+
+Local evidence (Elixir 1.20.4 / OTP 29): SDK tests pass; the real gRPC harness
+against the generated Elixir SDK passed 26 checks with zero failures, including
+claim-check and user-node discovery. A production Mix release also built, booted,
+and passed 23 gRPC checks. These are single-runtime runs; the complete
+polyglot chain and production container still require the corresponding CI
+jobs. Admission/cancellation, TLS, and resource baselines remain separate issue
+#943 acceptance work and are not established by these checks.

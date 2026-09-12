@@ -64,6 +64,16 @@ describe("NodeJsRuntimeAdapter", () => {
 			expect(result.data).toBeNull();
 		});
 
+		it("preserves payload fields that resemble a response envelope", async () => {
+			const payload = { success: true, data: "business value", error: "business value" };
+			const result = await adapter.execute(
+				createMockNodeWithRun({ success: true, data: payload, error: null }),
+				createMockContext(),
+			);
+
+			expect(result).toMatchObject({ success: true, data: payload, errors: null });
+		});
+
 		it("should pass context to node run method", async () => {
 			const mockContext = createMockContext({
 				id: "custom-id",

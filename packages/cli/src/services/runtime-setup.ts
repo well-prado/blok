@@ -148,7 +148,9 @@ export async function setupRuntime(
 
 	// 1. Copy SDK source to .blok/runtimes/{language}/
 	fsExtra.ensureDirSync(path.dirname(blokctlRuntimeDir));
-	fsExtra.copySync(sdkSourcePath, blokctlRuntimeDir);
+	fsExtra.copySync(sdkSourcePath, blokctlRuntimeDir, {
+		filter: (src) => ![".build", ".dart_tool"].includes(path.basename(src)),
+	});
 
 	// 2. Create project-level runtimes directory for user nodes
 	fsExtra.ensureDirSync(projectRuntimeDir);
@@ -383,7 +385,7 @@ export function generateElixirNodeRegistry(projectDir: string): string {
 	const registryFile = path.join(sdkDir, "config", "nodes.exs");
 	fsExtra.removeSync(usernodesDir);
 	fsExtra.ensureDirSync(usernodesDir);
-	const modules: string[] = ["Blok.Examples.HelloWorld"];
+	const modules: string[] = ["Blok.Examples.HelloWorld", "Blok.Examples.TypedGreet", "Blok.Examples.ChainTest"];
 	if (fsExtra.existsSync(nodesSrcDir)) {
 		for (const entry of fsExtra.readdirSync(nodesSrcDir, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;

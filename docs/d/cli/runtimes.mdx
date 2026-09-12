@@ -1,11 +1,11 @@
 ---
 title: Language Runtimes
-description: Add, remove, and list language runtimes (Go, Rust, Java, Kotlin, C#, PHP, Ruby, Python, Dart) in an existing Blok project.
+description: Add, remove, and list language runtimes (Go, Rust, Java, Kotlin, C#, PHP, Ruby, Python, Elixir, Swift, and Dart) in an existing Blok project.
 icon: "layer-group"
 ---
 
 Blok runs workflow steps across JavaScript targets (**Node.js, Bun, and Deno**)
-plus the supported language runtimes, including **Dart** and the distinct `runtime.wasi`
+plus the supported language runtimes, including **Elixir, Swift, and Dart**, and the distinct `runtime.wasi`
 Component Model boundary. JavaScript target selection is a project setting; it
 is separate from the package manager and from the language sidecars managed by
 the commands below. The WASI boundary is contract-first in the current
@@ -85,7 +85,7 @@ blokctl runtime list
 │  …                                                             │
 ├────────────────────────────────────────────────────────────────╯
 │
-└  Node / TypeScript runs in-process — always available, nothing to install.
+└  JavaScript target: Node.js (in-process).
 ```
 
 Add `--json` for a machine‑readable version (handy in scripts or CI):
@@ -93,6 +93,11 @@ Add `--json` for a machine‑readable version (handy in scripts or CI):
 ```bash
 blokctl runtime list --json
 ```
+
+The JSON output reports the selected JavaScript target separately from language
+sidecars. Node.js runs in-process; Bun and Deno require their persistent workers,
+whose availability is checked when the project boots. Kotlin SDK integration is
+tracked separately and is not offered by these commands yet.
 
 ---
 

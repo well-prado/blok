@@ -7,6 +7,6 @@ config :blok,
   max_concurrency: 16,
   max_queue: 64,
   cancellation_grace_ms: 250,
-  nodes: [Blok.Examples.HelloWorld]
+  nodes: [Blok.Examples.HelloWorld, Blok.Examples.TypedGreet, Blok.Examples.ChainTest]
 
 import_config "nodes.exs"

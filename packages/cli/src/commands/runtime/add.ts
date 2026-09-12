@@ -18,6 +18,7 @@ import {
 	buildRuntimeConfig,
 	setupRuntime,
 } from "../../services/runtime-setup.js";
+import { formatVersionMismatch, satisfiesConstraint } from "../../services/semver-utils.js";
 import {
 	RuntimeCommandError,
 	assertGrpcPortFree,
@@ -109,6 +110,7 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 			}
 			const rt = (detected ?? (await detectRuntimes())).find((d) => d.kind === kind);
 			if (!rt) throw new RuntimeCommandError(`Unknown runtime "${kind}".`);
+			if (options.skipToolchainCheck !== true) assertToolchainVersion(rt);
 			const grpcPort = grpcPortOverride ?? rt.defaultGrpcPort;
 			const clash = Object.values(config.runtimes ?? {}).find((rc) => rc.kind !== kind && rc.grpcPort === grpcPort);
 			if (clash) {
@@ -145,17 +147,7 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		// 2. Toolchain availability (reuse the picker's detection when we have it).
 		const rt = (detected ?? (await detectRuntimes())).find((d) => d.kind === kind);
 		if (!rt) throw new RuntimeCommandError(`Unknown runtime "${kind}".`);
-		if (!rt.available && options.skipToolchainCheck !== true) {
-			let missing = rt.toolchain;
-			let hint = rt.installHint;
-			if (rt.secondaryTool && rt.secondaryTool.available === false) {
-				missing = rt.secondaryTool.name; // surface the tool that's actually missing…
-				hint = rt.secondaryTool.installHint; // …and the hint to install it
-			}
-			throw new RuntimeCommandError(
-				`${def.label} toolchain not detected (need ${color.bold(missing)}). ${hint}\n  Already have it? Re-run with --skip-toolchain-check.`,
-			);
-		}
+		if (options.skipToolchainCheck !== true) assertToolchainVersion(rt);
 
 		// 3. Port resolution + collision (config entries, then a live-listener probe for fresh installs).
 		const grpcPort = grpcPortOverride ?? rt.defaultGrpcPort;
@@ -207,6 +199,21 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		finalizeRuntime(root, config, rc, kind, def.label);
 	} catch (err) {
 		reportRuntimeError(err);
+	}
+}
+
+function assertToolchainVersion(runtime: RuntimeInfo): void {
+	if (!runtime.available) {
+		const missing = runtime.secondaryTool?.available === false ? runtime.secondaryTool.name : runtime.toolchain;
+		const hint = runtime.secondaryTool?.available === false ? runtime.secondaryTool.installHint : runtime.installHint;
+		throw new RuntimeCommandError(
+			`${runtime.label} toolchain not detected (need ${color.bold(missing)}). ${hint}\n  Already have it? Re-run with --skip-toolchain-check.`,
+		);
+	}
+	if (runtime.minVersion && (!runtime.version || !satisfiesConstraint(runtime.version, `>=${runtime.minVersion}`))) {
+		throw new RuntimeCommandError(
+			formatVersionMismatch(runtime.label, runtime.version, `>=${runtime.minVersion}`, runtime.installHint),
+		);
 	}
 }
 

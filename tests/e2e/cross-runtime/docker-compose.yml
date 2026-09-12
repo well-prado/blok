@@ -149,3 +149,12 @@ services:
       <<: *blob-env
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10011"
+  sdk-elixir:
+    build:
+      context: .build/elixir/.blok/runtimes/elixir
+    ports:
+      - "10010:10010"
+    volumes: *blob-volume
+    environment:
+      <<: *blob-env
+      GRPC_PORT: "10010"
