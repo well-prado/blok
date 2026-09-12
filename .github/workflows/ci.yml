@@ -342,9 +342,13 @@ jobs:
       # on $PATH — setup-php puts the composer bin dir ahead of /usr/local/bin.
       - name: Install RoadRunner
         run: |
-          composer global require spiral/roadrunner-cli --quiet
-          "$(composer global config bin-dir --absolute --quiet)/rr" get-binary --location /usr/local/bin --quiet
-          composer global remove spiral/roadrunner-cli --quiet
+          # Pinned release tarball straight from GitHub Releases. `rr get-binary`
+          # (spiral/roadrunner-cli) lists releases through the unauthenticated
+          # GitHub API and fails the job with HTTP 403 once the runner IP is
+          # rate-limited — a flake unrelated to Blok.
+          RR_VERSION=2025.1.15
+          curl -fsSL "https://github.com/roadrunner-server/roadrunner/releases/download/v${RR_VERSION}/roadrunner-${RR_VERSION}-linux-amd64.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "roadrunner-${RR_VERSION}-linux-amd64/rr"
           command -v rr
           rr --version
 
