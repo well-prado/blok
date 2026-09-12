@@ -2510,6 +2510,8 @@
 									"runtime.csharp",
 									"runtime.ruby",
 									"runtime.swift",
+									"runtime.dart",
+									"runtime.elixir",
 									"runtime.docker",
 									"runtime.wasm",
 									"runtime.wasi"
@@ -2572,6 +2574,8 @@
 									"csharp",
 									"ruby",
 									"swift",
+									"dart",
+									"elixir",
 									"docker",
 									"wasm",
 									"wasi"

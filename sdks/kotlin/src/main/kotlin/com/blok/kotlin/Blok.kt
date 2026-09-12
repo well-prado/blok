@@ -529,7 +529,7 @@ class RuntimeServer private constructor(
     companion object {
         fun fromEnv(): RuntimeServer = RuntimeServer(
             host = System.getenv("HOST")?.takeIf { it.isNotBlank() } ?: "0.0.0.0",
-            port = envInt("PORT", 9009), grpcPort = envInt("GRPC_PORT", 10009),
+            port = envInt("PORT", 9011), grpcPort = envInt("GRPC_PORT", 10011),
             version = System.getenv("VERSION")?.takeIf { it.isNotBlank() } ?: "1.0.0",
             maxMessageBytes = envInt("BLOK_GRPC_MAX_MESSAGE_BYTES", 16 * 1024 * 1024),
             dispatcherThreads = envInt("BLOK_RUNTIME_DISPATCHER_THREADS", 4).coerceIn(1, 64),

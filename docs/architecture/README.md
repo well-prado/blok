@@ -13,6 +13,9 @@ they must not silently contradict it.
 - [WASI Component Model runtime](runtime/adr/0001-wasi-component-runtime.md)
 - [ADR 0016 — Selectable JavaScript execution runtimes](adr-0016-javascript-runtimes.md)
 - [ADR 0016 conformance evidence](adr-0016-javascript-runtimes-conformance.md)
+- [ADR 0002 — Dart runtime sidecar](runtime/adr/0002-dart-runtime.md)
+- [Dart runtime conformance](runtime/dart-conformance.md)
+- [ADR 0017 — Elixir/BEAM runtime sidecar](adr-0017-elixir-beam-runtime.md)
 
 ## Decision governance
 

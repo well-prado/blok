@@ -12,12 +12,12 @@ is not required:
 ```bash
 ./gradlew test
 ./gradlew installDist
-GRPC_PORT=10009 BLOK_TRANSPORT=grpc ./gradlew run
+GRPC_PORT=10011 BLOK_TRANSPORT=grpc ./gradlew run
 ```
 
 The sidecar serves `NodeRuntime/Execute`, `ExecuteStream`, `Health`, and
-`ListNodes` over gRPC on `GRPC_PORT` (default `10009`) and a readiness-only
-`GET /health` endpoint on `PORT` (default `9009`). `HOST`, `VERSION`,
+`ListNodes` over gRPC on `GRPC_PORT` (default `10011`) and a readiness-only
+`GET /health` endpoint on `PORT` (default `9011`). `HOST`, `VERSION`,
 `BLOK_GRPC_MAX_MESSAGE_BYTES`, `BLOK_GRPC_KEEPALIVE_TIME_MS`,
 `BLOK_GRPC_KEEPALIVE_TIMEOUT_MS`, and `BLOK_RUNTIME_DISPATCHER_THREADS` are
 configurable through the environment.

@@ -28,6 +28,8 @@ const VALID_STEP_TYPES = [
 	"runtime.csharp",
 	"runtime.ruby",
 	"runtime.swift",
+	"runtime.dart",
+	"runtime.elixir",
 	"runtime.wasi",
 ];
 
@@ -44,6 +46,8 @@ const VALID_RUNTIMES = [
 	"csharp",
 	"ruby",
 	"swift",
+	"dart",
+	"elixir",
 	"docker",
 	"wasm",
 	"wasi",

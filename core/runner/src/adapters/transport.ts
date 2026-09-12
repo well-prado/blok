@@ -2,7 +2,18 @@ import type { Context, ResponseContext, VarsContext } from "@blokjs/shared";
 import type { RuntimeKind } from "./RuntimeAdapter";
 import type { TlsConfig } from "./grpc/types";
 
-const SUPPORTED_KINDS: readonly RuntimeKind[] = ["go", "rust", "java", "csharp", "php", "ruby", "python3", "swift"];
+const SUPPORTED_KINDS: readonly RuntimeKind[] = [
+	"go",
+	"rust",
+	"java",
+	"csharp",
+	"php",
+	"ruby",
+	"python3",
+	"swift",
+	"dart",
+	"elixir",
+];
 
 /**
  * Reject any leftover `RUNTIME_TRANSPORT=http` (global) or

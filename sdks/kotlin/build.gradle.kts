@@ -66,13 +66,6 @@ tasks.jar {
     manifest { attributes["Main-Class"] = application.mainClass.get() }
 }
 
-tasks.register<Copy>("copyRuntimeProto") {
-    from("../../proto/blok/runtime/v1/runtime.proto")
-    into("src/main/proto/blok/runtime/v1")
-}
-
-tasks.named("generateProto") { dependsOn("copyRuntimeProto") }
 tasks.named<org.gradle.language.jvm.tasks.ProcessResources>("processResources") {
-    dependsOn("copyRuntimeProto")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

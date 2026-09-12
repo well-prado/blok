@@ -174,8 +174,8 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Kotlin",
 		minVersion: "17.0.0",
 		installHint: "Install JDK 17+: https://adoptium.net/",
-		defaultPort: 9009,
-		defaultGrpcPort: 10009,
+		defaultPort: 9011,
+		defaultGrpcPort: 10011,
 		commands: ["java --version", "/opt/homebrew/opt/openjdk/bin/java --version"],
 		toolchain: "JDK 17+ + Gradle wrapper",
 		installDeps: "./gradlew installDist --no-daemon",
@@ -247,6 +247,24 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		},
 	},
 	{
+		kind: "elixir",
+		label: "Elixir / BEAM",
+		minVersion: "1.17.0",
+		installHint: "Install Elixir 1.17+ with OTP 27+: https://elixir-lang.org/install.html",
+		defaultPort: 9010,
+		defaultGrpcPort: 10010,
+		commands: ["elixir --version"],
+		toolchain: "elixir + mix",
+		installDeps: "mix deps.get",
+		startCmd: "mix run --no-halt",
+		sdkDir: "elixir",
+		secondaryTool: {
+			name: "Mix",
+			command: "mix --version",
+			installHint: "Install Mix with Elixir: https://elixir-lang.org/install.html",
+		},
+	},
+	{
 		kind: "swift",
 		label: "Swift",
 		installHint: "Install Swift 6.1+ for Linux: https://swift.org/install/",
@@ -258,6 +276,19 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		installDeps: "swift package resolve",
 		startCmd: "swift run blok-swift-runtime",
 		sdkDir: "swift",
+	},
+	{
+		kind: "dart",
+		label: "Dart",
+		minVersion: "3.3.0",
+		installHint: "Install Dart 3.3+: https://dart.dev/get-dart",
+		defaultPort: 9009,
+		defaultGrpcPort: 10009,
+		commands: ["dart --version"],
+		toolchain: "dart",
+		installDeps: "dart pub get",
+		startCmd: "dart run bin/serve.dart",
+		sdkDir: "dart",
 	},
 ];
 
@@ -315,6 +346,10 @@ function parseVersion(output: string, kind: string): string | undefined {
 		}
 		case "swift": {
 			const match = output.match(/Swift version (\d+\.\d+(?:\.\d+)?)/i);
+			return match ? match[1] : undefined;
+		}
+		case "dart": {
+			const match = output.match(/Dart SDK version:\s*(\d+\.\d+\.\d+)/i);
 			return match ? match[1] : undefined;
 		}
 		default:

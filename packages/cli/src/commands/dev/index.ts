@@ -8,6 +8,7 @@ import { findOccupiedGrpcPorts, waitForGrpcPort } from "../../services/health-pr
 import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	generateCSharpNodeRegistry,
+	generateDartNodeRegistry,
 	generateGoNodeRegistry,
 	generateJavaNodeRegistry,
 	generateKotlinNodeRegistry,
@@ -289,7 +290,7 @@ export async function devProject(opts: OptionValues) {
 			// Dynamic runtimes fs-scan this dir at boot (serve.py / serve.rb /
 			// serve.php). The runtime cwd is .blok/runtimes/<lang>; user nodes
 			// live in the project's runtimes/<lang>/nodes.
-			if (rt.kind === "python3" || rt.kind === "ruby" || rt.kind === "php") {
+			if (rt.kind === "python3" || rt.kind === "ruby" || rt.kind === "php" || rt.kind === "dart") {
 				env.BLOK_NODES_DIR = path.resolve(currentPath, "runtimes", rt.kind, "nodes");
 			}
 
@@ -319,6 +320,14 @@ export async function devProject(opts: OptionValues) {
 					generateCSharpNodeRegistry(currentPath);
 				} catch (err) {
 					console.log(`  Warning: C# user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			if (rt.kind === "dart") {
+				try {
+					generateDartNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: Dart user-node codegen failed: ${(err as Error).message}`);
 				}
 			}
 

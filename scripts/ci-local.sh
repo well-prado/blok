@@ -11,7 +11,7 @@
 #                     localstack/gcp-pubsub via infra/testing/docker-compose.yml)
 #   cross-runtime  → .github/workflows/cross-runtime.yml
 #                    builds + drives the 9 SDK gRPC runtimes end-to-end
-#                    (HEAVY: builds 9 Docker images — Go/Rust/Java/Kotlin/C#/PHP/Ruby/Python3/Swift)
+#                    (HEAVY: builds 10 Docker images — Go/Rust/Java/Kotlin/C#/PHP/Ruby/Python3/Swift/Dart)
 #   fast           → no Docker: lint:check → proto:check → nx build → `bun run test`
 #                    (integration suites self-skip with no BLOK_INTEGRATION_* env)
 #   packaging      → .github/workflows/packaging.yml
@@ -77,7 +77,7 @@ run_cross_runtime() {
   local CR="tests/e2e/cross-runtime"
   step "Build @blokjs/runner (the harness imports GrpcRuntimeAdapter)"; bunx nx build @blokjs/runner
   step "Prepare user-node build contexts"; bun "$CR/prepare-usernodes.ts"
-  step "Build + start the 9 SDK gRPC runtimes (docker compose --build)"
+  step "Build + start the 10 SDK gRPC runtimes (docker compose --build)"
   docker compose -f "$CR/docker-compose.yml" up -d --build
   # Always tear the runtimes down, even if the harness fails.
   trap 'docker compose -f "'"$CR"'/docker-compose.yml" down -v >/dev/null 2>&1 || true' EXIT

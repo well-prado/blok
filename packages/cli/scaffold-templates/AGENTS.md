@@ -13,7 +13,7 @@ Two facts shape everything here:
   trigger. Reflexively picking `http` is the most common mistake — start from the
   decision table in §6.
 - **Nodes run in 9 runtimes.** TypeScript runs in-process; the other 8 (`go`, `rust`,
-  `java`, `csharp`, `php`, `ruby`, `python3`, `swift`) run as gRPC sidecars. A step routes to a
+  `java`, `csharp`, `php`, `ruby`, `python3`, `swift`, `dart`) run as gRPC sidecars. A step routes to a
   sidecar with `type: "runtime.<lang>"`.
 
 > **Read `.blok/config.json` first.** It records which triggers and runtimes this project
@@ -137,6 +137,7 @@ A non-TS node runs in a per-language gRPC sidecar and is referenced from a step 
 | Ruby | `runtime.ruby` | 9006 |
 | Python3 | `runtime.python3` | 9007 |
 | Swift | `runtime.swift` | 9008 |
+| Dart | `runtime.dart` | 9009 |
 
 ```ts
 // In a workflow, route a step to a Python node:
