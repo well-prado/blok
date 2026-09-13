@@ -1,0 +1,228 @@
+---
+title: JavaScript Runtime Troubleshooting
+description: Diagnose Node.js, Bun, and Deno execution targets — worker startup, permissions, module resolution, and the errors each one produces.
+icon: "wrench"
+---
+
+Every symptom below is one Blok reports on purpose, with the engine and the
+remediation named. Blok never substitutes a different JavaScript engine for the
+one a project selected, so a failure here is always a failure to start or reach
+the engine you asked for — never a silent fallback.
+
+See [Language Runtimes](./runtimes) for how to select a target, and
+[ADR 0016](../../architecture/adr-0016-javascript-runtimes.md) for the model.
+
+## Is it the host or the target?
+
+The engine hosting the trigger and workflow engine (the **orchestrator host**)
+and the engine executing `runtime.nodejs` / `runtime.bun` / `runtime.deno`
+steps (the **execution target**) are separate choices. `blokctl dev` prints
+which case you are in at boot:
+
+```text
+JavaScript target: bun — the orchestrator host is bun, so runtime.bun steps execute in-process.
+```
+
+or
+
+```text
+  Deno Worker (grpc port 10014) started (PID: 51234)
+```
+
+If you see neither, nothing is executing your `runtime.*` steps and the reason
+follows on a `Warning:` line.
+
+---
+
+## The worker does not start
+
+### `blokctl dev` prints a skip with remediation
+
+```text
+Warning: JavaScript worker for target "deno" not started — `deno` is not on PATH.
+         runtime.deno steps will fail until it is available.
+```
+
+Install the engine, or change the target with `blokctl runtime use <target>`.
+A skip is never a fallback: the affected steps fail loudly at runtime.
+
+### The engine is installed but too old
+
+```text
+Deno 2.6.10 is older than the required 2.7.5.
+```
+
+Minimum versions are **Node.js 20**, **Bun 1.1**, **Deno 2.7.5**. The Deno
+floor is load-bearing, not cosmetic: before 2.7.5 its Node-compat HTTP/2
+*server* never completes a gRPC connection, so the worker binds its port and
+then answers nothing. An older Deno therefore presents as "the worker is not
+running", not as a version problem. Bisected against the worker's own
+integration suite (2.7.4 fails, 2.7.5 passes); CI pins exactly v2.7.5.
+
+### `@blokjs/runtime-worker is not installed`
+
+The worker is a normal dependency of every generated project. If it is missing,
+add it and reinstall:
+
+```bash
+npm install @blokjs/runtime-worker   # or pnpm / yarn / bun add
+```
+
+### The worker starts and then exits
+
+Read its own log line. The two common causes:
+
+- **The port is taken.** `blokctl dev` refuses to start when a configured gRPC
+  port already has a listener, naming the port. Change it with
+  `RUNTIME_NODEJS_GRPC_PORT` / `RUNTIME_BUN_GRPC_PORT` / `RUNTIME_DENO_GRPC_PORT`.
+- **A node throws at import.** The worker loads your node module at boot, so an
+  error in module scope kills it before it serves. It is reported with the
+  module specifier it was loading.
+
+A sidecar that crashes later is **restarted** by `blokctl dev`, with backoff, up
+to five times a minute. Past that it says so once and stops:
+
+```text
+  Deno Worker (grpc port 10014) exited (code 1) and will NOT be restarted —
+  restarted 5 time(s) in the last 60s. Fix the cause and re-run `blokctl dev`.
+```
+
+---
+
+## `NODE_NOT_FOUND` for a node that exists
+
+The worker serves the project's node module, and which file that is depends on
+the engine:
+
+| Target | Module the worker loads |
+| --- | --- |
+| `node` | `dist/Nodes.js` — Node.js cannot import TypeScript sources |
+| `bun` | `src/Nodes.ts` (falls back to `dist/`) |
+| `deno` | `src/Nodes.ts` (falls back to `dist/`) |
+
+So a **Node.js target needs a build** before the worker can see a new node. Run
+your project's `build`, or point `BLOK_WORKER_NODES` at the module yourself.
+The worker says which candidates it looked for when it finds none.
+
+---
+
+## `NODE_RUNTIME_INCOMPATIBLE`
+
+The node exists, but it declares a runtime constraint this engine does not
+satisfy:
+
+```json
+{ "capabilityManifest": { "runtimes": ["bun"], "...": "..." } }
+```
+
+A node that reaches for `node:` APIs, `Bun.*`, `Deno.*`, or a native addon
+should declare the engines it supports. The worker refuses to register it **at
+boot**, naming both sides, and keeps it out of the catalog:
+
+```text
+[blok][worker] Node "screenshot" declares capabilityManifest.runtimes = [bun]
+and cannot run on runtime.deno. Select a matching JavaScript target
+(`blokctl runtime use …`), pin the step to a runtime it declares, or widen the
+node's declaration if it is actually portable.
+```
+
+Three fixes, in order of preference: make the node portable and drop the
+constraint; pin the step to a runtime the node declares; or change the project
+target.
+
+---
+
+## Module resolution differences
+
+The portable baseline — proven against all three engines by the conformance
+suite — is standard ESM: relative `./x.js` specifiers, package `exports` maps,
+dynamic `import()`, JSON modules via import attributes, top-level await, and
+ordinary npm dependencies. Where engines differ:
+
+| Case | Node.js | Bun | Deno |
+| --- | --- | --- | --- |
+| TypeScript sources | needs a build (or a loader) | native | native |
+| `./x.js` pointing at `x.ts` | resolved after `tsc` | rewritten automatically | needs `--sloppy-imports` |
+| npm packages | native | native | node compatibility (`--node-modules-dir=manual`) |
+| `node:` builtins | native | compatibility layer | compatibility layer |
+
+`blokctl dev` adds Deno's `--node-modules-dir=manual` and the sloppy-imports
+switch for you (it probes which spelling your Deno accepts, since the flag was
+renamed in Deno 2.2). Those are **resolution** switches, not permissions: they
+grant the worker no authority.
+
+If a Deno build has neither spelling, `blokctl dev` warns, and a `.js`
+specifier pointing at a `.ts` source will not resolve.
+
+---
+
+## Deno permissions
+
+### `--allow-net` is unrestricted and I want it scoped
+
+A capability manifest declares *effects* (`network`), not destinations: there
+is no field in which a node can name the hosts it calls, so the `network`
+effect can only widen `--allow-net` to unrestricted. When a deployment knows
+its egress, scope it explicitly:
+
+```bash
+BLOK_DENO_ALLOW_NET=api.example.com,db.internal:5432 blokctl dev
+```
+
+`blokctl dev` prints every grant with the reason it exists, so least privilege
+is inspectable rather than asserted:
+
+```text
+  Deno worker permissions: --allow-net --allow-read=/app --allow-env (declared effects: network)
+    --allow-net — effect `network` — unrestricted: no manifest field names outbound hosts. Set BLOK_DENO_ALLOW_NET to scope it.
+    --allow-read=/app — baseline: read the project sources and node_modules this worker serves
+    --allow-env — baseline: @grpc/grpc-js reads GRPC_* variables at load
+```
+
+### Why is `--allow-env` unrestricted?
+
+Two reasons, both measured:
+
+1. A node never reads Deno's environment. `ctx.env` is the projection the
+   runner sends over the wire, so environment access grants node code no
+   authority it did not already have.
+2. `@grpc/grpc-js` reads `GRPC_*` variables at module load, and Deno throws
+   `NotCapable: Requires env access to "GRPC_NODE_VERBOSITY"` under a narrowed
+   allow-list. Enumerating them would mean tracking a transitive dependency's
+   internals, and would break on its next release.
+
+### `--allow-all`
+
+Reachable only through `BLOK_DENO_ALLOW_ALL=1`, which prints a warning every
+time. It disables the only native permission boundary Blok has and must not be
+a production default.
+
+---
+
+## Payload and concurrency errors
+
+| Error | Meaning | What to do |
+| --- | --- | --- |
+| `WORKER_OVERLOADED` | Past both the concurrency limit and the queue | Lower workflow concurrency, or raise `BLOK_WORKER_MAX_CONCURRENCY` / `BLOK_WORKER_MAX_QUEUE` |
+| `NODE_DEADLINE_EXCEEDED` | The step's deadline elapsed | Raise the step's `maxDuration`, or honour `ctx.signal` and return earlier |
+| `REQUEST_TOO_LARGE` / `OUTPUT_TOO_LARGE` | Over the 16 MiB message ceiling | Pass a reference instead of bulk data, or raise `BLOK_GRPC_MAX_MESSAGE_BYTES` on **both** sides |
+| `BLOB_NOT_FOUND` | The claim-check directory differs between runner and worker | Point `BLOK_BLOB_DIR` at the same directory (a shared volume across containers) |
+
+Oversized **inputs** are offloaded automatically through the `blob-v1`
+claim-check when `BLOK_BLOB_DIR` is set. There is no outbound claim-check: an
+oversized **result** is an error, by design (ADR 0014).
+
+---
+
+## Verifying an engine yourself
+
+The worker ships the portable conformance fixtures. Serve them and drive them
+with your own client to check an engine end to end:
+
+```bash
+BLOK_WORKER_CONFORMANCE=1 GRPC_PORT=10013 bun node_modules/@blokjs/runtime-worker/dist/bin.js
+```
+
+`--print-manifest` reports what the running engine claims to support, and
+`--print-permissions` reports the effects your nodes declare plus the Deno
+flags derived from them.

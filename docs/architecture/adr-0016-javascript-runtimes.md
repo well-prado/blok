@@ -142,6 +142,66 @@ Consequences of that slice:
   node in the worker sees an EMPTY `ctx.state`; anything it publishes travels
   back as `vars_delta`.
 
+### Conformance, supervision, and deployment slice (implemented)
+
+The second slice closes the verification, supervision, packaging, and
+deployment obligations §3, §4 and §6 create.
+
+- **One portable fixture set, three engines.** `@blokjs/runtime-worker`'s
+  `src/conformance/` is a single runtime-neutral set of `defineNode()` nodes,
+  served when `BLOK_WORKER_CONFORMANCE=1`. It is executed unchanged against
+  Node.js, Bun and Deno by `tests/conformance.test.ts` (worker contract) and
+  `tests/conformance.workflow.test.ts` (real workflows through the runner:
+  handles and persisted state, branch, switch, forEach, loop, try/catch,
+  sub-workflows, deadlines, uncaught failures, trace correlation, secret
+  redaction, and a mixed Node.js → Bun → Deno chain). There is deliberately no
+  per-engine fork: an engine either satisfies the portable contract with those
+  exact modules or it does not.
+
+- **Runtime constraints are enforced, not merely declarable.**
+  `capabilityManifest.runtimes` (§4) is now checked when a worker registers a
+  node. Entries are canonical runner kinds (`nodejs`, `bun`, `deno`, with the
+  `node`/`typescript`/`ts` aliases accepted); an absent or empty list means
+  portable. A node the engine does not satisfy is refused AT BOOT with both
+  sides named, stays out of the catalog, and answers `NODE_RUNTIME_INCOMPATIBLE`
+  — distinct from `NODE_NOT_FOUND` — if a step still targets it. This is what
+  §4's "fail at validation or boot, not during an otherwise valid production
+  run" requires.
+
+- **Crash recovery exists.** §3 lists crash recovery among the properties an
+  out-of-process target needs before production. `blokctl dev` now supervises
+  every runtime sidecar — not only the JavaScript worker — with bounded
+  restart-and-backoff: restart on an unexpected exit, exponential delay, and a
+  capped budget per rolling window so a process that cannot boot produces one
+  clear message instead of an endless loop.
+
+- **Permission decisions are inspectable.** The Deno launcher reports each
+  `--allow-*` grant with the reason it exists (baseline, or the declared effect
+  that earned it). `--allow-ffi` is unreachable by derivation.
+  `BLOK_DENO_ALLOW_NET` scopes the `network` effect's grant for a deployment
+  that knows its egress; without it the grant is unrestricted, because no
+  manifest field names a destination host. `--allow-env` stays unrestricted for
+  a measured reason recorded in the conformance file.
+
+- **Host and target stay separate in generated projects.** The selected target
+  shapes `test` (the engine's own runner) and `worker:start` (the persistent
+  worker); `start` boots the ORCHESTRATOR, which is Node.js or Bun. A Deno
+  project therefore starts a Node orchestrator and executes its `runtime.deno`
+  steps in the Deno worker. `typecheck` and `build` are `tsc` for every target:
+  the type checker is no more an execution axis than the package manager is
+  (§5).
+
+- **Deployment metadata names the engine and pins it.** The worker is emitted
+  as a supervised `[program:javascript_worker]` alongside the language
+  sidecars, and a non-Bun target adds a pinned engine layer to the generated
+  Dockerfile. The pins are the versions CI installs, enforced by a drift test
+  that reads `.github/workflows/ci.yml`.
+
+- **Drift is a test, not a convention.** One check reads the CLI's target
+  definitions, the LSP completion list, both workflow schemas, the VS Code
+  snippets, three documentation pages and the CI matrix from disk and compares
+  them with `@blokjs/shared`.
+
 ## Conformance requirements
 
 The following are machine-checked in the first slice:

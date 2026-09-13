@@ -372,13 +372,71 @@ workflow state is not shipped to a worker. A node that reads
 with `ctx.publish(name, value)` travels back and is merged into state by the
 runner.
 
+### Declaring a runtime-specific node
+
+A node that reaches for `node:` APIs, `Bun.*`, `Deno.*`, or a native addon is
+no longer portable, and the manifest is where it says so:
+
+```ts
+export default defineNode({
+  name: "screenshot",
+  capabilityManifest: {
+    version: "1",
+    classification: "agent-compatible",
+    effects: ["process"],
+    capabilities: [],
+    secrets: [],
+    determinism: "external",
+    idempotency: "idempotent",
+    maturity: "stable",
+    // Canonical runner kinds: nodejs, bun, deno (aliases node/typescript/ts
+    // normalize to nodejs). Absent or empty means portable.
+    runtimes: ["bun"],
+  },
+  // ...
+});
+```
+
+A worker for another engine refuses that node **at boot**, naming both sides,
+keeps it out of its catalog, and answers `NODE_RUNTIME_INCOMPATIBLE` (not
+`NODE_NOT_FOUND`) if a step still targets it. Before this, such a node loaded
+everywhere and failed mid-run with a `ReferenceError`.
+
 ### Deno permissions
 
 The Deno worker launches with the least privilege its nodes justify: one bound
 port, project read, env read. A node earns more by declaring it in its
 `capabilityManifest` — `network` → `--allow-net`, `filesystem`/`write` →
-`--allow-write`, `process` → `--allow-run`. `BLOK_DENO_ALLOW_ALL=1` is the only
-route to `--allow-all` and prints a warning; it is not a production default.
+`--allow-write`, `process` → `--allow-run`. Nothing maps to `--allow-ffi`.
+`BLOK_DENO_ALLOW_ALL=1` is the only route to `--allow-all` and prints a
+warning; it is not a production default. `BLOK_DENO_ALLOW_NET=host[:port],…`
+scopes the `network` grant for a deployment that knows its egress.
+
+`blokctl dev` prints every grant with the reason it exists. See
+[JavaScript runtime troubleshooting](../d/cli/runtime-troubleshooting) for the
+full symptom list.
+
+### Commands in a migrated project
+
+`blokctl runtime use <node|bun|deno>` changes the target in `.blok/config.json`
+without touching workflows, nodes, or the package manager. It does **not**
+rewrite an existing project's `package.json` scripts — re-scaffolding does. If
+you switch targets in place, update these by hand to match what
+`blokctl create project --runtime <target>` now generates:
+
+| Script | node | bun | deno |
+| --- | --- | --- | --- |
+| `test` | `tsc && node --test tests/*.test.js` | `tsc && bun test tests/` | `tsc && deno test --allow-read --allow-env --node-modules-dir=manual tests/` |
+| `start` | `node dist/…` | `bun dist/…` | `node dist/…` (the runner is not hosted under Deno) |
+| `worker:start` | `node …/runtime-worker/dist/bin.js` | `bun …/bin.js` | `deno run --allow-… …/bin.js` |
+
+`typecheck` (`tsc --noEmit`) and `build` (`tsc`) are the same for every target:
+the type checker is not an execution axis.
+
+For deployment, add the supervised worker program to `supervisord.conf` and, if
+your image is not already built on the selected engine, a pinned engine layer
+to the `Dockerfile` — both shown in
+[Language Runtimes](../d/cli/runtimes).
 
 ## Configuring the WebAssembly Runtime
 

@@ -88,6 +88,8 @@ The runner finds it at `RUNTIME_NODEJS_GRPC_PORT` / `RUNTIME_BUN_GRPC_PORT` /
 | `BLOK_BLOB_DIR` | unset | Shared claim-check directory; enables `blob-v1` |
 | `BLOK_SKIP_JS_WORKER` | unset | `1` stops `blokctl dev` spawning a worker |
 | `BLOK_DENO_ALLOW_ALL` | unset | `1` launches the Deno worker with `--allow-all` (diagnosed; never a production default) |
+| `BLOK_DENO_ALLOW_NET` | unset | `host[:port],…` scopes the `network` effect's `--allow-net` instead of leaving it unrestricted |
+| `BLOK_WORKER_CONFORMANCE` | unset | `1` also serves the portable conformance fixture set, for verifying an engine by hand |
 
 `--print-manifest` prints the worker's runtime capability manifest (engine,
 version, protocol version, module formats, TypeScript mode, npm compatibility,
@@ -103,13 +105,83 @@ directory when one is configured), and environment access. Anything more is
 
 | Declared effect | Additional permission |
 | --- | --- |
-| `network` | `--allow-net` (unrestricted; manifests can't enumerate destinations) |
+| `network` | `--allow-net`, scoped by `BLOK_DENO_ALLOW_NET` when set, otherwise unrestricted |
 | `filesystem` / `write` | `--allow-write=<project>` |
 | `process` | `--allow-run` |
+
+Nothing maps to `--allow-ffi`, so a Deno worker cannot reach native code at
+all unless an operator opts out of the boundary entirely. `blokctl dev` prints
+each grant with the reason it exists — least privilege you can inspect rather
+than take on trust. `--allow-env` is unrestricted by design;
+[the troubleshooting page](./runtime-troubleshooting) records the measurement
+behind that.
 
 `blokctl dev` reads those declarations from the worker itself before launching
 it, so the flags follow the code. `BLOK_DENO_ALLOW_ALL=1` is the only route to
 `--allow-all`, and it prints a warning every time.
+
+## What a generated project gets
+
+Selecting a target shapes the scripts `blokctl create project` writes:
+
+| Script | `--runtime node` | `--runtime bun` | `--runtime deno` |
+| --- | --- | --- | --- |
+| `dev` | `blokctl dev` | `blokctl dev` | `blokctl dev` |
+| `typecheck` | `tsc --noEmit` | `tsc --noEmit` | `tsc --noEmit` |
+| `build` | `tsc` | `tsc` | `tsc` |
+| `test` | `tsc && node --test tests/*.test.js` | `tsc && bun test tests/` | `tsc && deno test … tests/` |
+| `start` | `node dist/…` | `bun dist/…` | `node dist/…` |
+| `worker:start` | `node …/runtime-worker/dist/bin.js` | `bun …/bin.js` | `deno run --allow-… …/bin.js` |
+
+Two of those deserve a word.
+
+**`typecheck` and `build` are the same for every target.** TypeScript is the
+project's type checker and emitter whichever engine runs the output; which
+engine executes your nodes is not a type-checking concern, the same way it is
+not a package-manager concern.
+
+**`start` is Node.js for a Deno project.** That is the host/target separation
+doing its job: `start` boots the *orchestrator*, the Blok runner is not hosted
+under Deno, and the project's `runtime.deno` steps run in the worker that
+`worker:start` (and `blokctl dev`) launches. Node.js and Bun host the
+orchestrator themselves, so selecting them makes `start` use that engine and
+their steps run in-process with no worker at all.
+
+The project also ships one test (`tests/nodes.test.js`) written with
+`node:test` in plain JavaScript — the one spelling all three engines run
+unchanged. It loads the **built** node registry, which is exactly the load the
+worker performs, so a node that only resolves under one engine fails there
+first. Add your own with `runNode` / `runWorkflow` from `@blokjs/core/testing`.
+
+### Deployment metadata
+
+The worker is a supervised program like every language sidecar, pinned to the
+engine version CI proves it against:
+
+```ini
+[program:javascript_worker]
+; ADR 0016 — persistent deno worker for runtime.deno steps.
+; Pinned engine: deno 2.7.5 (the version CI proves this worker against).
+command=deno run --allow-net=127.0.0.1:10014,localhost:10014 --allow-read=. --allow-env --node-modules-dir=manual node_modules/@blokjs/runtime-worker/dist/bin.js
+directory=/app
+environment=GRPC_PORT="10014",HOST="0.0.0.0"
+autostart=true
+autorestart=true
+```
+
+The generated `Dockerfile` builds on a Bun image, so a `node` or `deno` target
+also gets a pinned engine layer in the release stage:
+
+```dockerfile
+# Blok JavaScript execution target: deno (ADR 0016).
+COPY --from=denoland/deno:bin-2.7.5 /deno /usr/local/bin/deno
+```
+
+<Note>
+In development, `blokctl dev` supervises every sidecar — including this worker
+— with bounded restart and backoff. A crash is restarted; a crash **loop** is
+capped and reported once rather than flooding the log.
+</Note>
 
 ## The commands at a glance
 

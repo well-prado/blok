@@ -473,6 +473,37 @@ jobs:
         working-directory: packages/js-runtime-worker
         run: bunx vitest run tests/worker.integration.test.ts
 
+      # The portable conformance matrix: ONE fixture set, executed against all
+      # three engines. It does not vary by matrix leg, so it runs once —
+      # tripling it would only prove the runner is deterministic.
+      - name: Portable conformance matrix (node + bun + deno)
+        if: matrix.target == 'node'
+        working-directory: packages/js-runtime-worker
+        run: bunx vitest run tests/conformance.test.ts
+
+      # The orchestrator half: real workflows over those same workers —
+      # handles/state, branch, switch, forEach, loop, try/catch, sub-workflows,
+      # deadlines, trace correlation, secret redaction, and a mixed
+      # Node.js → Bun → Deno chain.
+      - name: Workflow conformance across the three targets
+        if: matrix.target == 'node'
+        working-directory: packages/js-runtime-worker
+        run: bunx vitest run tests/conformance.workflow.test.ts
+
+      # Crash recovery: SIGKILL the real worker, the supervisor brings it back,
+      # the next step succeeds.
+      - name: Supervised worker crash recovery
+        if: matrix.target == 'node'
+        working-directory: packages/cli
+        run: bunx vitest run tests/services/supervisor.test.ts tests/integration/js-worker-crash-recovery.test.ts
+
+      # Measures throughput/latency/CPU/memory per engine AND asserts the three
+      # regressions that must never come back: no process per step, worker
+      # reuse, and backpressure past the concurrency gate.
+      - name: Runtime benchmark + process-count regression
+        if: matrix.target == 'node'
+        run: bun run benchmarks/js-runtime-worker.ts 500 32
+
       - name: Scaffold → boot with --runtime ${{ matrix.target }}
         env:
           SMOKE_JS_RUNTIME: ${{ matrix.target }}
