@@ -15,8 +15,13 @@ import {
 	runtimeKindOf,
 	sdkNameOf,
 } from "../src/host.js";
-import { declaredEffects, denoPermissionFlags } from "../src/permissions.js";
-import { type ExecuteContextProjection, type WorkerNode, WorkerRegistry } from "../src/registry.js";
+import { declaredEffects, denoPermissionFlags, denoPermissionGrants, parseNetAllowList } from "../src/permissions.js";
+import {
+	type ExecuteContextProjection,
+	type WorkerNode,
+	WorkerRegistry,
+	isRuntimeCompatible,
+} from "../src/registry.js";
 import { ConcurrencyGate } from "../src/server.js";
 
 const ORIGIN = { node: "n", sdk: "blok-js-node", sdkVersion: "1.0.0", runtimeKind: "runtime.nodejs" };
@@ -274,6 +279,25 @@ describe("bounded concurrency", () => {
 	});
 });
 
+describe("runtime constraints", () => {
+	it("treats an absent or empty declaration as portable", () => {
+		expect(isRuntimeCompatible([], "deno")).toBe(true);
+	});
+
+	it("accepts the canonical kind, the runtime. prefix, and the legacy aliases", () => {
+		for (const declared of [["nodejs"], ["runtime.nodejs"], ["node"], ["typescript"], ["ts"], ["NodeJS"]]) {
+			expect(isRuntimeCompatible(declared, "nodejs"), declared.join()).toBe(true);
+		}
+	});
+
+	it("refuses an engine the node never named", () => {
+		expect(isRuntimeCompatible(["bun"], "deno")).toBe(false);
+		expect(isRuntimeCompatible(["bun", "deno"], "nodejs")).toBe(false);
+		// Multi-engine declarations are satisfied by any one of them.
+		expect(isRuntimeCompatible(["bun", "deno"], "deno")).toBe(true);
+	});
+});
+
 describe("deno permissions", () => {
 	const options = { port: 10014, projectRoot: "/srv/app" };
 
@@ -297,6 +321,32 @@ describe("deno permissions", () => {
 
 	it("reaches --allow-all only through the explicit opt-in", () => {
 		expect(denoPermissionFlags(["network"], { ...options, allowAll: true })).toEqual(["--allow-all"]);
+	});
+
+	it("scopes the network grant when the operator supplies an allow-list", () => {
+		const netAllow = parseNetAllowList("api.example.com, db.internal:5432 ,");
+		expect(netAllow).toEqual(["api.example.com", "db.internal:5432"]);
+		expect(denoPermissionFlags(["network"], { ...options, netAllow })[0]).toBe(
+			"--allow-net=api.example.com,db.internal:5432",
+		);
+		// An empty/whitespace-only value must not silently produce `--allow-net=`,
+		// which Deno reads as "allow nothing" and would kill the worker's own bind.
+		expect(denoPermissionFlags(["network"], { ...options, netAllow: parseNetAllowList(" , ") })[0]).toBe("--allow-net");
+	});
+
+	it("never derives --allow-ffi from any effect", () => {
+		const everyEffect = ["network", "filesystem", "write", "read", "process", "secret", "streaming", "destructive"];
+		expect(denoPermissionFlags(everyEffect as never, options).join(" ")).not.toContain("ffi");
+	});
+
+	it("reports the reason for every grant, so least privilege is inspectable", () => {
+		const grants = denoPermissionGrants(["network", "process"], options);
+		const byFlag = Object.fromEntries(grants.map((g) => [g.flag, g.reason]));
+		expect(byFlag["--allow-net"]).toContain("network");
+		expect(byFlag["--allow-net"]).toContain("BLOK_DENO_ALLOW_NET");
+		expect(byFlag["--allow-run"]).toContain("process");
+		expect(byFlag["--allow-read=/srv/app"]).toContain("baseline");
+		expect(denoPermissionGrants([], { ...options, allowAll: true })[0].reason).toContain("BLOK_DENO_ALLOW_ALL");
 	});
 
 	it("treats a missing manifest as granting nothing", () => {
