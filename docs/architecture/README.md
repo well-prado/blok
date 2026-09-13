@@ -15,6 +15,7 @@ they must not silently contradict it.
 - [ADR 0016 conformance evidence](adr-0016-javascript-runtimes-conformance.md)
 - [ADR 0002 — Dart runtime sidecar](runtime/adr/0002-dart-runtime.md)
 - [Dart runtime conformance](runtime/dart-conformance.md)
+- [ADR 0003 — Zig runtime: transport decision (deferred)](runtime/adr/0003-zig-transport-decision.md)
 - [ADR 0017 — Elixir/BEAM runtime sidecar](adr-0017-elixir-beam-runtime.md)
 
 ## Decision governance
