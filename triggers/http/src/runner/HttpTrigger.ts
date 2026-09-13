@@ -2463,6 +2463,18 @@ export default class HttpTrigger extends TriggerBase {
 					if (e instanceof GlobalError) {
 						const error_context = e as GlobalError;
 
+						// #996 — a thrown error may carry response headers and cookies
+						// (`@blokjs/throw`'s `headers` / `cookies`). That is what turns a
+						// middleware short-circuit into `302 Location: /login` with a flash
+						// cookie, instead of a bare 401. Applied before every return below
+						// so it covers the DOMException, JSON-body and plain-message shapes.
+						for (const [key, value] of Object.entries(error_context.context.headers ?? {})) {
+							c.header(key, value);
+						}
+						for (const cookie of error_context.context.cookies ?? []) {
+							c.header("Set-Cookie", cookie, { append: true });
+						}
+
 						if (error_context.context.message === "{}" && error_context.context.json instanceof DOMException) {
 							workflow_runner_errors.add(1, {
 								env: process.env.NODE_ENV,

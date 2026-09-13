@@ -48,6 +48,21 @@ export default defineNode({
 					"reason: 'token expired' }`).",
 			),
 		name: z.string().optional().describe("Error name. Surfaces as `$.error.name`. Default 'Error'."),
+		headers: z
+			.record(z.string())
+			.optional()
+			.describe(
+				"Response headers the HTTP trigger emits with this error (#996). " +
+					"`{ Location: '/login' }` with `code: 302` turns a middleware " +
+					"short-circuit into a real redirect instead of a bare 401.",
+			),
+		cookies: z
+			.array(z.string())
+			.optional()
+			.describe(
+				"Raw `Set-Cookie` values emitted with this error (#996). Each entry " +
+					"becomes its own header, e.g. a flash cookie persisted on the way out.",
+			),
 	}),
 	output: z.never(),
 
@@ -56,6 +71,8 @@ export default defineNode({
 		if (input.code !== undefined) err.setCode(input.code);
 		if (input.body !== undefined) err.setJson(input.body as Record<string, unknown>);
 		if (input.name !== undefined) err.setName(input.name);
+		if (input.headers !== undefined) err.setHeaders(input.headers);
+		if (input.cookies !== undefined) err.setCookies(input.cookies);
 		// Stash on the prototype-level field too so tryCatch's cause-chain
 		// unwrap reads the right `.name` (Error class default-names to "Error"
 		// regardless of GlobalError's internal context.name).

@@ -27,6 +27,14 @@ export default class GlobalError extends Error {
 	setName(name?: string) {
 		this.context.name = name;
 	}
+	/** #996 — response headers to emit with this error (e.g. `Location`). */
+	setHeaders(headers?: Record<string, string>) {
+		this.context.headers = headers;
+	}
+	/** #996 — raw `Set-Cookie` values to emit with this error. */
+	setCookies(cookies?: string[]) {
+		this.context.cookies = cookies;
+	}
 
 	hasJson(): boolean {
 		return this.context.json !== undefined;

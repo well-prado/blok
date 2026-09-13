@@ -158,10 +158,15 @@ re-issue the logout write) and marks the request so the next page object
 carries `clearHistory: true`. The client then drops its history key and IV,
 and the entries behind Back can no longer be decrypted.
 
-The mark is request-scoped: a page rendered **in the same request** picks it
-up. Carrying it across the redirect to the *next* request needs the session
-flash — `TODO(#996)`. Until then, render the page after `logout` in the same
-workflow, or pass `clearHistory()` to the page that answers `/login`.
+The mark is request-scoped, so a page rendered **in the same request** picks it
+up directly. The normal case — a redirect — is covered by the signed flash
+cookie (#996): `logoutResponse` persists the mark, `inertia.shared` reads it
+back on the next request, and the page the user lands on carries
+`clearHistory: true` **once**. Wire `clearHistory: {"$ref": {"step": "flash",
+"path": ["clearHistory"]}}` into the render step for that (the `flash` step
+reports `true` or nothing — never `false` — so it can't override a mark set in
+the same request). Without `BLOK_FLASH_SECRET` configured, logout keeps the
+request-scoped-only behaviour instead of failing.
 
 ### Authorization
 
@@ -296,6 +301,88 @@ The same step in a JSON workflow:
 Internally the step lowers to one inner step per prop, named `<pageId>.<key>`,
 plus the serializer at `<pageId>.$render`. Studio tags those inner steps
 `page:<pageId>`, the way middleware inner steps are tagged.
+## Middleware pack + flash (#996)
+
+Two ordinary Blok middleware workflows (`middleware: true`, run on the parent
+ctx before the page workflow). This is not a second middleware system — it is
+the existing one, registered by name:
+
+```ts
+// src/Workflows.ts
+import { createAuthMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
+  // …your page workflows
+};
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared"]);
+// per route: trigger: http.get("/orders", { middleware: ["inertia.auth"] })
+```
+
+| Workflow | Steps | What it does |
+| --- | --- | --- |
+| `inertia.shared` | `auth`, `flash` | runs your `currentUser` node into `ctx.state.auth`, then verifies + clears the signed flash cookie into `ctx.state.flash` |
+| `inertia.auth` | `inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect` | when `auth.id` is missing, throws `302 Location: /login` (`@blokjs/throw`'s `headers`) |
+
+> **Reserved step ids: `auth` and `flash`.** Step ids are ONE flat namespace
+> per run (footgun 3) and middleware shares the page workflow's `ctx`, so a
+> page step called `auth` overwrites the signed-in user. `inertia.auth`'s own
+> ids are prefixed (`inertiaGuest`, `inertiaAuthGate`,
+> `inertiaAuthRedirect`) for the same reason.
+
+**With the `page` control step (#1008) there is nothing to wire.** `page`
+reads the `flash` state slot itself and folds it into the serializer's inputs:
+errors, the error bag, page flash, `preserveFragment`, `clearHistory`, and the
+clearing `Set-Cookie`. Anything you pass through `render()`'s options wins —
+`errors` and `flash` MERGE, with your keys on top of the middleware's. Read
+`auth` with `shared()`:
+
+```ts
+import { definePage, shared } from "@blokjs/inertia";
+
+const OrdersPage = definePage("Orders/Index", { auth: shared(currentUser, "auth") });
+export default workflow("orders", { version: "1.0.0", trigger: http.get("/orders") }, () => {
+  OrdersPage.render("page", { auth: shared(currentUser, "auth") });
+});
+```
+
+A hand-written serializer step (no `page` step) wires the same fields itself —
+`inertia.shared`'s `flash` step exposes `{ errors, bag, flash,
+preserveFragment, clearHistory, cookie, present }`, and `cookie` has to go
+through as `cookies`, because the response that CONSUMED the flash is the one
+that expires it:
+
+```json
+{ "id": "render", "use": "@blokjs/inertia", "inputs": {
+  "component": "Orders/Index",
+  "props":   { "auth": { "$ref": { "step": "auth", "path": [] } } },
+  "errors":  { "$ref": { "step": "flash", "path": ["errors"] } },
+  "errorBag":{ "$ref": { "step": "flash", "path": ["bag"] } },
+  "flash":   { "$ref": { "step": "flash", "path": ["flash"] } },
+  "clearHistory": { "$ref": { "step": "flash", "path": ["clearHistory"] } },
+  "cookies": [ { "$ref": { "step": "flash", "path": ["cookie"] } } ]
+}}
+```
+
+The write side is `redirectBack()` / `back()`, plus a chainable `flash()`:
+
+```ts
+return redirectBack(ctx.request, { errors: { sku: "Required." }, bag: "createOrder", fallback: "/orders" });
+return flash("toast", { type: "success" }).render({ component: "Orders/Index", props });
+```
+
+`redirectBack()` persists errors AND flash (and `preserveFragment`) in the
+signed one-shot cookie, and answers a non-GET with `303` so the write is never
+replayed. `withAllErrors: true` on the node ships every message per field
+(`string[]`) instead of the first (`string`). On a version-mismatch `409` the
+node RE-SIGNS any pending flash, so it survives the forced full visit.
+
+**`BLOK_FLASH_SECRET` is required** for anything that touches the cookie —
+HMAC-SHA256, `HttpOnly; SameSite=Lax; Path=/`. There is no default: an
+unsigned flash cookie is a forgeable one. A tampered or wrong-secret cookie
+reads back as "no flash", never as an error.
 
 ## Exports
 
@@ -331,22 +418,28 @@ import InertiaNode, {
   scroll,
   shared,
   getPageRegistry,
+  // #996
+  redirectBack,
+  back,
+  flash,
+  flashCookie,
+  normalizeErrors,
+  createSharedMiddleware,
+  createAuthMiddleware,
 } from "@blokjs/inertia";
 import type { PageProps } from "@blokjs/inertia";
 ```
 
-The security nodes are **not** in `HELPER_NODES`: pass the node object to
-`step()`, or register them in your project's `Nodes.ts` if you write JSON
-workflows.
-
-Registered in `HELPER_NODES` as `@blokjs/inertia`, so JSON workflows reach it
-without any extra wiring.
+Registered in `HELPER_NODES` when the package is installed — the adapter as
+`@blokjs/inertia`, and the three named nodes as `@blokjs/inertia.authorize`,
+`@blokjs/inertia.logout` and `@blokjs/inertia.history` — so JSON workflows
+reach all of them without any extra wiring. In TypeScript, pass the node object
+to `step()` instead.
 
 ## Not this node's job
 
-The middleware/session layer that flashes errors and `preserveFragment` across
-a redirect (#996), the shared-prop registry (#1015), merge/once RESOLUTION
-semantics (#1009), infinite-scroll paging (#1010), SSR (#1001) and the client
-package. `definePage` (#995) and the `page` control step (#1008) ship here, but
-they are the AUTHORING and CONTROL layers — the node itself still only
-serializes.
+The shared-prop registry (#1015), merge/once RESOLUTION semantics (#1009),
+infinite-scroll paging (#1010), SSR (#1001) and the client package.
+`definePage` (#995), the `page` control step (#1008) and the middleware pack
+(#996) ship here, but they are the AUTHORING, CONTROL and REQUEST layers — the
+node itself still only serializes.

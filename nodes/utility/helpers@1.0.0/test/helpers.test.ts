@@ -63,9 +63,13 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/ctx-publish",
 				"@blokjs/ctx-publish-many",
 				"@blokjs/expr",
+				"@blokjs/flash",
 				"@blokjs/hmac-verify",
 				"@blokjs/in-memory-kv",
 				"@blokjs/inertia",
+				"@blokjs/inertia.authorize",
+				"@blokjs/inertia.history",
+				"@blokjs/inertia.logout",
 				"@blokjs/json-schema",
 				"@blokjs/jwt-verify",
 				"@blokjs/llm-agent",
@@ -85,6 +89,23 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/ws-close",
 				"@blokjs/ws-reply",
 			]);
+		});
+
+		// #996 — the optional `@blokjs/inertia` package contributes FOUR nodes,
+		// each keyed by its own `name`, through the one dynamic import. A key
+		// that drifts from the node's name is a `use:` that resolves to nothing.
+		it("registers every Inertia node under its own name when the package is present", () => {
+			const refs = [
+				"@blokjs/inertia",
+				"@blokjs/inertia.authorize",
+				"@blokjs/inertia.logout",
+				"@blokjs/inertia.history",
+			];
+			for (const ref of refs) {
+				const node = (HELPER_NODES as Record<string, { name?: string } | undefined>)[ref];
+				expect(node, `${ref} missing from HELPER_NODES`).toBeDefined();
+				expect(node?.name).toBe(ref);
+			}
 		});
 	});
 
