@@ -179,6 +179,17 @@ describe("#1000 CORS", () => {
 		expect(get.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
 	});
 
+	it("keeps credentials on with an allow-list of origins", async () => {
+		// dev + preview, the other half of standalone mode. Hono echoes the ONE
+		// matched origin, so a list is as credential-safe as a single origin.
+		process.env.BLOK_CORS_ORIGIN = "http://localhost:5173,http://localhost:4173";
+		const app = await boot();
+
+		const res = await app.request("/health-check", { headers: { Origin: "http://localhost:4173" } });
+		expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:4173");
+		expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+	});
+
 	it("does not send credentials with the wildcard origin", async () => {
 		process.env.BLOK_CORS_ORIGIN = "*";
 		const app = await boot();

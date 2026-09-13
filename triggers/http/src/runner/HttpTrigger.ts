@@ -1446,12 +1446,14 @@ export default class HttpTrigger extends TriggerBase {
 					this.app.use(
 						cors({
 							origin: origins.length === 1 ? origins[0] : origins,
-							// #1000 — a credentialed origin is the standalone-SPA case
-							// (Vite on :5173, session cookie on the API). The wildcard
-							// is the exception: `Allow-Origin: *` with
-							// `Allow-Credentials: true` is rejected by every browser,
-							// so `*` stays an uncredentialed public-API opt-in.
-							credentials: origins.length === 1 && origins[0] !== "*",
+							// #1000 — a named origin is the standalone-SPA case (Vite on
+							// :5173, session cookie on the API), and an allow-LIST is
+							// just as much that case (dev + preview): Hono echoes the
+							// one matched origin, never the list, so credentials stay
+							// valid. The wildcard is the exception: `Allow-Origin: *`
+							// with `Allow-Credentials: true` is rejected by every
+							// browser, so a list containing `*` stays uncredentialed.
+							credentials: !origins.includes("*"),
 							allowHeaders: CORS_ALLOW_HEADERS,
 							exposeHeaders: CORS_EXPOSE_HEADERS,
 						}),
