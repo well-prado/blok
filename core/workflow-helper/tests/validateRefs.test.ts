@@ -754,3 +754,110 @@ describe("validateRefs — wait references (#704)", () => {
 		expect(bad.map((d) => d.code)).toEqual(["dangling-step"]);
 	});
 });
+
+// ─────────────────────── #1008 page control step ────────────────────────────
+
+describe("validateRefs — page steps (#1008)", () => {
+	const nodes = lookup({
+		"current-user": z.object({ id: z.string(), email: z.string() }),
+		"list-orders": z.object({ items: z.array(z.string()) }),
+		"@blokjs/respond": z.object({ ok: z.boolean() }),
+	});
+
+	const pageStep = {
+		id: "page",
+		page: {
+			component: "Orders/Index",
+			url: "/orders",
+			props: {
+				auth: { use: "current-user", mode: "always", inputs: {} },
+				orders: {
+					use: "list-orders",
+					inputs: { userId: { $ref: { step: "@trigger", path: ["query", "userId"] } } },
+				},
+			},
+		},
+	};
+
+	it("registers the page's own slot and every per-prop slot as readable producers", () => {
+		const result = validateRefs(
+			{
+				name: "page-refs",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/orders" } },
+				steps: [
+					pageStep,
+					{
+						id: "after",
+						use: "@blokjs/respond",
+						inputs: {
+							body: {
+								items: { $ref: { step: "page.orders", path: ["items"] } },
+								email: { $ref: { step: "page.auth", path: ["email"] } },
+								envelope: { $ref: { step: "page", path: [] } },
+							},
+						},
+					},
+				],
+			},
+			{ nodes },
+		);
+
+		expect(errors(result)).toHaveLength(0);
+		expect(codes(result)).not.toContain("unknown-step");
+	});
+
+	it("still field-checks a per-prop read against the prop node's output schema", () => {
+		const result = validateRefs(
+			{
+				name: "page-refs-bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/orders" } },
+				steps: [
+					pageStep,
+					{
+						id: "after",
+						use: "@blokjs/respond",
+						inputs: { body: { nope: { $ref: { step: "page.auth", path: ["nope"] } } } },
+					},
+				],
+			},
+			{ nodes },
+		);
+
+		const bad = errors(result);
+		expect(bad).toHaveLength(1);
+		expect(bad[0]?.code).toBe("unknown-field");
+		expect(bad[0]?.producer).toBe("page.auth");
+		expect(bad[0]?.fields).toEqual(["id", "email"]);
+	});
+
+	it("validates the refs inside a prop's own inputs", () => {
+		const result = validateRefs(
+			{
+				name: "page-prop-input-ref",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/orders" } },
+				steps: [
+					{ id: "user", use: "current-user", inputs: {} },
+					{
+						id: "page",
+						page: {
+							component: "Orders/Index",
+							props: {
+								orders: { use: "list-orders", inputs: { userId: { $ref: { step: "user", path: ["nope"] } } } },
+							},
+						},
+					},
+				],
+			},
+			{ nodes },
+		);
+
+		const bad = errors(result);
+		expect(bad).toHaveLength(1);
+		expect(bad[0]?.code).toBe("unknown-field");
+		expect(bad[0]?.producer).toBe("user");
+		expect(bad[0]?.refPath).toBe("nope");
+	});
+});

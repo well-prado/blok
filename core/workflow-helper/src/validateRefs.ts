@@ -408,6 +408,27 @@ function collectProducers(
 					spreadRoot: false,
 				});
 			}
+		} else if (isPlainObject(raw.page)) {
+			// #1008 — a `page` step writes TWO kinds of slot: its own (the
+			// serializer's response envelope) and one per prop, at
+			// `<pageId>.<key>`. Registering both keeps this validator in step with
+			// what `PageNode` actually persists; without the per-prop slots a
+			// perfectly valid read of one would be reported as an unknown step.
+			push(out, id, { stepId: id, scope, ephemeral: false, schema: {}, unchecked: false, spreadRoot: false });
+			const pageProps = (raw.page as Record<string, unknown>).props;
+			if (isPlainObject(pageProps)) {
+				for (const [key, spec] of Object.entries(pageProps)) {
+					const use = isPlainObject(spec) ? asString(spec.use) : undefined;
+					push(out, `${id}.${key}`, {
+						stepId: id,
+						scope,
+						ephemeral: false,
+						schema: (use && lookup ? lookup(use) : undefined) ?? {},
+						unchecked: false,
+						spreadRoot: false,
+					});
+				}
+			}
 		} else if (!isFlowStep(raw)) {
 			const use = asString(raw.use);
 			const isSub = typeof raw.subworkflow === "string";
