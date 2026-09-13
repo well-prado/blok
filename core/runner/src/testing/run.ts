@@ -160,6 +160,11 @@ export async function runWorkflow<W>(
 		headers: opts?.headers,
 		query: opts?.query,
 		params: opts?.params,
+		// Request/state seams the page harness needs (#1002): `method` decides a
+		// redirect's 302-vs-303, `state` stands in for a middleware chain.
+		method: opts?.method,
+		url: opts?.url,
+		state: opts?.state,
 		contextOverrides: {
 			...opts?.contextOverrides,
 			...(opts?.env ? { env: opts.env } : {}),

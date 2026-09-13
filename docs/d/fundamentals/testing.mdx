@@ -4,16 +4,17 @@ description: Unit-test a node and a typed-handle workflow under vitest or bun te
 icon: "flask-conical"
 ---
 
-Blok's test surface is two functions. `runNode` runs one node in isolation.
+Blok's test surface is three functions. `runNode` runs one node in isolation.
 `runWorkflow` runs a `workflow()` export through the real engine and tells you
-what every step did.
+what every step did. `runPage` does the same for an Inertia page workflow, with
+the protocol headers and the page object handled for you.
 
 ```bash
 npm i -D vitest    # or use `bun test` — both work, unchanged
 ```
 
 ```ts
-import { runNode, runWorkflow } from "@blokjs/core/testing";
+import { runNode, runPage, runWorkflow } from "@blokjs/core/testing";
 ```
 
 <Tip>
@@ -151,6 +152,94 @@ expect(run.steps.map((s) => s.id)).toEqual(["load", "aggregate", "render"]);
 
 Cross-runtime steps (Python, Go, Rust, …) need a live sidecar, so mock them by
 key like any other external dependency — `{ mock: { "score-model": async () => ({ score: 0.9 }) } }`.
+
+## Recipe 4 — an Inertia page workflow
+
+A page workflow's contract is a protocol: which headers went out, which props
+the runner therefore resolved, and what the page object says about the ones it
+skipped. `runPage` builds that request for you, runs the same engine
+`runWorkflow` does, and hands back the page object already unwrapped.
+
+```ts
+import { runPage } from "@blokjs/core/testing";
+
+const page = await runPage(ordersIndex, {
+  headers: { cookie: "session=abc" },              // merged into the trigger request
+  partial: ["stats"],                              // sets X-Inertia-Partial-Data/-Component
+  version: "v1", clientVersion: "v1",              // → X-Inertia-Version
+  middleware: { auth: { id: "u1", email: "a@b" } },// seeds ctx.state, does NOT run middleware
+  mock: { "list-orders": async () => [{ id: "o-1" }] }, // same contract as runWorkflow
+});
+
+page.component;   // "Orders/Index"
+page.props.orders;
+page.deferred;    // ["stats"]
+page.status;      // 200 | 303 | 409 …
+page.headers;     // envelope headers
+page.run;         // the underlying runWorkflow result (steps, ctx.state)
+```
+
+`middleware` seeds `ctx.state` **before** the run — enough for `shared(currentUser, "auth")`
+to resolve — but it does not execute a middleware chain. To exercise the real
+chain, author it on the workflow and use `runWorkflow`.
+
+Mocks are keyed by **node ref**, exactly as in `runWorkflow`, and are validated
+against that node's Zod output schema. A page prop's own step id is
+`"<pageId>.<propKey>"`, which is what `page.run.step(...)` / `page.run.state(...)` take.
+
+### Fluent assertions
+
+`page.assert()` mirrors Laravel's `AssertableInertia`: dot paths everywhere, an
+array count as the second `has` argument, `where` deep-equals.
+
+```ts
+page.assert()
+  .component("Orders/Index")
+  .has("orders", 3, (o) => o.where("0.id", "o-1").etc())
+  .where("auth.email", "a@b")
+  .missing("auth.password")
+  .hasFlash("toast.message", "Saved")
+  .etc();
+```
+
+Inside a `has(key, scope)` scope every immediate key must be asserted by
+`has` / `where` / `missing`, or the scope must end with `.etc()` — otherwise the
+assertion fails listing the untouched keys. (The outer chain has no closing
+moment, so it is never checked; `.etc()` there just reads symmetrically.)
+
+### Follow-up reloads
+
+These are **real second runs** of the same workflow, carrying the partial-reload
+headers the client would have sent — the only way to prove a deferred prop's
+node ran exactly when it should have.
+
+```ts
+await page.reloadOnly(["stats"], (p) => p.has("stats"));
+await page.reloadExcept(["orders"], (p) => p.missing("orders"));
+await page.loadDeferredProps("dashboard", (p) => p.has("stats").missing("feed"));
+```
+
+Each returns a fresh page result, so `fresh.run.step("page.stats")?.executed`
+tells you which props the second visit resolved.
+
+### Redirects and flash
+
+```ts
+const page = await runPage(storeOrder, { method: "POST", input: { sku: "" } });
+
+page.assertRedirect("/orders")
+  .status(303)
+  .assertFlash("errors.sku")
+  .assertFlashMissing("errors.name");
+```
+
+`assertFlash` verifies the signed flash cookie on the response, so it needs the
+signing secret: `BLOK_FLASH_SECRET`, or `flashSecret` on the `runPage` options.
+
+<Note>
+`runPrecognition()` is declared but throws — the precognition request pipeline
+lands with [#1011](https://github.com/well-prado/blok/issues/1011).
+</Note>
 
 ## What a run tells you
 
