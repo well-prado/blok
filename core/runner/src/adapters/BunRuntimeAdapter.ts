@@ -45,7 +45,7 @@ export class BunRuntimeAdapter implements RuntimeAdapter {
 			data: null,
 			errors: {
 				message:
-					"runtime.bun requires the Blok runner to be hosted by Bun until the persistent Bun worker is configured",
+					"runtime.bun cannot execute in-process: this runner is not hosted by Bun. Configuration registers the persistent Bun worker (gRPC) for this case — reaching this branch means the adapter was registered manually on a mismatched host.",
 			},
 		};
 	}

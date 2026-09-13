@@ -68,6 +68,8 @@ export interface GrpcErrorContext {
 	readonly sdk: string;
 	readonly sdkVersion: string;
 	readonly runtimeKind: string;
+	/** Next step for a failure that never reached the server. Optional. */
+	readonly remediation?: string;
 }
 
 /**
@@ -108,6 +110,7 @@ export function toBlokError(err: unknown, ctx: GrpcErrorContext): BlokError {
 			sdk: ctx.sdk,
 			sdkVersion: ctx.sdkVersion,
 			runtimeKind: ctx.runtimeKind,
+			remediation: ctx.remediation,
 			details: { grpcStatus: GrpcStatus[err.code], grpcMessage: err.message },
 		});
 	}
