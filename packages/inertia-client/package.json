@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/inertia-client",
-	"version": "2.2.1",
+	"version": "2.3.0",
 	"files": ["dist"],
 	"description": "Framework-agnostic Inertia.js client glue for Blok: typed page props, typed routes, and the Vite plugin.",
 	"type": "module",
