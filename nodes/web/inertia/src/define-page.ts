@@ -212,6 +212,30 @@ export interface RenderOptions {
 	preserveFragment?: boolean;
 	/** Flash data. #996 owns the middleware that fills this; passed through verbatim. */
 	flash?: Refable<Record<string, unknown>>;
+	/** `false` hides the shared-prop key list from the page object (#1015). Values still ship. */
+	exposeSharedPropKeys?: boolean;
+}
+
+/**
+ * A reusable prop bundle — declare a set of props once and spread it into every
+ * page that needs them, with the types intact (Laravel's
+ * `ProvidesInertiaProperties`).
+ *
+ * ```ts
+ * const dashboard = withProps({ auth: always(currentUser), nav: loadNav });
+ * export const Home = definePage("Home", { ...dashboard, stats: loadStats });
+ * export const Team = definePage("Team", { ...dashboard, members: loadMembers });
+ * ```
+ *
+ * ponytail: a typed identity, on purpose. The bundle IS a `PageShape`, so the
+ * spread is all the machinery a bundle needs; this only pins the type so the
+ * keys stay inferred (and gives the concept a name to search for).
+ */
+export function withProps<B extends PageShape>(bundle: B): B {
+	if (!bundle || typeof bundle !== "object") {
+		throw new Error("withProps() requires a props object, e.g. withProps({ auth: always(currentUser) }).");
+	}
+	return { ...bundle };
 }
 
 /** What `definePage()` returns. */

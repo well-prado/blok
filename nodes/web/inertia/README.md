@@ -384,6 +384,113 @@ HMAC-SHA256, `HttpOnly; SameSite=Lax; Path=/`. There is no default: an
 unsigned flash cookie is a forgeable one. A tampered or wrong-secret cookie
 reads back as "no flash", never as an error.
 
+## Shared data, routes and naming (#1015)
+
+### `share()` / `shareOnce()` — data every page gets
+
+```ts
+// src/Bootstrap.ts (imported once, before the workflows)
+import { share, shareOnce } from "@blokjs/inertia";
+
+share("appName", "Blok");                                  // static
+share("auth", (req) => userFromSession(req));              // LAZY: per request
+share("flags", loadFlags, { always: true });               // survives every partial filter
+shareOnce("countries", loadCountries, { until: "1d" });    // the client caches it
+```
+
+Shared values are merged **under** the page's own props (a page prop of the
+same name wins, and the shared value is then never resolved at all), and their
+top-level keys ride the page object as `sharedProps` so
+[instant visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) can
+carry them to the next page before the server answers. `exposeSharedPropKeys:
+false` on a page hides the key list; the values still ship.
+
+Selection follows the same table as declared props:
+
+| Request | `regular` | `always` | `once` |
+| --- | --- | --- | --- |
+| full visit | resolved | resolved | resolved unless `X-Inertia-Except-Once-Props` names it |
+| partial with `only` | only when named | resolved | only when named |
+| partial without `only` | resolved | resolved | not resolved |
+| `except` names it | not resolved | resolved | not resolved |
+
+A lazy value is called with `ctx.request`, at most once per request, and only
+when the key is actually selected — so `share("auth", expensive)` costs nothing
+on a partial reload that asked for something else. A prop resolver that needs
+another shared value reads it from the same per-request cache:
+
+```ts
+const tenant = await getShared("tenant", { id: "public" }, ctx);
+```
+
+Namespace shared data (`share("auth", { user })`, not `share("user", …)`) —
+keys are top-level props and a page prop of the same name silently wins. A key
+containing a dot is rejected for that reason.
+
+> **Registry vs. the `inertia.shared` middleware.** The middleware (#996) runs
+> two real steps (`auth`, `flash`) whose outputs land in `ctx.state` for
+> `shared(currentUser, "auth")` to feed into a prop's INPUTS. The registry
+> hands values straight to the CLIENT on every page with no wiring. Use the
+> middleware when a prop needs the value; use the registry when the page does.
+> Registry values are resolved by the serializer, so they reach a `page` step,
+> a hand-written `step("render", …)` and `inertia.page()` alike.
+
+### `inertia.page()` — a route with no controller
+
+```ts
+// src/Workflows.ts — Laravel's Route::inertia()
+export default { about: await inertia.page("/about", "About", { team: "Blok" }) };
+```
+
+One generated workflow, one step, no workflow file. Pass
+`{ name, middleware, inputs }` as a fourth argument for the workflow name, a
+middleware chain, or extra serializer inputs (`version`, `viewData`, `shell`, …).
+
+### `resolveUrlUsing()` / `transformComponentUsing()`
+
+```ts
+resolveUrlUsing((req) => new URL(req.url, "http://x").pathname);  // page-object `url`
+transformComponentUsing((name) => name.toLowerCase());            // component name
+```
+
+Both are adapter-wide and set at boot. The URL resolver wins over a page's own
+`url` (every page passes one, so an override that lost to it would never
+apply). The component transform runs before the name is emitted and before
+`ensurePagesExist` checks it.
+
+> A component transform is NOT seen by the `page` control step, which compares
+> `X-Inertia-Partial-Component` against the untransformed name. The wire output
+> stays correct (the serializer narrows), but the step resolves the full prop
+> set on such a partial, and an `optional`/`defer` prop asked for by name will
+> not resolve. Prefer naming components as the client spells them.
+
+### `ensurePagesExist()` — fail the boot, not the route
+
+```ts
+await ensurePagesExist();   // on unless NODE_ENV=production
+```
+
+Checks every `definePage()` component (and every `inertia.page()` one) against
+the `pages.json` the Blok Vite plugin writes into its `outDir`, and throws
+naming the missing ones plus a `Fix:` line. The manifest is looked up at
+`$BLOK_STATIC_DIR/pages.json` (override with `{ manifest }` / `{ dir }`); when
+it is absent the check WARNS and skips, so booting the server before the client
+has ever been built still works.
+
+### `withProps()` — reusable prop bundles
+
+```ts
+const dashboard = withProps({ auth: always(currentUser), nav: loadNav });
+export const Home = definePage("Home", { ...dashboard, stats: loadStats });
+export const Team = definePage("Team", { ...dashboard, members: loadMembers });
+```
+
+### History size
+
+A page object over 8 MiB logs one warning per process and still ships —
+browsers keep the page object in history state and Firefox hard-fails at
+16 MiB. Move the bulk behind `defer()` / `optional()`, or paginate it.
+
 ## Exports
 
 ```ts
@@ -418,6 +525,17 @@ import InertiaNode, {
   scroll,
   shared,
   getPageRegistry,
+  withProps,                 // reusable prop bundles (#1015)
+  // shared data + routing (#1015)
+  share,
+  shareOnce,
+  getShared,
+  sharedKeys,
+  inertia,                   // inertia.page(path, component, props?)
+  inertiaPage,
+  resolveUrlUsing,
+  transformComponentUsing,
+  ensurePagesExist,
   // #996
   redirectBack,
   back,
@@ -438,8 +556,9 @@ to `step()` instead.
 
 ## Not this node's job
 
-The shared-prop registry (#1015), merge/once RESOLUTION semantics (#1009),
-infinite-scroll paging (#1010), SSR (#1001) and the client package.
-`definePage` (#995), the `page` control step (#1008) and the middleware pack
-(#996) ship here, but they are the AUTHORING, CONTROL and REQUEST layers — the
-node itself still only serializes.
+Merge/once RESOLUTION semantics (#1009), infinite-scroll paging (#1010), SSR
+(#1001) and the client package. `definePage` (#995), the `page` control step
+(#1008), the middleware pack (#996) and the shared-data registry (#1015) ship
+here, but they are the AUTHORING, CONTROL and REQUEST layers — the node itself
+still only serializes (the registry is resolved during that serialization,
+which is why it lives on this side).
