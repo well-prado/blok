@@ -1,6 +1,15 @@
 defmodule Blok.NodeTest do
   use ExUnit.Case, async: true
 
+  # Local fixtures only: a test file must never depend on a module defined in
+  # ANOTHER test file. `mix test` loads test files concurrently, so a reference
+  # to schema_test.exs's Input resolved only when that file happened to load
+  # first — a seed-dependent UndefinedFunctionError in CI.
+  defmodule Input do
+    use Blok.Schema
+    field :name, :string, required: true
+  end
+
   defmodule Output do
     use Blok.Schema
     field :message, :string, required: true
@@ -10,7 +19,7 @@ defmodule Blok.NodeTest do
     use Blok.Node,
       name: "typed-greet",
       description: "Returns a greeting",
-      input: Blok.SchemaTest.Input,
+      input: Input,
       output: Output,
       capability_manifest: %{
         "version" => "1",
@@ -35,7 +44,7 @@ defmodule Blok.NodeTest do
 
   test "turns output validation failures into structured errors" do
     defmodule BadNode do
-      use Blok.Node, name: "bad", input: Blok.SchemaTest.Input, output: Output
+      use Blok.Node, name: "bad", input: Input, output: Output
       def execute(_context, _input), do: {:ok, %{message: 123}}
     end
 
