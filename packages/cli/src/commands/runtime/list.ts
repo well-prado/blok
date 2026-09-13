@@ -89,13 +89,12 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 			p.note(rows.join("\n"), `Available to add (${available.length})`);
 		}
 
+		const jsLabel = javascript.version ? `${javascript.label} ${javascript.version}` : javascript.label;
+		const jsExecution = hostIsTarget ? "in-process" : `persistent worker, gRPC :${javascript.defaultGrpcPort}`;
 		p.outro(
 			color.dim(
 				javascript.available
-					? `JavaScript target: ${javascript.label} ${javascript.version ?? ""} (${hostIsTarget ? "in-process" : `persistent worker, gRPC :${javascript.defaultGrpcPort}`}).`.replace(
-							"  ",
-							" ",
-						)
+					? `JavaScript target: ${jsLabel} (${jsExecution}).`
 					: `JavaScript target: ${javascript.label} — NOT available. ${javascript.remediation}`,
 			),
 		);
