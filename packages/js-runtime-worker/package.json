@@ -1,0 +1,46 @@
+{
+	"name": "@blokjs/runtime-worker",
+	"version": "2.2.1",
+	"description": "Persistent JavaScript/TypeScript execution worker for Blok — serves blok.runtime.v1 over gRPC under Node.js, Bun, or Deno.",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"bin": {
+		"blok-runtime-worker": "dist/bin.js"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": ["dist"],
+	"scripts": {
+		"build": "rm -rf dist && bun run tsc && bun run sync:proto",
+		"build:dev": "tsc --watch",
+		"sync:proto": "mkdir -p dist/proto/blok/runtime/v1 && cp src/proto/blok/runtime/v1/runtime.proto dist/proto/blok/runtime/v1/runtime.proto",
+		"test": "vitest run",
+		"test:bun": "bun test tests/worker.unit.test.ts",
+		"test:dev": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["blok", "runtime", "worker", "grpc", "bun", "deno", "nodejs"],
+	"license": "MIT",
+	"dependencies": {
+		"@blokjs/runner": "^2.2.1",
+		"@blokjs/shared": "^2.2.1",
+		"@grpc/grpc-js": "^1.12.0",
+		"@grpc/proto-loader": "^0.7.13",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}
