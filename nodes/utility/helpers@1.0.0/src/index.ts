@@ -20,6 +20,7 @@
  * ```
  */
 
+import type { NodeBase } from "@blokjs/shared";
 import AuditLogNode, { _resetAuditEventsForTests, getAuditEvents } from "./auditLog";
 import CtxPublishNode from "./ctxPublish";
 import CtxPublishManyNode from "./ctxPublishMany";
@@ -82,6 +83,24 @@ export {
 };
 
 /**
+ * `@blokjs/inertia` — the Inertia v3 protocol adapter (#994) — ships as its own
+ * package: it carries the whole wire protocol, and a project that serves no SPA
+ * should not pay for it. It is an OPTIONAL peer, imported through a non-literal
+ * specifier + try/catch (the same shape `triggers/http/src/Nodes.ts` uses for
+ * `@blokjs/browser`), so a scaffold that never installed it boots fine — it just
+ * has no `@blokjs/inertia` ref. Promote it to a plain dependency once the
+ * package is published to npm.
+ */
+const inertiaPkg = "@blokjs/inertia";
+let InertiaNode: NodeBase | undefined;
+try {
+	const mod = (await import(inertiaPkg)) as { default?: unknown };
+	if (mod.default) InertiaNode = mod.default as NodeBase;
+} catch {
+	// not installed — the Inertia adapter is simply unavailable
+}
+
+/**
  * Pre-built node map suitable for `GlobalOptions.nodes` registration.
  * Drop this into your scaffold's Nodes.ts to make every helper available
  * by its `@blokjs/<name>` ref:
@@ -98,6 +117,7 @@ export const HELPER_NODES = {
 	"@blokjs/expr": ExprNode,
 	"@blokjs/hmac-verify": HmacVerifyNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
+	...(InertiaNode ? { "@blokjs/inertia": InertiaNode } : {}),
 	"@blokjs/json-schema": JsonSchemaNode,
 	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/llm-agent": LlmAgentNode,

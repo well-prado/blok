@@ -65,6 +65,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/expr",
 				"@blokjs/hmac-verify",
 				"@blokjs/in-memory-kv",
+				"@blokjs/inertia",
 				"@blokjs/json-schema",
 				"@blokjs/jwt-verify",
 				"@blokjs/llm-agent",
