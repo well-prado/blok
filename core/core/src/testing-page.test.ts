@@ -14,7 +14,7 @@ import { runPage, runPrecognition, runWorkflow } from "@blokjs/core/testing";
 import { always, defer, definePage, merge, optional, shared } from "@blokjs/inertia";
 import inertiaNode from "@blokjs/inertia";
 import { RESPOND_BRAND } from "@blokjs/shared";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 // =============================================================================
@@ -239,12 +239,16 @@ describe("2 — partial reload", () => {
 });
 
 describe("3 — stale asset version", () => {
-	it("answers 409 with a location and no page", async () => {
+	it("answers 409 with a location and no page", async ({ onTestFinished }) => {
+		// The fixture carries flash, which the 409 must re-sign for the next visit.
+		vi.stubEnv("BLOK_FLASH_SECRET", FLASH_SECRET);
+		onTestFinished(() => vi.unstubAllEnvs());
 		const page = await runPage(await ordersWorkflow(), { middleware: SEED, clientVersion: "old" });
 
 		expect(page.status).toBe(409);
 		expect(page.location).toBe("/orders");
 		expect(page.component).toBeUndefined();
+		page.assertRedirect("/orders").assertFlash("toast.message", "Saved");
 	});
 
 	it("renders normally when the versions match", async () => {
