@@ -61,10 +61,12 @@ describe("JavaScript runtime identifiers do not drift", () => {
 		return ci.slice(start, next === -1 ? undefined : next);
 	}
 
-	it("the CI matrix runs exactly the selectable targets", () => {
-		const matrix = jsTargetsJob().match(/target:\s*\[([^\]]+)\]/);
-		expect(matrix, "the js-runtime-targets matrix is gone").not.toBeNull();
-		const targets = (matrix as RegExpMatchArray)[1].split(",").map((t) => t.trim());
+	it("the CI job scaffolds exactly the selectable targets", () => {
+		// One job loops over the engines (`for target in node bun deno; do`);
+		// a per-engine matrix leg tripled the whole job for one 2-minute step.
+		const loop = jsTargetsJob().match(/for target in ([a-z ]+); do/);
+		expect(loop, "the js-runtime-targets engine loop is gone").not.toBeNull();
+		const targets = (loop as RegExpMatchArray)[1].split(/\s+/).filter(Boolean);
 		expect(targets).toEqual([...JAVASCRIPT_RUNTIMES]);
 	});
 
