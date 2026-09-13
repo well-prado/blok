@@ -7,14 +7,27 @@ defmodule Blok.Runtime do
     ListNodesResponse,
     Metrics,
     NodeError,
-    NodeDescriptor
+    NodeDescriptor,
+    RuntimeState,
+    TriggerInfo,
+    WorkflowInfo
   }
 
   def execute(request) do
     node_name = request.node.name
     timeout_ms = request_deadline(request)
+    metadata = telemetry_metadata(request)
+    enqueued_at = System.monotonic_time()
 
-    case Blok.Admission.run(fn -> execute_node(request) end, timeout_ms) do
+    job = fn ->
+      Logger.metadata(Enum.to_list(metadata))
+
+      Blok.Telemetry.span(metadata, Blok.Telemetry.elapsed_ms(enqueued_at), fn ->
+        execute_node(request)
+      end)
+    end
+
+    case Blok.Admission.run(job, timeout_ms) do
       {:ok, %ExecuteResponse{} = response} ->
         response
 
@@ -43,6 +56,18 @@ defmodule Blok.Runtime do
             code: "NODE_PROCESS_CRASH",
             category: "INTERNAL",
             message: "node process crashed"
+          },
+          node_name
+        )
+
+      # A failure raised outside the node body (protocol decoding, telemetry
+      # handler, logger metadata). It must still leave the endpoint standing.
+      {:error, {kind, reason, _stacktrace}} ->
+        error_response(
+          %Blok.Error{
+            code: "RUNTIME_#{String.upcase(to_string(kind))}",
+            category: "INTERNAL",
+            message: Blok.Logger.safe_inspect(reason)
           },
           node_name
         )
@@ -137,9 +162,11 @@ defmodule Blok.Runtime do
   end
 
   defp context_from_request(request) do
-    trigger = request.trigger || %{}
-    state = request.state || %{}
-    workflow = request.workflow || %{}
+    # Submessages are optional on the wire: a sparse request must project to an
+    # empty context, never to a KeyError inside the execution.
+    trigger = request.trigger || %TriggerInfo{}
+    state = request.state || %RuntimeState{}
+    workflow = request.workflow || %WorkflowInfo{}
     previous = decode_json(state.previous_output)
     vars = decode_json(state.vars) || %{}
     deadline_ms = request_deadline(request)
@@ -214,7 +241,10 @@ defmodule Blok.Runtime do
     do: Blok.Error.validation("schema validation failed", %{issues: issues})
 
   defp normalize_error({kind, reason}),
-    do: %Blok.Error{code: "NODE_#{String.upcase(to_string(kind))}", message: inspect(reason)}
+    do: %Blok.Error{
+      code: "NODE_#{String.upcase(to_string(kind))}",
+      message: Blok.Logger.safe_inspect(reason)
+    }
 
   defp normalize_error(error), do: %Blok.Error{message: Exception.message(error)}
 
@@ -231,6 +261,14 @@ defmodule Blok.Runtime do
   defp category("PROTOCOL"), do: :PROTOCOL
   defp category("DATA"), do: :DATA
   defp category(_), do: :INTERNAL
+
+  # Identity only. Inputs, env, headers, and output never reach telemetry
+  # handlers or Logger metadata.
+  defp telemetry_metadata(request) do
+    workflow = request.workflow || %WorkflowInfo{}
+
+    %{node: request.node.name, run_id: workflow.run_id || "", workflow: workflow.name || ""}
+  end
 
   defp request_deadline(request) do
     case request.options && request.options.deadline_ms do
