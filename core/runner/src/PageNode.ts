@@ -183,28 +183,38 @@ export class PageNode extends RunnerNode {
 		// --- resolve the selected props in parallel ---------------------------
 		const resolved: Record<string, unknown> = {};
 		const rescued: string[] = [];
-		const runs = selection.run.map(async (prop) => {
-			const index = props.indexOf(prop);
-			try {
-				const value = await this.runProp(ctx, steps[index] as NodeBase, index);
-				resolved[prop.key] = value;
-				// The per-prop state slot is the author-visible one — same contract
-				// as any other step's, so `run.state("page.orders")` just works.
-				(ctx.state as Record<string, unknown>)[prop.step] = value;
-			} catch (error) {
-				// `rescue` OMITS the prop and reports it; it does NOT swallow the
-				// failure — the inner Runner already recorded the failed NodeRun,
-				// and this log keeps it visible to an operator tailing stdout.
-				if (prop.rescue !== true) throw error;
-				rescued.push(prop.key);
-				ctx.logger.log(
-					`[blok] page step "${this.name}": prop "${prop.key}" failed and was rescued: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				);
-			}
-		});
-		await Promise.all(runs);
+		// Failures are COLLECTED, not thrown from inside the map: a bare
+		// `Promise.all` rejects on the first one and leaves its siblings running
+		// against a ctx nobody is reading any more. Let every prop settle, then
+		// fail the step with the first real error.
+		const failures: unknown[] = [];
+		await Promise.all(
+			selection.run.map(async (prop) => {
+				const index = props.indexOf(prop);
+				try {
+					const value = await this.runProp(ctx, steps[index] as NodeBase, index);
+					resolved[prop.key] = value;
+					// The per-prop state slot is the author-visible one — same contract
+					// as any other step's, so `run.state("page.orders")` just works.
+					(ctx.state as Record<string, unknown>)[prop.step] = value;
+				} catch (error) {
+					// `rescue` OMITS the prop and reports it; it does NOT swallow the
+					// failure — the inner Runner already recorded the failed NodeRun,
+					// and this log keeps it visible to an operator tailing stdout.
+					if (prop.rescue !== true) {
+						failures.push(error);
+						return;
+					}
+					rescued.push(prop.key);
+					ctx.logger.log(
+						`[blok] page step "${this.name}": prop "${prop.key}" failed and was rescued: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					);
+				}
+			}),
+		);
+		if (failures.length > 0) throw failures[0];
 
 		// --- hand everything to the serializer -------------------------------
 		const metadata = buildMetadata(props, selection, resolved, rescued);
