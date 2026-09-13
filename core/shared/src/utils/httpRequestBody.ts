@@ -13,6 +13,7 @@
  */
 
 import { type MultipartBody, UploadTooLargeError, parseMultipartBody } from "./multipart";
+import { expandFormEntries } from "./nestedFields";
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 export const DEFAULT_UPLOAD_SPOOL_BYTES = 1024 * 1024;
@@ -25,8 +26,11 @@ export type ParsedHttpRequest = {
 	body: unknown;
 	/** Raw body text, captured BEFORE parsing (empty for multipart). */
 	rawBody: string;
-	/** File parts by field name. Empty unless the body was multipart. */
-	files: Record<string, File | File[]>;
+	/**
+	 * File parts by field name, nested the same way the body is: `docs[0]` /
+	 * `docs[1]` is a `File[]` at `files.docs`. Empty unless multipart.
+	 */
+	files: Record<string, unknown>;
 	/** Effective method — the spoofed one when `_method` applied. */
 	method: string;
 	/** The method actually on the wire (`POST` for a spoofed request). */
@@ -48,6 +52,13 @@ export type ParseHttpRequestOptions = {
 	 * behaviour (providers that post JSON with a sloppy content-type).
 	 */
 	jsonFallback?: boolean;
+	/**
+	 * Honour a `_method` field in the body. Default `true`. OFF for the webhook
+	 * trigger: a webhook body is provider-controlled data, not a browser form,
+	 * so a payload that happens to carry `"_method": "delete"` must not change
+	 * the request's method.
+	 */
+	spoofing?: boolean;
 	maxBytes?: number;
 	spoolBytes?: number;
 };
@@ -116,6 +127,9 @@ export async function parseHttpRequest(req: Request, opts: ParseHttpRequestOptio
 	const maxBytes = opts.maxBytes ?? limits.maxBytes;
 	const spoolBytes = opts.spoolBytes ?? limits.spoolBytes;
 
+	const spoof = (body: unknown): string =>
+		opts.spoofing === false ? originalMethod : applyMethodSpoofing(originalMethod, body);
+
 	if (opts.multipart !== false && contentType.includes("multipart/form-data")) {
 		let parsed: MultipartBody;
 		try {
@@ -126,7 +140,7 @@ export async function parseHttpRequest(req: Request, opts: ParseHttpRequestOptio
 			// an empty body rather than a 500.
 			return empty;
 		}
-		const method = applyMethodSpoofing(originalMethod, parsed.fields);
+		const method = spoof(parsed.fields);
 		return {
 			body: parsed.fields,
 			rawBody: "",
@@ -158,9 +172,9 @@ export async function parseHttpRequest(req: Request, opts: ParseHttpRequestOptio
 			body = {};
 		}
 	} else if (contentType.includes("application/x-www-form-urlencoded")) {
-		const parsed: Record<string, string> = {};
-		for (const [key, value] of new URLSearchParams(rawBody)) parsed[key] = value;
-		body = parsed;
+		// Same bracket-key expansion as multipart: a browser form posts the
+		// identical `user[name]` / `tags[0]` shape either way.
+		body = expandFormEntries(new URLSearchParams(rawBody));
 	} else if (opts.jsonFallback) {
 		try {
 			body = rawBody.length === 0 ? {} : JSON.parse(rawBody);
@@ -175,7 +189,7 @@ export async function parseHttpRequest(req: Request, opts: ParseHttpRequestOptio
 		body,
 		rawBody,
 		files: {},
-		method: applyMethodSpoofing(originalMethod, body),
+		method: spoof(body),
 		originalMethod,
 		cleanup: NO_CLEANUP,
 	};

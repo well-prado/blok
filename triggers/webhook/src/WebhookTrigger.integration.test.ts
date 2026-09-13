@@ -82,6 +82,9 @@ const SECRET_ENV = `GH_SECRET_${SUFFIX}`;
 // body actually ran (a mounted-but-not-dispatched path would leave it
 // empty even while returning a healthy-looking 200).
 const EXECUTIONS: Array<{ eventId: string }> = [];
+// #1016 — what the run saw on `ctx.request`, so a delivery carrying a
+// `_method` field can be proved NOT to have rewritten the method.
+const REQUESTS: Array<{ method?: string; originalMethod?: string; spoofField?: unknown }> = [];
 
 function hmacHex(body: string): string {
 	return createHmac("sha256", SECRET).update(body).digest("hex");
@@ -93,9 +96,11 @@ const handleNode = defineNode({
 	input: z.object({}).passthrough(),
 	output: z.object({ handled: z.boolean(), eventId: z.string() }),
 	async execute(ctx) {
-		const body = (ctx.request?.body as { delivery_id?: string } | undefined) ?? {};
+		const body = (ctx.request?.body as { delivery_id?: string; _method?: unknown } | undefined) ?? {};
 		const eventId = body.delivery_id ?? "";
 		EXECUTIONS.push({ eventId });
+		const request = ctx.request as unknown as { method?: string; originalMethod?: string } | undefined;
+		REQUESTS.push({ method: request?.method, originalMethod: request?.originalMethod, spoofField: body._method });
 		return { handled: true, eventId };
 	},
 });
@@ -107,6 +112,7 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 
 	beforeEach(async () => {
 		EXECUTIONS.length = 0;
+		REQUESTS.length = 0;
 		WorkflowRegistry.resetInstance();
 		_setActiveWebhookTrigger(null);
 		process.env[SECRET_ENV] = SECRET;
@@ -221,6 +227,28 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 		expect(secondJson.eventId).toBe("delivery-uuid-9");
 		// Still exactly one execution — the replay did not dispatch.
 		expect(EXECUTIONS).toEqual([{ eventId: "delivery-uuid-9" }]);
+	}, 15_000);
+
+	it("#1016 — a `_method` field in a provider payload does NOT rewrite the method", async () => {
+		// A webhook body is provider-controlled data, not a browser form: the
+		// spoofing rule the http trigger applies must be off here, or a delivery
+		// could steer the request's method (and, on a shared path, its routing).
+		const body = JSON.stringify({ delivery_id: "delivery-uuid-spoof", _method: "delete" });
+		const res = await fetch(url(), {
+			method: "POST",
+			headers: {
+				...baseHeaders,
+				"x-hub-signature-256": `sha256=${hmacHex(body)}`,
+				"x-github-event": "push",
+				"x-github-delivery": "delivery-uuid-spoof",
+			},
+			body,
+		});
+
+		expect(res.status).toBe(200);
+		expect(EXECUTIONS).toEqual([{ eventId: "delivery-uuid-spoof" }]);
+		// Method untouched, and the field stayed in the payload as ordinary data.
+		expect(REQUESTS).toEqual([{ method: "POST", originalMethod: "POST", spoofField: "delete" }]);
 	}, 15_000);
 
 	it("ADR 0015 — signed but schema-invalid body → 400 validation_errors, workflow NOT run, delivery NOT cached", async () => {

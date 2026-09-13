@@ -127,8 +127,22 @@ parts arrive as strings; file parts arrive as Web
 written to a temp file and handed over as a disk-backed `File` — read it
 with `file.stream()`, `file.bytes()` or `file.text()`; the temp file is
 deleted when the request finishes, so a node that needs to keep it must
-copy it during the run. A field named `avatar[]` collects every part with
-that name into an array.
+copy it during the run.
+
+Bracket names are expanded back into structure — the same for multipart
+and urlencoded bodies — so the shape a client flattens into field names
+arrives as the object you declared:
+
+| Posted field names | `req.body` |
+|---|---|
+| `user[name]=ada` | `{ user: { name: "ada" } }` |
+| `tags[0]=x`, `tags[1]=y` (or `tags[]` twice) | `{ tags: ["x", "y"] }` |
+| `docs[0]`, `docs[1]` (files) | `req.files.docs` is a `File[]` |
+
+Nesting stops at 5 segments (deeper names stay flat), a name used both as
+a value and as a container keeps its flat key rather than guessing, and
+`__proto__` / `constructor` / `prototype` in a name drops the field
+outright — a form value never reaches an object's prototype.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -159,6 +173,9 @@ export default workflow("update-profile", { version: "1.0.0", trigger: http.put(
   not the `http.post()` one's.
 - Set `BLOK_METHOD_SPOOFING=0` to turn it off; `_method` is then an
   ordinary body field.
+- HTTP only. The [webhook trigger](./webhook.mdx) never spoofs: a
+  provider payload is data, not a browser form, so a delivery carrying
+  `"_method": "delete"` leaves `ctx.request.method` at `POST`.
 
 ## Controlling the response
 

@@ -252,14 +252,16 @@ export default class WebhookTrigger extends TriggerBase {
 
 		// 1. Parse through the shared builder (#1016) — one body contract for
 		// every HTTP-speaking trigger: raw body captured BEFORE parsing (the
-		// verifiers sign the wire bytes), `jsonFallback` for providers that post
-		// JSON under a sloppy content-type (Slack challenges, Shopify), and
-		// `_method` spoofing so `ctx.request.method` is the effective one.
-		// Multipart is OFF here: parsing the stream would empty `rawBody` and no
-		// provider signs a multipart delivery.
+		// verifiers sign the wire bytes) and `jsonFallback` for providers that
+		// post JSON under a sloppy content-type (Slack challenges, Shopify).
+		//
+		// Multipart is OFF: parsing the stream would empty `rawBody` and no
+		// provider signs a multipart delivery. `_method` spoofing is OFF too: a
+		// webhook body is provider-controlled DATA, not a browser form, so a
+		// delivery carrying `"_method": "delete"` must not rewrite the method.
 		let parsed: ParsedHttpRequest;
 		try {
-			parsed = await parseHttpRequest(c.req.raw, { multipart: false, jsonFallback: true });
+			parsed = await parseHttpRequest(c.req.raw, { multipart: false, jsonFallback: true, spoofing: false });
 		} catch (err) {
 			if (!(err instanceof UploadTooLargeError)) throw err;
 			this.counterRejected.add(1, { workflow_name: workflowName, reason: "payload_too_large" });

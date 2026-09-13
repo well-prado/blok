@@ -53,8 +53,64 @@ describe("parseHttpRequest — multipart", () => {
 		const parsed = await parseHttpRequest(request(form));
 
 		const body = parsed.body as Record<string, unknown>;
-		expect(body["tags[]"]).toEqual(["a", "b"]);
-		expect(Array.isArray(parsed.files["docs[]"])).toBe(true);
+		expect(body.tags).toEqual(["a", "b"]);
+		expect(Array.isArray(parsed.files.docs)).toBe(true);
+		await parsed.cleanup();
+	});
+
+	it("expands the key shape the stock Inertia client emits", async () => {
+		// What `objectToFormData({ user: { name: "a" }, tags: ["x","y"],
+		// avatar: File, docs: [File, File] })` puts on the wire.
+		const form = new FormData();
+		form.set("user[name]", "a");
+		form.set("tags[0]", "x");
+		form.set("tags[1]", "y");
+		form.set("avatar", new File(["A"], "a.png", { type: "image/png" }));
+		form.set("docs[0]", new File(["1"], "one.txt", { type: "text/plain" }));
+		form.set("docs[1]", new File(["2"], "two.txt", { type: "text/plain" }));
+		const parsed = await parseHttpRequest(request(form));
+
+		const body = parsed.body as { user?: { name?: string }; tags?: unknown; docs?: unknown[] };
+		expect(body.user?.name).toBe("a");
+		expect(body.tags).toEqual(["x", "y"]);
+		expect(body.docs).toHaveLength(2);
+		expect(parsed.files.avatar).toBeInstanceOf(File);
+		expect(parsed.files.docs).toHaveLength(2);
+		expect((parsed.files.docs as File[])[1].name).toBe("two.txt");
+		await parsed.cleanup();
+	});
+
+	it("drops a part whose name is a prototype key", async () => {
+		const form = new FormData();
+		form.set("__proto__", new File(["x"], "evil.txt"));
+		form.set("ok", "kept");
+		const parsed = await parseHttpRequest(request(form));
+
+		const body = parsed.body as Record<string, unknown>;
+		expect(Object.keys(body)).toEqual(["ok"]);
+		expect(Object.keys(parsed.files)).toEqual([]);
+		expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
+		await parsed.cleanup();
+	});
+
+	it("takes `name` from the disposition even when `filename` comes first", async () => {
+		const boundary = "----blok";
+		const raw = [
+			`--${boundary}`,
+			'content-disposition: form-data; filename="a.png"; name="avatar"',
+			"content-type: image/png",
+			"",
+			"PNGDATA",
+			`--${boundary}--`,
+			"",
+		].join("\r\n");
+		const parsed = await parseHttpRequest(
+			request(raw, { headers: { "content-type": `multipart/form-data; boundary=${boundary}` } }),
+		);
+
+		const body = parsed.body as Record<string, unknown>;
+		expect(Object.keys(body)).toEqual(["avatar"]);
+		expect((body.avatar as File).name).toBe("a.png");
 		await parsed.cleanup();
 	});
 
@@ -172,6 +228,17 @@ describe("parseHttpRequest — method spoofing", () => {
 		);
 		expect(form.method).toBe("DELETE");
 		expect(form.body).toEqual({ id: "7" });
+	});
+
+	it("leaves the method alone when spoofing is disabled for the caller (webhook)", async () => {
+		const parsed = await parseHttpRequest(
+			request(JSON.stringify({ _method: "delete", id: 1 }), { headers: { "content-type": "application/json" } }),
+			{ spoofing: false },
+		);
+
+		expect(parsed.method).toBe("POST");
+		expect(parsed.originalMethod).toBe("POST");
+		expect(parsed.body).toEqual({ _method: "delete", id: 1 });
 	});
 
 	it("ignores a non-spoofable method and leaves the field in place", () => {

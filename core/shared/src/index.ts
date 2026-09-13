@@ -161,6 +161,7 @@ export {
 	readBoundary,
 } from "./utils/multipart";
 export type { MultipartBody, MultipartOptions } from "./utils/multipart";
+export { MAX_FIELD_DEPTH, UNSAFE_KEY_SEGMENTS, expandFormEntries } from "./utils/nestedFields";
 export {
 	AGENT_CAPABILITY_CONTRACT_VERSION,
 	CAPABILITY_MAX_ID_LENGTH,

@@ -149,6 +149,32 @@ vi.mock("../../src/Workflows", () => {
 				{ id: "probe", use: "test/upload-probe", inputs: { workflow: "avatar-put", file: ref("body", "avatar") } },
 				echo("avatar-put"),
 			]),
+			// Reached through the LEGACY catch-all (`BLOK_FILE_BASED_ROUTING=false`,
+			// `POST /legacy-upload`) — the other half of the temp-file cleanup
+			// proof. That path resolves the workflow through LocalStorage, which
+			// calls `toJson()` on the map entry, so this fixture carries one.
+			"legacy-upload": {
+				...wf("legacy-upload", "PUT", "/", [
+					{
+						id: "probe",
+						use: "test/upload-probe",
+						inputs: { workflow: "legacy-upload", file: ref("body", "avatar") },
+					},
+					echo("legacy-upload"),
+				]),
+				toJson() {
+					return JSON.stringify(
+						wf("legacy-upload", "PUT", "/", [
+							{
+								id: "probe",
+								use: "test/upload-probe",
+								inputs: { workflow: "legacy-upload", file: ref("body", "avatar") },
+							},
+							echo("legacy-upload"),
+						])._config,
+					);
+				},
+			},
 		},
 	};
 });
@@ -320,6 +346,75 @@ describe("HttpTrigger — multipart uploads and `_method` spoofing (#1016)", () 
 		expect(probe.report).toMatchObject({ isFile: true, spooled: true, tempFileExists: true, size: 2 * 1024 * 1024 });
 		// …and gone once the response is out.
 		expect(existsSync(probe.spoolPath as string)).toBe(false);
+	});
+
+	// Test 6 (cont.) — the cleanup middleware is registered inside `listen()`,
+	// and Hono runs handlers in registration order, so prove it actually wraps
+	// BOTH mount kinds, not just the spoof mount test 6 exercises.
+	it("removes the temp file after a spooled upload through an EXPLICIT route mount", async () => {
+		process.env.BLOK_UPLOAD_SPOOL_BYTES = String(64 * 1024);
+		// `/orders/:id` HAS a POST route, so this goes through `mountRoute`'s
+		// handler (not the spoof mount) and is re-routed to the PUT workflow.
+		const res = await send("/orders/11", {
+			method: "POST",
+			body: upload({ _method: "put" }, { field: "avatar", bytes: new Uint8Array(512 * 1024).fill(5), name: "big.bin" }),
+		});
+
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as Echoed).ran).toBe("orders-update");
+		expect(probe.report).toMatchObject({ spooled: true, tempFileExists: true });
+		expect(existsSync(probe.spoolPath as string)).toBe(false);
+	});
+
+	it("removes the temp file after a spooled upload through the LEGACY catch-all", async () => {
+		process.env.BLOK_FILE_BASED_ROUTING = "false";
+		process.env.BLOK_UPLOAD_SPOOL_BYTES = String(64 * 1024);
+		const res = await send("/legacy-upload", {
+			method: "POST",
+			body: upload({ _method: "put" }, { field: "avatar", bytes: new Uint8Array(512 * 1024).fill(9), name: "big.bin" }),
+		});
+
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as Echoed).ran).toBe("legacy-upload");
+		expect(probe.report).toMatchObject({ spooled: true, tempFileExists: true });
+		expect(existsSync(probe.spoolPath as string)).toBe(false);
+	});
+
+	// Nested bracket keys — the shape `useForm({ user: { name }, tags, avatar,
+	// docs })` actually posts, reaching the workflow as real structure.
+	it("expands the Inertia client's bracket keys into nested body and files", async () => {
+		const form = new FormData();
+		form.set("_method", "put");
+		form.set("user[name]", "ada");
+		form.set("tags[0]", "x");
+		form.set("tags[1]", "y");
+		form.set("avatar", new File(["A"], "a.png", { type: "image/png" }));
+		form.set("docs[0]", new File(["1"], "one.txt", { type: "text/plain" }));
+		form.set("docs[1]", new File(["2"], "two.txt", { type: "text/plain" }));
+		const res = await send("/orders/12", { method: "POST", body: form });
+
+		expect(res.status).toBe(200);
+		const json = (await res.json()) as Echoed;
+		expect(json.ran).toBe("orders-update");
+		const body = json.body as { user?: { name?: string }; tags?: unknown; docs?: unknown[] };
+		expect(body.user?.name).toBe("ada");
+		expect(body.tags).toEqual(["x", "y"]);
+		expect(body.docs).toHaveLength(2);
+		// The file part still reached the node as a File (the probe read it).
+		expect(probe.report).toMatchObject({ isFile: true, name: "a.png" });
+	});
+
+	it("drops prototype keys posted as form fields", async () => {
+		const res = await send("/orders/13", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: "_method=put&constructor%5Bprototype%5D%5Bpolluted%5D=1&kept=yes",
+		});
+
+		expect(res.status).toBe(200);
+		const json = (await res.json()) as Echoed;
+		expect(json.body).toEqual({ kept: "yes" });
+		expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
 	});
 
 	// Test 7

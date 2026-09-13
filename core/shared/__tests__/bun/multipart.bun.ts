@@ -39,6 +39,24 @@ const check = (label: string, ok: boolean): void => {
 	await parsed.cleanup();
 }
 
+// Bracket keys (the Inertia client's wire shape) expand into structure.
+{
+	const form = new FormData();
+	form.set("user[name]", "ada");
+	form.set("tags[0]", "x");
+	form.set("tags[1]", "y");
+	form.set("docs[0]", new File(["1"], "one.txt"));
+	form.set("docs[1]", new File(["2"], "two.txt"));
+	form.set("__proto__", "nope");
+	const parsed = await parseHttpRequest(new Request("http://localhost/u", { method: "POST", body: form }));
+	const body = parsed.body as { user?: { name?: string }; tags?: unknown; docs?: unknown[] };
+	check("nested object from user[name]", body.user?.name === "ada");
+	check("array from tags[0]/tags[1]", JSON.stringify(body.tags) === '["x","y"]');
+	check("file array from docs[0]/docs[1]", (parsed.files.docs as File[] | undefined)?.length === 2);
+	check("prototype key dropped", !Object.hasOwn(body as Record<string, unknown>, "__proto__"));
+	await parsed.cleanup();
+}
+
 // Spooling past the threshold, and cleanup.
 {
 	process.env.BLOK_UPLOAD_SPOOL_BYTES = "1024";

@@ -19,6 +19,7 @@ import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { expandFormEntries } from "./nestedFields";
 
 /** Thrown when a request body exceeds the configured upload cap. */
 export class UploadTooLargeError extends Error {
@@ -87,10 +88,14 @@ export class SpooledFile extends File {
 	}
 }
 
-/** One parsed multipart body. `cleanup()` removes every spooled temp file. */
+/**
+ * One parsed multipart body. Bracket keys are expanded (see
+ * `./nestedFields.ts`), so both maps can nest: `user[avatar]` puts a `File`
+ * at `files.user.avatar`. `cleanup()` removes every spooled temp file.
+ */
 export type MultipartBody = {
 	fields: Record<string, unknown>;
-	files: Record<string, File | File[]>;
+	files: Record<string, unknown>;
 	cleanup: () => Promise<void>;
 };
 
@@ -121,10 +126,18 @@ function headerValue(headers: string, name: string): string | undefined {
 	return undefined;
 }
 
+/**
+ * Read one `content-disposition` parameter.
+ *
+ * Every form is anchored on a parameter boundary (`^` or `;`) — without it
+ * `name=` matches inside `filename=`, so a part whose disposition lists
+ * `filename` first would take the file name as its field name.
+ */
 function dispositionParam(disposition: string, param: string): string | undefined {
-	const quoted = new RegExp(`${param}="([^"]*)"`, "i").exec(disposition);
+	const at = "(?:^|;)\\s*";
+	const quoted = new RegExp(`${at}${param}="([^"]*)"`, "i").exec(disposition);
 	if (quoted) return quoted[1];
-	const extended = new RegExp(`${param}\\*=(?:UTF-8'[^']*')?([^;]+)`, "i").exec(disposition);
+	const extended = new RegExp(`${at}${param}\\*=(?:UTF-8'[^']*')?([^;]+)`, "i").exec(disposition);
 	if (extended?.[1]) {
 		try {
 			return decodeURIComponent(extended[1].trim());
@@ -132,7 +145,7 @@ function dispositionParam(disposition: string, param: string): string | undefine
 			return extended[1].trim();
 		}
 	}
-	const bare = new RegExp(`${param}=([^;]+)`, "i").exec(disposition);
+	const bare = new RegExp(`${at}${param}=([^;]+)`, "i").exec(disposition);
 	return bare ? bare[1].trim() : undefined;
 }
 
@@ -164,8 +177,10 @@ export async function parseMultipartBody(req: Request, opts: MultipartOptions): 
 	}
 
 	const delimiter = Buffer.concat([CRLF, DASHES, Buffer.from(boundary)]);
-	const fields: Record<string, unknown> = {};
-	const files: Record<string, File | File[]> = {};
+	// Ordered, duplicates kept: `expandFormEntries` needs the wire order to
+	// build `tags[]`/`tags[0]` arrays and to apply last-wins for plain names.
+	const fieldEntries: Array<[string, unknown]> = [];
+	const fileEntries: Array<[string, File]> = [];
 
 	let tempDir: string | undefined;
 	let spoolCount = 0;
@@ -177,18 +192,8 @@ export async function parseMultipartBody(req: Request, opts: MultipartOptions): 
 	};
 
 	const addValue = (name: string, value: unknown): void => {
-		const isList = name.endsWith("[]");
-		const target = isList ? fields[name] : undefined;
-		if (isList) fields[name] = Array.isArray(target) ? [...(target as unknown[]), value] : [value];
-		else fields[name] = value;
-
-		if (!(value instanceof File)) return;
-		if (isList) {
-			const current = files[name];
-			files[name] = Array.isArray(current) ? [...current, value] : [value];
-		} else {
-			files[name] = value;
-		}
+		fieldEntries.push([name, value]);
+		if (value instanceof File) fileEntries.push([name, value]);
 	};
 
 	// Prepending a CRLF lets the very first `--boundary` match the same
@@ -348,5 +353,7 @@ export async function parseMultipartBody(req: Request, opts: MultipartOptions): 
 		throw err;
 	}
 
-	return { fields, files, cleanup };
+	// `user[name]` / `tags[0]` / `docs[]` become real structure — the files map
+	// through the SAME expansion so `docs[0]`,`docs[1]` is a `File[]` there too.
+	return { fields: expandFormEntries(fieldEntries), files: expandFormEntries(fileEntries), cleanup };
 }
