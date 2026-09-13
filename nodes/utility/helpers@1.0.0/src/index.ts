@@ -20,6 +20,7 @@
  * ```
  */
 
+import type { NodeBase } from "@blokjs/shared";
 import AuditLogNode, { _resetAuditEventsForTests, getAuditEvents } from "./auditLog";
 import CtxPublishNode from "./ctxPublish";
 import CtxPublishManyNode from "./ctxPublishMany";
@@ -82,6 +83,29 @@ export {
 };
 
 /**
+ * `@blokjs/inertia` — the Inertia v3 protocol adapter (#994) — ships as its own
+ * package: it carries the whole wire protocol, and a project that serves no SPA
+ * should not pay for it. It is OPTIONAL and undeclared, loaded through a
+ * non-literal specifier + try/catch — exactly the shape
+ * `triggers/http/src/Nodes.ts` uses for `@blokjs/browser`, which likewise
+ * appears in no manifest. A project that installed it gets the
+ * `@blokjs/inertia` ref; one that did not boots fine without it.
+ *
+ * Deliberately NOT a dependency or a peer: bun installs the dependencies of a
+ * `file:`-linked package, so a hard dependency on a package that is not yet on
+ * npm breaks `blokctl create`, and a peer entry would only restate what this
+ * import already expresses.
+ */
+const inertiaPkg = "@blokjs/inertia";
+let InertiaNode: NodeBase | undefined;
+try {
+	const mod = (await import(inertiaPkg)) as { default?: unknown };
+	if (mod.default) InertiaNode = mod.default as NodeBase;
+} catch {
+	// not installed — the Inertia adapter is simply unavailable
+}
+
+/**
  * Pre-built node map suitable for `GlobalOptions.nodes` registration.
  * Drop this into your scaffold's Nodes.ts to make every helper available
  * by its `@blokjs/<name>` ref:
@@ -98,6 +122,7 @@ export const HELPER_NODES = {
 	"@blokjs/expr": ExprNode,
 	"@blokjs/hmac-verify": HmacVerifyNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
+	...(InertiaNode ? { "@blokjs/inertia": InertiaNode } : {}),
 	"@blokjs/json-schema": JsonSchemaNode,
 	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/llm-agent": LlmAgentNode,

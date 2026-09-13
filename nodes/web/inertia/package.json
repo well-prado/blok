@@ -1,0 +1,37 @@
+{
+	"name": "@blokjs/inertia",
+	"version": "2.3.0",
+	"files": ["dist"],
+	"description": "Inertia v3 protocol adapter node — serializes an Inertia page object into a Blok HTTP response (HTML shell, JSON page object, and the version/redirect/location control responses).",
+	"type": "module",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"author": "Deskree Technologies Inc.",
+	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "rimraf ./dist && tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"devDependencies": {
+		"@inertiajs/core": "^3.7.1",
+		"@types/node": "^22.15.21",
+		"jsdom": "^27.4.0",
+		"rimraf": "^6.1.2",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/shared": "^2.3.0",
+		"zod": "^3.24.2"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}

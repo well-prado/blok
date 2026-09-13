@@ -266,6 +266,23 @@
         "vitest": "^4.0.18",
       },
     },
+    "nodes/web/inertia": {
+      "name": "@blokjs/inertia",
+      "version": "2.3.0",
+      "dependencies": {
+        "@blokjs/core": "^2.3.0",
+        "@blokjs/shared": "^2.3.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@inertiajs/core": "^3.7.1",
+        "@types/node": "^22.15.21",
+        "jsdom": "^27.4.0",
+        "rimraf": "^6.1.2",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "nodes/web/react@1.0.0": {
       "name": "@blokjs/react",
       "version": "2.3.0",
@@ -1165,6 +1182,8 @@
     "@blokjs/helpers": ["@blokjs/helpers@workspace:nodes/utility/helpers@1.0.0"],
 
     "@blokjs/if-else": ["@blokjs/if-else@workspace:nodes/control-flow/if-else@1.0.0"],
+
+    "@blokjs/inertia": ["@blokjs/inertia@workspace:nodes/web/inertia"],
 
     "@blokjs/inertia-client": ["@blokjs/inertia-client@workspace:packages/inertia-client"],
 

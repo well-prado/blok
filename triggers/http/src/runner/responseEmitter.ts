@@ -1,5 +1,36 @@
 import { type RespondEnvelope, isRespondEnvelope } from "@blokjs/shared";
-import type { Context as HonoContext } from "hono";
+import type { Context as HonoContext, MiddlewareHandler } from "hono";
+
+/** Methods after which a redirect MUST be replayed as a GET, never repeated. */
+const REPLAYABLE_WRITE_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
+
+/**
+ * Inertia's 303 rule, enforced at the trigger's response boundary.
+ *
+ * A redirect answering a PUT/PATCH/DELETE has to be a `303`: on a `302` the
+ * browser re-issues the ORIGINAL method against the redirect target, which for
+ * an Inertia visit means the write runs twice. `@blokjs/inertia`'s `redirect()`
+ * already emits 303, but a redirect can also leave the trigger from somewhere
+ * that never saw the Inertia contract — a middleware short-circuit, a
+ * rate-limiter, a hand-written `@blokjs/respond` step. This net catches those:
+ * status 302 + a non-GET method + `X-Inertia: true` on the REQUEST, and nothing
+ * else. (Inertia v3 fixed exactly this leak in the Laravel adapter.)
+ *
+ * Registered as the outermost middleware so it also covers responses produced
+ * by the error branch, which never reaches {@link emitWorkflowResponse}.
+ */
+export const inertia303SafetyNet: MiddlewareHandler = async (c, next) => {
+	await next();
+	if (
+		c.res.status === 302 &&
+		c.req.header("X-Inertia") === "true" &&
+		REPLAYABLE_WRITE_METHODS.has(c.req.method.toUpperCase())
+	) {
+		// Headers are passed through explicitly: Hono's `res` setter re-applies
+		// the previous response's headers but deliberately skips `content-type`.
+		c.res = new Response(c.res.body, { status: 303, headers: c.res.headers });
+	}
+};
 
 /**
  * Turn a finished workflow's `ctx.response` into a Hono `Response`.

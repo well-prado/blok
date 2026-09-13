@@ -67,7 +67,7 @@ import {
 import { bounded } from "./bootTimeout.js";
 import { bootstrapMetrics } from "./metrics/opentelemetry_metrics.js";
 import { buildNodeCatalog } from "./nodeCatalog.js";
-import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter.js";
+import { emitWorkflowResponse, inertia303SafetyNet, normalizeResponseEnvelope } from "./responseEmitter.js";
 import { scanWorkflows } from "./scanWorkflows.js";
 import NodeTypes from "./types/NodeTypes.js";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow.js";
@@ -1485,6 +1485,12 @@ export default class HttpTrigger extends TriggerBase {
 		}
 
 		return new Promise((done, fail) => {
+			// Inertia's 303 rule — outermost middleware so it also covers the
+			// error branch (a middleware `throw` with `code: 302`), which never
+			// reaches `emitWorkflowResponse`. No-op for every non-Inertia
+			// request. See `responseEmitter.inertia303SafetyNet`.
+			this.app.use("*", inertia303SafetyNet);
+
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
 

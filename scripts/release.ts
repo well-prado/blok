@@ -96,6 +96,10 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	// Core — the typed-handle authoring barrel. Thin re-export of the DSL
 	// from runner + helper + shared, so it lists after all three.
 	{ dir: "core/core", name: "@blokjs/core" },
+	// Inertia v3 protocol adapter node (#994) — authored with defineNode from
+	// @blokjs/core, so it lists after it. `@blokjs/helpers` registers it as an
+	// OPTIONAL peer, which imposes no publish ordering of its own.
+	{ dir: "nodes/web/inertia", name: "@blokjs/inertia" },
 	// Persistent JavaScript execution worker (ADR 0016) — consumes runner +
 	// shared, and every scaffolded project declares it, so it must be on npm
 	// before `blokctl` ships a scaffold that depends on it.
