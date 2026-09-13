@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import type { OptionValues } from "../../services/commander.js";
-import { detectRuntimes } from "../../services/runtime-detector.js";
+import { detectJavaScriptRuntime, detectRuntimes } from "../../services/runtime-detector.js";
 import { readConfigSafe, reportRuntimeError, resolveProjectRoot } from "./shared.js";
 
 /**
@@ -15,6 +15,11 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 		const installed = config.runtimes ?? {};
 		const javascriptTarget = config.runtime ?? "node";
 		const detected = await detectRuntimes();
+		// The JavaScript target is not a sidecar entry in `runtimes`, so its
+		// availability has to be probed directly — reporting it from the config
+		// alone would claim a runtime that may not be installed.
+		const javascript = await detectJavaScriptRuntime(javascriptTarget);
+		const hostIsTarget = javascriptTarget === ("Bun" in globalThis ? "bun" : "node");
 		const detectedByKind = new Map(detected.map((d) => [d.kind, d]));
 		const installedKinds = Object.keys(installed);
 
@@ -24,8 +29,16 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 					{
 						javascript: {
 							target: javascriptTarget,
-							execution: javascriptTarget === "node" ? "in-process" : "persistent-worker",
-							available: javascriptTarget === "node",
+							kind: `runtime.${javascript.kind}`,
+							// In-process only when the orchestrator host IS the selected
+							// engine (ADR 0016 §1); otherwise the persistent worker.
+							execution: hostIsTarget ? "in-process" : "persistent-worker",
+							available: javascript.available,
+							binary: javascript.binary,
+							version: javascript.version ?? null,
+							minVersion: javascript.minVersion,
+							grpcPort: javascript.defaultGrpcPort,
+							remediation: javascript.remediation || null,
 						},
 						installed: installedKinds.map((kind) => ({
 							kind,
@@ -78,9 +91,12 @@ export async function runtimeList(options: OptionValues): Promise<void> {
 
 		p.outro(
 			color.dim(
-				javascriptTarget === "node"
-					? "JavaScript target: Node.js (in-process)."
-					: `JavaScript target: ${javascriptTarget} (persistent worker availability is checked at boot).`,
+				javascript.available
+					? `JavaScript target: ${javascript.label} ${javascript.version ?? ""} (${hostIsTarget ? "in-process" : `persistent worker, gRPC :${javascript.defaultGrpcPort}`}).`.replace(
+							"  ",
+							" ",
+						)
+					: `JavaScript target: ${javascript.label} — NOT available. ${javascript.remediation}`,
 			),
 		);
 	} catch (err) {

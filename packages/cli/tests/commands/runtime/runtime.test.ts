@@ -467,7 +467,20 @@ describe("runtime list --json", () => {
 		spy.mockRestore();
 
 		const out = JSON.parse(lines.join("\n"));
-		expect(out.javascript).toEqual({ target: "deno", execution: "persistent-worker", available: false });
+		// The JavaScript block is PROBED, not read back from config: `available`
+		// reflects whether this machine actually has the engine, and carries the
+		// exact remediation when it does not.
+		expect(out.javascript).toMatchObject({
+			target: "deno",
+			kind: "runtime.deno",
+			execution: "persistent-worker",
+			binary: "deno",
+			minVersion: "2.0.0",
+			grpcPort: 10014,
+		});
+		expect(typeof out.javascript.available).toBe("boolean");
+		// Unavailable must always come with a next step; available needs none.
+		expect(out.javascript.available || Boolean(out.javascript.remediation)).toBe(true);
 		expect(out.installed.map((r: { kind: string }) => r.kind)).toContain("go");
 		expect(out.available.map((r: { kind: string }) => r.kind)).not.toContain("go");
 		expect(out.available.length).toBeGreaterThan(0);
