@@ -580,13 +580,16 @@ export async function createProject(opts: OptionValues, version: string, current
 			// its engine in the release image or the supervised worker cannot
 			// start there (ADR 0016 §3).
 			const engineDef = getJavaScriptRuntimeDefinition(selectedJavaScriptRuntime);
-			if (engineDef && selectedJavaScriptRuntime !== "bun") {
+			if (engineDef) {
 				fsExtra.writeFileSync(
 					`${dirPath}/Dockerfile`,
 					withJavaScriptEngine(
 						fsExtra.readFileSync(`${dirPath}/Dockerfile`, "utf8"),
 						selectedJavaScriptRuntime,
-						engineDef.dockerProvision,
+						// Bun is already in the trigger's base image; the others need
+						// a pinned layer.
+						selectedJavaScriptRuntime === "bun" ? "" : engineDef.dockerProvision,
+						`dist/triggers/${primaryTrigger}/index.js`,
 					),
 				);
 			}
@@ -1161,8 +1164,18 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// ponytail: strip the framework's internal test setup so it doesn't bleed
 		// into the user's project — no `test`/`test:dev` scripts, no vitest dep.
+		//
+		// `reload` goes too: it is inherited verbatim from the trigger package
+		// (`bun --env-file=.env.local run src/index.ts`), which is both Bun-only
+		// and pointed at a path a generated project does not have — its entries
+		// live at `src/triggers/<kind>/index.ts` (#709). `blokctl dev` is the
+		// supported dev loop. The `infra:*` scripts are dropped when the project
+		// has no `infra/` directory to compose, which is every project that did
+		// not scaffold a broker.
+		const hasInfra = fsExtra.existsSync(`${dirPath}/infra/docker-compose.yml`);
+		const DANGLING = new Set(["test", "test:dev", "reload", ...(hasInfra ? [] : ["infra:dev", "infra:build"])]);
 		packageJsonContent.scripts = Object.fromEntries(
-			Object.entries(packageJsonContent.scripts).filter(([s]) => s !== "test" && s !== "test:dev"),
+			Object.entries(packageJsonContent.scripts).filter(([s]) => !DANGLING.has(s)),
 		);
 		packageJsonContent.devDependencies = Object.fromEntries(
 			Object.entries(packageJsonContent.devDependencies).filter(([d]) => d !== "vitest" && !d.startsWith("@vitest/")),

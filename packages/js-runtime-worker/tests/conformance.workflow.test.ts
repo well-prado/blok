@@ -97,6 +97,16 @@ async function boot(engine: (typeof ENGINES)[number], port: number): Promise<voi
 
 const available = ENGINES.filter((e) => binaryAvailable(e.bin));
 const canRun = existsSync(ENTRY) && available.length === ENGINES.length;
+if (!canRun) {
+	// Say so out loud. A silent skip in a lane that lacks an engine reads
+	// exactly like a pass, which is how cross-runtime coverage rots.
+	const missing = ENGINES.filter((e) => !available.includes(e)).map((e) => e.bin);
+	console.warn(
+		`[conformance] SKIPPING the workflow matrix — ${
+			existsSync(ENTRY) ? `missing engine(s): ${missing.join(", ")}` : `${ENTRY} is missing (run \`bun run build\`)`
+		}. The js-runtime-targets CI lane installs all three.`,
+	);
+}
 
 /** `runtime.<kind>` step, spelled the way a JSON workflow spells it. */
 function runtimeStep(id: string, use: string, kind: string, inputs: Record<string, unknown>): Record<string, unknown> {

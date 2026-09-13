@@ -1437,9 +1437,25 @@ stdout_logfile=/var/log/javascript_worker.out.log
  * supervised worker cannot start. Inserted immediately after the release
  * stage's `FROM`, so the multi-stage build is untouched otherwise. Idempotent.
  */
-export function withJavaScriptEngine(dockerfile: string, target: JavaScriptRuntime, provision: string): string {
-	if (dockerfile.includes(provision)) return dockerfile;
-	const lines = dockerfile.split("\n");
+export function withJavaScriptEngine(
+	dockerfile: string,
+	target: JavaScriptRuntime,
+	provision: string,
+	entry?: string,
+): string {
+	let result = dockerfile;
+	// The trigger's Dockerfile ends `ENTRYPOINT [ "bun", "run", "dist/index.js" ]`
+	// — the PACKAGE entry under the PACKAGE's engine. A generated project lays
+	// its entries at dist/triggers/<kind>/index.js and may have selected another
+	// engine, so the image would start the wrong binary on the wrong path
+	// (the #709 class of bug, fixed for `start` but not for the image).
+	if (entry !== undefined) {
+		const host = target === "deno" ? "node" : target;
+		result = result.replace(/^ENTRYPOINT\s*\[[^\]]*\]\s*$/m, `ENTRYPOINT [ "${host}", "${entry}" ]`);
+	}
+	// An empty `provision` means the base image already has the engine (Bun).
+	if (provision === "" || result.includes(provision)) return result;
+	const lines = result.split("\n");
 	const releaseIndex = lines.findIndex((line) => /^FROM\s+.*\bAS\s+release\b/i.test(line.trim()));
 	// No recognizable release stage (a hand-edited or unusual Dockerfile):
 	// append rather than guess at a position that might break the build.

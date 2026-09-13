@@ -445,10 +445,47 @@ workflows/json/**.json    # optional JSON workflows (file-based routing)
 
 | Command | Does |
 |---|---|
-| `blokctl dev` | Start the trigger(s) + spawn configured runtimes. |
+| `blokctl dev` | Start the trigger(s) + spawn configured runtimes. **Requires Bun**: it runs the trigger entrypoints straight from TypeScript source. |
 | `blokctl create node <name> [--runtime <lang>]` | Scaffold a node. |
 | `blokctl create workflow <name>` | Scaffold a workflow. |
 | `blokctl trace` | Open **Blok Studio** (also at `/__blok` on the running server) — per-run traces with each step's inputs/outputs/errors/timing. |
+
+### JavaScript execution target
+
+This project selected one of **Node.js**, **Bun**, or **Deno** at creation
+(`.blok/config.json` → `runtime`; change it with `blokctl runtime use <target>`).
+Two axes, deliberately separate:
+
+- the **orchestrator host** runs the trigger and the workflow engine — `npm run dev`
+  (Bun, from TypeScript source) and `npm start` (the built output);
+- the **execution target** runs `runtime.nodejs` / `runtime.bun` / `runtime.deno` steps.
+  When it is the same engine as the host they run in-process; otherwise they run in the
+  persistent `@blokjs/runtime-worker` that `npm run worker:start` (and `blokctl dev`) boots.
+
+| Script | Engine |
+|---|---|
+| `dev` | Bun (`blokctl dev` runs the triggers from source) |
+| `typecheck`, `build` | `tsc` — the type checker is not an execution axis |
+| `test` | the selected target's own test runner, over `tests/` |
+| `start` | the selected target, except Deno: the Blok runner is not hosted under Deno, so a Deno project starts a **Node** orchestrator and runs its steps in the Deno worker |
+| `worker:start` | the selected target |
+
+Write **portable** nodes: `defineNode()`, Zod schemas, the documented `ctx` ABI, standard ESM,
+and `ctx.env` for environment values (not `process.env`). A node that genuinely needs `node:`
+APIs, `Bun.*`, `Deno.*`, or a native addon must say so, or it will fail on another engine
+halfway through a run:
+
+```ts
+capabilityManifest: {
+  version: "1", classification: "agent-compatible",
+  effects: ["process"], capabilities: [], secrets: [],
+  determinism: "external", idempotency: "idempotent", maturity: "stable",
+  runtimes: ["bun"],   // canonical kinds: nodejs | bun | deno. Omit when portable.
+}
+```
+
+A worker for another engine then refuses that node **at boot**, names both sides, and answers
+`NODE_RUNTIME_INCOMPATIBLE` if a step still targets it.
 
 ---
 

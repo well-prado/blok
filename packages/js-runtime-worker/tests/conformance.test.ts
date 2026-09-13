@@ -197,6 +197,16 @@ afterAll(async () => {
 });
 
 const available = ENGINES.filter((e) => binaryAvailable(e.bin));
+if (available.length < ENGINES.length || !existsSync(ENTRY)) {
+	// A per-engine suite legitimately runs against whatever is installed, but
+	// an unannounced skip is indistinguishable from a pass.
+	const missing = ENGINES.filter((e) => !available.includes(e)).map((e) => e.bin);
+	console.warn(
+		`[conformance] running against ${available.map((e) => e.bin).join(", ") || "no engines"}${
+			missing.length > 0 ? ` — SKIPPING ${missing.join(", ")}` : ""
+		}${existsSync(ENTRY) ? "" : ` — ${ENTRY} is missing (run \`bun run build\`)`}.`,
+	);
+}
 
 describe.skipIf(!existsSync(ENTRY) || available.length === 0)("portable conformance matrix", () => {
 	for (const engine of ENGINES) {

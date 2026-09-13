@@ -5,7 +5,13 @@ icon: "rocket"
 ---
 
 By the end of this page you'll have a running Blok API with one typed node, one workflow, and a
-live trace of every request. You'll need **Node 18+** (or Bun) and a terminal.
+live trace of every request. You'll need **Node 20+**, **[Bun](https://bun.sh)**, and a terminal.
+
+<Note>
+Both, not either: `blokctl dev` runs your trigger entrypoints straight from TypeScript source,
+which is Bun's job. Which engine executes your *nodes* is a separate, explicit choice —
+`--runtime node|bun|deno`, see [Language Runtimes](../cli/runtimes).
+</Note>
 
 ## 1. Scaffold a project
 

@@ -8,7 +8,7 @@ and runtimes this project actually has, and author for those (don't default to H
 ## Commands
 
 ```bash
-blokctl dev                              # Start trigger(s) + spawn configured runtimes
+blokctl dev                              # Start trigger(s) + spawn configured runtimes (requires Bun: runs triggers from TS source)
 blokctl create node <name>               # Scaffold a TS node (--runtime go|rust|java|kotlin|csharp|php|ruby|python3|swift|dart)
 blokctl create workflow <name>           # Scaffold a workflow
 blokctl trace                            # Open Blok Studio (or visit /__blok on the running server)
@@ -68,3 +68,16 @@ A node at `src/nodes/<name>/index.ts` is **auto-discovered** by its `name` (the 
 - No duplicate node `name` (throws); no response objects built inside a node (use `@blokjs/respond`).
 
 → Full guide with examples for all 9 triggers, reliability, sub-workflows, and testing: **`AGENTS.md`**.
+
+## JavaScript execution target
+
+`.blok/config.json` → `runtime` is `node`, `bun`, or `deno` (`blokctl runtime use <target>`).
+The **orchestrator host** (`dev`, `start`) and the **execution target** (`runtime.*` steps,
+`worker:start`) are separate axes. `typecheck`/`build` are `tsc` for every target; `test` uses
+the target's own runner; a Deno project starts a Node orchestrator and runs its steps in the
+Deno worker.
+
+Author portable nodes and use `ctx.env`, not `process.env`. A node that needs `node:` APIs,
+`Bun.*`, `Deno.*`, or a native addon must declare `capabilityManifest.runtimes: ["bun"]` (kinds:
+`nodejs`, `bun`, `deno`) — a worker for another engine then refuses it at boot instead of
+failing mid-run.
