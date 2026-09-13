@@ -23,6 +23,7 @@ beforeAll(() => {
 	process.env.BLOK_FLASH_SECRET = SECRET;
 });
 afterAll(() => {
+	// biome-ignore lint/performance/noDelete: the var must be ABSENT afterwards, not the string "undefined".
 	if (previousSecret === undefined) delete process.env.BLOK_FLASH_SECRET;
 	else process.env.BLOK_FLASH_SECRET = previousSecret;
 });

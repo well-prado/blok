@@ -94,6 +94,13 @@ const inputSchema = z.object({
 		.record(z.unknown())
 		.optional()
 		.describe("Validation errors. Always emitted as props.errors ({} when none)."),
+	errorBag: z
+		.string()
+		.optional()
+		.describe(
+			"Error-bag name the errors nest under. Overrides X-Inertia-Error-Bag — a bag persisted " +
+				"across a redirect (#996) rides the flash cookie, not the follow-up request's headers.",
+		),
 	withAllErrors: z
 		.boolean()
 		.optional()
@@ -101,9 +108,7 @@ const inputSchema = z.object({
 	cookies: z
 		.array(z.string())
 		.optional()
-		.describe(
-			"Raw Set-Cookie values to emit, e.g. the clearing flash cookie from the `flash` middleware step (#996).",
-		),
+		.describe("Raw Set-Cookie values to emit, e.g. the clearing flash cookie from the `flash` middleware step (#996)."),
 
 	// --- request surface (supplied by the page control step / definePage) ---
 	headers: z.record(z.unknown()).optional().describe("Request headers. Defaults to ctx.request.headers."),
@@ -219,7 +224,7 @@ export default defineNode({
 			// cookie that would otherwise cancel it.
 			const reflash = flashCookie({
 				errors: input.errors as Record<string, unknown> | undefined,
-				bag: headers["x-inertia-error-bag"],
+				bag: input.errorBag ?? headers["x-inertia-error-bag"],
 				flash: input.flash as Record<string, unknown> | undefined,
 				preserveFragment: input.preserveFragment,
 			});
@@ -235,7 +240,7 @@ export default defineNode({
 			errors: normalizeErrors(input.errors as Record<string, unknown> | undefined, {
 				withAllErrors: input.withAllErrors,
 			}),
-			errorBag: headers["x-inertia-error-bag"],
+			errorBag: input.errorBag ?? headers["x-inertia-error-bag"],
 			headers,
 			mergeProps: input.mergeProps,
 			prependProps: input.prependProps,

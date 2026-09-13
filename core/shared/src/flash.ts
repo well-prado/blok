@@ -61,8 +61,7 @@ export function resolveFlashSecret(explicit?: string): string {
 	const secret = explicit ?? process.env[FLASH_SECRET_ENV];
 	if (!secret) {
 		throw new Error(
-			`[blok] flash cookies require a signing secret: set ${FLASH_SECRET_ENV} (or pass \`secret\`). ` +
-				"There is no default — an unsigned or randomly-keyed flash cookie is forgeable.",
+			`[blok] flash cookies require a signing secret: set ${FLASH_SECRET_ENV} (or pass \`secret\`). There is no default — an unsigned or randomly-keyed flash cookie is forgeable.`,
 		);
 	}
 	return secret;

@@ -20,6 +20,8 @@ import InertiaNode, { clearHistory } from "../src/index.js";
 
 const PORT = 39441;
 const SENT_PROPS = { user: { name: "Ada", href: "/users/1" }, count: 2 };
+/** #996 — the page-object `flash` field the client reads once and strips. */
+const TOAST = { toast: { type: "success", message: "Order saved." } };
 
 // The client's own `sessionStorage` keys for the history AES key and IV
 // (`historySessionStorageKeys` in @inertiajs/core — declared in its types but
@@ -49,11 +51,27 @@ beforeAll(async () => {
 		headers: { "x-inertia": "true" },
 	});
 
+	// #996 — the same node answering a bounce-back GET: errors in props, flash
+	// on the page object itself, and the clearing cookie on the way out.
+	const flashed = await render({
+		component: "Orders/Index",
+		props: { count: 0 },
+		errors: { sku: "Required." },
+		flash: TOAST,
+		url: "/orders",
+		version: "v1",
+		headers: { "x-inertia": "true" },
+		cookies: ["blok_flash=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"],
+	});
+
+	routes.set("/users/1", visit);
+	routes.set("/orders", flashed);
 	server = createServer((req, res) => {
 		const env = routes.get((req.url ?? "/").split("?")[0] as string) ?? visit;
 		res.writeHead(env.status ?? 200, {
 			"Content-Type": env.contentType ?? "application/json",
 			...(env.headers ?? {}),
+			...(env.cookies?.length ? { "Set-Cookie": env.cookies } : {}),
 		});
 		res.end(JSON.stringify(env.body));
 	});
@@ -112,6 +130,65 @@ describe("17 — the stock Inertia client boots from, and visits, our responses"
 		// router swapped in — this is that same value.
 		expect(swapped.at(-1)?.props).toEqual({ ...SENT_PROPS, errors: {} });
 		expect(swapped.at(-1)?.url).toBe("/users/1");
+	});
+});
+
+/**
+ * #996 test 17 — flash, through the stock client.
+ *
+ * Declared after the block above on purpose: `router.init()` there is what
+ * wires the client's popstate handling, and the router is a module singleton —
+ * a second init would double every listener. Declared BEFORE the #1013 block
+ * below for the same kind of reason: that one deliberately replaces the current
+ * history entry with an undecryptable one, which is no state to press Back in.
+ */
+describe("17 (#996) — router.on('flash') fires, and Back leaves the page flash empty", () => {
+	it("delivers page.flash to the client and drops it from the history entry", async () => {
+		const flashes: Record<string, unknown>[] = [];
+		const stopListening = router.on("flash", (event: CustomEvent<{ flash: Record<string, unknown> }>) => {
+			flashes.push(event.detail.flash);
+		});
+
+		// Resolved off `navigate`, not `onSuccess`: a page carrying validation
+		// errors is an `onError` visit by the client's own contract, and this
+		// bounce-back page deliberately carries both errors and flash.
+		const withFlash = await new Promise<Page>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("router.visit('/orders') never navigated")), 5000);
+			const off = router.on("navigate", (event: CustomEvent<{ page: Page }>) => {
+				if (event.detail.page.url !== "/orders") return;
+				clearTimeout(timer);
+				off();
+				resolve(event.detail.page);
+			});
+			router.visit("/orders", { method: "get" });
+		});
+		// `inertia:flash` fires after the page swap completes.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		// The page object carries flash as a TOP-LEVEL field, not a prop...
+		expect(withFlash.flash).toEqual(TOAST);
+		expect(withFlash.props).not.toHaveProperty("flash");
+		expect(withFlash.props.errors).toEqual({ sku: "Required." });
+		// ...and the client fired `inertia:flash` with exactly that payload.
+		expect(flashes).toEqual([TOAST]);
+		stopListening();
+
+		// Back: the client stores history entries WITHOUT flash, so the restored
+		// page carries none — a toast must not replay on every backward visit.
+		const restored = await new Promise<Page>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("popstate never restored a page")), 5000);
+			const off = router.on("navigate", (event: CustomEvent<{ page: Page }>) => {
+				if (event.detail.page.url !== "/users/1") return;
+				clearTimeout(timer);
+				off();
+				resolve(event.detail.page);
+			});
+			window.history.back();
+		});
+
+		expect(restored.component).toBe("Users/Show");
+		expect(restored.flash ?? {}).toEqual({});
+		expect(flashes).toEqual([TOAST]);
 	});
 });
 

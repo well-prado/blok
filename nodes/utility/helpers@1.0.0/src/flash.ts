@@ -58,9 +58,7 @@ export default defineNode({
 		secure: z.boolean().optional().describe("Add the Secure attribute (HTTPS-only cookie)."),
 	}),
 	output: z.object({
-		cookie: z
-			.string()
-			.describe("The Set-Cookie value to emit — the signed cookie on write, the clearing one on read."),
+		cookie: z.string().describe("The Set-Cookie value to emit — the signed cookie on write, the clearing one on read."),
 		present: z.boolean().describe("read: true when a valid, correctly-signed payload was found."),
 		errors: z.record(z.unknown()).describe("read: the payload's errors, {} when absent."),
 		bag: z.string().optional().describe("read: the payload's error-bag name."),

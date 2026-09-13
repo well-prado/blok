@@ -63,6 +63,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/ctx-publish",
 				"@blokjs/ctx-publish-many",
 				"@blokjs/expr",
+				"@blokjs/flash",
 				"@blokjs/hmac-verify",
 				"@blokjs/in-memory-kv",
 				"@blokjs/inertia",
