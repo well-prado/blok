@@ -275,6 +275,17 @@ function collectPageSteps(node: unknown, out: { component: string; props: Record
 let scanCounter = 0;
 
 /**
+ * Explain an import failure. A host that cannot load `.ts` at all is the one
+ * failure worth translating: every workflow reports it, and the raw Node
+ * message ("Unknown file extension") never mentions the fix.
+ */
+export function importFailureMessage(err: unknown): string {
+	const message = err instanceof Error ? err.message : String(err);
+	if (!/Unknown file extension|ERR_UNKNOWN_FILE_EXTENSION/.test(message)) return message;
+	return `${message} — this runtime cannot import TypeScript. Run blokctl under Bun, or Node >= 22.18 (type stripping).`;
+}
+
+/**
  * Import every workflow module and read the pages + routes out of it.
  *
  * The page registry is process-global, so it is reset before each scan and the
@@ -303,7 +314,7 @@ export async function scanInertiaProject(files: readonly string[], projectRoot: 
 			const built = (await mod.default) as { _config?: WorkflowConfig } | undefined;
 			if (built?._config) configs.push(built._config);
 		} catch (err) {
-			failures.push({ file, message: err instanceof Error ? err.message : String(err) });
+			failures.push({ file, message: importFailureMessage(err) });
 		}
 	}
 

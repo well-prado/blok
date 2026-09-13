@@ -15,7 +15,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { collectTsFiles, generateAppTypes, resolveOutPaths } from "./appTypes.js";
-import { buildPagesSource, buildRoutesModuleSource, generatePages, zodToTs } from "./pagesTypes.js";
+import {
+	buildPagesSource,
+	buildRoutesModuleSource,
+	generatePages,
+	importFailureMessage,
+	zodToTs,
+} from "./pagesTypes.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.join(here, "../../../tests/fixtures");
@@ -319,6 +325,12 @@ describe("zodToTs", () => {
 		expect(zodToTs(z.number().brand<"cents">())).toBe("number");
 		// Dates cross the wire as JSON.
 		expect(zodToTs(z.date())).toBe("string");
+	});
+
+	it("explains the one import failure whose raw message hides the fix", () => {
+		const raw = new Error('Unknown file extension ".ts" for /p/wf.ts');
+		expect(importFailureMessage(raw)).toContain("Run blokctl under Bun, or Node >= 22.18");
+		expect(importFailureMessage(new Error("boom"))).toBe("boom");
 	});
 
 	it("makes `.optional()` an optional KEY, not a `| undefined` value", () => {
