@@ -100,8 +100,9 @@ describe("create project (non-interactive)", () => {
 		SCAFFOLD_TIMEOUT,
 	);
 
-	it(
-		"should accept package-manager flag in non-interactive mode",
+	// #1030: twenty consecutive real installs in CI, with fresh projects each time.
+	it.each(Array.from({ length: process.env.CI ? 20 : 1 }, (_, index) => index + 1))(
+		"should accept package-manager flag in non-interactive mode (run %i)",
 		async () => {
 			await scaffold("test-ni-pm", { packageManager: "bun" });
 		},
