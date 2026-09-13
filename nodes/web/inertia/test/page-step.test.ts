@@ -529,3 +529,33 @@ describe("12 — JSON form (golden)", () => {
 		expect(fromJson.state("page.stats")).toEqual({ total: 42 });
 	});
 });
+
+describe("load-time guards", () => {
+	it("refuses a prop key containing a dot — it would be ambiguous with a sub-path", async () => {
+		const wf = {
+			name: "page-dotted-prop",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/dotted" } },
+			steps: [
+				{
+					id: "page",
+					page: {
+						component: "Dotted/Index",
+						props: { "posts.data": { use: "page-paginate-posts" } },
+					},
+				},
+			],
+		};
+		await expect(runWorkflow(JSON.stringify(wf))).rejects.toThrow(/contains a dot/);
+	});
+
+	it("refuses a prop with no `use`", async () => {
+		const wf = {
+			name: "page-no-use",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/no-use" } },
+			steps: [{ id: "page", page: { component: "NoUse/Index", props: { orders: { mode: "always" } } } }],
+		};
+		await expect(runWorkflow(JSON.stringify(wf))).rejects.toThrow(/missing `use`/);
+	});
+});

@@ -1206,6 +1206,15 @@ function normalizePageStep(
 		if (!use) {
 			throw new Error(`[blok] WorkflowNormalizer: page step "${id}" prop "${key}" is missing \`use\`.`);
 		}
+		// A dot in a prop key is genuinely ambiguous, not merely awkward: partial
+		// reloads target prop SUB-PATHS with dots (`only: "posts.data"`), and the
+		// prop's state slot is `<pageId>.<key>`. A key containing one could not be
+		// told apart from a path into a sibling prop.
+		if (key.includes(".")) {
+			throw new Error(
+				`[blok] WorkflowNormalizer: page step "${id}" prop "${key}" contains a dot. Dots separate a prop from a sub-path in partial reloads (\`only: "posts.data"\`) and in the prop's state slot — pick a key without one.`,
+			);
+		}
 		rawSteps.push({
 			id: `${id}.${key}`,
 			use,
