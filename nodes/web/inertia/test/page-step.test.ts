@@ -419,6 +419,30 @@ describe("8 — dot-notation paths", () => {
 	});
 });
 
+describe("8b — `X-Inertia-Reset` with a dot path", () => {
+	it("still resolves the prop, and strips its merge label so the client replaces it", async () => {
+		const headers = {
+			...INERTIA,
+			"x-inertia-partial-component": "Orders/Index",
+			"x-inertia-partial-data": "feed,posts",
+			"x-inertia-reset": "feed.data,posts.data",
+		};
+		const run = await runWorkflow(await ordersWorkflow(), {}, { headers, query: QUERY });
+
+		expect(run.ok).toBe(true);
+		// A reset prop is still RESOLVED — the client is asking for a fresh copy.
+		expect(calls("page-load-feed")).toBe(1);
+		expect(calls("page-paginate-posts")).toBe(1);
+
+		const page = pageOf(run.response);
+		expect(page.props.feed).toEqual({ data: ["f-1"] });
+		// …but its merge labels are gone, and the scroll prop is flagged reset.
+		expect(page.mergeProps ?? []).not.toContain("feed.data");
+		expect(page.mergeProps ?? []).not.toContain("posts.data");
+		expect(page.scrollProps?.["posts.data"]?.reset).toBe(true);
+	});
+});
+
 describe("9 — parallelism", () => {
 	it("two 100ms props finish in well under 200ms", async () => {
 		const wf = await workflow("parallel-page", { version: "1.0.0", trigger: http.get("/parallel") }, (req) => {
