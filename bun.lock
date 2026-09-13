@@ -674,7 +674,6 @@
         "zod": "^3.24.2",
       },
       "devDependencies": {
-        "@blokjs/inertia": "^2.3.0",
         "@types/ejs": "^3.1.5",
         "@types/node": "^22.15.21",
         "@types/pg": "^8.16.0",

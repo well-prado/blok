@@ -13,6 +13,13 @@
  * server mocks — plus `../../src/Nodes` extended with the app-side nodes an
  * Inertia project supplies itself (`currentUser`, the failing POST handler and
  * a run probe).
+ *
+ * `@blokjs/inertia` is imported here WITHOUT being a manifest dependency of
+ * this package, deliberately and for the same reason `src/Nodes.ts` reaches it
+ * through a non-literal specifier: the scaffold copies this package.json into
+ * generated projects, and a dependency on a package that is not yet on npm
+ * breaks `blokctl create` (only the scaffold E2E catches it). The workspace
+ * link is what resolves it here.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
