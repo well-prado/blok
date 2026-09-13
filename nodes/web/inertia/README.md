@@ -158,10 +158,15 @@ re-issue the logout write) and marks the request so the next page object
 carries `clearHistory: true`. The client then drops its history key and IV,
 and the entries behind Back can no longer be decrypted.
 
-The mark is request-scoped: a page rendered **in the same request** picks it
-up. Carrying it across the redirect to the *next* request needs the session
-flash — `TODO(#996)`. Until then, render the page after `logout` in the same
-workflow, or pass `clearHistory()` to the page that answers `/login`.
+The mark is request-scoped, so a page rendered **in the same request** picks it
+up directly. The normal case — a redirect — is covered by the signed flash
+cookie (#996): `logoutResponse` persists the mark, `inertia.shared` reads it
+back on the next request, and the page the user lands on carries
+`clearHistory: true` **once**. Wire `clearHistory: {"$ref": {"step": "flash",
+"path": ["clearHistory"]}}` into the render step for that (the `flash` step
+reports `true` or nothing — never `false` — so it can't override a mark set in
+the same request). Without `BLOK_FLASH_SECRET` configured, logout keeps the
+request-scoped-only behaviour instead of failing.
 
 ### Authorization
 
@@ -328,9 +333,9 @@ WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared"]);
 > `inertiaAuthRedirect`) for the same reason.
 
 `inertia.shared`'s `flash` step exposes `{ errors, bag, flash,
-preserveFragment, cookie, present }`. Wire them into the render step — and
-pass `cookie` through as `cookies`, because the response that CONSUMED the
-flash is the one that has to expire it:
+preserveFragment, clearHistory, cookie, present }`. Wire them into the render
+step — and pass `cookie` through as `cookies`, because the response that
+CONSUMED the flash is the one that has to expire it:
 
 ```json
 { "id": "render", "use": "@blokjs/inertia", "inputs": {
@@ -339,6 +344,7 @@ flash is the one that has to expire it:
   "errors":  { "$ref": { "step": "flash", "path": ["errors"] } },
   "errorBag":{ "$ref": { "step": "flash", "path": ["bag"] } },
   "flash":   { "$ref": { "step": "flash", "path": ["flash"] } },
+  "clearHistory": { "$ref": { "step": "flash", "path": ["clearHistory"] } },
   "cookies": [ { "$ref": { "step": "flash", "path": ["cookie"] } } ]
 }}
 ```

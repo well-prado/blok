@@ -47,6 +47,8 @@ export interface RedirectBackOptions extends FlashPersistOptions {
 	fallback?: string;
 	/** Keep the current URL fragment across the visit. */
 	preserveFragment?: boolean;
+	/** #1013 — make the page after the redirect carry `clearHistory: true`. */
+	clearHistory?: boolean;
 	/** Extra response headers merged onto the redirect. */
 	headers?: Record<string, string>;
 }
@@ -85,6 +87,7 @@ export function redirectBack(req: FlashRequest, opts: RedirectBackOptions = {}):
 			bag: opts.bag,
 			flash: opts.flash,
 			preserveFragment: opts.preserveFragment,
+			clearHistory: opts.clearHistory,
 		},
 		opts,
 	);

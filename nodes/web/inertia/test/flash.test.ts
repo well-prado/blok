@@ -3,15 +3,16 @@
  * `withAllErrors` option (test 16), the page-object flash field (test 13) and
  * the 409 re-flash (test 15), all against the real node via `runNode`.
  *
- * The middleware round-trip through a live HTTP trigger (tests 7–12, 14) lives
- * in `triggers/http/__tests__/unit/HttpTrigger.inertia-middleware.test.ts` —
- * only the trigger can prove a middleware chain actually short-circuits.
+ * The middleware round-trip through a live HTTP trigger (tests 7–12, 14, plus
+ * the logout round-trip) lives in
+ * `triggers/http/__tests__/unit/HttpTrigger.inertiaMiddleware.test.ts` — only
+ * the trigger can prove a middleware chain actually short-circuits.
  */
 
 import { runNode } from "@blokjs/core/testing";
 import { type RespondEnvelope, verifyFlash } from "@blokjs/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import InertiaNode, { back, flash, normalizeErrors, redirectBack } from "../src/index.js";
+import InertiaNode, { back, flash, logoutResponse, normalizeErrors, redirectBack } from "../src/index.js";
 import type { PageObject } from "../src/protocol.js";
 
 const SECRET = "inertia-flash-secret";
@@ -87,6 +88,31 @@ describe("redirectBack / back", () => {
 
 	it("back() is redirectBack()", () => {
 		expect(back).toBe(redirectBack);
+	});
+
+	// #1013's TODO(#996): the clearHistory mark is request-scoped, so the page
+	// after a redirect only learns about it through the cookie.
+	it("persists clearHistory, and logoutResponse uses it", () => {
+		const explicit = redirectBack({ headers: { referer: "/app" }, method: "POST" }, { clearHistory: true });
+		expect(payloadOf(explicit.cookies?.[0])).toEqual({ clearHistory: true });
+
+		const out = logoutResponse({ request: { method: "POST" } }, { redirectTo: "/login" });
+		expect(out.status).toBe(303);
+		expect(out.headers?.Location).toBe("/login");
+		expect(payloadOf(out.cookies?.[0])).toEqual({ clearHistory: true });
+	});
+
+	it("logoutResponse keeps working when no signing secret is configured", () => {
+		const secret = process.env.BLOK_FLASH_SECRET;
+		// biome-ignore lint/performance/noDelete: the var must be ABSENT, not the string "undefined".
+		delete process.env.BLOK_FLASH_SECRET;
+		try {
+			const out = logoutResponse({ request: { method: "POST" } });
+			expect(out.status).toBe(303);
+			expect(out.cookies).toBeUndefined();
+		} finally {
+			process.env.BLOK_FLASH_SECRET = secret;
+		}
 	});
 });
 

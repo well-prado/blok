@@ -90,8 +90,10 @@ export {
  * should not pay for it. It is OPTIONAL and undeclared, loaded through a
  * non-literal specifier + try/catch — exactly the shape
  * `triggers/http/src/Nodes.ts` uses for `@blokjs/browser`, which likewise
- * appears in no manifest. A project that installed it gets the
- * `@blokjs/inertia` ref; one that did not boots fine without it.
+ * appears in no manifest. A project that installed it gets the adapter ref
+ * `@blokjs/inertia` plus the security nodes `@blokjs/inertia.authorize`,
+ * `@blokjs/inertia.logout` and `@blokjs/inertia.history` (#1013); one that did
+ * not boots fine without any of them.
  *
  * Deliberately NOT a dependency or a peer: bun installs the dependencies of a
  * `file:`-linked package, so a hard dependency on a package that is not yet on
@@ -99,12 +101,23 @@ export {
  * import already expresses.
  */
 const inertiaPkg = "@blokjs/inertia";
-let InertiaNode: NodeBase | undefined;
+/** Every node the Inertia package ships, keyed by its own `name` (ADR 0002). */
+const inertiaNodes: Record<string, NodeBase> = {};
 try {
-	const mod = (await import(inertiaPkg)) as { default?: unknown };
-	if (mod.default) InertiaNode = mod.default as NodeBase;
+	const mod = (await import(inertiaPkg)) as {
+		default?: unknown;
+		authorizeNode?: unknown;
+		logoutNode?: unknown;
+		historyNode?: unknown;
+	};
+	// The adapter plus the three named nodes (#1013). Keys come from each node's
+	// own `name` so a JSON workflow's `use:` and this map cannot drift apart.
+	for (const candidate of [mod.default, mod.authorizeNode, mod.logoutNode, mod.historyNode]) {
+		const node = candidate as NodeBase | undefined;
+		if (node?.name) inertiaNodes[node.name] = node;
+	}
 } catch {
-	// not installed — the Inertia adapter is simply unavailable
+	// not installed — the Inertia nodes are simply unavailable
 }
 
 /**
@@ -125,7 +138,7 @@ export const HELPER_NODES = {
 	"@blokjs/flash": FlashNode,
 	"@blokjs/hmac-verify": HmacVerifyNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
-	...(InertiaNode ? { "@blokjs/inertia": InertiaNode } : {}),
+	...inertiaNodes,
 	"@blokjs/json-schema": JsonSchemaNode,
 	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/llm-agent": LlmAgentNode,

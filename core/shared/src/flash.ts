@@ -38,6 +38,12 @@ export interface FlashPayload {
 	flash?: Record<string, unknown>;
 	/** Keep the URL fragment across the redirect. */
 	preserveFragment?: boolean;
+	/**
+	 * #1013 — carry `clearHistory` to the page AFTER the redirect. The mark
+	 * `logoutResponse()` leaves is request-scoped, and logout is a redirect, so
+	 * without this the page the user actually lands on never sees it.
+	 */
+	clearHistory?: boolean;
 }
 
 /** Cookie attributes. Defaults are the safe ones; only `secure` is opt-in. */
@@ -150,5 +156,5 @@ export function isEmptyFlash(payload: FlashPayload | undefined): boolean {
 	if (!payload) return true;
 	const errors = Object.keys(payload.errors ?? {}).length;
 	const flash = Object.keys(payload.flash ?? {}).length;
-	return errors === 0 && flash === 0 && !payload.preserveFragment;
+	return errors === 0 && flash === 0 && !payload.preserveFragment && !payload.clearHistory;
 }

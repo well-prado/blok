@@ -126,6 +126,9 @@ vi.mock("../../src/Workflows", async () => {
 						errors: ref("flash", "errors"),
 						errorBag: ref("flash", "bag"),
 						flash: ref("flash", "flash"),
+						// #1013 via #996 — `logoutResponse()` flashed the mark; the
+						// page after the redirect is where the client acts on it.
+						clearHistory: ref("flash", "clearHistory"),
 						// One-shot: the render that consumed the flash expires it.
 						cookies: [ref("flash", "cookie")],
 					},
@@ -148,6 +151,16 @@ vi.mock("../../src/Workflows", async () => {
 					version: "1.0.0",
 					trigger: { http: { method: "POST", path: "/orders" } },
 					steps: [{ id: "create", use: "test/create-order", inputs: { body: ref("@trigger", "body") } }],
+				},
+			},
+			// #1013's logout node, straight out of HELPER_NODES by its ref.
+			logout: {
+				_blokV2: true,
+				_config: {
+					name: "logout",
+					version: "1.0.0",
+					trigger: { http: { method: "POST", path: "/logout" } },
+					steps: [{ id: "out", use: "@blokjs/inertia.logout", inputs: { redirectTo: "/orders/open" } }],
 				},
 			},
 		},
@@ -300,6 +313,29 @@ describe("HttpTrigger — Inertia middleware pack (#996)", () => {
 		const body = await res.text();
 		expect(body).toContain("nope");
 		expect(probe.ran).toEqual([]);
+	});
+
+	// #1013's `TODO(#996)`, resolved: the clearHistory mark is request-scoped,
+	// and logout is a redirect, so without the flash cookie the page the user
+	// actually lands on never learns to rotate the client's history key.
+	it("carries clearHistory across the logout redirect, once", async () => {
+		const app = await buildApp();
+
+		const loggedOut = await fetchIt(app, "/logout", { method: "POST", headers: INERTIA });
+		expect(loggedOut.status).toBe(303);
+		expect(loggedOut.headers.get("location")).toBe("/orders/open");
+		const flashCookie = loggedOut.headers.get("set-cookie");
+		expect(flashCookie).toContain("blok_flash=");
+
+		const landed = await fetchIt(app, "/orders/open", {
+			headers: { ...INERTIA, ...SIGNED_IN, cookie: `session=ada; ${cookiePair(flashCookie)}` },
+		});
+		expect(((await landed.json()) as { clearHistory?: true }).clearHistory).toBe(true);
+		expect(landed.headers.get("set-cookie")).toContain("Max-Age=0");
+
+		// One-shot here too: the very next page must not re-clear the history.
+		const after = await fetchIt(app, "/orders/open", { headers: { ...INERTIA, ...SIGNED_IN } });
+		expect(((await after.json()) as { clearHistory?: true }).clearHistory).toBeUndefined();
 	});
 
 	it("a guest POST redirect is a 303, so the safety net never has to rewrite it", async () => {

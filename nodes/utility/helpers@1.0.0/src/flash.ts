@@ -46,6 +46,10 @@ export default defineNode({
 		bag: z.string().optional().describe("write: error-bag name the errors nest under on the next render."),
 		flash: z.record(z.unknown()).optional().describe("write: page-object flash data to carry across the redirect."),
 		preserveFragment: z.boolean().optional().describe("write: keep the URL fragment across the redirect."),
+		clearHistory: z
+			.boolean()
+			.optional()
+			.describe("write: make the page after the redirect carry clearHistory (#1013 logout)."),
 		value: z
 			.record(z.unknown())
 			.optional()
@@ -64,6 +68,13 @@ export default defineNode({
 		bag: z.string().optional().describe("read: the payload's error-bag name."),
 		flash: z.record(z.unknown()).describe("read: the payload's flash data, {} when absent."),
 		preserveFragment: z.boolean().describe("read: the payload's preserveFragment flag."),
+		clearHistory: z
+			.boolean()
+			.optional()
+			.describe(
+				"read: true when the payload carried clearHistory, UNDEFINED otherwise — never false, so feeding it " +
+					"to the adapter's `clearHistory` input cannot override a mark set in this same request.",
+			),
 		value: z.record(z.unknown()).optional().describe("read: the whole verified payload, undefined when absent."),
 	}),
 
@@ -83,6 +94,7 @@ export default defineNode({
 				...(input.bag !== undefined ? { bag: input.bag } : {}),
 				...(input.flash !== undefined ? { flash: input.flash } : {}),
 				...(input.preserveFragment !== undefined ? { preserveFragment: input.preserveFragment } : {}),
+				...(input.clearHistory !== undefined ? { clearHistory: input.clearHistory } : {}),
 			};
 			return {
 				cookie: flashSetCookie(signFlash(payload, secret), { ...cookieOpts, maxAge: input.maxAge }),
@@ -91,6 +103,7 @@ export default defineNode({
 				bag: payload.bag,
 				flash: payload.flash ?? {},
 				preserveFragment: payload.preserveFragment === true,
+				clearHistory: payload.clearHistory === true ? true : undefined,
 				value: payload as Record<string, unknown>,
 			};
 		}
@@ -106,6 +119,8 @@ export default defineNode({
 			bag: payload?.bag,
 			flash: payload?.flash ?? {},
 			preserveFragment: payload?.preserveFragment === true,
+			// `true` or ABSENT, never `false` — see the schema note.
+			clearHistory: payload?.clearHistory === true ? true : undefined,
 			value: payload as Record<string, unknown> | undefined,
 		};
 	},

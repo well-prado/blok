@@ -27,6 +27,7 @@
 import { defineNode, step, workflow } from "@blokjs/core";
 import { RESPOND_BRAND, type RespondEnvelope } from "@blokjs/shared";
 import { z } from "zod";
+import { type FlashPersistOptions, flashCookie } from "../flash.js";
 import { redirect } from "../protocol.js";
 
 // =============================================================================
@@ -152,7 +153,7 @@ export function encryptHistoryMiddleware() {
 // Logout
 // =============================================================================
 
-export interface LogoutOptions {
+export interface LogoutOptions extends FlashPersistOptions {
 	/** Where to send the browser after logging out. Default `/login`. */
 	redirectTo?: string;
 }
@@ -167,15 +168,27 @@ export interface LogoutOptions {
  * A fragment target still answers `409` + `X-Inertia-Redirect`.
  *
  * The mark is request-scoped, so it lands on a page rendered LATER IN THE SAME
- * request (`logout` then a page step). Carrying it across the redirect to the
- * next request needs the session flash.
- * TODO(#996): flash the mark so the page after the redirect carries it too.
+ * request (`logout` then a page step). To reach the page AFTER the redirect —
+ * which is the normal case — the mark also rides the signed flash cookie
+ * (#996), which `inertia.shared` reads back on the next request.
  */
 export function logoutResponse(ctx: unknown, options: LogoutOptions = {}): RespondEnvelope {
 	markHistory(ctx, { clear: true });
 	const method = String((ctx as HistoryHost).request?.method ?? "POST");
 	const env = redirect(options.redirectTo ?? "/login", { method });
-	return env.status === 302 ? { ...env, status: 303 } : env;
+	const redirected = env.status === 302 ? { ...env, status: 303 } : env;
+
+	// ponytail: an app that never configured BLOK_FLASH_SECRET keeps the old
+	// request-scoped-only behaviour rather than having its logout throw. The
+	// cookie is an ADDITION here, not the security boundary — the boundary is
+	// the client rotating its history key, which the mark already drives for a
+	// page rendered in this same request.
+	try {
+		const cookie = flashCookie({ clearHistory: true }, options);
+		return cookie ? { ...redirected, cookies: [...(redirected.cookies ?? []), cookie] } : redirected;
+	} catch {
+		return redirected;
+	}
 }
 
 /** {@link logoutResponse} as a workflow step. */
