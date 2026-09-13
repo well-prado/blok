@@ -13,8 +13,78 @@
  * @module AppRoutes
  */
 
-import { Hono } from "hono";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type Env, Hono, type MiddlewareHandler } from "hono";
 const app = new Hono();
+
+/** Vite fingerprints every `/assets/*` filename, so they can be cached forever. */
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** Name of the version file the Vite plugin writes into the client build. */
+const ASSET_VERSION_FILE = ".blok-asset-version";
+
+/**
+ * #1000 — the host engine's `serveStatic`. Bun reads files through `Bun.file`
+ * (`hono/bun`), Node through fs streams (`@hono/node-server/serve-static`).
+ * Detection is the repo idiom — `"Bun" in globalThis`, same probe
+ * `core/runner`'s `BunRuntimeAdapter` / `SqliteRunStore` use — rather than a
+ * new one. The import is dynamic so the Bun adapter is never loaded on Node.
+ */
+async function hostServeStatic(): Promise<(options: { root: string }) => MiddlewareHandler> {
+	const mod = "Bun" in globalThis ? await import("hono/bun") : await import("@hono/node-server/serve-static");
+	return mod.serveStatic as (options: { root: string }) => MiddlewareHandler;
+}
+
+/** Registers the static routes for one prepared root onto a Hono app. */
+type StaticMount = <E extends Env>(honoApp: Hono<E>) => void;
+
+/**
+ * #1000 — prepare the mount for a built client bundle (`BLOK_STATIC_DIR`,
+ * e.g. `client/dist`). Loading the host adapter is async, registering routes
+ * is not, so this resolves the adapter once at boot and hands back a plain
+ * function the caller registers in route order.
+ *
+ * `/assets/*` is served immutable; `favicon.ico` and `robots.txt` come from
+ * the same root with no cache header. Called from `HttpTrigger.listen()` only
+ * when `BLOK_STATIC_DIR` is set — with it unset nothing is registered and the
+ * welcome page below is still what `/` serves.
+ */
+export async function prepareStaticRoutes(root: string): Promise<StaticMount> {
+	const serveStatic = await hostServeStatic();
+	return <E extends Env>(honoApp: Hono<E>) => {
+		const files = serveStatic({ root }) as MiddlewareHandler<E>;
+
+		// Set AFTER the fact so a miss (the 404 below) never inherits the
+		// year-long immutable header.
+		honoApp.use("/assets/*", async (c, next) => {
+			await next();
+			if (c.res.status === 200) c.res.headers.set("Cache-Control", IMMUTABLE_CACHE_CONTROL);
+		});
+		honoApp.use("/assets/*", files);
+		// `serveStatic` falls THROUGH on a miss (and on a rejected `..` path).
+		// Without this the request would reach the workflow catch-all and come
+		// back as a workflow 404 naming a workflow nobody asked for.
+		honoApp.all("/assets/*", (c) => c.text("Not Found", 404));
+
+		// Not fingerprinted → no cache header. Both fall through when absent.
+		honoApp.get("/favicon.ico", files);
+		honoApp.get("/robots.txt", files);
+	};
+}
+
+/**
+ * #1000 — the asset version written next to the client build by the Vite
+ * plugin. `null` when the file is missing or empty (no build yet, or a static
+ * dir that isn't a Blok client build).
+ */
+export function readAssetVersion(root: string): string | null {
+	try {
+		return readFileSync(join(root, ASSET_VERSION_FILE), "utf8").trim() || null;
+	} catch {
+		return null;
+	}
+}
 
 app.get("/", (c) => {
 	const html = `

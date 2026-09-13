@@ -235,6 +235,17 @@ value also requires an exact match (handy for pinning an API version):
 trigger: http.post("/api", { headers: { "x-api-key": "", "x-api-version": "2026-01" } })
 ```
 
+## Serving a built client
+
+Three server env vars, all off by default — with none of them set the trigger
+behaves exactly as before, welcome page included.
+
+| Env var | Default | Notes |
+|---|---|---|
+| `BLOK_STATIC_DIR` | — | Root of a built client (e.g. `client/dist`). Mounts `/assets/*` with `Cache-Control: public, max-age=31536000, immutable` (bundlers fingerprint those filenames), plus `favicon.ico` and `robots.txt` from the same root with no cache header. A miss under `/assets/*` is a plain `404`, never a workflow dispatch. Files are read by `hono/bun` under Bun and `@hono/node-server/serve-static` under Node. |
+| `ASSET_VERSION` | read from `<BLOK_STATIC_DIR>/.blok-asset-version` | The client build's version, used by the Inertia 409 reload path. Set explicitly to override the file; left unset when neither exists. |
+| `BLOK_CORS_ORIGIN` | — | Comma-separated allow-list. Unset means **no** `Access-Control-*` headers at all (same-origin). A single non-wildcard origin is credentialed (`Access-Control-Allow-Credentials: true`) and allows/exposes the Inertia, Precognition and devtools headers a standalone client needs — notably `X-Inertia-Location`, without which the browser cannot follow a 409 external redirect. `*` stays uncredentialed, since browsers reject `*` with credentials. |
+
 ## Composition
 
 Drop any reliability or scheduling knob into the trigger options:

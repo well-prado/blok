@@ -209,6 +209,14 @@ jobs:
         continue-on-error: true
         run: bunx nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage
 
+      # #1000 — the http trigger's SPA static-asset / CORS suite is mock-free
+      # on purpose so ONE file runs under both engines. The vitest lane above
+      # exercises `@hono/node-server/serve-static` (real Node); this step runs
+      # the same file under Bun, where `hono/bun`'s `Bun.file` implementation
+      # is the one serving. Different code — only running it twice proves both.
+      - name: HTTP trigger static assets under Bun
+        run: bun run --filter @blokjs/trigger-http test:bun
+
       - name: Run integration tests
         env:
           BLOK_INTEGRATION_REDIS: "1"
