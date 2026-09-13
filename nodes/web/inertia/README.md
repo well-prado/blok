@@ -42,7 +42,7 @@ hand-written workflow only needs `component` + `props`.
 | `X-Inertia-Partial-Except` | Comma-separated prop paths to drop, applied after `Partial-Data`. |
 | `X-Inertia-Reset` | Prop paths returned unmerged: stripped from `mergeProps`/`prependProps`/`deepMergeProps`, and `scrollProps[path].reset = true`. |
 | `X-Inertia-Error-Bag` | Nests `props.errors` under that bag name. |
-| `X-Inertia-Except-Once-Props` | Once-prop cache keys the client still holds: the prop and its `onceProps` entry are both omitted. |
+| `X-Inertia-Except-Once-Props` | Once-prop cache keys the client still holds. Skipping the *value* is the resolver's job (#1008); the `onceProps` **entry is always echoed**, or the client would drop its cached copy. A value resolved anyway (the entry expired) ships alongside its entry. |
 | `X-Inertia-Infinite-Scroll-Merge-Intent` | `prepend` / `append` — moves scroll props between `mergeProps` and `prependProps`. |
 | `Purpose: prefetch` | A fragment redirect stays an ordinary redirect instead of becoming a 409. |
 

@@ -65,9 +65,9 @@ export function isPartialReload(headers: Record<string, string>, component: stri
 /**
  * Build the v3 page object.
  *
- * Order of operations matters: once-props the client already holds are dropped
- * first, then partial-reload narrowing runs, then always-props and `errors` are
- * forced back in, then reset paths strip their merge labels.
+ * Order of operations matters: partial-reload narrowing runs first, then
+ * always-props and `errors` are forced back in, then reset paths strip their
+ * merge labels.
  */
 export function buildPage(input: BuildPageInput): PageObject {
 	const { headers, component } = input;
@@ -77,14 +77,13 @@ export function buildPage(input: BuildPageInput): PageObject {
 	const full: Record<string, unknown> = { ...input.props };
 	const onceProps = normalizeOnceProps(input.onceProps);
 
-	// `X-Inertia-Except-Once-Props`: the client still holds these once-props,
-	// so neither the value nor its cache entry is resent.
-	for (const key of headerList(headers["x-inertia-except-once-props"])) {
-		const entry = onceProps[key];
-		if (!entry) continue;
-		deletePath(full, entry.prop);
-		delete onceProps[key];
-	}
+	// `X-Inertia-Except-Once-Props` names once-props the client still holds. Not
+	// RESOLVING those is the prop resolver's job (#1008) — by the time the page
+	// is serialized the value is simply absent from `props`. What the node must
+	// not do is drop the `onceProps` ENTRY: the client reads it to learn its
+	// cached copy is still valid, and a missing entry invalidates the cache.
+	// A value the server chose to resolve anyway (the entry expired, so the
+	// resolver produced a fresh one) therefore ships alongside its entry.
 
 	let props: Record<string, unknown> = full;
 	if (partial) {

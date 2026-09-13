@@ -255,18 +255,34 @@ describe("8 — onceProps", () => {
 		});
 	});
 
-	it("drops the prop AND the entry the client says it already has", async () => {
+	it("keeps the entry for a key the client already has, without the value", async () => {
+		// The resolver (#1008) skipped the value, so it never reaches the node —
+		// but the entry MUST still be echoed or the client invalidates its cache.
+		const page = pageOf(
+			await run({
+				component: "Home",
+				url: "/",
+				headers: { ...INERTIA, "x-inertia-except-once-props": "menu:v1" },
+				props: { other: 1 },
+				onceProps: { "menu:v1": { prop: "menu" } },
+			}),
+		);
+		expect(page.props).toEqual({ other: 1, errors: {} });
+		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: null } });
+	});
+
+	it("ships value AND entry when the server resolved the prop fresh despite the header", async () => {
 		const page = pageOf(
 			await run({
 				component: "Home",
 				url: "/",
 				headers: { ...INERTIA, "x-inertia-except-once-props": "menu:v1" },
 				props: { menu: ["a"], other: 1 },
-				onceProps: { "menu:v1": { prop: "menu" } },
+				onceProps: { "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } },
 			}),
 		);
-		expect(page.props).toEqual({ other: 1, errors: {} });
-		expect(page.onceProps).toBeUndefined();
+		expect(page.props).toEqual({ menu: ["a"], other: 1, errors: {} });
+		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } });
 	});
 });
 
