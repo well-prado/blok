@@ -225,12 +225,10 @@
         "vitest": "^4.0.18",
       },
       "peerDependencies": {
-        "@blokjs/inertia": "^2.3.0",
         "@blokjs/trigger-sse": "^2.3.0",
         "openai": "^4.77.0",
       },
       "optionalPeers": [
-        "@blokjs/inertia",
         "@blokjs/trigger-sse",
         "openai",
       ],

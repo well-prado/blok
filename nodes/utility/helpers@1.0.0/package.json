@@ -35,15 +35,11 @@
 		"zod": "^3.24.2"
 	},
 	"peerDependencies": {
-		"@blokjs/inertia": "^2.3.0",
 		"@blokjs/trigger-sse": "^2.3.0",
 		"openai": "^4.77.0"
 	},
 	"peerDependenciesMeta": {
 		"openai": {
-			"optional": true
-		},
-		"@blokjs/inertia": {
 			"optional": true
 		},
 		"@blokjs/trigger-sse": {

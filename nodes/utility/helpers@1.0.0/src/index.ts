@@ -85,11 +85,16 @@ export {
 /**
  * `@blokjs/inertia` — the Inertia v3 protocol adapter (#994) — ships as its own
  * package: it carries the whole wire protocol, and a project that serves no SPA
- * should not pay for it. It is an OPTIONAL peer, imported through a non-literal
- * specifier + try/catch (the same shape `triggers/http/src/Nodes.ts` uses for
- * `@blokjs/browser`), so a scaffold that never installed it boots fine — it just
- * has no `@blokjs/inertia` ref. Promote it to a plain dependency once the
- * package is published to npm.
+ * should not pay for it. It is OPTIONAL and undeclared, loaded through a
+ * non-literal specifier + try/catch — exactly the shape
+ * `triggers/http/src/Nodes.ts` uses for `@blokjs/browser`, which likewise
+ * appears in no manifest. A project that installed it gets the
+ * `@blokjs/inertia` ref; one that did not boots fine without it.
+ *
+ * Deliberately NOT a dependency or a peer: bun installs the dependencies of a
+ * `file:`-linked package, so a hard dependency on a package that is not yet on
+ * npm breaks `blokctl create`, and a peer entry would only restate what this
+ * import already expresses.
  */
 const inertiaPkg = "@blokjs/inertia";
 let InertiaNode: NodeBase | undefined;
