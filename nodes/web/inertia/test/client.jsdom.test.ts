@@ -34,6 +34,9 @@ let server: Server;
 /** Path -> the envelope the server replays. Unlisted paths get the default visit. */
 const routes = new Map<string, RespondEnvelope>();
 
+/** Every request the client actually put on the wire (#1015 test 12). */
+let requests = 0;
+
 async function render(input: Record<string, unknown>): Promise<RespondEnvelope> {
 	return (await runNode(InertiaNode, input as never)) as unknown as RespondEnvelope;
 }
@@ -67,6 +70,7 @@ beforeAll(async () => {
 	routes.set("/users/1", visit);
 	routes.set("/orders", flashed);
 	server = createServer((req, res) => {
+		requests += 1;
 		const env = routes.get((req.url ?? "/").split("?")[0] as string) ?? visit;
 		res.writeHead(env.status ?? 200, {
 			"Content-Type": env.contentType ?? "application/json",
@@ -189,6 +193,96 @@ describe("17 (#996) — router.on('flash') fires, and Back leaves the page flash
 		expect(restored.component).toBe("Users/Show");
 		expect(restored.flash ?? {}).toEqual({});
 		expect(flashes).toEqual([TOAST]);
+	});
+});
+
+/**
+ * Issue #1015, test 12 — an INSTANT visit, through the real client.
+ *
+ * The issue asks for Playwright; the browser half (a real `<Link instant>`, a
+ * real paint) lands with the harness in #1003. What is testable HERE — with the
+ * stock `@inertiajs/core`, against page objects THIS node produced — is the
+ * whole mechanism: the client reads `sharedProps` off the page it is on,
+ * carries exactly those props onto the intermediate page it renders
+ * immediately, and then the one server response fills in the rest.
+ *
+ * Declared before the #1013 block for the reason stated there: that one leaves
+ * an undecryptable history entry behind on purpose.
+ */
+describe("12 (#1015) — an instant visit renders shared props first, then the real ones", () => {
+	const AUTH = { id: "u-1", name: "Ada" };
+
+	it("carries `auth` over immediately and finishes the page in ONE request", async () => {
+		// The page the user is on: shared data in props, and the key list that
+		// says which of them are shared. Both come out of this node.
+		const current = (
+			await render({
+				component: "Users/Show",
+				props: { ...SENT_PROPS, auth: AUTH },
+				sharedProps: ["auth"],
+				url: "/users/1",
+				version: "v1",
+				headers: { "x-inertia": "true" },
+			})
+		).body as unknown as Page;
+
+		// Where the instant visit is headed.
+		routes.set(
+			"/dashboard",
+			await render({
+				component: "Dashboard",
+				props: { auth: AUTH, stats: { total: 42 } },
+				sharedProps: ["auth"],
+				url: "/dashboard",
+				version: "v1",
+				headers: { "x-inertia": "true" },
+			}),
+		);
+
+		const swaps: Page[] = [];
+		router.init({
+			initialPage: current,
+			resolveComponent: async (name: string) => ({ name }),
+			swapComponent: async ({ page }: { page: Page }) => {
+				swaps.push(page);
+			},
+		});
+
+		const before = requests;
+		const landed = await new Promise<Page>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("the instant visit never resolved")), 5000);
+			router.visit("/dashboard", {
+				method: "get",
+				component: "Dashboard",
+				onSuccess: (p: Page) => {
+					clearTimeout(timer);
+					resolve(p);
+				},
+				onError: (errors: unknown) => {
+					clearTimeout(timer);
+					reject(new Error(`visit failed: ${JSON.stringify(errors)}`));
+				},
+			});
+		});
+
+		// Two swaps reached the Dashboard: the INSTANT one (`router.init` swapped
+		// the initial page in first, hence the filter), then the server's.
+		const dashboards = swaps.filter((p) => p.component === "Dashboard");
+		expect(dashboards).toHaveLength(2);
+
+		// The instant swap happened before the server answered, so it carries the
+		// shared prop and nothing page-specific.
+		const instant = dashboards[0] as Page;
+		expect(instant.props.auth).toEqual(AUTH);
+		expect(instant.props.stats).toBeUndefined();
+		expect(instant.sharedProps).toEqual(["auth"]);
+
+		// Then the server's props arrived, over exactly one request.
+		expect(landed.component).toBe("Dashboard");
+		expect(landed.props.stats).toEqual({ total: 42 });
+		expect(landed.props.auth).toEqual(AUTH);
+		expect((dashboards[1] as Page).props.stats).toEqual({ total: 42 });
+		expect(requests - before).toBe(1);
 	});
 });
 

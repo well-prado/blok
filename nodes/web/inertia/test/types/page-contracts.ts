@@ -19,6 +19,7 @@ import {
 	optional,
 	scroll,
 	shared,
+	withProps,
 } from "../../src/define-page.js";
 
 // =============================================================================
@@ -194,3 +195,32 @@ void nope;
 /** Mirrors `@blokjs/inertia-client`'s `PagePropsOf<T extends { __props: unknown }>`. */
 type PagePropsOf<T extends { __props: unknown }> = T["__props"] & { errors: Record<string, string | string[]> };
 assertExact<Exact<PagePropsOf<typeof OrdersIndex>["auth"], { id: string; email: string }>>(true);
+
+// =============================================================================
+// 10 (#1015) — a prop bundle keeps its types on every page that spreads it
+// =============================================================================
+
+const dashboard = withProps({ auth: always(currentUser), plans: once(loadPlans, { until: "1h" }) });
+
+const BundleHome = definePage("Ty/BundleHome", { ...dashboard, filters: optional(loadFilters) });
+const BundleTeam = definePage("Ty/BundleTeam", { ...dashboard, posts: paginatePosts });
+
+type HomeProps = PageProps<typeof BundleHome>;
+type TeamProps = PageProps<typeof BundleTeam>;
+
+// Both pages carry the bundle's props, fully typed and with their MODES intact
+// (`plans` is a `once` prop, so it stays required on both).
+assertExact<Exact<HomeProps["auth"], { id: string; email: string }>>(true);
+assertExact<Exact<TeamProps["auth"], { id: string; email: string }>>(true);
+assertExact<Exact<HomeProps["plans"], { tiers: string[] }>>(true);
+assertExact<Exact<TeamProps["plans"], { tiers: string[] }>>(true);
+// ...and each keeps its own.
+assertExact<Exact<HomeProps["filters"], { open: boolean } | undefined>>(true);
+assertExact<Exact<TeamProps["posts"], { data: string[]; page: number }>>(true);
+
+export function readsBundledProps(props: TeamProps): string {
+	// @ts-expect-error 10 — `filters` belongs to the OTHER page, not this bundle.
+	const open = props.filters;
+	void open;
+	return props.auth.email;
+}
