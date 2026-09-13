@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "es2022",
+		"moduleResolution": "bundler",
+		"lib": ["es2022", "dom"],
+		"jsx": "react-jsx",
+		"jsxImportSource": "react",
+		"strict": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"types": [],
+		"baseUrl": ".",
+		"paths": {
+			"@blokjs/inertia-client": ["../../../../inertia-client/src/index.ts"]
+		}
+	},
+	"include": [
+		"**/*.ts",
+		"**/*.tsx",
+		"../inertia-app/golden/blok-pages.d.ts",
+		"../inertia-app/golden/blok-routes.ts"
+	]
+}

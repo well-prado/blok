@@ -1,0 +1,10 @@
+{
+	"name": "blok-fixture-inertia-app",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@blokjs/core": "*",
+		"@blokjs/inertia": "*",
+		"zod": "*"
+	}
+}

@@ -2,6 +2,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import type { OptionValues } from "commander";
 import color from "picocolors";
+import { generatePages } from "./pagesTypes.js";
 
 /**
  * `blokctl gen app-types` — generate the `BlokApp` type for `@blokjs/client`.
@@ -12,10 +13,11 @@ import color from "picocolors";
  * `import type { BlokApp } from "./blok-app"` + `createBlokClient<BlokApp>()`
  * and gets a fully-typed client — no hand-written aggregation.
  *
- * The generator does NOT execute project code (blokctl runs under node, which
- * can't import `.ts`). It extracts each workflow's `name` STATICALLY. The name
- * is what the client's RPC call is keyed by (`/__blok/rpc/<name>`), so the
- * nesting mirrors the registered name exactly.
+ * The `blok-app.d.ts` half does NOT execute project code: it extracts each
+ * workflow's `name` STATICALLY. The name is what the client's RPC call is keyed
+ * by (`/__blok/rpc/<name>`), so the nesting mirrors the registered name exactly.
+ * (The Inertia half in `pagesTypes.ts` DOES import the modules — page prop types
+ * only exist as Zod schemas at runtime. See that file's header.)
  *
  * JSON-authored workflows are skipped (no TS type to import). The generator
  * scans for them and LISTS any it finds at the end of the run, so the gap is
@@ -31,9 +33,11 @@ export interface WorkflowEntry {
 
 /**
  * Extract the workflow `name` from a TS source file WITHOUT executing it.
- * Anchors on the `workflow(`/`Workflow(` factory call, then reads the first
- * `name:` string literal. Returns null when the file has no workflow factory
- * call or uses a non-literal name (e.g. a variable) — the caller warns + skips.
+ * Anchors on the `workflow(`/`Workflow(` factory call, then reads the name from
+ * whichever form it is in: the callback DSL's FIRST ARGUMENT
+ * (`workflow("orders.index", { … }, req => …)`) or the object DSL's `name:`
+ * key. Returns null when the file has no workflow factory call or uses a
+ * non-literal name (e.g. a variable) — the caller warns + skips.
  */
 export function extractWorkflowName(source: string): string | null {
 	// Strip block + line comments so a commented-out `name:` can't match.
@@ -41,6 +45,8 @@ export function extractWorkflowName(source: string): string | null {
 	const factory = /\b(?:workflow|Workflow)\s*\(/.exec(stripped);
 	if (!factory) return null;
 	const rest = stripped.slice(factory.index);
+	const positional = /^(?:workflow|Workflow)\s*\(\s*(["'`])([^"'`]+)\1/.exec(rest);
+	if (positional) return positional[2].trim();
 	const nameMatch = /\bname\s*:\s*(["'`])([^"'`]+)\1/.exec(rest);
 	return nameMatch ? nameMatch[2].trim() : null;
 }
@@ -157,7 +163,7 @@ export function buildAppTypeSource(
 }
 
 /** Recursively collect candidate `.ts` workflow files under `dir`. */
-async function collectTsFiles(dir: string): Promise<string[]> {
+export async function collectTsFiles(dir: string): Promise<string[]> {
 	const out: string[] = [];
 	let dirents: import("node:fs").Dirent[];
 	try {
@@ -235,6 +241,50 @@ async function resolveWorkflowsDir(cwd: string, explicit?: string | null): Promi
 	return null;
 }
 
+/**
+ * Where the generated files go. `--out` takes EITHER a file (`.ts`/`.d.ts`,
+ * the historical meaning: the `blok-app.d.ts` path) OR a directory, which is
+ * what a standalone SPA passes: `--out ../my-spa/src` (#998).
+ */
+export function resolveOutPaths(cwd: string, out: string | undefined): { outFile: string; outDir: string } {
+	const raw = out ?? "blok-app.d.ts";
+	const abs = path.isAbsolute(raw) ? raw : path.join(cwd, raw);
+	const isFile = abs.endsWith(".ts");
+	const outFile = isFile ? abs : path.join(abs, "blok-app.d.ts");
+	return { outFile, outDir: path.dirname(outFile) };
+}
+
+/**
+ * Poll `dir` for `.ts` changes and re-run `pass`. ponytail: polling, not
+ * `fs.watch` — `{ recursive: true }` is not portable across every supported
+ * platform, and a 300 ms stat sweep of a workflows directory is free. Swap it
+ * for a real watcher if a project ever has thousands of workflow files.
+ */
+async function watchLoop(dir: string, pass: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+	const fingerprint = async (): Promise<string> => {
+		const files = await collectTsFiles(dir);
+		const stats = await Promise.all(
+			files.sort().map(async (f) => {
+				const stat = await fsp.stat(f).catch(() => null);
+				return `${f}:${stat?.mtimeMs ?? 0}`;
+			}),
+		);
+		return stats.join("|");
+	};
+
+	let last = "";
+	console.log(color.dim(`👀 Watching ${dir} — Ctrl-C to stop\n`));
+	while (signal?.aborted !== true) {
+		const current = await fingerprint();
+		if (current !== last) {
+			last = current;
+			// A failing pass must never kill the watcher: report and keep watching.
+			await pass().catch((err: unknown) => console.error(err instanceof Error ? err.message : String(err)));
+		}
+		await new Promise((resolve) => setTimeout(resolve, 300));
+	}
+}
+
 /** CLI entrypoint for `blokctl gen app-types`. */
 export async function generateAppTypes(opts: OptionValues): Promise<void> {
 	const cwd = process.cwd();
@@ -251,11 +301,26 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 		);
 	}
 
-	const outFile = path.isAbsolute(opts.out ?? "")
-		? (opts.out as string)
-		: path.join(cwd, (opts.out as string | undefined) ?? "blok-app.d.ts");
+	const { outFile, outDir } = resolveOutPaths(cwd, opts.out as string | undefined);
 
 	console.log(color.dim(`Scanning ${color.cyan(dir)} (recursive)\n`));
+	const onePass = () => generateOnce({ opts, cwd, dir, outFile, outDir });
+	if (opts.watch === true) {
+		await watchLoop(dir, onePass, opts.signal as AbortSignal | undefined);
+		return;
+	}
+	await onePass();
+}
+
+/** One generation pass — everything `--watch` repeats. */
+async function generateOnce(ctx: {
+	opts: OptionValues;
+	cwd: string;
+	dir: string;
+	outFile: string;
+	outDir: string;
+}): Promise<void> {
+	const { opts, cwd, dir, outFile, outDir } = ctx;
 	const files = await collectTsFiles(dir);
 
 	// Discover JSON-authored workflows so we can WARN they're excluded from the
@@ -284,36 +349,53 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 		else skipped.push(path.relative(cwd, file));
 	}
 
-	if (entries.length === 0) {
+	const pagesOnly = opts.pagesOnly === true;
+
+	if (entries.length === 0 && !pagesOnly) {
 		console.log(color.yellow("No TS workflows with a literal `name:` found — nothing to generate."));
 		if (skipped.length > 0) console.log(color.dim(`Skipped (no literal name): ${skipped.join(", ")}`));
 		warnJsonSkipped();
-		return;
-	}
+	} else if (!pagesOnly) {
+		const { source, collisions } = buildAppTypeSource(entries, outFile);
 
-	const { source, collisions } = buildAppTypeSource(entries, outFile);
+		if (opts.dryRun === true) {
+			console.log(color.dim(`— dry run — would write ${color.cyan(path.relative(cwd, outFile))}:\n`));
+			console.log(source);
+		} else {
+			await fsp.mkdir(path.dirname(outFile), { recursive: true });
+			await fsp.writeFile(outFile, source, "utf8");
+			console.log(color.green(`✅ Wrote ${color.cyan(path.relative(cwd, outFile))} (${entries.length} workflow(s)).`));
+		}
 
-	if (opts.dryRun === true) {
-		console.log(color.dim(`— dry run — would write ${color.cyan(path.relative(cwd, outFile))}:\n`));
-		console.log(source);
-	} else {
-		await fsp.mkdir(path.dirname(outFile), { recursive: true });
-		await fsp.writeFile(outFile, source, "utf8");
-		console.log(color.green(`✅ Wrote ${color.cyan(path.relative(cwd, outFile))} (${entries.length} workflow(s)).`));
-	}
-
-	for (const c of collisions) {
-		console.log(color.yellow(`⚠️  name collision — "${c}" overlaps another workflow's path and was dropped.`));
-	}
-	if (skipped.length > 0) {
+		for (const c of collisions) {
+			console.log(color.yellow(`⚠️  name collision — "${c}" overlaps another workflow's path and was dropped.`));
+		}
+		if (skipped.length > 0) {
+			console.log(
+				color.dim(
+					`ℹ️  Skipped ${skipped.length} file(s) without a literal workflow name (dynamic name or not a workflow): ${skipped.join(", ")}`,
+				),
+			);
+		}
+		warnJsonSkipped();
 		console.log(
-			color.dim(
-				`ℹ️  Skipped ${skipped.length} file(s) without a literal workflow name (dynamic name or not a workflow): ${skipped.join(", ")}`,
-			),
+			color.dim('Next: `import type { BlokApp } from "<out>"` and `createBlokClient<BlokApp>({ baseUrl })`.\n'),
 		);
 	}
-	warnJsonSkipped();
-	console.log(
-		color.dim('Next: `import type { BlokApp } from "<out>"` and `createBlokClient<BlokApp>({ baseUrl })`.\n'),
-	);
+
+	// The Inertia half (#998): `blok-pages.d.ts` + the runtime `blok-routes.ts`.
+	const pages = await generatePages({
+		dir,
+		outDir,
+		files,
+		withAllErrors: opts.withAllErrors === true,
+		dryRun: opts.dryRun === true,
+	});
+
+	// A workflow module that could not be imported is REPORTED and the rest are
+	// still emitted — but the run fails, so CI cannot go green on a broken page.
+	if (pages.failures.length > 0) {
+		const detail = pages.failures.map((f) => `  ${f.file}: ${f.message}`).join("\n");
+		throw new Error(`${pages.failures.length} workflow module(s) failed to load:\n${detail}`);
+	}
 }
