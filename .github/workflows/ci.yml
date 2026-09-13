@@ -218,7 +218,7 @@ jobs:
   # Mirrored locally by `bun run ci:packaging`.
   # ==========================================================================
   packaging:
-    name: Packed artifacts import under Node LTS
+    name: Packed artifacts import under Node LTS / Bun / Deno
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -235,6 +235,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
+
+      # ADR 0016 makes Node.js, Bun and Deno equally supported execution
+      # targets, so the gate imports every packed subpath under all three.
+      # Without this step the Deno leg reports itself skipped and the lane is a
+      # two-engine gate wearing a three-engine name.
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.7.5
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

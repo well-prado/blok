@@ -87,4 +87,15 @@ describe("JavaScript runtime identifiers do not drift", () => {
 		// means CI proves something the docs say is unsupported.
 		expect(def?.dockerProvision).toContain(def?.pinnedVersion as string);
 	});
+
+	/** Deno is installed in more than one lane (the targets matrix and the
+	 * packaging gate). They must agree, or one lane proves a version the other
+	 * does not. */
+	it("pins the same Deno everywhere CI installs it", () => {
+		const ci = read(".github/workflows/ci.yml");
+		const pins = [...ci.matchAll(/deno-version:\s*v?([^\s]+)/g)].map((m) => m[1]);
+		expect(pins.length, "no setup-deno step found").toBeGreaterThan(0);
+		const expected = JAVASCRIPT_RUNTIME_DEFINITIONS.find((d) => d.target === "deno")?.pinnedVersion;
+		expect(new Set(pins)).toEqual(new Set([expected]));
+	});
 });
