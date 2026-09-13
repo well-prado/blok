@@ -14,9 +14,10 @@
  *      `.npmignore` and the exports map apply exactly as at publish time.
  *      Never the workspace: its symlinks and Bun's resolver mask the failure.
  *   2. `npm install` all of them into one throwaway consumer project.
- *   3. `node --input-type=module -e "await import('<pkg>/<subpath>')"` for
- *      EVERY subpath in every exports map, wildcards expanded against the
- *      installed files.
+ *   3. `await import('<pkg>/<subpath>')` for EVERY subpath in every exports
+ *      map, wildcards expanded against the installed files — under Node.js,
+ *      Bun AND Deno (ADR 0016: all three are supported execution targets, so
+ *      "the artifact loads" has to mean all three, not just Node LTS).
  *   4. Run `tests/e2e/node-consumer` — vitest on Node, zero `deps.inline`.
  *   5. `publint` + `@arethetypeswrong/cli` over each tarball.
  *
@@ -26,7 +27,7 @@
  * Requires a fresh `bun run build` (which runs `scripts/fix-esm-extensions.ts`).
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PUBLISHABLE } from "./release";
@@ -246,43 +247,78 @@ function main(): void {
 		process.exit(1);
 	}
 
-	step("import every exports subpath under Node's ESM loader");
+	// One probe module, three engines. `-e`/`eval` differs per engine (and Deno
+	// resolves bare specifiers only for a real module in a package.json
+	// directory), so a file on disk is the one spelling all three agree on.
+	const probe = join(consumer, "blok-import-probe.mjs");
+	writeFileSync(probe, "await import(process.argv[2]);\n");
+
+	/** Engines the packed artifacts must load under (ADR 0016). Node is
+	 * mandatory; Bun and Deno are checked when installed, and CI installs both. */
+	const engines: Array<{ name: string; argv: (file: string) => string[]; bin: string }> = [
+		{ name: "node", bin: "node", argv: (file) => [file] },
+		{ name: "bun", bin: "bun", argv: (file) => [file] },
+		{
+			name: "deno",
+			bin: "deno",
+			// `--node-modules-dir=manual` points Deno at the node_modules npm
+			// already installed, which is exactly how a Deno-target Blok project
+			// consumes these packages.
+			argv: (file) => ["run", "--allow-all", "--node-modules-dir=manual", file],
+		},
+	];
+	const availableEngines = engines.filter((engine) => run(engine.bin, ["--version"], consumer).ok);
+	const missing = engines.filter((engine) => !availableEngines.includes(engine)).map((engine) => engine.name);
+	if (!availableEngines.some((engine) => engine.name === "node")) {
+		console.error("node is required for the packaging gate.");
+		process.exit(1);
+	}
+	if (missing.length > 0) {
+		console.log(`  (skipping ${missing.join(", ")} — not installed on this machine; CI pins all three)`);
+	}
+
+	step(`import every exports subpath under ${availableEngines.map((e) => e.name).join(" / ")}`);
 	const failures: string[] = [];
 	let imported = 0;
 	let skipped = 0;
-	for (const { pkg } of packed) {
-		const installed = join(consumer, "node_modules", pkg.name);
+	for (const engine of availableEngines) {
+		for (const { pkg } of packed) {
+			const installed = join(consumer, "node_modules", pkg.name);
 
-		// A bin package's entry RUNS on import (commander parses argv and
-		// exits), so importing it proves nothing and fails for the wrong
-		// reason. Execute the bin instead — same loader, real user path.
-		if (pkg.bin !== undefined) {
-			for (const rel of Object.values(typeof pkg.bin === "string" ? { [pkg.name]: pkg.bin } : pkg.bin)) {
-				const r = run("node", [join(installed, rel), "--version"], consumer);
-				if (r.ok) imported++;
-				else failures.push(`${pkg.name} bin ${rel}\n${r.out.trim().split("\n").slice(0, 6).join("\n")}`);
-			}
-			console.log(`  ${pkg.name}: bin`);
-			continue;
-		}
-
-		const subpaths = subpathsOf(pkg, installed);
-		for (const subpath of subpaths) {
-			const r = run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(subpath)})`], consumer);
-			if (r.ok) {
-				imported++;
+			// A bin package's entry RUNS on import (commander parses argv and
+			// exits), so importing it proves nothing and fails for the wrong
+			// reason. Execute the bin instead — same loader, real user path.
+			if (pkg.bin !== undefined) {
+				for (const rel of Object.values(typeof pkg.bin === "string" ? { [pkg.name]: pkg.bin } : pkg.bin)) {
+					const r = run(engine.bin, [...engine.argv(join(installed, rel)), "--version"], consumer);
+					if (r.ok) imported++;
+					else
+						failures.push(
+							`[${engine.name}] ${pkg.name} bin ${rel}\n${r.out.trim().split("\n").slice(0, 6).join("\n")}`,
+						);
+				}
+				console.log(`  [${engine.name}] ${pkg.name}: bin`);
 				continue;
 			}
-			if (isOptionalPeerMiss(r.out)) {
-				skipped++;
-				continue;
+
+			const subpaths = subpathsOf(pkg, installed);
+			for (const subpath of subpaths) {
+				const r = run(engine.bin, [...engine.argv(probe), subpath], consumer);
+				if (r.ok) {
+					imported++;
+					continue;
+				}
+				if (isOptionalPeerMiss(r.out)) {
+					skipped++;
+					continue;
+				}
+				failures.push(`[${engine.name}] ${subpath}\n${r.out.trim().split("\n").slice(0, 6).join("\n")}`);
 			}
-			failures.push(`${subpath}\n${r.out.trim().split("\n").slice(0, 6).join("\n")}`);
+			console.log(`  [${engine.name}] ${pkg.name}: ${subpaths.length} subpath(s)`);
 		}
-		console.log(`  ${pkg.name}: ${subpaths.length} subpath(s)`);
 	}
 	if (failures.length > 0) {
-		console.error(`\n\x1b[1;31m${failures.length} subpath(s) failed to import under Node:\x1b[0m`);
+		console.error(`\n\x1b[1;31m${failures.length} subpath(s) failed to import:\x1b[0m`);
 		for (const f of failures) console.error(`\n--- ${f}`);
 		process.exit(1);
 	}
@@ -341,7 +377,9 @@ function main(): void {
 	}
 	if (lintFailed) process.exit(1);
 
-	console.log("\n\x1b[1;32m✅ Packaging gate passed — every packed subpath imports under Node.\x1b[0m");
+	console.log(
+		`\n\x1b[1;32m✅ Packaging gate passed — every packed subpath imports under ${availableEngines.map((e) => e.name).join(", ")}.\x1b[0m`,
+	);
 }
 
 if (import.meta.main) main();

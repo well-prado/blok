@@ -98,7 +98,7 @@ function derivedDenoFlags(
 	projectRoot: string,
 	env: Record<string, string>,
 	baseline: string[],
-): { flags: string[]; note: string } {
+): { flags: string[]; note: string; grants: Array<{ flag: string; reason: string }> } {
 	try {
 		const probe = child_process.spawnSync(binary, [...baseline, entry, "--print-permissions"], {
 			cwd: projectRoot,
@@ -110,17 +110,24 @@ function derivedDenoFlags(
 		if (!line) {
 			return {
 				flags: baseline,
+				grants: [],
 				note: "could not read declared capabilities; running with the least-privilege baseline",
 			};
 		}
-		const parsed = JSON.parse(line.slice("BLOK_PERMISSIONS ".length)) as { effects: string[]; flags: string[] };
+		const parsed = JSON.parse(line.slice("BLOK_PERMISSIONS ".length)) as {
+			effects: string[];
+			flags: string[];
+			grants?: Array<{ flag: string; reason: string }>;
+		};
 		return {
 			flags: parsed.flags,
+			grants: parsed.grants ?? [],
 			note: parsed.effects.length > 0 ? `declared effects: ${parsed.effects.join(", ")}` : "no declared effects",
 		};
 	} catch (err) {
 		return {
 			flags: baseline,
+			grants: [],
 			note: `capability probe failed (${(err as Error).message.split("\n")[0]}); running with the least-privilege baseline`,
 		};
 	}
@@ -195,6 +202,14 @@ export async function planJsWorker(options: {
 			const derived = derivedDenoFlags(info.binary, entry, projectRoot, env, [...baseline, ...resolution]);
 			permissions = [...derived.flags, ...resolution];
 			console.log(`  Deno worker permissions: ${derived.flags.join(" ")} (${derived.note})`);
+			// Print WHY each grant exists. Least privilege the operator cannot
+			// inspect is indistinguishable from --allow-all with extra steps.
+			for (const grant of derived.grants) console.log(`    ${grant.flag} — ${grant.reason}`);
+			if (derived.flags.includes("--allow-net")) {
+				console.log(
+					"    ! --allow-net is unrestricted. A capability manifest names no outbound hosts; set BLOK_DENO_ALLOW_NET=host[:port],… to scope it.",
+				);
+			}
 		}
 	}
 

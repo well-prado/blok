@@ -186,6 +186,7 @@
 							"d/cli/dev",
 							"d/cli/project",
 							"d/cli/runtimes",
+							"d/cli/runtime-troubleshooting",
 							"d/cli/observability",
 							"d/cli/nodes",
 							"d/cli/workflows",

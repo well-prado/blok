@@ -1,7 +1,7 @@
 {
 	"name": "@blokjs/runtime-worker",
 	"version": "2.2.1",
-	"description": "Persistent JavaScript/TypeScript execution worker for Blok — serves blok.runtime.v1 over gRPC under Node.js, Bun, or Deno.",
+	"description": "Persistent JavaScript/TypeScript execution worker for Blok \u2014 serves blok.runtime.v1 over gRPC under Node.js, Bun, or Deno.",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -19,7 +19,7 @@
 	"scripts": {
 		"build": "rm -rf dist && bun run tsc && bun run sync:proto",
 		"build:dev": "tsc --watch",
-		"sync:proto": "mkdir -p dist/proto/blok/runtime/v1 && cp src/proto/blok/runtime/v1/runtime.proto dist/proto/blok/runtime/v1/runtime.proto",
+		"sync:proto": "mkdir -p dist/proto/blok/runtime/v1 dist/conformance && cp src/proto/blok/runtime/v1/runtime.proto dist/proto/blok/runtime/v1/runtime.proto && cp src/conformance/data.json dist/conformance/data.json",
 		"test": "vitest run",
 		"test:bun": "bun test tests/worker.unit.test.ts",
 		"test:dev": "vitest",
@@ -35,6 +35,7 @@
 		"zod": "^3.24.2"
 	},
 	"devDependencies": {
+		"@blokjs/if-else": "^2.2.1",
 		"@types/node": "^22.15.21",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"

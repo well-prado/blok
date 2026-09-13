@@ -46,6 +46,7 @@
 		"ci:fast": "bash scripts/ci-local.sh fast",
 		"ci:cross-runtime": "bash scripts/ci-local.sh cross-runtime",
 		"ci:packaging": "bash scripts/ci-local.sh packaging",
+		"bench:runtimes": "bun run benchmarks/js-runtime-worker.ts",
 		"ci:all": "bash scripts/ci-local.sh all",
 		"cli:dev": "bun run --filter blokctl build:dev",
 		"cli:test:dev": "bun run --filter blokctl test:dev",

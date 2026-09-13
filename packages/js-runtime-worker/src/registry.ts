@@ -10,8 +10,9 @@
  * is registered once regardless of the map key it was exported under.
  */
 
-import type { Context, NodeBase } from "@blokjs/shared";
+import type { Context, NodeBase, RuntimeKind } from "@blokjs/shared";
 import { WorkerError } from "./errors.js";
+import { detectHostRuntime, runtimeKindOf } from "./host.js";
 
 /** What the worker needs from a node beyond `NodeBase`. Duck-typed on purpose:
  * `handle()` lives on `BlokService` in `@blokjs/runner`, and the reflection
@@ -130,22 +131,85 @@ function projectContext(p: ExecuteContextProjection): {
 	return { ctx, logger, vars };
 }
 
+/**
+ * The runtime constraint a node declares (`capabilityManifest.runtimes`).
+ *
+ * Entries are canonical runner kinds — `nodejs`, `bun`, `deno`, `go`, … — with
+ * the project-target aliases `node`/`typescript`/`ts` accepted for `nodejs`.
+ * An absent or empty list means portable: runnable on any engine.
+ */
+function declaredRuntimes(node: WorkerNode): string[] {
+	const manifest = (node.capabilityManifestRaw ?? node.capabilityManifest) as { runtimes?: unknown } | null | undefined;
+	const runtimes = manifest?.runtimes;
+	if (!Array.isArray(runtimes)) return [];
+	return runtimes.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+const RUNTIME_ALIASES: Readonly<Record<string, string>> = { node: "nodejs", typescript: "nodejs", ts: "nodejs" };
+
+/**
+ * Is a node with these declared runtimes executable on `kind`?
+ *
+ * ADR 0016 §4: a node that reaches for `node:` APIs, `Bun.*`, `Deno.*`, or a
+ * native addon declares the engines it supports. Loading it into the wrong
+ * worker must fail at BOOT with a message naming both sides, not halfway
+ * through a production run with a `ReferenceError: Bun is not defined`.
+ */
+export function isRuntimeCompatible(declared: readonly string[], kind: RuntimeKind): boolean {
+	if (declared.length === 0) return true;
+	return declared.some((entry) => {
+		const normalized = entry.toLowerCase().replace(/^runtime\./, "");
+		return (RUNTIME_ALIASES[normalized] ?? normalized) === kind;
+	});
+}
+
+export interface IncompatibleNode {
+	name: string;
+	declared: string[];
+	message: string;
+}
+
 export class WorkerRegistry {
 	private readonly nodes = new Map<string, WorkerNode>();
+	/** Nodes this engine refused: declared for other runtimes only. */
+	private readonly incompatible = new Map<string, IncompatibleNode>();
 	/** Executions served by THIS process, for the worker-reuse proof. */
 	public executions = 0;
 
+	constructor(private readonly runtimeKind: RuntimeKind = runtimeKindOf(detectHostRuntime())) {}
+
 	/** Register under the node's own `name`. A later registration replaces an
 	 * earlier one so a project node can shadow a built-in fixture of the same
-	 * name; the caller decides whether to warn. */
-	register(node: WorkerNode): void {
+	 * name; the caller decides whether to warn.
+	 *
+	 * Returns the rejection when the node declares a runtime constraint this
+	 * engine does not satisfy — the caller reports it at boot. */
+	register(node: WorkerNode): IncompatibleNode | null {
 		const name = (node as { name?: unknown }).name;
 		if (typeof name !== "string" || name.length === 0) {
 			throw new Error(
 				"[blok][worker] a node has no string `name` to register under — every defineNode() needs a name.",
 			);
 		}
+		const declared = declaredRuntimes(node);
+		if (!isRuntimeCompatible(declared, this.runtimeKind)) {
+			const rejection: IncompatibleNode = {
+				name,
+				declared,
+				message: `Node "${name}" declares capabilityManifest.runtimes = [${declared.join(", ")}] and cannot run on runtime.${this.runtimeKind}. Select a matching JavaScript target (\`blokctl runtime use …\`), pin the step to a runtime it declares, or widen the node's declaration if it is actually portable.`,
+			};
+			this.incompatible.set(name, rejection);
+			this.nodes.delete(name);
+			return rejection;
+		}
+		this.incompatible.delete(name);
 		this.nodes.set(name, node);
+		return null;
+	}
+
+	/** Nodes refused at load because they declare other runtimes. */
+	rejected(): IncompatibleNode[] {
+		return [...this.incompatible.values()].sort((a, b) => a.name.localeCompare(b.name));
 	}
 
 	has(name: string): boolean {
@@ -185,6 +249,20 @@ export class WorkerRegistry {
 	 * protocol specifies.
 	 */
 	async execute(nodeName: string, projection: ExecuteContextProjection): Promise<WorkerExecution> {
+		const rejection = this.incompatible.get(nodeName);
+		if (rejection) {
+			// Distinct from NODE_NOT_FOUND on purpose: the node EXISTS, this
+			// engine is the wrong one for it. A "not found" here would send the
+			// operator hunting for a missing file.
+			throw new WorkerError(
+				"NODE_RUNTIME_INCOMPATIBLE",
+				rejection.message,
+				"CONFIGURATION",
+				501,
+				false,
+				`Declared runtimes: ${rejection.declared.join(", ")}. This worker executes runtime.${this.runtimeKind}.`,
+			);
+		}
 		const registered = this.nodes.get(nodeName);
 		if (!registered) {
 			throw new WorkerError(
