@@ -16,12 +16,14 @@
  *
  * Run:  bun tests/e2e/cross-runtime/prepare-usernodes.ts
  */
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	csharp_node_file,
 	dart_node_file,
 	elixir_node_file,
+	function_first_node_file,
 	go_node_file,
 	java_node_file,
 	kotlin_node_file,
@@ -134,9 +136,63 @@ prepCompiled("swift", "node.swift", swift_node_file, generateSwiftNodeRegistry);
 prepCompiled("dart", "node.dart", dart_node_file, generateDartNodeRegistry);
 prepCompiled("elixir", "node.ex", elixir_node_file, generateElixirNodeRegistry);
 
+/**
+ * JavaScript — the three engines share ONE build context because they share one
+ * worker. This mirrors what a scaffolded project actually does: the REAL
+ * `defineNode` template under `src/nodes/<name>/index.ts`, a `src/Nodes.ts`
+ * default-exporting the node record, and the project's own `tsc` emitting
+ * `dist/Nodes.js`. The worker then loads that module — Node.js needs the
+ * compiled output, Bun and Deno would take either.
+ */
+function prepJavaScript(): void {
+	const ctx = join(BUILD, "javascript");
+	rmSync(ctx, { recursive: true, force: true });
+	write(join(ctx, "src", "nodes", NAME, "index.ts"), render(function_first_node_file));
+	write(
+		join(ctx, "src", "Nodes.ts"),
+		`import e2eUser from "./nodes/${NAME}/index.js";\n\nconst nodes = { "${NAME}": e2eUser };\n\nexport default nodes;\n`,
+	);
+	// `"type": "module"` so Node loads the emitted ESM without reparsing it.
+	write(
+		join(ctx, "package.json"),
+		`${JSON.stringify({ name: "blok-e2e-javascript-usernodes", private: true, type: "module" }, null, 2)}\n`,
+	);
+	write(
+		join(ctx, "tsconfig.json"),
+		`${JSON.stringify(
+			{
+				compilerOptions: {
+					target: "es2022",
+					module: "es2022",
+					moduleResolution: "bundler",
+					lib: ["es2022"],
+					rootDir: "./src",
+					outDir: "./dist",
+					strict: true,
+					skipLibCheck: true,
+				},
+				include: ["./src"],
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	const built = spawnSync("bunx", ["tsc", "-p", ctx], { cwd: ROOT, encoding: "utf8" });
+	if (built.status !== 0 || !existsSync(join(ctx, "dist", "Nodes.js"))) {
+		console.log(
+			`  javascript: tsc FAILED — the JS workers will serve built-ins only\n${built.stdout ?? ""}${built.stderr ?? ""}`,
+		);
+		return;
+	}
+	console.log(`  javascript: node compiled → ${join(ctx, "dist", "Nodes.js").replace(ROOT, ".")} (BLOK_WORKER_NODES)`);
+}
+
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.
 prepDynamic("python3", "node.py", python3_file, { "__init__.py": "" });
 prepDynamic("ruby", "node.rb", ruby_node_file);
 prepDynamic("php", `src/Nodes/${PASCAL}Node.php`, php_node_file);
+
+// JavaScript (node/bun/deno) — one worker, one compiled node module.
+prepJavaScript();
 
 console.log("Done. Build with: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build");

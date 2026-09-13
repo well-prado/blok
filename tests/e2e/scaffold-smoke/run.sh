@@ -17,7 +17,13 @@
 #   bash tests/e2e/scaffold-smoke/run.sh
 #
 # Env:
-#   SMOKE_RUNTIMES=go,python3   limit to these runtimes (default: all detected)
+#   SMOKE_RUNTIMES=go,python3   limit to these runtimes (default: all detected;
+#                               `none` scaffolds with no language sidecar at all)
+#   SMOKE_JS_RUNTIME=bun        JavaScript execution target for the scaffold
+#                               (node|bun|deno, default: the CLI's own default).
+#                               When it differs from the orchestrator host,
+#                               `blokctl dev` must bring up the persistent
+#                               @blokjs/runtime-worker — asserted below.
 #   SMOKE_TRIGGERS=http,grpc    limit to these triggers (default: all applicable)
 #   SMOKE_SKIP_BUILD=1          skip `bun run build` (assume dist is current)
 #   SMOKE_KEEP=1                keep the scaffolded project dir for inspection
@@ -104,6 +110,9 @@ detect_runtimes() {
 
 RUNTIMES="${SMOKE_RUNTIMES:-$(detect_runtimes)}"
 RUNTIMES="${RUNTIMES// /,}"
+# An EMPTY SMOKE_RUNTIMES still falls through to detection (bash `:-`), so the
+# "scaffold with no sidecars" case needs a word, not an empty string.
+[ "$RUNTIMES" = "none" ] && RUNTIMES=""
 
 # ── 2. pick triggers (pubsub needs a broker) ──────────────────────────────────
 ALL_TRIGGERS="http,sse,websocket,webhook,mcp,worker,cron,grpc"
@@ -140,6 +149,9 @@ WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/blok-smoke.XXXXXX")"
 PROJECT="$WORKDIR/smoke"
 RUNTIME_ARG=()
 [ -n "$RUNTIMES" ] && RUNTIME_ARG=(--runtimes "$RUNTIMES")
+JS_RUNTIME="${SMOKE_JS_RUNTIME:-}"
+JS_ARG=()
+[ -n "$JS_RUNTIME" ] && JS_ARG=(--runtime "$JS_RUNTIME")
 LOCAL_ARG=(--local "$ROOT")
 [ -n "$PUBLISHED" ] && LOCAL_ARG=()
 log "scaffolding at $PROJECT …"
@@ -147,7 +159,7 @@ log "scaffolding at $PROJECT …"
 # under `set -u`; the + idiom expands to nothing instead of dying.
 if ! (cd "$WORKDIR" && run_cli create project \
       --name smoke ${LOCAL_ARG[@]+"${LOCAL_ARG[@]}"} \
-      --triggers "$TRIGGERS" ${RUNTIME_ARG[@]+"${RUNTIME_ARG[@]}"} \
+      --triggers "$TRIGGERS" ${RUNTIME_ARG[@]+"${RUNTIME_ARG[@]}"} ${JS_ARG[@]+"${JS_ARG[@]}"} \
       --examples --package-manager bun --non-interactive </dev/null) >"$WORKDIR/scaffold.log" 2>&1; then
   log "scaffold failed — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
 fi
@@ -187,6 +199,29 @@ done
 [ -n "$READY" ] || { log "HTTP trigger never became ready — tail of dev.log:"; tail -30 "$DEV_LOG"; exit 1; }
 log "HTTP trigger up. Giving runtime sidecars a moment to register…"
 sleep 3
+
+# ── 6b. the JavaScript execution worker (ADR 0016) ───────────────────────────
+# `blokctl dev` hosts the triggers under Bun, so any target other than `bun`
+# must have brought up a persistent @blokjs/runtime-worker on its gRPC port.
+# A skip here is a real failure: it means runtime.<js> steps would 503.
+if [ -n "$JS_RUNTIME" ] && [ "$JS_RUNTIME" != "bun" ]; then
+  case "$JS_RUNTIME" in
+    node) JS_PORT=10012 ;;
+    deno) JS_PORT=10014 ;;
+    *)    JS_PORT="" ;;
+  esac
+  if [ -n "$JS_PORT" ]; then
+    JS_READY=""
+    for _ in $(seq 1 60); do port_open "localhost:$JS_PORT" && { JS_READY=1; break; }; sleep 1; done
+    if [ -n "$JS_READY" ]; then
+      log "JavaScript worker ($JS_RUNTIME) listening on gRPC :$JS_PORT"
+    else
+      log "JavaScript worker ($JS_RUNTIME) never came up on :$JS_PORT — tail of dev.log:"
+      grep -iE "worker|javascript" "$DEV_LOG" | tail -20
+      exit 1
+    fi
+  fi
+fi
 
 # ── 7. drive the assertions ───────────────────────────────────────────────────
 log "running smoke.ts …"

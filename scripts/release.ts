@@ -96,6 +96,10 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	// Core — the typed-handle authoring barrel. Thin re-export of the DSL
 	// from runner + helper + shared, so it lists after all three.
 	{ dir: "core/core", name: "@blokjs/core" },
+	// Persistent JavaScript execution worker (ADR 0016) — consumes runner +
+	// shared, and every scaffolded project declares it, so it must be on npm
+	// before `blokctl` ships a scaffold that depends on it.
+	{ dir: "packages/js-runtime-worker", name: "@blokjs/runtime-worker" },
 	// Harness control plane (#923) — consumes runner/session contracts.
 	{ dir: "packages/control-plane", name: "@blokjs/control-plane" },
 	// Provider-neutral harness kernel (#924) — consumes shared session contracts.

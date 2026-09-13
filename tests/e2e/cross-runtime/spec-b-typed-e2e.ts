@@ -1,7 +1,9 @@
 /**
  * SPEC-B end-to-end proof over REAL gRPC.
  *
- * Drives running SDK gRPC servers (all 11: Go/Rust/C#/Java/Kotlin/PHP/Ruby/Python3/Swift/Dart/Elixir)
+ * Drives running SDK gRPC servers (all 14: Go/Rust/C#/Java/Kotlin/PHP/Ruby/Python3/
+ * Swift/Dart/Elixir plus the three JavaScript targets served by
+ * `@blokjs/runtime-worker` under Node.js/Bun/Deno)
  * through the runner's OWN `GrpcRuntimeAdapter` — the client the runner uses per
  * step. Probes which runtimes are actually up and, per live runtime, proves:
  *   1. ListNodes returns the typed node WITH a real JSON Schema (SPEC-B P1.2 +
@@ -41,11 +43,17 @@ const RUNTIMES = [
 	{ kind: "swift", port: Number(process.env.SWIFT_GRPC_PORT ?? 10008) },
 	{ kind: "dart", port: Number(process.env.DART_GRPC_PORT ?? 10009) },
 	{ kind: "elixir", port: Number(process.env.ELIXIR_GRPC_PORT ?? 10010) },
+	// ADR 0016 — one persistent `@blokjs/runtime-worker` per JavaScript engine.
+	// Same contract, same assertions: the JavaScript targets are not a special
+	// case of the cross-runtime suite, they are three more rows in it.
+	{ kind: "nodejs", port: Number(process.env.NODEJS_GRPC_PORT ?? 10012) },
+	{ kind: "bun", port: Number(process.env.BUN_GRPC_PORT ?? 10013) },
+	{ kind: "deno", port: Number(process.env.DENO_GRPC_PORT ?? 10014) },
 ] as const;
 
 // CI gate: a runtime named here MUST come up or the run fails (instead of
 // silently skipping — the exact rot the cross-runtime harness exists to catch).
-// `BLOK_E2E_REQUIRE_ALL=1` requires all 10; `BLOK_E2E_REQUIRE=go,rust` a subset.
+// `BLOK_E2E_REQUIRE_ALL=1` requires all 14; `BLOK_E2E_REQUIRE=go,rust` a subset.
 const REQUIRE_ALL = /^(1|true)$/i.test(process.env.BLOK_E2E_REQUIRE_ALL ?? "");
 const REQUIRED = new Set(
 	REQUIRE_ALL
