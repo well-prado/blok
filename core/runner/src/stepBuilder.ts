@@ -1299,6 +1299,145 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 			: Handle<OutputOf<N>>;
 }
 
+// ───────────────────────────── page (#1008) ──────────────────────────────
+//
+// `page(id, { component, url, props, inputs })` — the Inertia page control step.
+// Unlike every other primitive here it has no ARM callbacks: each prop is a
+// single node invocation the RUNNER decides whether to run, per request. So the
+// lowering is flat — each prop's `inputs` go through the same `lowerHandles`
+// pass a `step()`'s do, and the whole thing emits ONE `{ id, page: {...} }`
+// step record.
+//
+// This is the low-level seam. Authors reach it through `definePage().render()`
+// in `@blokjs/inertia`, which adds the typed prop contract on top.
+
+/** How the runner resolves one prop. `merge`/`once`/`scroll` resolve like `regular` (#1009/#1010). */
+export type PagePropMode = "regular" | "always" | "optional" | "defer" | "merge" | "once" | "scroll";
+
+/** One declared prop: the node that resolves it, its inputs, and its mode metadata. */
+export interface PagePropSpec {
+	/** The node value (from `defineNode` / `runtimeNode` / `node()`) that resolves this prop. */
+	node: { name: string };
+	/** Inputs for that node. Handles allowed, exactly like `step()`. */
+	inputs?: Record<string, unknown>;
+	mode?: PagePropMode;
+	/** Deferred-prop group the client fetches together. `defer` only. */
+	group?: string;
+	/** A throw omits the prop and lists it in `rescuedProps` instead of failing the run. */
+	rescue?: boolean;
+	merge?: { append?: string; prepend?: string; deep?: string | boolean; matchOn?: string };
+	once?: { as?: string; until?: string | number };
+	scroll?: {
+		wrapper?: string;
+		pageName?: string;
+		previousPage?: number | string | null;
+		nextPage?: number | string | null;
+		currentPage?: number | string | null;
+	};
+	/** Per-prop reliability knobs — they apply to THIS prop only, not the page. */
+	retry?: unknown;
+	idempotencyKey?: string | Handle<unknown>;
+	idempotencyKeyTTL?: number;
+	maxDuration?: number | string;
+}
+
+/** Everything a {@link page} step needs beyond its props. */
+export interface PageStepOptions {
+	/** Client-side page component name, e.g. `"Orders/Index"`. */
+	component: string;
+	/** Page URL written into the page object. Defaults to the request URL. */
+	url?: string | Handle<string>;
+	/** Prop key -> the node that resolves it. */
+	props: Record<string, PagePropSpec>;
+	/** Serializer node ref. Defaults to `"@blokjs/inertia"`. */
+	serializer?: string;
+	/** Extra serializer inputs carried verbatim (version, errors, viewData, shell, …). */
+	inputs?: Record<string, unknown>;
+}
+
+/**
+ * The Inertia `page` control step (#1008). Emits one step whose props the
+ * RUNNER resolves lazily per request — see `PageNode`.
+ *
+ * Prefer `definePage(...).render(...)` from `@blokjs/inertia`: it carries the
+ * typed prop contract and calls this.
+ *
+ * @example
+ *   page("page", {
+ *     component: "Orders/Index",
+ *     url: "/orders",
+ *     props: {
+ *       auth:   { node: currentUser, mode: "always" },
+ *       orders: { node: listOrders, inputs: { userId: auth.id } },
+ *       stats:  { node: heavyStats, mode: "defer", group: "dashboard", rescue: true },
+ *     },
+ *   });
+ */
+export function page<T = unknown>(id: string, opts: PageStepOptions): Handle<T> {
+	if (typeof id !== "string" || id.length === 0) throw new Error("page() requires a non-empty string id.");
+	if (!opts || typeof opts.component !== "string" || opts.component.length === 0) {
+		throw new Error(`page("${id}") requires a non-empty \`component\`.`);
+	}
+	if (!opts.props || typeof opts.props !== "object") {
+		throw new Error(`page("${id}") requires a \`props\` object (prop key -> { node, inputs? }).`);
+	}
+	const builder = currentBuilder();
+	const ids = builder.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	const props: Record<string, unknown> = {};
+	for (const key of Object.keys(opts.props)) {
+		const spec = opts.props[key] as PagePropSpec;
+		if (!spec || !spec.node || typeof spec.node.name !== "string" || spec.node.name.length === 0) {
+			throw new Error(`page("${id}") prop "${key}" requires a node value (from defineNode/runtimeNode/node).`);
+		}
+		props[key] = {
+			use: spec.node.name,
+			...(runtimeTypeOf(spec.node) ? { type: runtimeTypeOf(spec.node) } : {}),
+			// Always emit `inputs`, even empty: a node with a `z.object({})` input
+			// schema rejects `undefined` ("Required"), so an omitted key would fail
+			// the prop for a node that takes nothing.
+			inputs: lowerHandles(spec.inputs ?? {}, builder) as Record<string, unknown>,
+			...(spec.mode !== undefined ? { mode: spec.mode } : {}),
+			...(spec.group !== undefined ? { group: spec.group } : {}),
+			...(spec.rescue !== undefined ? { rescue: spec.rescue } : {}),
+			...(spec.merge !== undefined ? { merge: spec.merge } : {}),
+			...(spec.once !== undefined ? { once: spec.once } : {}),
+			...(spec.scroll !== undefined ? { scroll: spec.scroll } : {}),
+			...(spec.retry !== undefined ? { retry: spec.retry } : {}),
+			...(spec.idempotencyKey !== undefined
+				? { idempotencyKey: lowerExpressionSite(spec.idempotencyKey, builder, "idempotencyKey") }
+				: {}),
+			...(spec.idempotencyKeyTTL !== undefined ? { idempotencyKeyTTL: spec.idempotencyKeyTTL } : {}),
+			...(spec.maxDuration !== undefined ? { maxDuration: spec.maxDuration } : {}),
+		};
+	}
+
+	builder.steps.push({
+		id,
+		page: {
+			component: opts.component,
+			...(opts.url !== undefined ? { url: lowerHandles(opts.url, builder) } : {}),
+			props,
+			...(opts.serializer !== undefined ? { serializer: opts.serializer } : {}),
+			...(opts.inputs ? { inputs: lowerHandles(opts.inputs, builder) as Record<string, unknown> } : {}),
+		},
+	} as unknown as StepRecord);
+
+	return buildHandle(id, builder, []) as Handle<T>;
+}
+
+/** A `runtimeNode()` value's bare runtime KIND (`"runtime.python3:ask"` → `"runtime.python3"`), else undefined. */
+function runtimeTypeOf(node: { name: string }): string | undefined {
+	const meta = node as { kind?: unknown; runtime?: unknown };
+	if (meta.kind !== "runtimeNode" || typeof meta.runtime !== "string") return undefined;
+	const colon = meta.runtime.indexOf(":");
+	return colon > 0 ? meta.runtime.slice(0, colon) : meta.runtime;
+}
+
 /** Options for a {@link subworkflow} step (a superset of the regular step knobs). */
 export interface SubworkflowOptions extends StepOptions {
 	/** `true` (default) — parent blocks on the child; `false` — fire-and-forget. */

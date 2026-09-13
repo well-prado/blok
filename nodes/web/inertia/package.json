@@ -14,7 +14,8 @@
 	"scripts": {
 		"build": "rimraf ./dist && tsc",
 		"build:dev": "tsc --watch",
-		"test": "vitest run",
+		"test": "vitest run && bun run type-test",
+		"type-test": "tsc --noEmit -p tsconfig.typetest.json",
 		"test:dev": "vitest"
 	},
 	"devDependencies": {

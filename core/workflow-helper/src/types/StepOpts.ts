@@ -1064,6 +1064,138 @@ export const V2TryCatchStepSchema = z.lazy(() =>
 export type V2TryCatchStep = z.infer<typeof V2TryCatchStepSchema>;
 
 /**
+ * V2 page step (#1008) — Inertia's lazy prop taxonomy as ONE control step.
+ *
+ * Every prop is a node step the runner may or may not run: the request
+ * headers (`X-Inertia-Partial-Data` / `-Partial-Except` / `-Reset` /
+ * `-Except-Once-Props`) decide the resolution set, the selected prop steps run
+ * in PARALLEL, each lands at `ctx.state["<pageId>.<key>"]`, and the collected
+ * values plus their mode metadata are handed to the serializer node
+ * (`@blokjs/inertia`) which owns the wire format.
+ *
+ * `mode` semantics — `always` survives every partial filter, `optional` and
+ * `defer` never run on a full visit, `merge` / `once` / `scroll` resolve like
+ * a regular prop and only contribute their client-side metadata (#1009/#1010).
+ *
+ * @example
+ *   {
+ *     id: "page",
+ *     page: {
+ *       component: "Orders/Index",
+ *       url: "/orders",
+ *       props: {
+ *         auth:   { use: "current-user", mode: "always" },
+ *         orders: { use: "list-orders", inputs: { userId: { "$ref": { step: "auth", path: ["id"] } } } },
+ *         stats:  { use: "heavy-stats", mode: "defer", group: "dashboard", rescue: true }
+ *       },
+ *       inputs: { version: "v1" }
+ *     }
+ *   }
+ */
+export const V2PagePropSchema = z
+	.object({
+		use: z.string().min(1).describe("Node reference that resolves this prop (e.g. '@acme/list-orders')."),
+		type: NodeTypeSchema.optional().describe("Node type override. Inferred from `use` when omitted."),
+		inputs: z
+			.record(z.unknown())
+			.optional()
+			.describe("Inputs for this prop's node — same structural `{$ref}` / `{$tpl}` surface a regular step takes."),
+		mode: z
+			.enum(["regular", "always", "optional", "defer", "merge", "once", "scroll"])
+			.optional()
+			.describe(
+				"Resolution mode. 'regular' (default) runs on full visits and when selected on a partial; " +
+					"'always' ignores only/except; 'optional' and 'defer' run ONLY when explicitly requested; " +
+					"'merge'/'once'/'scroll' resolve like 'regular' and add client-side prop metadata.",
+			),
+		group: z.string().min(1).optional().describe("Deferred-prop group the client fetches together. `defer` only."),
+		rescue: z
+			.boolean()
+			.optional()
+			.describe(
+				"When true, a throw from this prop omits it and lists it in `rescuedProps` instead of failing the run.",
+			),
+		merge: z
+			.object({
+				append: z.string().optional(),
+				prepend: z.string().optional(),
+				deep: z.union([z.string(), z.boolean()]).optional(),
+				matchOn: z.string().optional(),
+			})
+			.strict()
+			.optional()
+			.describe(
+				"Client merge strategy metadata (#1009). Emitted as mergeProps/prependProps/deepMergeProps/matchPropsOn.",
+			),
+		once: z
+			.object({
+				as: z.string().optional(),
+				until: z.union([z.string(), z.number()]).optional(),
+			})
+			.strict()
+			.optional()
+			.describe("Once-prop cache metadata (#1009). Emitted as the page object's `onceProps` entry."),
+		scroll: z
+			.object({
+				wrapper: z.string().optional(),
+				pageName: z.string().optional(),
+				previousPage: z.union([z.number(), z.string(), z.null()]).optional(),
+				nextPage: z.union([z.number(), z.string(), z.null()]).optional(),
+				currentPage: z.union([z.number(), z.string(), z.null()]).optional(),
+			})
+			.strict()
+			.optional()
+			.describe("Infinite-scroll paging metadata (#1010). Emitted as the page object's `scrollProps` entry."),
+		idempotencyKey: ResolvedKeySchema.optional().describe(
+			"Per-prop idempotency cache key — same contract as a step's.",
+		),
+		idempotencyKeyTTL: z.number().int().min(0).optional(),
+		retry: RetryConfigSchema.optional().describe("Per-prop retry. Retries ONLY this prop, not the whole page."),
+		maxDuration: DurationSchema.optional().describe("Per-prop, per-attempt execution timeout."),
+	})
+	.strict();
+
+export type V2PageProp = z.infer<typeof V2PagePropSchema>;
+
+export const V2PageStepSchema = z.lazy(() =>
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier. The serializer's output lands at ctx.state[id]."),
+			page: z
+				.object({
+					component: z.string().min(1).describe("Client-side page component name, e.g. 'Orders/Index'."),
+					url: z
+						.unknown()
+						.optional()
+						.describe("Page URL. A literal, a structural {$ref}, or a `js/` expression. Defaults to the request URL."),
+					props: z
+						.record(V2PagePropSchema)
+						.describe("Prop key -> the node step that resolves it, plus its resolution mode."),
+					serializer: z
+						.string()
+						.min(1)
+						.optional()
+						.describe("Serializer node ref. Defaults to '@blokjs/inertia' — the one owner of the wire format."),
+					inputs: z
+						.record(z.unknown())
+						.optional()
+						.describe(
+							"Extra serializer inputs carried verbatim (version, errors, viewData, shell, encryptHistory, …).",
+						),
+				})
+				.strict()
+				.describe("page configuration."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+			description: V2StepDescriptionSchema,
+			ui: V2StepUiSchema,
+		})
+		.strict(),
+);
+
+export type V2PageStep = z.infer<typeof V2PageStepSchema>;
+
+/**
  * F22 — pick the single member schema a step shape should be validated
  * against, using key presence (the same discriminators the `isXStep` guards
  * use). The regular-step schema is the catch-all when no control-flow key is
@@ -1088,6 +1220,7 @@ function selectV2StepSchema(value: unknown): z.ZodTypeAny {
 	if ("loop" in value) return V2LoopStepSchema;
 	if ("switch" in value) return V2SwitchStepSchema;
 	if ("tryCatch" in value) return V2TryCatchStepSchema;
+	if ("page" in value) return V2PageStepSchema;
 	if ("agentStep" in value) return V2AgentStepSchema;
 	if ("approval" in value) return V2ApprovalStepSchema;
 	if ("evidence" in value) return V2EvidenceStepSchema;
@@ -1107,6 +1240,7 @@ function selectV2StepSchema(value: unknown): z.ZodTypeAny {
  * - presence of `loop` → loop step (v0.5)
  * - presence of `switch` → switch step (v0.5)
  * - presence of `tryCatch` → tryCatch step (v0.5)
+ * - presence of `page` → Inertia page step (#1008)
  * - presence of `agentStep`, `approval`, `evidence`, `assert`, or `completion`
  *   → the corresponding enforced-agent contract step
  * - otherwise → regular step
@@ -1147,6 +1281,7 @@ export const V2StepSchema: z.ZodType<
 	| V2LoopStep
 	| V2SwitchStep
 	| V2TryCatchStep
+	| V2PageStep
 	| V2AgentStep
 	| V2ApprovalStep
 	| V2EvidenceStep
@@ -1167,6 +1302,7 @@ export const V2StepSchema: z.ZodType<
 			V2LoopStepSchema,
 			V2SwitchStepSchema,
 			V2TryCatchStepSchema,
+			V2PageStepSchema,
 			V2RegularStepSchema,
 			// Catch-all so the union always succeeds and the superRefine below
 			// owns error reporting (single-member, no invalid_union noise). See
@@ -1191,6 +1327,7 @@ export const V2StepSchema: z.ZodType<
 	| V2LoopStep
 	| V2SwitchStep
 	| V2TryCatchStep
+	| V2PageStep
 	| V2AgentStep
 	| V2ApprovalStep
 	| V2EvidenceStep

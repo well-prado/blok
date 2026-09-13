@@ -12,9 +12,10 @@ already-resolved props and the request headers into a `RespondEnvelope` the
 
 Both answers carry `Vary: X-Inertia` — the same URL serves both.
 
-This node is the **serializer**. Resolving which props to compute (optional,
-deferred, merge, once, scroll) is the `page` control step's job (#1008); by the
-time the node runs, `props` are values.
+This node is the **serializer**. Deciding which props to compute (optional,
+deferred, merge, once, scroll) is the `page` control step's job — see
+[Typed pages](#typed-pages-definepage-and-the-page-control-step) below; by the
+time this node runs, `props` are values.
 
 ```json
 {
@@ -189,6 +190,112 @@ Inertia **error page** instead of a JSON body is #1014.
 
 `authorizeNode` is the same check as a step
 (`step("guard", authorizeNode, { ability: "edit", allowed: false })`).
+## Typed pages: `definePage()` and the `page` control step
+
+A page's props are declared ONCE, outside the workflow callback, so the type is
+importable by the frontend and by codegen:
+
+```ts
+import { always, defer, definePage, merge, once, optional, scroll, shared } from "@blokjs/inertia";
+import { http, workflow } from "@blokjs/core";
+
+export const OrdersIndex = definePage("Orders/Index", {
+  auth:    always(currentUser),                                 // ignores only/except
+  orders:  listOrders,                                          // regular
+  filters: optional(loadFilters),                               // only when asked for
+  stats:   defer(heavyStats, { group: "dashboard", rescue: true }),
+  feed:    merge(loadFeed, { append: "data", matchOn: "id" }),   // #1009
+  plans:   once(loadPlans, { until: "1h" }),                     // #1009
+  posts:   scroll(paginatePosts, { wrapper: "data" }),           // #1010
+});
+
+export default workflow("Orders page", { version: "1.0.0", trigger: http.get("/orders") }, (req) => {
+  OrdersIndex.render(req, "page", "/orders", {
+    orders: { userId: shared(currentUser, "auth").id },
+    stats:  { userId: req.query.userId },
+  }, { version: "v1" });
+});
+```
+
+`render()` takes **node inputs per prop** (handles allowed), not resolved
+values — the runner decides per request which prop nodes actually run. It emits
+exactly one `page` control step.
+
+The frontend reads the props through the phantom type the `PageDef` carries:
+
+```ts
+import type { PageProps } from "@blokjs/inertia";
+import type { OrdersIndex } from "../../workflows/orders";
+
+export default function Index(props: PageProps<typeof OrdersIndex>) { … }
+```
+
+`optional` and `defer` keys are `T | undefined`; every other mode is present.
+`errors` is always there. `@blokjs/inertia-client`'s `PagePropsOf<T>` reads the
+same `__props` carrier.
+
+`getPageRegistry()` returns every page declared in the process — component,
+per-prop mode metadata, Zod output schema and source `file:line` — which is what
+`blokctl gen` (#998) and DevTools (#1017) consume.
+
+### Resolution rules
+
+| Visit | Runs | Does not run |
+| --- | --- | --- |
+| Full visit (no `X-Inertia-Partial-Component`, or one naming a different component) | `regular`, `always`, `merge`, `scroll`, and `once` unless listed in `X-Inertia-Except-Once-Props` | `optional`, `defer` |
+| Partial reload, `X-Inertia-Partial-Data` set | the named props (dot paths select by their ROOT segment) plus `always` | everything else |
+| Partial reload, only `X-Inertia-Partial-Except` set | `regular`, `merge`, `scroll` minus the named props; `always` is exempt | `optional`, `defer`, `once` |
+
+Selected props run **in parallel**, each through the normal step machinery — so
+per-prop `retry`, `idempotencyKey` and `maxDuration` all work, and each result
+lands at `ctx.state["<pageId>.<key>"]` (`run.state("page.orders")` in tests).
+Because they run concurrently, **one prop can never read another's output**;
+read the request, or a middleware step's output via `shared()`.
+
+A prop declared `rescue: true` that throws is omitted from `props`, listed in
+`rescuedProps`, and logged — the run still succeeds. Without `rescue` the throw
+fails the workflow like any other step.
+
+### JSON form
+
+The same step in a JSON workflow:
+
+```json
+{
+  "id": "page",
+  "page": {
+    "component": "Orders/Index",
+    "url": "/orders",
+    "props": {
+      "auth":    { "use": "current-user", "mode": "always" },
+      "orders":  { "use": "list-orders", "inputs": { "userId": { "$ref": { "step": "@trigger", "path": ["query", "userId"] } } } },
+      "filters": { "use": "load-filters", "mode": "optional" },
+      "stats":   { "use": "heavy-stats", "mode": "defer", "group": "dashboard", "rescue": true },
+      "feed":    { "use": "load-feed", "mode": "merge", "merge": { "append": "data", "matchOn": "id" } },
+      "plans":   { "use": "load-plans", "mode": "once", "once": { "until": "1h" } },
+      "posts":   { "use": "paginate-posts", "mode": "scroll", "scroll": { "wrapper": "data" } }
+    },
+    "inputs": { "version": "v1" }
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `page.component` | required — the client-side page component name |
+| `page.url` | literal, `{$ref}` or `js/` expression; defaults to the request URL |
+| `page.props.<key>.use` / `.type` | the node that resolves the prop, exactly like a step |
+| `page.props.<key>.inputs` | that node's inputs — same `{$ref}` / `{$tpl}` surface a step takes |
+| `page.props.<key>.mode` | `regular` (default), `always`, `optional`, `defer`, `merge`, `once`, `scroll` |
+| `page.props.<key>.group` / `.rescue` | `defer` only |
+| `page.props.<key>.merge` / `.once` / `.scroll` | client-side metadata, emitted verbatim onto the page object |
+| `page.props.<key>.retry` / `.idempotencyKey` / `.idempotencyKeyTTL` / `.maxDuration` | per-prop reliability knobs |
+| `page.serializer` | node ref; defaults to `@blokjs/inertia` |
+| `page.inputs` | extra serializer inputs (`version`, `errors`, `viewData`, `shell`, `encryptHistory`, …) |
+
+Internally the step lowers to one inner step per prop, named `<pageId>.<key>`,
+plus the serializer at `<pageId>.$render`. Studio tags those inner steps
+`page:<pageId>`, the way middleware inner steps are tagged.
 
 ## Exports
 
@@ -214,7 +321,18 @@ import InertiaNode, {
   can,                       // rules -> the `can` prop object
   authorize,                 // throw 403 unless allowed
   authorizeNode,             // authorize as a step
+  // typed page contracts (#995 / #1008)
+  definePage,
+  always,
+  optional,
+  defer,
+  merge,
+  once,
+  scroll,
+  shared,
+  getPageRegistry,
 } from "@blokjs/inertia";
+import type { PageProps } from "@blokjs/inertia";
 ```
 
 The security nodes are **not** in `HELPER_NODES`: pass the node object to
@@ -226,6 +344,9 @@ without any extra wiring.
 
 ## Not this node's job
 
-`definePage` (#995), the middleware/session layer that flashes errors and
-`preserveFragment` across a redirect (#996), the `page` control step that
-resolves prop types (#1008), SSR (#1001) and the client package.
+The middleware/session layer that flashes errors and `preserveFragment` across
+a redirect (#996), the shared-prop registry (#1015), merge/once RESOLUTION
+semantics (#1009), infinite-scroll paging (#1010), SSR (#1001) and the client
+package. `definePage` (#995) and the `page` control step (#1008) ship here, but
+they are the AUTHORING and CONTROL layers — the node itself still only
+serializes.

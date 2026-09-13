@@ -2484,6 +2484,339 @@
 							"id": {
 								"type": "string",
 								"minLength": 1,
+								"description": "Stable identifier. The serializer's output lands at ctx.state[id]."
+							},
+							"page": {
+								"type": "object",
+								"properties": {
+									"component": {
+										"type": "string",
+										"minLength": 1,
+										"description": "Client-side page component name, e.g. 'Orders/Index'."
+									},
+									"url": {
+										"description": "Page URL. A literal, a structural {$ref}, or a `js/` expression. Defaults to the request URL."
+									},
+									"props": {
+										"type": "object",
+										"additionalProperties": {
+											"type": "object",
+											"properties": {
+												"use": {
+													"type": "string",
+													"minLength": 1,
+													"description": "Node reference that resolves this prop (e.g. '@acme/list-orders')."
+												},
+												"type": {
+													"type": "string",
+													"enum": [
+														"local",
+														"module",
+														"runtime.python3",
+														"runtime.node",
+														"runtime.typescript",
+														"runtime.nodejs",
+														"runtime.bun",
+														"runtime.deno",
+														"runtime.go",
+														"runtime.java",
+														"runtime.kotlin",
+														"runtime.rust",
+														"runtime.php",
+														"runtime.csharp",
+														"runtime.ruby",
+														"runtime.swift",
+														"runtime.dart",
+														"runtime.elixir",
+														"runtime.docker",
+														"runtime.wasm",
+														"runtime.wasi"
+													],
+													"description": "Node type override. Inferred from `use` when omitted."
+												},
+												"inputs": {
+													"type": "object",
+													"additionalProperties": {},
+													"description": "Inputs for this prop's node — same structural `{$ref}` / `{$tpl}` surface a regular step takes."
+												},
+												"mode": {
+													"type": "string",
+													"enum": [
+														"regular",
+														"always",
+														"optional",
+														"defer",
+														"merge",
+														"once",
+														"scroll"
+													],
+													"description": "Resolution mode. 'regular' (default) runs on full visits and when selected on a partial; 'always' ignores only/except; 'optional' and 'defer' run ONLY when explicitly requested; 'merge'/'once'/'scroll' resolve like 'regular' and add client-side prop metadata."
+												},
+												"group": {
+													"type": "string",
+													"minLength": 1,
+													"description": "Deferred-prop group the client fetches together. `defer` only."
+												},
+												"rescue": {
+													"type": "boolean",
+													"description": "When true, a throw from this prop omits it and lists it in `rescuedProps` instead of failing the run."
+												},
+												"merge": {
+													"type": "object",
+													"properties": {
+														"append": {
+															"type": "string"
+														},
+														"prepend": {
+															"type": "string"
+														},
+														"deep": {
+															"type": [
+																"string",
+																"boolean"
+															]
+														},
+														"matchOn": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false,
+													"description": "Client merge strategy metadata (#1009). Emitted as mergeProps/prependProps/deepMergeProps/matchPropsOn."
+												},
+												"once": {
+													"type": "object",
+													"properties": {
+														"as": {
+															"type": "string"
+														},
+														"until": {
+															"type": [
+																"string",
+																"number"
+															]
+														}
+													},
+													"additionalProperties": false,
+													"description": "Once-prop cache metadata (#1009). Emitted as the page object's `onceProps` entry."
+												},
+												"scroll": {
+													"type": "object",
+													"properties": {
+														"wrapper": {
+															"type": "string"
+														},
+														"pageName": {
+															"type": "string"
+														},
+														"previousPage": {
+															"type": [
+																"number",
+																"string",
+																"null"
+															]
+														},
+														"nextPage": {
+															"type": [
+																"number",
+																"string",
+																"null"
+															]
+														},
+														"currentPage": {
+															"type": [
+																"number",
+																"string",
+																"null"
+															]
+														}
+													},
+													"additionalProperties": false,
+													"description": "Infinite-scroll paging metadata (#1010). Emitted as the page object's `scrollProps` entry."
+												},
+												"idempotencyKey": {
+													"anyOf": [
+														{
+															"type": "string",
+															"minLength": 1
+														},
+														{
+															"anyOf": [
+																{
+																	"type": "object",
+																	"properties": {
+																		"$ref": {
+																			"type": "object",
+																			"properties": {
+																				"step": {
+																					"type": "string",
+																					"minLength": 1
+																				},
+																				"path": {
+																					"type": "array",
+																					"items": {
+																						"type": [
+																							"string",
+																							"number"
+																						]
+																					}
+																				}
+																			},
+																			"required": [
+																				"step"
+																			],
+																			"additionalProperties": false
+																		}
+																	},
+																	"required": [
+																		"$ref"
+																	],
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"$tpl": {
+																			"type": "array",
+																			"items": {}
+																		}
+																	},
+																	"required": [
+																		"$tpl"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													],
+													"description": "Per-prop idempotency cache key — same contract as a step's."
+												},
+												"idempotencyKeyTTL": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"retry": {
+													"type": "object",
+													"properties": {
+														"maxAttempts": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 20,
+															"description": "Total attempts including the first run. 1 = no retry. Capped at 20."
+														},
+														"minTimeoutInMs": {
+															"type": "integer",
+															"minimum": 0,
+															"description": "Initial backoff delay in ms before the second attempt. Default 1000."
+														},
+														"maxTimeoutInMs": {
+															"type": "integer",
+															"minimum": 0,
+															"description": "Cap on the backoff delay between attempts. Default 30000."
+														},
+														"factor": {
+															"type": "number",
+															"minimum": 1,
+															"description": "Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."
+														},
+														"nonRetryableErrorNames": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"maxItems": 32,
+															"description": "Error names that never retry: when a thrown/soft error (or any wrapped cause) carries one of these names — Error.name or GlobalError.context.name — the step fails on the current attempt without further retries."
+														}
+													},
+													"required": [
+														"maxAttempts"
+													],
+													"additionalProperties": false,
+													"description": "Per-prop retry. Retries ONLY this prop, not the whole page."
+												},
+												"maxDuration": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "string",
+															"minLength": 1,
+															"pattern": "^\\d+(ms|s|m|h|d)$"
+														}
+													],
+													"description": "Per-prop, per-attempt execution timeout."
+												}
+											},
+											"required": [
+												"use"
+											],
+											"additionalProperties": false
+										},
+										"description": "Prop key -> the node step that resolves it, plus its resolution mode."
+									},
+									"serializer": {
+										"type": "string",
+										"minLength": 1,
+										"description": "Serializer node ref. Defaults to '@blokjs/inertia' — the one owner of the wire format."
+									},
+									"inputs": {
+										"type": "object",
+										"additionalProperties": {},
+										"description": "Extra serializer inputs carried verbatim (version, errors, viewData, shell, encryptHistory, …)."
+									}
+								},
+								"required": [
+									"component",
+									"props"
+								],
+								"additionalProperties": false,
+								"description": "page configuration."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"description": {
+								"type": "string",
+								"description": "What this step does. Documentation only — ignored by the runner; surfaces in Studio and the CLI."
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							}
+						},
+						"required": [
+							"id",
+							"page"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
 								"description": "Stable identifier. Other steps reference this step's output as ctx.state[id]. Required."
 							},
 							"use": {

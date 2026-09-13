@@ -1,0 +1,52 @@
+{
+	"name": "orders-page-json",
+	"version": "1.0.0",
+	"trigger": { "http": { "method": "GET", "path": "/orders-json" } },
+	"steps": [
+		{
+			"id": "page",
+			"page": {
+				"component": "Orders/Index",
+				"url": "/orders",
+				"props": {
+					"auth": { "use": "page-current-user", "mode": "always" },
+					"orders": {
+						"use": "page-list-orders",
+						"inputs": {
+							"userId": {
+								"$ref": { "step": "@trigger", "path": ["query", "userId"] }
+							}
+						}
+					},
+					"filters": { "use": "page-load-filters", "mode": "optional" },
+					"stats": {
+						"use": "page-heavy-stats",
+						"mode": "defer",
+						"group": "dashboard"
+					},
+					"other": {
+						"use": "page-other-stats",
+						"mode": "defer",
+						"group": "sidebar"
+					},
+					"feed": {
+						"use": "page-load-feed",
+						"mode": "merge",
+						"merge": { "append": "data", "matchOn": "id" }
+					},
+					"plans": {
+						"use": "page-load-plans",
+						"mode": "once",
+						"once": { "until": "1h" }
+					},
+					"posts": {
+						"use": "page-paginate-posts",
+						"mode": "scroll",
+						"scroll": { "wrapper": "data" }
+					}
+				},
+				"inputs": { "version": "v1" }
+			}
+		}
+	]
+}

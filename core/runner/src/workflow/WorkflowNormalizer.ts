@@ -357,6 +357,15 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			continue;
 		}
 
+		// #1008 page — { id, page: { component, url?, props: {...}, inputs? } }
+		if (isPlainObject(step.page)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizePageStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
 		// v2 regular — { id, use, inputs?, as?, spread?, ephemeral?, ... }
 		// or v1 regular — { name, node, type } + nodes[name].inputs
 		const { internalStep, nodeConfig } = normalizeRegularStep(step, nodesInput, i);
@@ -775,6 +784,11 @@ const FOR_EACH_NODE_REF = "@blokjs/forEach";
 const LOOP_NODE_REF = "@blokjs/loop";
 const SWITCH_NODE_REF = "@blokjs/switch";
 const TRY_CATCH_NODE_REF = "@blokjs/tryCatch";
+const PAGE_NODE_REF = "@blokjs/page";
+/** Default serializer for a `page` step — the ONE owner of the Inertia wire format (#994). */
+const PAGE_SERIALIZER_REF = "@blokjs/inertia";
+/** Suffix of the internal serializer step a `page` step lowers to: `<pageId>.$render`. */
+export const PAGE_RENDER_SUFFIX = ".$render";
 
 /**
  * Normalize a v0.5 forEach step into the internal shape. Inner steps
@@ -989,6 +1003,17 @@ function normalizeStepBlock(rawSteps: unknown[]): {
 			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
+		if (isPlainObject((s as Record<string, unknown>).page)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizePageStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
 		if (typeof (s as Record<string, unknown>).subworkflow === "string") {
 			const { internalStep: nestedStep, nodeConfig: nestedConfig } = normalizeSubworkflowStep(
 				s as Record<string, unknown>,
@@ -1130,6 +1155,108 @@ function normalizeTryCatchStep(
 		try: tryBlock.innerInternal,
 		catch: catchBlock.innerInternal,
 		...(finallyBlock !== undefined ? { finally: finallyBlock.innerInternal } : {}),
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Normalize a `page` step (#1008) into the internal shape.
+ *
+ * Every prop is lowered to an ordinary inner step named `<pageId>.<key>`, and
+ * the serializer becomes one more inner step named `<pageId>.$render`. They all
+ * ride in ONE `steps` array so `Configuration`'s existing
+ * `isFlowWithProperties` path resolves them to `NodeBase[]` — no new resolver
+ * branch, and cross-runtime props work because each prop is an ordinary step.
+ *
+ * `PageNode` reads the resulting config at run time:
+ *   { component, url?, props: PagePropMeta[], steps: NodeBase[] }
+ * where `steps[i]` resolves `props[i]` and `steps[props.length]` is the
+ * serializer.
+ */
+function normalizePageStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: page step at index ${index} is missing \`id\`.`);
+	}
+	const pg = step.page as Record<string, unknown>;
+	const component = pickString(pg.component);
+	if (!component) {
+		throw new Error(`[blok] WorkflowNormalizer: page step "${id}" is missing \`component\`.`);
+	}
+	if (!isPlainObject(pg.props)) {
+		throw new Error(
+			`[blok] WorkflowNormalizer: page step "${id}" is missing \`props\` (an object of prop key -> { use, inputs?, mode? }).`,
+		);
+	}
+
+	const rawProps = pg.props as Record<string, unknown>;
+	const propMeta: Record<string, unknown>[] = [];
+	const rawSteps: Record<string, unknown>[] = [];
+
+	for (const key of Object.keys(rawProps)) {
+		const spec = rawProps[key];
+		if (!isPlainObject(spec)) {
+			throw new Error(`[blok] WorkflowNormalizer: page step "${id}" prop "${key}" must be an object with a \`use\`.`);
+		}
+		const use = pickString(spec.use);
+		if (!use) {
+			throw new Error(`[blok] WorkflowNormalizer: page step "${id}" prop "${key}" is missing \`use\`.`);
+		}
+		rawSteps.push({
+			id: `${id}.${key}`,
+			use,
+			...(spec.type !== undefined ? { type: spec.type } : {}),
+			// `{}` not `undefined`: a node whose input schema is `z.object({})`
+			// rejects `undefined`, so a prop that takes no inputs still needs a slice.
+			inputs: isPlainObject(spec.inputs) ? spec.inputs : {},
+			...(spec.retry !== undefined ? { retry: spec.retry } : {}),
+			...(spec.idempotencyKey !== undefined ? { idempotencyKey: spec.idempotencyKey } : {}),
+			...(spec.idempotencyKeyTTL !== undefined ? { idempotencyKeyTTL: spec.idempotencyKeyTTL } : {}),
+			...(spec.maxDuration !== undefined ? { maxDuration: spec.maxDuration } : {}),
+		});
+		propMeta.push({
+			key,
+			step: `${id}.${key}`,
+			mode: pickString(spec.mode) ?? "regular",
+			...(spec.group !== undefined ? { group: spec.group } : {}),
+			...(spec.rescue === true ? { rescue: true } : {}),
+			...(isPlainObject(spec.merge) ? { merge: spec.merge } : {}),
+			...(isPlainObject(spec.once) ? { once: spec.once } : {}),
+			...(isPlainObject(spec.scroll) ? { scroll: spec.scroll } : {}),
+		});
+	}
+
+	// The serializer closes the pipeline. `ephemeral` because the PAGE step's own
+	// slot (`state[id]`) is the response — a second copy under `<id>.$render`
+	// would be dead weight in every trace and every state dump.
+	const serializerId = `${id}${PAGE_RENDER_SUFFIX}`;
+	rawSteps.push({
+		id: serializerId,
+		use: pickString(pg.serializer) ?? PAGE_SERIALIZER_REF,
+		ephemeral: true,
+		inputs: isPlainObject(pg.inputs) ? pg.inputs : {},
+	});
+
+	const { innerInternal, innerNodes } = normalizeStepBlock(rawSteps);
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: PAGE_NODE_REF,
+		type: "page",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+		...copyStepMeta(step),
+	};
+	const nodeConfig: InternalNodeConfig = {
+		component,
+		...(pg.url !== undefined ? { url: lowerRefs(pg.url) } : {}),
+		props: propMeta,
+		serializer: serializerId,
+		steps: innerInternal,
 	} as InternalNodeConfig;
 
 	return { internalStep, nodeConfig, innerNodes };
