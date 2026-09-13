@@ -1,0 +1,68 @@
+{
+	"name": "@blokjs/inertia-client",
+	"version": "2.2.1",
+	"files": ["dist"],
+	"description": "Framework-agnostic Inertia.js client glue for Blok: typed page props, typed routes, and the Vite plugin.",
+	"type": "module",
+	"sideEffects": false,
+	"engines": {
+		"node": ">=20.19.0"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./vite": {
+			"types": "./dist/vite.d.ts",
+			"import": "./dist/vite.js",
+			"default": "./dist/vite.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build:dev": "tsc --watch",
+		"build": "rm -rf dist && bun run tsc",
+		"test": "vitest run",
+		"test:dev": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["blok", "inertia", "spa", "vite", "typed", "routes"],
+	"author": "Deskree Inc",
+	"license": "MIT",
+	"peerDependencies": {
+		"@inertiajs/core": "^3.0.0",
+		"@inertiajs/vite": "^3.0.0",
+		"vite": "^7.0.0 || ^8.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@inertiajs/vite": {
+			"optional": true
+		},
+		"vite": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@inertiajs/core": "^3.7.1",
+		"@inertiajs/react": "^3.7.1",
+		"@inertiajs/svelte": "^3.7.1",
+		"@inertiajs/vite": "^3.7.1",
+		"@inertiajs/vue3": "^3.7.1",
+		"@types/node": "^22.15.21",
+		"@types/react": "^19.2.10",
+		"react": "^19.0.0",
+		"svelte": "^5.0.0",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0",
+		"vitest": "^4.0.18",
+		"vue": "^3.5.0"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}

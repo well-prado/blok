@@ -138,12 +138,29 @@ function subpathsOf(pkg: PackageJson, installedDir: string): string[] {
 
 /**
  * A missing BARE package is the consumer declining to install an optional peer
- * (`better-sqlite3`, `pg`, the OTel exporters) — not a packaging defect. A
- * missing path INSIDE the installed tree is exactly the bug this gate exists
- * for, and always fails.
+ * (`better-sqlite3`, `pg`, the OTel exporters, `vite`) — not a packaging
+ * defect. A missing path INSIDE the installed tree is exactly the bug this
+ * gate exists for, and always fails.
+ *
+ * The three engines phrase it differently, and only Node reliably says
+ * "package" for a bare specifier and "module" for a path:
+ *
+ *   node → Cannot find package 'vite' imported from …
+ *   bun  → Cannot find module 'vite' from …
+ *   deno → Could not find package 'vite' from referrer …
+ *
+ * So the decision is made on the SPECIFIER, not the wording: bare (no leading
+ * `.` or `/`) and not one of ours means an uninstalled peer. #997 is the first
+ * package with a subpath whose top-level import is an optional peer, which is
+ * why Bun and Deno were never exercised here before.
  */
+const MISSING_SPECIFIER = /(?:Cannot find|Could not find) (?:package|module) '([^']+)'/;
+
 function isOptionalPeerMiss(output: string): boolean {
-	return /Cannot find package '(?!@blokjs\/)/.test(output) && !/Cannot find module '/.test(output);
+	const specifier = MISSING_SPECIFIER.exec(output)?.[1];
+	if (specifier === undefined) return false;
+	if (specifier.startsWith(".") || specifier.startsWith("/")) return false;
+	return !specifier.startsWith("@blokjs/");
 }
 
 /**
