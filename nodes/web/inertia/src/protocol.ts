@@ -221,14 +221,21 @@ export function redirect(url: string, opts: RedirectOptions = {}): RespondEnvelo
 	});
 }
 
-/** Page-object flag: encrypt this history entry in the browser's history state. */
-export function encryptHistory(): { encryptHistory: true } {
-	return { encryptHistory: true };
+/**
+ * Page-object flag: encrypt this history entry in the browser's history state.
+ *
+ * `encryptHistory(false)` is the per-page OPT-OUT (#1013): an explicit `false`
+ * input beats the `inertia.encryptHistory` middleware and the adapter-wide
+ * `history.encrypt` default, and the field is simply omitted (the page object
+ * never carries `false`).
+ */
+export function encryptHistory(value = true): { encryptHistory: boolean } {
+	return { encryptHistory: value };
 }
 
 /** Page-object flag: clear the client's history state on this visit. */
-export function clearHistory(): { clearHistory: true } {
-	return { clearHistory: true };
+export function clearHistory(value = true): { clearHistory: boolean } {
+	return { clearHistory: value };
 }
 
 /**

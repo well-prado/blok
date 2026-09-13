@@ -13,6 +13,9 @@ import { RESPOND_BRAND, type RespondEnvelope } from "@blokjs/shared";
 import { z } from "zod";
 import { buildPage, isInertiaRequest } from "./page.js";
 import { type PageObject, location, normalizeHeaders, redirect, renderShell, versionConflict } from "./protocol.js";
+// #1013 — the request mark left by the `inertia.encryptHistory` middleware and
+// by `logoutResponse()`, plus the adapter-wide `history.encrypt` default.
+import { resolveClearHistory, resolveEncryptHistory } from "./security/history.js";
 
 export {
 	APP_MARKER,
@@ -29,6 +32,7 @@ export {
 export type { OnceProp, PageObject, RedirectOptions, RenderShellOptions, ScrollProp } from "./protocol.js";
 export { buildPage, isInertiaRequest, isPartialReload } from "./page.js";
 export type { BuildPageInput, PageMetadata } from "./page.js";
+export * from "./security/index.js";
 
 const scrollPropSchema = z.object({
 	pageName: z.string(),
@@ -184,8 +188,10 @@ export default defineNode({
 			sharedProps: input.sharedProps,
 			onceProps: input.onceProps,
 			flash: input.flash as Record<string, unknown> | undefined,
-			encryptHistory: input.encryptHistory,
-			clearHistory: input.clearHistory,
+			// #1013 — input wins (an explicit `false` opts out), then the request
+			// mark, then the adapter default.
+			encryptHistory: resolveEncryptHistory(ctx, input.encryptHistory),
+			clearHistory: resolveClearHistory(ctx, input.clearHistory),
 			preserveFragment: input.preserveFragment,
 			alwaysProps: input.alwaysProps,
 			exposeSharedPropKeys: input.exposeSharedPropKeys,
