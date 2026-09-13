@@ -119,6 +119,9 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	{ dir: "triggers/mcp", name: "@blokjs/trigger-mcp" },
 	// Typed client SDK (consumes only @blokjs/helper types). No internal runtime deps.
 	{ dir: "packages/client", name: "@blokjs/client" },
+	// Inertia SPA client glue (#997) — frontend-only: typed page props, typed
+	// routes and the Vite plugin. No internal deps at all, so position is free.
+	{ dir: "packages/inertia-client", name: "@blokjs/inertia-client" },
 	// CLI last — depends on everything via the scaffold.
 	{ dir: "packages/cli", name: "blokctl" },
 ];
