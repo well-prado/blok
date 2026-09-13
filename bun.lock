@@ -427,7 +427,7 @@
     },
     "packages/inertia-client": {
       "name": "@blokjs/inertia-client",
-      "version": "2.2.1",
+      "version": "2.3.0",
       "devDependencies": {
         "@inertiajs/core": "^3.7.1",
         "@inertiajs/react": "^3.7.1",
