@@ -30,6 +30,9 @@ defmodule Blok.MixProject do
       {:grpc, "~> 1.0.5"},
       {:protobuf, "~> 0.17.0"},
       {:protobuf_generate, "~> 0.2.1", only: :dev},
+      # Client transport for `mix blok.bench` only. `grpc` declares it optional
+      # because the sidecar itself never dials out; the release excludes it.
+      {:gun, "~> 2.4", only: [:dev, :test]},
       {:jason, "~> 1.4"},
       {:ex_json_schema, "~> 0.11.5"},
       {:telemetry, "~> 1.3"}
