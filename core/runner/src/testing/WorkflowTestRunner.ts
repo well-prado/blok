@@ -93,6 +93,19 @@ export interface WorkflowExecuteOptions {
 	 * production run; legacy sequential workflows do not have policy hooks.
 	 */
 	policy?: PolicyExecutionOptions;
+	/**
+	 * HTTP method written to `ctx.request.method`. Default `"GET"` — the same
+	 * field the HTTP trigger sets, which nodes like `@blokjs/inertia` read to
+	 * decide 302 vs 303 and whether a version mismatch may 409 (#1002).
+	 */
+	method?: string;
+	/** Request URL written to `ctx.request.url`. */
+	url?: string;
+	/**
+	 * `ctx.state` entries seeded BEFORE the run — what a middleware chain would
+	 * have left behind. The steps themselves are not executed (#1002).
+	 */
+	state?: Record<string, unknown>;
 }
 
 /**
@@ -447,7 +460,9 @@ export class WorkflowTestRunner {
 		const model = this.v2Model as Record<string, any>;
 		await config.init((model.name as string) ?? "test-workflow", globalOptions, model);
 
-		const state: Record<string, unknown> = {};
+		// Seeded state is what a middleware chain would have persisted before the
+		// first step — the same object the run then writes its own slots into.
+		const state: Record<string, unknown> = { ...options?.state };
 		const ctx = {
 			id: options?.contextOverrides?.id ?? `test-workflow-${Date.now()}`,
 			workflow_name: (model.name as string) ?? "test-workflow",
@@ -457,6 +472,8 @@ export class WorkflowTestRunner {
 				headers: options?.headers ?? options?.contextOverrides?.request?.headers ?? {},
 				query: options?.query ?? options?.contextOverrides?.request?.query ?? {},
 				params: options?.params ?? options?.contextOverrides?.request?.params ?? {},
+				method: options?.method ?? "GET",
+				...(options?.url !== undefined ? { url: options.url } : {}),
 			},
 			response: { data: null, error: null, success: true, contentType: "application/json" },
 			error: options?.contextOverrides?.error ?? { message: [] },
