@@ -11,5 +11,8 @@ export default defineConfig({
 		// slow CompilationValidator family.
 		testTimeout: 30_000,
 		hookTimeout: 30_000,
+		// One Bun install cache per worker: concurrent scaffold installs of the
+		// same `file:` dependency race on the shared global cache (see setup file).
+		setupFiles: ["./tests/setup/isolate-bun-cache.ts"],
 	},
 });
