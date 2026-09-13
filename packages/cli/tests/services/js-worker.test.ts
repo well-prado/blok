@@ -7,8 +7,10 @@ import { hostTargetFromStartCommands, jsWorkerPort, planJsWorker } from "../../s
 import {
 	JS_WORKER_ENTRY,
 	detectJavaScriptRuntime,
+	getJavaScriptRuntimeDefinition,
 	parseJavaScriptVersion,
 } from "../../src/services/runtime-detector.js";
+import { compareSemver as compareSemverForTest } from "../../src/services/semver-utils.js";
 
 async function projectWithWorker(installed: boolean): Promise<string> {
 	const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "blok-jsworker-"));
@@ -47,7 +49,32 @@ describe("version parsing", () => {
 	it("reads each engine's own --version format", () => {
 		expect(parseJavaScriptVersion("v22.11.0", "node")).toBe("22.11.0");
 		expect(parseJavaScriptVersion("1.1.38", "bun")).toBe("1.1.38");
-		expect(parseJavaScriptVersion("deno 2.1.4 (stable, release, aarch64-apple-darwin)", "deno")).toBe("2.1.4");
+		expect(parseJavaScriptVersion("deno 2.7.5 (stable, release, aarch64-apple-darwin)", "deno")).toBe("2.7.5");
+		// `deno --version` prints three lines; only the first names the engine.
+		expect(
+			parseJavaScriptVersion("deno 2.9.6 (stable, release, aarch64-apple-darwin)\nv8 14.5\ntypescript 5.9", "deno"),
+		).toBe("2.9.6");
+	});
+});
+
+describe("engine floors", () => {
+	// The Deno floor is load-bearing, not cosmetic: before 2.7.5 the worker binds
+	// its gRPC port and then never completes a connection (Deno's Node-compat
+	// HTTP/2 server), so an older Deno presents as "worker not running". CI pins
+	// exactly this version, so a drift here silently un-proves the floor.
+	it("declares the versions the worker is actually proven against", () => {
+		expect(getJavaScriptRuntimeDefinition("deno")?.minVersion).toBe("2.7.5");
+		expect(getJavaScriptRuntimeDefinition("node")?.minVersion).toBe("20.0.0");
+		expect(getJavaScriptRuntimeDefinition("bun")?.minVersion).toBe("1.1.0");
+	});
+
+	it("rejects a binary below the floor instead of running it", async () => {
+		const deno = await detectJavaScriptRuntime("deno");
+		if (deno.available) {
+			expect(compareSemverForTest(deno.version ?? "0.0.0", "2.7.5")).toBeGreaterThanOrEqual(0);
+		} else {
+			expect(deno.remediation.length).toBeGreaterThan(0);
+		}
 	});
 });
 

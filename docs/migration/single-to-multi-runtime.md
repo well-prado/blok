@@ -94,7 +94,7 @@ In this example:
 |---|---|---|---|
 | Node.js | project `node`, step `runtime.nodejs` | In-process on a Node.js host, else persistent worker (gRPC :10012) | `node` >= 20 |
 | Bun | project `bun`, step `runtime.bun` | In-process on a Bun host, else persistent worker (gRPC :10013) | `bun` >= 1.1 |
-| Deno | project `deno`, step `runtime.deno` | Persistent worker (gRPC :10014) | `deno` >= 2, plus permissions derived from declared capabilities |
+| Deno | project `deno`, step `runtime.deno` | Persistent worker (gRPC :10014) | `deno` >= 2.7.5, plus permissions derived from declared capabilities |
 | Python 3 | `python3` | gRPC | Python gRPC server running |
 | Docker | `docker` | HTTP | Docker daemon running |
 | WebAssembly | `wasm` | In-process (WASM API) | `.wasm` module file |

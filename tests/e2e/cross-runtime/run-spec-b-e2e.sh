@@ -142,12 +142,14 @@ if [ -f "$JS_WORKER" ]; then
   if command -v node >/dev/null; then
     echo "--- booting Node.js worker ---"
     (cd "$ROOT" && GRPC_PORT=20012 node "$JS_WORKER") >/tmp/blok-jsworker-node.log 2>&1 &
-    PIDS+=($!); wait_port 20012 && echo "Node.js worker gRPC up :20012"
+    PIDS+=($!)
+    wait_port 20012 && echo "Node.js worker gRPC up :20012" || { echo "Node.js worker NEVER came up:"; tail -20 /tmp/blok-jsworker-node.log; }
   fi
   if command -v bun >/dev/null; then
     echo "--- booting Bun worker ---"
     (cd "$ROOT" && GRPC_PORT=20013 bun "$JS_WORKER") >/tmp/blok-jsworker-bun.log 2>&1 &
-    PIDS+=($!); wait_port 20013 && echo "Bun worker gRPC up :20013"
+    PIDS+=($!)
+    wait_port 20013 && echo "Bun worker gRPC up :20013" || { echo "Bun worker NEVER came up:"; tail -20 /tmp/blok-jsworker-bun.log; }
   fi
   if command -v deno >/dev/null; then
     echo "--- booting Deno worker ---"
@@ -157,7 +159,8 @@ if [ -f "$JS_WORKER" ]; then
       "--allow-net=127.0.0.1:20014,localhost:20014" \
       "--allow-read=$ROOT,$BLOK_BLOB_DIR" --allow-env --node-modules-dir=manual \
       "$JS_WORKER") >/tmp/blok-jsworker-deno.log 2>&1 &
-    PIDS+=($!); wait_port 20014 && echo "Deno worker gRPC up :20014"
+    PIDS+=($!)
+    wait_port 20014 && echo "Deno worker gRPC up :20014" || { echo "Deno worker NEVER came up:"; tail -20 /tmp/blok-jsworker-deno.log; }
   fi
 else
   echo "--- skipping JavaScript workers: $JS_WORKER missing (run \`bun run build\`) ---"

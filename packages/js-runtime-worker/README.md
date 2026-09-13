@@ -37,6 +37,10 @@ GRPC_PORT=10014 deno run \
 `blokctl dev` does this for you when the project's target differs from the
 orchestrator host.
 
+**Minimum engine versions:** Node.js 20, Bun 1.1, **Deno 2.7.5**. The Deno floor is
+not cosmetic — before 2.7.5 its Node-compat HTTP/2 server binds the port but never
+completes a gRPC connection, so the worker looks alive and answers nothing.
+
 | Environment variable | Default | What it does |
 | --- | --- | --- |
 | `GRPC_PORT` | 10012 / 10013 / 10014 per engine | Port the worker binds |

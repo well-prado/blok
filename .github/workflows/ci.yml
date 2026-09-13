@@ -444,10 +444,13 @@ jobs:
         with:
           node-version: '22.11.0'
 
+      # Pinned to the worker's exact floor, so CI proves the floor it claims.
+      # Below 2.7.5 the gRPC server binds but no client call ever completes
+      # (Deno's Node-compat HTTP/2 server), so the workers look "not running".
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.1.4
+          deno-version: v2.7.5
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -514,15 +517,20 @@ jobs:
         with:
           node-version: '22.11.0'
 
+      # Pinned to the worker's exact floor, so CI proves the floor it claims.
+      # Below 2.7.5 the gRPC server binds but no client call ever completes
+      # (Deno's Node-compat HTTP/2 server), so the workers look "not running".
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.1.4
+          deno-version: v2.7.5
 
       # The harness imports GrpcRuntimeAdapter from @blokjs/runner; the worker
       # entrypoint is @blokjs/runtime-worker's dist/bin.js.
-      - name: Build @blokjs/runner and @blokjs/runtime-worker
-        run: bunx nx build @blokjs/runtime-worker && bun run scripts/fix-esm-extensions.ts
+      # @blokjs/core is what the REAL node template the fixtures use imports, so
+      # it must be built even though nothing in the harness imports it directly.
+      - name: Build @blokjs/runner, @blokjs/runtime-worker and @blokjs/core
+        run: bunx nx run-many -t build -p @blokjs/runtime-worker @blokjs/core && bun run scripts/fix-esm-extensions.ts
 
       # Bake a scaffolded `e2e-user` node into each SDK build context (real
       # codegen for compiled langs, BLOK_NODES_DIR node-dir for dynamic) so the
@@ -554,10 +562,17 @@ jobs:
             "--allow-net=127.0.0.1:10014,localhost:10014" \
             "--allow-read=${{ github.workspace }},$BLOK_BLOB_DIR" \
             --allow-env --node-modules-dir=manual "$WORKER" > /tmp/worker-deno.log 2>&1 &
+          # Requested-but-absent is a FAILURE, never a skip: a worker that never
+          # binds would otherwise reach the harness as "not running" and read
+          # like a missing runtime instead of a worker that died on boot.
+          fail=0
           for port in 10012 10013 10014; do
-            for _ in $(seq 1 60); do nc -z 127.0.0.1 "$port" && break; sleep 1; done
+            up=""
+            for _ in $(seq 1 60); do nc -z 127.0.0.1 "$port" && { up=1; break; }; sleep 1; done
+            if [ -z "$up" ]; then echo "::error::JavaScript worker never listened on :$port"; fail=1; fi
           done
           tail -n +1 /tmp/worker-*.log
+          exit "$fail"
 
       - name: Run cross-runtime gRPC harness (all 14 required, user nodes + claim-check asserted)
         env:

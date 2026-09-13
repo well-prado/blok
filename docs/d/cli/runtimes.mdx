@@ -39,7 +39,12 @@ with the exact command to start it. See
 | TypeScript | via your build (`tsc`) | native | native |
 | npm packages | native | native | via node compatibility |
 | Permission boundary | none (Blok capability policy only) | none (Blok capability policy only) | native `--allow-*`, derived from declared capabilities |
+| Minimum version | 20 | 1.1 | **2.7.5** |
 | Pick it when | broadest ecosystem + production compatibility | fastest start-up and an integrated toolchain | you want least-privilege execution enforced by the engine |
+
+<Note>
+Deno's Node-compat HTTP/2 **server** could not complete a gRPC connection before 2.7.5: the worker binds its port and then never answers a call, so an older Deno looks like a worker that is not running rather than one that is too old. Bisected against the worker's own integration suite (2.7.4 fails, 2.7.5 passes), and CI pins exactly v2.7.5 so the floor is what CI proves.
+</Note>
 
 The target is **independent of the package manager**: `blokctl runtime use bun`
 does not switch you to `bun install`, and `--package-manager npm` does not force
@@ -186,9 +191,9 @@ version rather than assuming the config is achievable.
     "available": false,
     "binary": "deno",
     "version": null,
-    "minVersion": "2.0.0",
+    "minVersion": "2.7.5",
     "grpcPort": 10014,
-    "remediation": "`deno` is not on PATH. Install Deno 2+: https://docs.deno.com/runtime/getting_started/installation/"
+    "remediation": "`deno` is not on PATH. Install Deno 2.7.5+: https://docs.deno.com/runtime/getting_started/installation/ (older Deno binds the port but its Node-compat HTTP/2 server never completes a gRPC connection)"
   }
 }
 ```

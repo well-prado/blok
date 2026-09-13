@@ -27,7 +27,9 @@ export const DEFAULT_WORKER_PORTS: Readonly<Record<JavaScriptRuntime, number>> =
 export const MIN_ENGINE_VERSIONS: Readonly<Record<JavaScriptRuntime, string>> = {
 	node: "20.0.0",
 	bun: "1.1.0",
-	deno: "2.0.0",
+	// 2.7.5 is the first release whose Node-compat HTTP/2 server completes a
+	// gRPC connection; earlier versions bind the port and then never answer.
+	deno: "2.7.5",
 };
 
 interface BunGlobal {

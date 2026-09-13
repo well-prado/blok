@@ -137,6 +137,21 @@ prepCompiled("dart", "node.dart", dart_node_file, generateDartNodeRegistry);
 prepCompiled("elixir", "node.ex", elixir_node_file, generateElixirNodeRegistry);
 
 /**
+ * Build a workspace package on demand. The cross-runtime lane builds only what
+ * the HARNESS imports, so anything the FIXTURES need must be asked for
+ * explicitly instead of assumed to be lying around from someone's full build.
+ */
+function ensureBuilt(pkg: string, entry: string): void {
+	if (existsSync(entry)) return;
+	console.log(`  javascript: ${pkg} is not built yet — building it`);
+	const built = spawnSync("bunx", ["nx", "build", pkg], { cwd: ROOT, stdio: "inherit" });
+	if (built.status !== 0 || !existsSync(entry)) {
+		console.error(`  javascript: FAILED to build ${pkg} (expected ${entry})`);
+		process.exit(1);
+	}
+}
+
+/**
  * JavaScript — the three engines share ONE build context because they share one
  * worker. This mirrors what a scaffolded project actually does: the REAL
  * `defineNode` template under `src/nodes/<name>/index.ts`, a `src/Nodes.ts`
@@ -170,6 +185,9 @@ function prepJavaScript(): void {
 					outDir: "./dist",
 					strict: true,
 					skipLibCheck: true,
+					// No partial emit: a Nodes.js that compiled with errors is a
+					// worker that boots and then dies on its first import.
+					noEmitOnError: true,
 				},
 				include: ["./src"],
 			},
@@ -177,12 +195,19 @@ function prepJavaScript(): void {
 			2,
 		)}\n`,
 	);
+	// The REAL template imports `@blokjs/core`, so that workspace package must be
+	// BUILT — for `tsc` (its types) and at run time (the emitted `Nodes.js`
+	// imports it for real). A lane that builds only @blokjs/runtime-worker never
+	// builds @blokjs/core, which is how this used to emit a `Nodes.js` no worker
+	// could load, and then read as "runtime not running" three steps later.
+	ensureBuilt("@blokjs/core", join(ROOT, "core", "core", "dist", "index.js"));
+
 	const built = spawnSync("bunx", ["tsc", "-p", ctx], { cwd: ROOT, encoding: "utf8" });
 	if (built.status !== 0 || !existsSync(join(ctx, "dist", "Nodes.js"))) {
-		console.log(
-			`  javascript: tsc FAILED — the JS workers will serve built-ins only\n${built.stdout ?? ""}${built.stderr ?? ""}`,
-		);
-		return;
+		// Loud, never lenient. A silently-degraded fixture surfaces as a missing
+		// runtime in the harness, which reads like a broken worker.
+		console.error(`  javascript: FAILED to compile the e2e-user node\n${built.stdout ?? ""}${built.stderr ?? ""}`);
+		process.exit(1);
 	}
 	console.log(`  javascript: node compiled → ${join(ctx, "dist", "Nodes.js").replace(ROOT, ".")} (BLOK_WORKER_NODES)`);
 }

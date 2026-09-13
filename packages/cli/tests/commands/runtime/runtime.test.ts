@@ -68,6 +68,7 @@ import { runtimeList } from "../../../src/commands/runtime/list.js";
 import { runtimeRemove } from "../../../src/commands/runtime/remove.js";
 import { assertSidecarKind } from "../../../src/commands/runtime/shared.js";
 import { runtimeUse } from "../../../src/commands/runtime/use.js";
+import { getJavaScriptRuntimeDefinition } from "../../../src/services/runtime-detector.js";
 import { detectRuntimes, getAllRuntimeDefinitions } from "../../../src/services/runtime-detector.js";
 
 interface FixtureRuntime {
@@ -475,7 +476,9 @@ describe("runtime list --json", () => {
 			kind: "runtime.deno",
 			execution: "persistent-worker",
 			binary: "deno",
-			minVersion: "2.0.0",
+			// Sourced, not duplicated: the floor is pinned once, in
+			// tests/services/js-worker.test.ts, alongside the CI-pin drift guard.
+			minVersion: getJavaScriptRuntimeDefinition("deno")?.minVersion,
 			grpcPort: 10014,
 		});
 		expect(typeof out.javascript.available).toBe("boolean");

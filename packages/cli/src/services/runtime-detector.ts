@@ -505,9 +505,14 @@ export const JAVASCRIPT_RUNTIME_DEFINITIONS: readonly JavaScriptRuntimeDefinitio
 		label: "Deno",
 		binary: "deno",
 		versionCommand: "deno --version",
-		minVersion: "2.0.0",
+		// Deno's Node-compat HTTP/2 SERVER could not complete a gRPC connection
+		// before 2.7.5: the worker binds its port and then never answers a call,
+		// so an older Deno reads as "worker not running" rather than as a version
+		// problem. Bisected against the worker's own integration suite.
+		minVersion: "2.7.5",
 		defaultGrpcPort: 10014,
-		installHint: "Install Deno 2+: https://docs.deno.com/runtime/getting_started/installation/",
+		installHint:
+			"Install Deno 2.7.5+: https://docs.deno.com/runtime/getting_started/installation/ (older Deno binds the port but its Node-compat HTTP/2 server never completes a gRPC connection)",
 	},
 ];
 

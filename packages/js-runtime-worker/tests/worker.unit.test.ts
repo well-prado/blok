@@ -1,13 +1,20 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineNode } from "@blokjs/runner/defineNode";
 import { GlobalError } from "@blokjs/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { resolveBlobDir, resolveClaimCheck } from "../src/claimCheck.js";
 import { WorkerError, toNodeError } from "../src/errors.js";
-import { buildRuntimeCapabilityManifest, detectHostRuntime, runtimeKindOf, sdkNameOf } from "../src/host.js";
+import {
+	MIN_ENGINE_VERSIONS,
+	buildRuntimeCapabilityManifest,
+	detectHostRuntime,
+	runtimeKindOf,
+	sdkNameOf,
+} from "../src/host.js";
 import { declaredEffects, denoPermissionFlags } from "../src/permissions.js";
 import { type ExecuteContextProjection, type WorkerNode, WorkerRegistry } from "../src/registry.js";
 import { ConcurrencyGate } from "../src/server.js";
@@ -99,6 +106,26 @@ describe("host + capability manifest", () => {
 		expect(manifest.cancellation).toBe(true);
 		expect(manifest.streaming).toBe(true);
 		expect(manifest.maxMessageBytes).toBe(1024);
+	});
+});
+
+describe("engine floors", () => {
+	// The floor only means something if the thing that PROVES it runs on it.
+	// CI pins a Deno version explicitly (never "latest"), so a floor bump that
+	// forgets the pin would leave the new floor unproven — and a pin bump that
+	// forgets the floor would quietly raise the real requirement.
+	it("keeps every CI Deno pin equal to the declared floor", () => {
+		const workflow = fileURLToPath(new URL("../../../.github/workflows/ci.yml", import.meta.url));
+		if (!existsSync(workflow)) return; // not a repo checkout (packed consumer)
+		const pins = [...readFileSync(workflow, "utf8").matchAll(/deno-version:\s*v?([\d.]+)/g)].map((m) => m[1]);
+		expect(pins.length).toBeGreaterThan(0);
+		for (const pin of pins) expect(pin).toBe(MIN_ENGINE_VERSIONS.deno);
+	});
+
+	it("declares the versions the worker is actually proven against", () => {
+		// 2.7.4 fails the integration suite, 2.7.5 passes: below 2.7.5 Deno's
+		// Node-compat HTTP/2 server binds the port and never completes a call.
+		expect(MIN_ENGINE_VERSIONS).toEqual({ node: "20.0.0", bun: "1.1.0", deno: "2.7.5" });
 	});
 });
 

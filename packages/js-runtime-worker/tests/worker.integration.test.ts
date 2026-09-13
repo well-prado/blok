@@ -25,12 +25,31 @@ const REPO_ROOT = path.resolve(PKG_ROOT, "../..");
 const ENTRY = path.join(PKG_ROOT, "dist", "bin.js");
 const PROTO = path.join(PKG_ROOT, "src", "proto", "blok", "runtime", "v1", "runtime.proto");
 
-/** Engines to try, with the port each integration worker binds. */
-const ENGINES = [
-	{ target: "node", kind: "nodejs", bin: "node", port: 21012 },
-	{ target: "bun", kind: "bun", bin: "bun", port: 21013 },
-	{ target: "deno", kind: "deno", bin: "deno", port: 21014 },
-] as const;
+/**
+ * Engines to try. Ports are claimed at run time, never hard-coded: a fixed port
+ * turns any leaked worker (or a second checkout on the same machine) into an
+ * EADDRINUSE that reads exactly like "this engine cannot serve gRPC" — which is
+ * precisely how a stale process once got mistaken for a Deno version floor.
+ */
+const ENGINES: Array<{ target: "node" | "bun" | "deno"; kind: string; bin: string; port: number }> = [
+	{ target: "node", kind: "nodejs", bin: "node", port: 0 },
+	{ target: "bun", kind: "bun", bin: "bun", port: 0 },
+	{ target: "deno", kind: "deno", bin: "deno", port: 0 },
+];
+
+/** A port the OS just confirmed free. Racy in principle, decisive in practice —
+ * and the boot failure now names EADDRINUSE instead of timing out silently. */
+async function claimPort(): Promise<number> {
+	const { createServer } = await import("node:net");
+	return new Promise<number>((resolve, reject) => {
+		const probe = createServer();
+		probe.once("error", reject);
+		probe.listen(0, "127.0.0.1", () => {
+			const { port } = probe.address() as { port: number };
+			probe.close(() => resolve(port));
+		});
+	});
+}
 
 function binaryAvailable(bin: string): boolean {
 	try {
@@ -70,7 +89,7 @@ async function boot(engine: (typeof ENGINES)[number]): Promise<ChildProcess> {
 	child.stderr?.on("data", (b) => {
 		log += String(b);
 	});
-	const deadline = Date.now() + 60_000;
+	const deadline = Date.now() + 25_000;
 	while (Date.now() < deadline) {
 		if (log.includes("serving on")) return child;
 		if (child.exitCode !== null) throw new Error(`${engine.bin} worker exited (${child.exitCode}):\n${log}`);
@@ -140,14 +159,24 @@ function rawClient(port: number): grpc.Client & Record<string, unknown> {
 	return new Ctor.runtime.v1.NodeRuntime(`127.0.0.1:${port}`, grpc.credentials.createInsecure()) as never;
 }
 
-afterAll(() => {
-	for (const child of started) {
-		try {
-			child.kill("SIGKILL");
-		} catch {
-			/* already gone */
-		}
-	}
+afterAll(async () => {
+	// Leaking a worker poisons the NEXT run of this suite, so reap deliberately
+	// and wait for the exits rather than firing SIGKILL and hoping.
+	await Promise.all(
+		started.map(
+			(child) =>
+				new Promise<void>((resolve) => {
+					if (child.exitCode !== null || child.signalCode !== null) return resolve();
+					child.once("exit", () => resolve());
+					try {
+						child.kill("SIGKILL");
+					} catch {
+						resolve();
+					}
+					setTimeout(resolve, 5_000);
+				}),
+		),
+	);
 });
 
 const available = ENGINES.filter((e) => binaryAvailable(e.bin));
@@ -182,6 +211,7 @@ describe.skipIf(!canRun)("JavaScript runtime worker over real gRPC", () => {
 			let adapter: GrpcRuntimeAdapter;
 
 			it("boots and serves its registry", async () => {
+				engine.port = await claimPort();
 				child = await boot(engine);
 				adapter = adapterFor(engine.kind, engine.port);
 				const names = (await adapter.listNodes()).map((n) => n.name);
