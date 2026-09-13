@@ -21,7 +21,7 @@
  *   BLOK_BLOB_DIR                  shared claim-check directory (enables blob-v1)
  */
 
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseCapabilityManifest } from "@blokjs/shared";
@@ -31,6 +31,41 @@ import { createWorkerRegistry, startWorker } from "./index.js";
 import { declaredEffects, denoPermissionFlags } from "./permissions.js";
 import { WORKER_DEFAULTS } from "./server.js";
 
+/** This package's own version, read from the package.json beside `dist/`. */
+const WORKER_VERSION: string = (() => {
+	try {
+		const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+		return (JSON.parse(readFileSync(pkg, "utf8")) as { version?: string }).version ?? "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
+})();
+
+const HELP = `blok-runtime-worker ${WORKER_VERSION} — the persistent JavaScript execution worker for Blok.
+
+Usage:
+  <node|bun|deno run [flags]> node_modules/@blokjs/runtime-worker/dist/bin.js [options]
+
+Options:
+  --version, -v          Print the worker version and exit
+  --help, -h             Print this help and exit
+  --print-manifest       Print the runtime capability manifest (JSON) and exit
+  --print-permissions    Print the effects the loaded nodes declare plus the
+                         Deno --allow-* flags derived from them, and exit
+
+Environment:
+  GRPC_PORT / BLOK_WORKER_PORT   gRPC port (default: 10012 node, 10013 bun, 10014 deno)
+  HOST                           Bind address (default 127.0.0.1)
+  BLOK_WORKER_NODES              Project node module (default: auto-detected from cwd)
+  BLOK_WORKER_BUILTINS=0         Serve only the project's nodes
+  BLOK_GRPC_MAX_MESSAGE_BYTES    Symmetric message ceiling (default 16 MiB)
+  BLOK_WORKER_MAX_CONCURRENCY    In-flight executions (default 64)
+  BLOK_WORKER_MAX_QUEUE          Queued executions before overload (default 256)
+  BLOK_BLOB_DIR                  Shared claim-check directory (enables blob-v1)
+  BLOK_DENO_ALLOW_ALL=1          Launch Deno with --allow-all (diagnosed; not a production default)
+
+Docs: https://github.com/well-prado/blok/blob/main/docs/d/cli/runtimes.mdx`;
+
 function intEnv(name: string, fallback: number): number {
 	const parsed = Number.parseInt(process.env[name] ?? "", 10);
 	return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
@@ -39,6 +74,18 @@ function intEnv(name: string, fallback: number): number {
 async function main(): Promise<void> {
 	const runtime = detectHostRuntime();
 	const maxMessageBytes = intEnv("BLOK_GRPC_MAX_MESSAGE_BYTES", WORKER_DEFAULTS.MAX_MESSAGE_BYTES);
+
+	// `--version` / `--help` must PRINT AND EXIT. A bin that ignores an unknown
+	// flag and boots a server instead hangs anything that probes it — which is
+	// exactly what the packed-artifact gate does to every `bin` it installs.
+	if (process.argv.includes("--version") || process.argv.includes("-v")) {
+		console.log(WORKER_VERSION);
+		return;
+	}
+	if (process.argv.includes("--help") || process.argv.includes("-h")) {
+		console.log(HELP);
+		return;
+	}
 
 	if (process.argv.includes("--print-manifest")) {
 		console.log(JSON.stringify(buildRuntimeCapabilityManifest({ runtime, maxMessageBytes }), null, 2));

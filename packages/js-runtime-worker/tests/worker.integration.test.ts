@@ -10,7 +10,7 @@
  * happily against a process-per-step implementation.
  */
 
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -152,6 +152,24 @@ afterAll(() => {
 
 const available = ENGINES.filter((e) => binaryAvailable(e.bin));
 const canRun = existsSync(ENTRY) && available.length > 0;
+
+describe.skipIf(!existsSync(ENTRY))("worker CLI surface", () => {
+	// The packed-artifact gate runs `node <bin> --version` on every published
+	// `bin`. A worker that ignores an unknown flag and boots a server instead
+	// hangs that gate (and every other probe) forever, so these must EXIT.
+	for (const flag of ["--version", "--help", "--print-manifest"]) {
+		it(`exits after ${flag}`, () => {
+			const result = spawnSync(process.execPath, [ENTRY, flag], { encoding: "utf8", timeout: 30_000 });
+			expect(result.status).toBe(0);
+			expect((result.stdout ?? "").trim().length).toBeGreaterThan(0);
+		});
+	}
+
+	it("reports a schema-shaped manifest for the engine running it", () => {
+		const result = spawnSync(process.execPath, [ENTRY, "--print-manifest"], { encoding: "utf8", timeout: 30_000 });
+		expect(JSON.parse(result.stdout)).toMatchObject({ runtime: "node", protocolVersion: "1.0.0", streaming: true });
+	});
+});
 
 describe.skipIf(!canRun)("JavaScript runtime worker over real gRPC", () => {
 	if (!existsSync(ENTRY)) {
