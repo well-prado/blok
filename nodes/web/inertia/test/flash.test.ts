@@ -257,6 +257,17 @@ const hint = defineNode({
 	},
 });
 
+/** A prior step whose output an author would hand to `render()`'s `errors`. */
+const validator = defineNode({
+	name: "test/flash-validator",
+	description: "a step whose errors a page passes to render()",
+	input: z.object({}),
+	output: z.object({ errors: z.record(z.unknown()) }),
+	async execute() {
+		return { errors: { sku: "bad" } };
+	},
+});
+
 const FlashPage = definePage("Orders/New", { hint });
 
 /** `middleware` = what the flash step reports; `opts` = explicit render options. */
@@ -343,6 +354,46 @@ describe("page step folds the flash bag into the serializer", () => {
 		expect(page.props.hint).toEqual({ text: "fill in the sku" });
 		expect(page.flash).toBeUndefined();
 		expect((run.response as RespondEnvelope).cookies).toBeUndefined();
+	});
+
+	// The author's `render()` options reach `PageNode` in their LOWERED form —
+	// a handle is a `{$ref}` object (or the `js/…` string it lowers to), not a
+	// value. Merging into one would corrupt the object AND break the reference.
+	it("leaves an explicit errors HANDLE untouched instead of merging into it", async () => {
+		const run = await runWorkflow(
+			await workflow("flash-page-handle", { version: "1.0.0", trigger: http.get("/orders/new") }, (req) => {
+				step("flash", flashSlot, { errors: { email: "taken" } });
+				const validation = step("validation", validator, {});
+				FlashPage.render(req, "page", "/orders/new", {}, { version: "v1", errors: validation.errors });
+			}),
+			{},
+			{ headers: INERTIA },
+		);
+		expect(run.ok).toBe(true);
+
+		// The handle won WHOLE: the middleware's `email` is not merged in, and
+		// no `$ref` key leaked into the errors object.
+		const errors = pageOf(run.response as RespondEnvelope).props.errors as Record<string, unknown>;
+		expect(errors).toEqual({ sku: "bad" });
+		expect(JSON.stringify(errors)).not.toContain("$ref");
+	});
+
+	it("still merges when the explicit value is a plain literal", async () => {
+		const run = await runWorkflow(
+			await flashPageWorkflow({ errors: { email: "taken" } }, { errors: { sku: "bad" } }),
+			{},
+			{ headers: INERTIA },
+		);
+		expect(pageOf(run.response as RespondEnvelope).props.errors).toEqual({ email: "taken", sku: "bad" });
+	});
+
+	it("leaves an explicit `js/` expression untouched", async () => {
+		const run = await runWorkflow(
+			await flashPageWorkflow({ errors: { email: "taken" } }, { errors: "js/({ sku: 'bad' })" }),
+			{},
+			{ headers: INERTIA },
+		);
+		expect(pageOf(run.response as RespondEnvelope).props.errors).toEqual({ sku: "bad" });
 	});
 
 	it("ignores a `flash` state slot that is not the flash node's output", async () => {

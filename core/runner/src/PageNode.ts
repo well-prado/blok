@@ -32,7 +32,7 @@
  * features can land later without touching this executor.
  */
 
-import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
+import { type Context, type NodeBase, type ResponseContext, isStructuralRef, isStructuralTpl } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
 import { deriveNestedAttribution } from "./utils/createChildContext";
 import { createScopedExecutionContext } from "./utils/createChildContext";
@@ -133,6 +133,26 @@ function readFlashState(ctx: Context): FlashState | undefined {
 }
 
 /**
+ * Is this serializer input still an UNRESOLVED author reference?
+ *
+ * `flashInputs` runs BEFORE `runSerializer` hands the inputs to the inner
+ * Runner, so a handle the author passed to `render()` — `errors:
+ * validation.errors` — is at this point a structural `{$ref}` / `{$tpl}`
+ * object, or the `js/…` string it lowers to. Both are opaque here: their VALUE
+ * does not exist yet, so there is nothing to merge with.
+ */
+function isUnresolved(value: unknown): boolean {
+	if (typeof value === "string") return value.startsWith("js/");
+	if (typeof value !== "object" || value === null) return false;
+	return isStructuralRef(value) || isStructuralTpl(value);
+}
+
+/** A value we may merge the middleware's into: absent, or an already-plain record. */
+function isMergeable(value: unknown): value is Record<string, unknown> | undefined {
+	return value === undefined || (isRecord(value) && !isUnresolved(value));
+}
+
+/**
  * Fold the `inertia.shared` flash bag into the serializer's inputs, so a page
  * never has to wire `errors` / `flash` / the clearing cookie by hand.
  *
@@ -141,19 +161,29 @@ function readFlashState(ctx: Context): FlashState | undefined {
  * `errors` and `flash` are objects whose keys come from two different places
  * (the failed write that redirected, and this render), so the author's keys sit
  * ON TOP of the middleware's rather than erasing them.
+ *
+ * A merge is only possible against a RESOLVED record. When the author passed a
+ * handle or expression instead, it stays untouched and wins WHOLE — spreading
+ * `{ ...state.errors, $ref: {…} }` would both corrupt the errors object and
+ * break the reference.
  */
 function flashInputs(ctx: Context, explicit: Record<string, unknown>): Record<string, unknown> {
 	const state = readFlashState(ctx);
 	if (!state) return {};
 	const out: Record<string, unknown> = {};
 
-	const explicitErrors = isRecord(explicit.errors) ? explicit.errors : undefined;
-	const merged = { ...(state.errors ?? {}), ...(explicitErrors ?? {}) };
-	if (Object.keys(merged).length > 0) out.errors = merged;
+	if (isMergeable(explicit.errors)) {
+		const merged = { ...(state.errors ?? {}), ...(explicit.errors ?? {}) };
+		if (Object.keys(merged).length > 0) out.errors = merged;
+	}
 
-	const mergedFlash = { ...(state.flash ?? {}), ...(isRecord(explicit.flash) ? explicit.flash : {}) };
-	if (Object.keys(mergedFlash).length > 0) out.flash = mergedFlash;
+	if (isMergeable(explicit.flash)) {
+		const merged = { ...(state.flash ?? {}), ...(explicit.flash ?? {}) };
+		if (Object.keys(merged).length > 0) out.flash = merged;
+	}
 
+	// These three are only ever CONSUMED when the author said nothing, so an
+	// unresolved value is already safe — it is simply left in place.
 	if (explicit.errorBag === undefined && state.bag !== undefined) out.errorBag = state.bag;
 	if (explicit.preserveFragment === undefined && state.preserveFragment === true) out.preserveFragment = true;
 	// `clearHistory` only ever travels as `true` (#1013): a `false` here would
@@ -161,8 +191,13 @@ function flashInputs(ctx: Context, explicit: Record<string, unknown>): Record<st
 	if (explicit.clearHistory === undefined && state.clearHistory === true) out.clearHistory = true;
 
 	// One-shot: the response that consumed the flash is the one that expires it.
-	const explicitCookies = Array.isArray(explicit.cookies) ? explicit.cookies : [];
-	out.cookies = [...explicitCookies, state.cookie];
+	// An ARRAY can be appended to even when its elements are refs (the inner
+	// Runner resolves each) — but a handle standing in for the whole array
+	// cannot, so that case keeps the author's value and forgoes the clearing
+	// cookie. ponytail: a page that hands `cookies` a whole-array handle has to
+	// append the `flash` step's `cookie` itself; pass an array literal instead.
+	if (explicit.cookies === undefined) out.cookies = [state.cookie];
+	else if (Array.isArray(explicit.cookies)) out.cookies = [...explicit.cookies, state.cookie];
 
 	return out;
 }
