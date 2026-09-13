@@ -25,12 +25,16 @@ import {
 	type RuntimeConfig,
 	type TriggerConfig,
 	createTriggerConfig,
+	generateExampleTest,
+	generateJavaScriptScripts,
+	generateJavaScriptWorkerSupervisord,
 	generateRuntimeEnvVars,
 	generateSupervisordConfig,
 	generateTriggerEnvVars,
 	generateTriggerSupervisordConfig,
 	getTriggerPort,
 	setupRuntime,
+	withJavaScriptEngine,
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
 import { computeDefaultConstraint, formatVersionMismatch, satisfiesConstraint } from "../../services/semver-utils.js";
@@ -572,6 +576,20 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Copy Dockerfiles from primary trigger
 		if (fsExtra.existsSync(`${primaryTriggerDir}/Dockerfile`)) {
 			fsExtra.copySync(`${primaryTriggerDir}/Dockerfile`, `${dirPath}/Dockerfile`);
+			// The trigger's Dockerfile provides Bun only. A node/deno target needs
+			// its engine in the release image or the supervised worker cannot
+			// start there (ADR 0016 §3).
+			const engineDef = getJavaScriptRuntimeDefinition(selectedJavaScriptRuntime);
+			if (engineDef && selectedJavaScriptRuntime !== "bun") {
+				fsExtra.writeFileSync(
+					`${dirPath}/Dockerfile`,
+					withJavaScriptEngine(
+						fsExtra.readFileSync(`${dirPath}/Dockerfile`, "utf8"),
+						selectedJavaScriptRuntime,
+						engineDef.dockerProvision,
+					),
+				);
+			}
 		}
 		if (fsExtra.existsSync(`${primaryTriggerDir}/Dockerfile.dev`)) {
 			fsExtra.copySync(`${primaryTriggerDir}/Dockerfile.dev`, `${dirPath}/Dockerfile.dev`);
@@ -1066,6 +1084,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		// (containers, serverless) is Node, and as of v2.0.x the template
 		// source compiles to Node-runnable ESM.
 		triggerScripts.start = `node dist/triggers/${primaryTrigger}/index.js`;
+		// ADR 0016 — the selected JavaScript execution target decides `start`
+		// (Node.js and Bun host the orchestrator themselves, so their steps run
+		// in-process), `test` (the engine's own runner over the built nodes) and
+		// `worker:start` (the persistent worker, for a target the host is not).
+		// `typecheck`/`build` stay tsc for every target: the type checker is not
+		// an execution axis.
 		packageJsonContent.scripts = {
 			...packageJsonContent.scripts,
 			...triggerScripts,
@@ -1128,6 +1152,13 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.writeFileSync(tsconfigPath, `${JSON.stringify(tsconfig, null, "\t")}\n`);
 		}
 
+		// One generated test, in the one spelling all three engines run unchanged
+		// (`node:test` + plain JavaScript). It loads the BUILT node registry —
+		// the same load the runtime worker performs — so a node that resolves
+		// under only one engine fails here rather than in production.
+		fsExtra.ensureDirSync(`${dirPath}/tests`);
+		fsExtra.writeFileSync(`${dirPath}/tests/nodes.test.js`, generateExampleTest(selectedJavaScriptRuntime));
+
 		// ponytail: strip the framework's internal test setup so it doesn't bleed
 		// into the user's project — no `test`/`test:dev` scripts, no vitest dep.
 		packageJsonContent.scripts = Object.fromEntries(
@@ -1136,6 +1167,19 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.devDependencies = Object.fromEntries(
 			Object.entries(packageJsonContent.devDependencies).filter(([d]) => d !== "vitest" && !d.startsWith("@vitest/")),
 		);
+
+		// AFTER the strip, or the filter above would drop the `test` script this
+		// project actually ships. ADR 0016 — the selected execution target decides
+		// `start` (Node.js and Bun host the orchestrator themselves, so their
+		// steps run in-process), `test` (the engine's own runner over the built
+		// nodes) and `worker:start` (the persistent worker for a target the host
+		// is not). `typecheck`/`build` stay tsc for every target: the type checker
+		// is not an execution axis.
+		const jsRuntimeDef = getJavaScriptRuntimeDefinition(selectedJavaScriptRuntime);
+		packageJsonContent.scripts = {
+			...packageJsonContent.scripts,
+			...generateJavaScriptScripts(selectedJavaScriptRuntime, primaryTrigger, jsRuntimeDef?.defaultGrpcPort ?? 10012),
+		};
 
 		// Add provider-specific dependencies for pubsub and queue triggers
 		const providerDeps = getProviderDependencies(
@@ -1453,6 +1497,16 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Add runtime programs
 		if (runtimeConfigs.length > 0) {
 			supervisordConfContent += generateSupervisordConfig(runtimeConfigs);
+		}
+		// The persistent JavaScript worker is a supervised program like every
+		// language sidecar — same autostart/autorestart/log shape, pinned engine.
+		const supervisorJsDef = getJavaScriptRuntimeDefinition(selectedJavaScriptRuntime);
+		if (supervisorJsDef) {
+			supervisordConfContent += generateJavaScriptWorkerSupervisord(
+				selectedJavaScriptRuntime,
+				supervisorJsDef.defaultGrpcPort,
+				supervisorJsDef.pinnedVersion,
+			);
 		}
 		fsExtra.writeFileSync(supervisordConfPath, supervisordConfContent);
 

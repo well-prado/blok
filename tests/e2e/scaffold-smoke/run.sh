@@ -173,6 +173,44 @@ if [ ! -d "$PROJECT" ]; then
   log "scaffold exited 0 but produced no project — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
 fi
 
+# ── 4b. the generated project's own commands, under its selected engine ──────
+# ADR 0016 / #942: "each generated project installs, type-checks, builds, tests
+# and starts using its selected runtime". Booting it (step 5) covers `start`;
+# these are the other three, run exactly as a user would run them. Skipped only
+# when the smoke did not select a target at all.
+if [ -n "$JS_RUNTIME" ]; then
+  for SCRIPT in typecheck build test; do
+    log "project: bun run $SCRIPT (runtime=$JS_RUNTIME) …"
+    if ! (cd "$PROJECT" && bun run "$SCRIPT") >"$WORKDIR/$SCRIPT.log" 2>&1; then
+      log "\`bun run $SCRIPT\` failed in the generated project — tail of $SCRIPT.log:"
+      tail -40 "$WORKDIR/$SCRIPT.log"
+      exit 1
+    fi
+  done
+  # The `test` script must actually run the SELECTED engine's runner, not
+  # whatever happened to be on PATH — a green log from the wrong engine proves
+  # nothing about portability.
+  case "$JS_RUNTIME" in
+    node) EXPECT_RUNNER="node --test tests" ;;
+    bun)  EXPECT_RUNNER="bun test" ;;
+    deno) EXPECT_RUNNER="deno test" ;;
+  esac
+  if ! grep -q -- "$EXPECT_RUNNER" "$PROJECT/package.json"; then
+    log "generated test script does not use \`$EXPECT_RUNNER\`:"
+    grep -n '"test"' "$PROJECT/package.json" || true
+    exit 1
+  fi
+  # Deployment metadata: the worker must be a supervised program pinned to the
+  # selected engine (ADR 0016 §3).
+  if ! grep -q "program:javascript_worker" "$PROJECT/supervisord.conf"; then
+    log "supervisord.conf has no javascript_worker program"; exit 1
+  fi
+  if ! grep -q "command=.*$JS_RUNTIME" "$PROJECT/supervisord.conf"; then
+    log "javascript_worker program does not launch $JS_RUNTIME:"; grep -A4 "program:javascript_worker" "$PROJECT/supervisord.conf"; exit 1
+  fi
+  log "project commands + deployment metadata OK for $JS_RUNTIME"
+fi
+
 # ── 5. boot `blokctl dev` (own process group so cleanup kills the tree) ───────
 DEV_LOG="$WORKDIR/dev.log"
 if [ "$HTTP_PORT" != "4000" ]; then

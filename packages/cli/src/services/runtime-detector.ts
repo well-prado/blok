@@ -472,6 +472,15 @@ export interface JavaScriptRuntimeDefinition {
 	binary: string;
 	versionCommand: string;
 	minVersion: string;
+	/**
+	 * The exact version CI runs this target against, and the one generated
+	 * deployment metadata pins. `minVersion` is the FLOOR (what is allowed);
+	 * this is the PROOF (what is actually exercised). `runtime-drift.test.ts`
+	 * fails if the two drift apart from `.github/workflows/ci.yml`.
+	 */
+	pinnedVersion: string;
+	/** How a container image obtains this engine, pinned to `pinnedVersion`. */
+	dockerProvision: string;
 	/** Mirrors `DEFAULT_GRPC_PORTS` in `@blokjs/runner`. One source of truth per
 	 * repo convention: HTTP 9012/9013/9014 + 1000. */
 	defaultGrpcPort: number;
@@ -486,6 +495,8 @@ export const JAVASCRIPT_RUNTIME_DEFINITIONS: readonly JavaScriptRuntimeDefinitio
 		binary: "node",
 		versionCommand: "node --version",
 		minVersion: "20.0.0",
+		pinnedVersion: "22.11.0",
+		dockerProvision: "COPY --from=node:22.11.0-bookworm-slim /usr/local/bin/node /usr/local/bin/node",
 		defaultGrpcPort: 10012,
 		installHint: "Install Node.js 20+: https://nodejs.org/en/download",
 	},
@@ -496,6 +507,8 @@ export const JAVASCRIPT_RUNTIME_DEFINITIONS: readonly JavaScriptRuntimeDefinitio
 		binary: "bun",
 		versionCommand: "bun --version",
 		minVersion: "1.1.0",
+		pinnedVersion: "1.4.0",
+		dockerProvision: "COPY --from=oven/bun:1.4.0 /usr/local/bin/bun /usr/local/bin/bun",
 		defaultGrpcPort: 10013,
 		installHint: "Install Bun 1.1+: https://bun.sh/docs/installation",
 	},
@@ -510,6 +523,8 @@ export const JAVASCRIPT_RUNTIME_DEFINITIONS: readonly JavaScriptRuntimeDefinitio
 		// so an older Deno reads as "worker not running" rather than as a version
 		// problem. Bisected against the worker's own integration suite.
 		minVersion: "2.7.5",
+		pinnedVersion: "2.7.5",
+		dockerProvision: "COPY --from=denoland/deno:bin-2.7.5 /deno /usr/local/bin/deno",
 		defaultGrpcPort: 10014,
 		installHint:
 			"Install Deno 2.7.5+: https://docs.deno.com/runtime/getting_started/installation/ (older Deno binds the port but its Node-compat HTTP/2 server never completes a gRPC connection)",

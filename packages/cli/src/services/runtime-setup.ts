@@ -1292,3 +1292,166 @@ stdout_logfile=/var/log/${tc.kind}_trigger.out.log
 
 	return config;
 }
+
+// ============================================================================
+// JavaScript execution target — generated commands and deployment metadata
+// ============================================================================
+//
+// ADR 0016 §1 keeps two axes apart, and the generated project has to keep them
+// apart too:
+//
+//   * the ORCHESTRATOR HOST runs the trigger, the workflow engine, and the
+//     registry. `start` boots that.
+//   * the EXECUTION TARGET runs `runtime.<nodejs|bun|deno>` steps. When it is
+//     the same engine as the host they run in-process; otherwise they run in
+//     the persistent `@blokjs/runtime-worker`, which `worker:start` boots.
+//
+// Node.js and Bun can be both, so selecting them makes `start` use that engine
+// and the steps run in-process — the zero-overhead shape. The Blok runner is
+// not hosted under Deno, so a Deno project keeps a Node orchestrator and runs
+// its steps in the Deno worker. That is the separation working, not a gap.
+
+/** Worker entrypoint, relative to the project root. */
+const WORKER_BIN = "node_modules/@blokjs/runtime-worker/dist/bin.js";
+
+/**
+ * The command that boots the persistent worker under `target`.
+ *
+ * Deno's flags are the least-privilege launch baseline (`denoPermissionFlags`
+ * in `@blokjs/runtime-worker`): bind one port, read the project, read env.
+ * `blokctl dev` narrows/widens this from the nodes' declared effects at spawn
+ * time; the generated script is the static equivalent an operator can run by
+ * hand, and it grants no more than the baseline.
+ */
+export function javaScriptWorkerCommand(target: JavaScriptRuntime, grpcPort: number): string {
+	if (target === "deno") {
+		return [
+			"deno run",
+			`--allow-net=127.0.0.1:${grpcPort},localhost:${grpcPort}`,
+			"--allow-read=.",
+			"--allow-env",
+			"--node-modules-dir=manual",
+			WORKER_BIN,
+		].join(" ");
+	}
+	return `${target} ${WORKER_BIN}`;
+}
+
+/**
+ * `package.json` scripts for the selected execution target.
+ *
+ * `typecheck` and `build` are deliberately the SAME for all three: TypeScript
+ * is the project's type checker and emitter whichever engine executes the
+ * output, and conflating "which engine runs my nodes" with "which tool checks
+ * my types" is exactly the mixing ADR 0016 §5 forbids for package managers.
+ */
+export function generateJavaScriptScripts(
+	target: JavaScriptRuntime,
+	primaryTrigger: string,
+	grpcPort: number,
+): Record<string, string> {
+	const entry = `dist/triggers/${primaryTrigger}/index.js`;
+	const host = target === "deno" ? "node" : target;
+	return {
+		typecheck: "tsc --noEmit",
+		// The tests import the BUILT nodes, so they must run against a current
+		// dist — same reason the Node.js worker reads dist rather than src.
+		test: `tsc && ${javaScriptTestCommand(target)}`,
+		start: `${host} ${entry}`,
+		"worker:start": javaScriptWorkerCommand(target, grpcPort),
+	};
+}
+
+/** The engine's own test runner over the project's `tests/` directory. */
+export function javaScriptTestCommand(target: JavaScriptRuntime): string {
+	if (target === "deno") return "deno test --allow-read --allow-env --node-modules-dir=manual tests/";
+	if (target === "bun") return "bun test tests/";
+	return "node --test tests/*.test.js";
+}
+
+/**
+ * The one generated test. Plain JavaScript with `node:test` + `node:assert`,
+ * which is the ONE test spelling Node.js, Bun and Deno all run unchanged —
+ * a TypeScript test would need a Node version that strips types, and a
+ * framework would pick an engine for the user.
+ *
+ * It loads the project's BUILT node registry under the selected engine and
+ * checks every node is well-formed. That is a real portability assertion: it
+ * is the same load the worker performs, so a node that only resolves under one
+ * engine fails here first.
+ */
+export function generateExampleTest(target: JavaScriptRuntime): string {
+	return `import { test } from "node:test";
+import assert from "node:assert/strict";
+
+// The built node registry — the same module the Blok runtime worker loads.
+// Running this under ${target} is what proves the project's nodes are portable
+// to the execution target it selected.
+const { default: nodes } = await import("../dist/Nodes.js");
+
+test("every node in the registry is well-formed", () => {
+	const entries = Object.values(nodes);
+	assert.ok(entries.length > 0, "the project registers at least one node");
+	for (const node of entries) {
+		assert.equal(typeof node.name, "string", "each node has a name");
+		assert.ok(node.name.length > 0, "each node name is non-empty");
+		assert.equal(typeof node.handle, "function", \`\${node.name} is executable\`);
+	}
+});
+
+// Add your own with runNode / runWorkflow from "@blokjs/core/testing" —
+// see docs/d/fundamentals/testing.mdx.
+`;
+}
+
+/**
+ * Supervisord program for the persistent JavaScript worker, matching the
+ * language sidecars' shape (`autostart`, `autorestart`, per-program logs).
+ * Emitted for EVERY target: the orchestrator host and the execution target are
+ * independent, so even a `node` project deployed under a Bun image needs it.
+ */
+export function generateJavaScriptWorkerSupervisord(
+	target: JavaScriptRuntime,
+	grpcPort: number,
+	pinnedVersion: string,
+): string {
+	return `
+[program:javascript_worker]
+; ADR 0016 — persistent ${target} worker for runtime.${target === "node" ? "nodejs" : target} steps.
+; Pinned engine: ${target} ${pinnedVersion} (the version CI proves this worker against).
+command=${javaScriptWorkerCommand(target, grpcPort)}
+directory=/app
+environment=GRPC_PORT="${grpcPort}",HOST="0.0.0.0"
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/javascript_worker.err.log
+stdout_logfile=/var/log/javascript_worker.out.log
+`;
+}
+
+/**
+ * Add the selected engine to a generated Dockerfile, pinned.
+ *
+ * The scaffold's Dockerfile comes from the primary trigger and provides Bun
+ * only. A `node` or `deno` target needs its engine in the release image or the
+ * supervised worker cannot start. Inserted immediately after the release
+ * stage's `FROM`, so the multi-stage build is untouched otherwise. Idempotent.
+ */
+export function withJavaScriptEngine(dockerfile: string, target: JavaScriptRuntime, provision: string): string {
+	if (dockerfile.includes(provision)) return dockerfile;
+	const lines = dockerfile.split("\n");
+	const releaseIndex = lines.findIndex((line) => /^FROM\s+.*\bAS\s+release\b/i.test(line.trim()));
+	// No recognizable release stage (a hand-edited or unusual Dockerfile):
+	// append rather than guess at a position that might break the build.
+	const at = releaseIndex === -1 ? lines.length : releaseIndex + 1;
+	const block = [
+		"",
+		`# Blok JavaScript execution target: ${target} (ADR 0016).`,
+		"# Pinned to the version CI proves the runtime worker against; the",
+		"# supervised blok-runtime-worker program in supervisord.conf runs it.",
+		provision,
+		"",
+	];
+	lines.splice(at, 0, ...block);
+	return lines.join("\n");
+}
