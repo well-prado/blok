@@ -277,31 +277,35 @@ export async function startWorkerServer(options: WorkerServerOptions): Promise<W
 		call.on("cancelled", onCancel);
 
 		const started = Date.now();
-		await gate.acquire();
+		// `acquired` guards the release: an overload rejection never took a slot,
+		// but it still has to clear the deadline timer, which was armed before
+		// the gate so that queueing time counts against the caller's deadline.
+		const deadlineError = () =>
+			new WorkerError(
+				"NODE_DEADLINE_EXCEEDED",
+				`Node "${nodeName}" exceeded its ${deadlineMs}ms deadline`,
+				"TIMEOUT",
+				504,
+				true,
+				"Raise the step's maxDuration, or make the node honour ctx.signal and return earlier.",
+			);
+		let acquired = false;
 		try {
+			await gate.acquire();
+			acquired = true;
+			// The deadline can expire while this call is QUEUED, and an
+			// `abort` listener attached after the fact never fires — so the
+			// already-aborted case has to be checked, not just listened for.
+			if (controller.signal.aborted) throw deadlineError();
 			const execution = await Promise.race([
 				registry.execute(nodeName, projection),
 				new Promise<never>((_resolve, reject) => {
-					controller.signal.addEventListener(
-						"abort",
-						() =>
-							reject(
-								new WorkerError(
-									"NODE_DEADLINE_EXCEEDED",
-									`Node "${nodeName}" exceeded its ${deadlineMs}ms deadline`,
-									"TIMEOUT",
-									504,
-									true,
-									"Raise the step's maxDuration, or make the node honour ctx.signal and return earlier.",
-								),
-							),
-						{ once: true },
-					);
+					controller.signal.addEventListener("abort", () => reject(deadlineError()), { once: true });
 				}),
 			]);
 			return { execution, requestBytes, durationMs: Date.now() - started, nodeName };
 		} finally {
-			gate.release();
+			if (acquired) gate.release();
 			clearTimeout(timer);
 		}
 	}
