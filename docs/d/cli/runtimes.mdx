@@ -20,12 +20,91 @@ step kinds are `runtime.nodejs`, `runtime.bun`, and `runtime.deno`. The runtime
 target does not select npm, pnpm, Yarn, or Bun as a package manager.
 </Note>
 
-<Warning>
-The persistent JavaScript worker implementation is being delivered in stages.
-This contract slice recognizes all three targets and refuses an unavailable
-target explicitly; it never silently executes a Bun or Deno selection with
-Node.js. See [ADR 0016](../../architecture/adr-0016-javascript-runtimes.md).
-</Warning>
+<Note>
+All three targets execute. When the engine hosting the orchestrator IS the
+selected target, steps run in-process with zero overhead; otherwise they run in
+a persistent `@blokjs/runtime-worker` process for that engine, reached over the
+same gRPC contract the language sidecars use. Blok never substitutes a
+different JavaScript engine — a missing or unreachable worker fails the step
+with the exact command to start it. See
+[ADR 0016](../../architecture/adr-0016-javascript-runtimes.md).
+</Note>
+
+## Choosing a JavaScript target
+
+| | Node.js (`node`) | Bun (`bun`) | Deno (`deno`) |
+| --- | --- | --- | --- |
+| Step kind | `runtime.nodejs` | `runtime.bun` | `runtime.deno` |
+| Worker gRPC port | `10012` | `10013` | `10014` |
+| TypeScript | via your build (`tsc`) | native | native |
+| npm packages | native | native | via node compatibility |
+| Permission boundary | none (Blok capability policy only) | none (Blok capability policy only) | native `--allow-*`, derived from declared capabilities |
+| Pick it when | broadest ecosystem + production compatibility | fastest start-up and an integrated toolchain | you want least-privilege execution enforced by the engine |
+
+The target is **independent of the package manager**: `blokctl runtime use bun`
+does not switch you to `bun install`, and `--package-manager npm` does not force
+Node.js execution.
+
+### The persistent worker
+
+`runtime.nodejs`, `runtime.bun`, and `runtime.deno` steps never spawn a process
+per invocation. One long-lived worker per engine serves every step, with health
+checks, bounded concurrency, backpressure, cancellation, deadlines, and a
+graceful drain on `SIGTERM`. `blokctl dev` starts it for you whenever the
+project's target differs from the engine hosting the triggers.
+
+Run one by hand (for a container image, or to point several projects at one
+worker):
+
+```bash
+# Node.js
+GRPC_PORT=10012 node node_modules/@blokjs/runtime-worker/dist/bin.js
+
+# Bun
+GRPC_PORT=10013 bun node_modules/@blokjs/runtime-worker/dist/bin.js
+
+# Deno — least privilege: one port, read the project, read env
+GRPC_PORT=10014 deno run \
+  --allow-net=127.0.0.1:10014 --allow-read=. --allow-env \
+  --node-modules-dir=manual node_modules/@blokjs/runtime-worker/dist/bin.js
+```
+
+The runner finds it at `RUNTIME_NODEJS_GRPC_PORT` / `RUNTIME_BUN_GRPC_PORT` /
+`RUNTIME_DENO_GRPC_PORT` (written into `.env.local` at scaffold time), on
+`RUNTIME_<KIND>_HOST` (default `localhost`).
+
+| Environment variable | Default | What it does |
+| --- | --- | --- |
+| `GRPC_PORT` | per-engine (10012/10013/10014) | Port the worker binds |
+| `BLOK_WORKER_NODES` | auto-detected | Project node module (`dist/Nodes.js` under Node.js, `src/Nodes.ts` under Bun/Deno) |
+| `BLOK_WORKER_MAX_CONCURRENCY` | `64` | In-flight executions before queueing |
+| `BLOK_WORKER_MAX_QUEUE` | `256` | Queued executions before a `WORKER_OVERLOADED` error |
+| `BLOK_GRPC_MAX_MESSAGE_BYTES` | 16 MiB | Message ceiling — must match the runner's |
+| `BLOK_BLOB_DIR` | unset | Shared claim-check directory; enables `blob-v1` |
+| `BLOK_SKIP_JS_WORKER` | unset | `1` stops `blokctl dev` spawning a worker |
+| `BLOK_DENO_ALLOW_ALL` | unset | `1` launches the Deno worker with `--allow-all` (diagnosed; never a production default) |
+
+`--print-manifest` prints the worker's runtime capability manifest (engine,
+version, protocol version, module formats, TypeScript mode, npm compatibility,
+permissions, cancellation, streaming, message ceiling); the same JSON rides on
+every `ListNodes` response in the `blok-runtime-manifest` gRPC metadata header.
+
+### Deno permissions
+
+Deno's worker is launched with the least privilege its nodes justify. The
+baseline is one bound port, read access to the project (and the claim-check
+directory when one is configured), and environment access. Anything more is
+**earned by a declared capability** in a node's `capabilityManifest`:
+
+| Declared effect | Additional permission |
+| --- | --- |
+| `network` | `--allow-net` (unrestricted; manifests can't enumerate destinations) |
+| `filesystem` / `write` | `--allow-write=<project>` |
+| `process` | `--allow-run` |
+
+`blokctl dev` reads those declarations from the worker itself before launching
+it, so the flags follow the code. `BLOK_DENO_ALLOW_ALL=1` is the only route to
+`--allow-all`, and it prints a warning every time.
 
 ## The commands at a glance
 
@@ -51,9 +130,9 @@ blokctl runtime use deno
 
 Legacy `nodejs`, `typescript`, and `ts` inputs are accepted once and normalized
 to the canonical project value `node` with a deprecation warning. The command
-does not install a JavaScript worker. Bun and Deno therefore remain fail-closed
-until their persistent adapters are registered; a project never silently runs
-those selections under Node.js.
+changes only the declared target: the worker for the new engine is started by
+the next `blokctl dev`, and a project never silently runs a Bun or Deno
+selection under Node.js.
 
 <Tip>
 Not sure where to start? Run `blokctl runtime list` to see what's installed and which languages your machine already has the toolchain for — then `blokctl runtime add` (with no argument) to pick one from an interactive menu.
@@ -85,7 +164,7 @@ blokctl runtime list
 │  …                                                             │
 ├────────────────────────────────────────────────────────────────╯
 │
-└  JavaScript target: Node.js (in-process).
+└  JavaScript target: Node.js 22.11.0 (persistent worker, gRPC :10012).
 ```
 
 Add `--json` for a machine‑readable version (handy in scripts or CI):
@@ -95,9 +174,27 @@ blokctl runtime list --json
 ```
 
 The JSON output reports the selected JavaScript target separately from language
-sidecars. Node.js runs in-process; Bun and Deno require their persistent workers,
-whose availability is checked when the project boots. Kotlin SDK integration is
-tracked separately and is not offered by these commands yet.
+sidecars, and reports it **truthfully**: it probes the engine's binary and
+version rather than assuming the config is achievable.
+
+```json
+{
+  "javascript": {
+    "target": "deno",
+    "kind": "runtime.deno",
+    "execution": "persistent-worker",
+    "available": false,
+    "binary": "deno",
+    "version": null,
+    "minVersion": "2.0.0",
+    "grpcPort": 10014,
+    "remediation": "`deno` is not on PATH. Install Deno 2+: https://docs.deno.com/runtime/getting_started/installation/"
+  }
+}
+```
+
+Kotlin SDK integration is tracked separately and is not offered by these
+commands yet.
 
 ---
 

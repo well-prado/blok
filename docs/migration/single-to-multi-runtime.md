@@ -92,18 +92,17 @@ In this example:
 
 | Runtime | Value | Communication | Requirements |
 |---|---|---|---|
-| Node.js | project `node`, step `runtime.nodejs` | In-process | None (default) |
-| Bun | project `bun`, step `runtime.bun` | Persistent worker (planned) | Bun worker configured |
-| Deno | project `deno`, step `runtime.deno` | Persistent worker (planned) | Deno worker + declared permissions |
+| Node.js | project `node`, step `runtime.nodejs` | In-process on a Node.js host, else persistent worker (gRPC :10012) | `node` >= 20 |
+| Bun | project `bun`, step `runtime.bun` | In-process on a Bun host, else persistent worker (gRPC :10013) | `bun` >= 1.1 |
+| Deno | project `deno`, step `runtime.deno` | Persistent worker (gRPC :10014) | `deno` >= 2, plus permissions derived from declared capabilities |
 | Python 3 | `python3` | gRPC | Python gRPC server running |
 | Docker | `docker` | HTTP | Docker daemon running |
 | WebAssembly | `wasm` | In-process (WASM API) | `.wasm` module file |
 
 The compatibility aliases `nodejs`, `typescript`, and `ts` normalize to Node.js
-with a deprecation diagnostic. They do not select Bun or Deno. The current
-contract slice recognizes `runtime.bun` and `runtime.deno` but refuses a missing
-worker rather than falling back to Node.js; persistent worker support is a
-subsequent implementation slice.
+with a deprecation diagnostic. They do not select Bun or Deno. A missing or
+unreachable worker fails the step with the command to start it; Blok never
+falls back to another JavaScript engine.
 
 ## Configuring the Python 3 Runtime
 
@@ -326,12 +325,17 @@ registry.register(
 | `maxUseCount` | number | `100` | Recycle after N executions |
 | `healthCheckInterval` | number | `30000` | Health check polling interval (ms) |
 
-## Configuring the Bun Runtime
+## Configuring the JavaScript execution worker
 
-The Bun adapter auto-detects the host environment:
+**Behaviour change.** The Bun adapter used to spawn a `bun` subprocess per
+invocation when the host was Node.js. That path is gone. All three JavaScript
+targets now resolve the same way:
 
-- **Running under Bun**: Executes in-process (same as NodeJS adapter)
-- **Running under Node.js**: Spawns a `bun` subprocess
+- the orchestrator host IS the selected engine → in-process, zero overhead;
+- otherwise → one long-lived `@blokjs/runtime-worker` process for that engine,
+  reached over the same gRPC contract the language sidecars use.
+
+Nothing is spawned per step in either case.
 
 ```json
 {
@@ -346,11 +350,35 @@ The Bun adapter auto-detects the host environment:
 }
 ```
 
-Ensure Bun is installed:
+`blokctl dev` starts the worker whenever the project's target differs from the
+engine hosting the triggers. To run one yourself:
 
 ```bash
-curl -fsSL https://bun.sh/install | bash
+GRPC_PORT=10013 bun node_modules/@blokjs/runtime-worker/dist/bin.js
 ```
+
+Point the runner at a non-default location with `RUNTIME_BUN_GRPC_PORT` /
+`RUNTIME_BUN_HOST` (and the `NODEJS` / `DENO` equivalents). A scaffolded
+project gets the port written into `.env.local`.
+
+### What a node sees in the worker
+
+Only resolved step inputs and the documented context projection cross the
+boundary: `ctx.request`, `ctx.env`, `ctx.logger`, `ctx.signal`, and the node's
+own config slice. **`ctx.state` / `ctx.vars` arrive EMPTY** — accumulated
+workflow state is not shipped to a worker. A node that reads
+`ctx.state["earlier-step"]` directly must instead take that value as an input
+(the typed handle from `step()` does this for you). Anything the node publishes
+with `ctx.publish(name, value)` travels back and is merged into state by the
+runner.
+
+### Deno permissions
+
+The Deno worker launches with the least privilege its nodes justify: one bound
+port, project read, env read. A node earns more by declaring it in its
+`capabilityManifest` — `network` → `--allow-net`, `filesystem`/`write` →
+`--allow-write`, `process` → `--allow-run`. `BLOK_DENO_ALLOW_ALL=1` is the only
+route to `--allow-all` and prints a warning; it is not a production default.
 
 ## Configuring the WebAssembly Runtime
 
@@ -586,7 +614,7 @@ registry.replace(new MockPythonAdapter());
 |---|---|---|---|
 | `nodejs` | &lt;1ms | &lt;1ms | In-process |
 | `bun` (Bun host) | &lt;1ms | &lt;1ms | In-process |
-| `bun` (Node host) | 50-200ms | 50-200ms | Subprocess |
+| `bun` / `deno` / `nodejs` (different host) | 1-5ms | 1-5ms | gRPC to the persistent worker |
 | `python3` | 1-5ms | 1-5ms | gRPC (protobuf) |
 | `docker` | 2-30s | 5-50ms | HTTP (JSON) |
 | `wasm` | 10-100ms | &lt;1ms | In-process (WASM API) |
@@ -610,7 +638,7 @@ registry.replace(new MockPythonAdapter());
 | Runtime | Memory Model | Overhead |
 |---|---|---|
 | `nodejs` | Shared with host | ~0 MB |
-| `bun` | Shared (Bun host) or separate (Node host) | 0-50 MB |
+| `bun` / `deno` / `nodejs` worker | One long-lived process per engine | 40-80 MB, independent of step count |
 | `python3` | Separate process | 30-100 MB |
 | `docker` | Isolated container | 50-500 MB |
 | `wasm` | Sandboxed linear memory | 0.6-6.4 MB |

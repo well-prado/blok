@@ -16,7 +16,13 @@ runtime is executable.
 | Alias boundary | `core/runner/src/workflow/WorkflowNormalizer.ts`; `core/runner/src/__tests__/WorkflowNormalizer.runtime-alias.test.ts`; `core/runner/src/RuntimeRegistry.ts` | Pass: `node`/`typescript`/`ts` aliases normalize to canonical Node.js with diagnostics; Bun and Deno are never rewritten to Node.js. |
 | Existing-project selection | `packages/cli/src/commands/runtime/use.ts`; `packages/cli/tests/commands/runtime/runtime.test.ts` | Pass: `runtime use` is idempotent, preserves unrelated config, and keeps package-manager policy independent. |
 | Project creation selection | `packages/cli/src/commands/create/project.ts`; `packages/cli/src/index.ts`; `docs/d/cli/project.mdx` | Contract pass: interactive and non-interactive creation record the selected target. Runtime-specific build/start commands still require the worker slice below. |
-| Registry resolution | `core/runner/src/__tests__/RuntimeRegistry.test.ts`; `core/runner/__tests__/javascript-runtime-resolution.test.ts`; `core/runner/src/Configuration.ts` | Partial: `runtime.nodejs` executes the registered portable node, and Bun-hosted runners register the in-process Bun adapter through the same resolver. Deno and cross-host Bun fail closed as unavailable. |
+| Registry resolution | `core/runner/src/__tests__/RuntimeRegistry.test.ts`; `core/runner/__tests__/javascript-runtime-resolution.test.ts`; `core/runner/src/Configuration.ts` | Pass: all three JavaScript kinds resolve through one registry path. In-process when the orchestrator host IS the selected engine; otherwise a gRPC adapter on the per-kind worker port (10012/10013/10014, overridable via `RUNTIME_<KIND>_GRPC_PORT`). No fallback to another engine in either direction. |
+| Persistent worker | `packages/js-runtime-worker/`; `packages/js-runtime-worker/tests/worker.integration.test.ts` | Pass: one long-lived gRPC server per engine implementing Health, ListNodes, Execute, and ExecuteStream, with readiness, bounded concurrency + queue (`WORKER_OVERLOADED`), cancellation via `ctx.signal`, per-call deadlines, configurable max message size, keepalive, and a graceful `SIGTERM` drain. The integration suite boots `dist/bin.js` under Node.js, Bun, and Deno. |
+| No process per step | `packages/js-runtime-worker/tests/worker.integration.test.ts` ("serves N concurrent executions from ONE process") | Pass: 24 concurrent executions per engine report one pid, the worker's own execution counter advances by exactly 24, and the worker's direct-child count does not move. |
+| Deno permissions | `packages/js-runtime-worker/src/permissions.ts`; `packages/js-runtime-worker/tests/worker.unit.test.ts`; `packages/cli/src/services/js-worker.ts` | Pass: flags are derived from the effects nodes DECLARE in their capability manifests (`network` → `--allow-net`, `filesystem`/`write` → `--allow-write`, `process` → `--allow-run`) over a least-privilege baseline. `--allow-all` is reachable only through `BLOK_DENO_ALLOW_ALL=1`, which prints a diagnostic. |
+| Runtime capability manifest | `core/shared/src/RuntimeContracts.ts` (`RuntimeCapabilityManifestSchema`); `packages/js-runtime-worker/src/host.ts`; `blok-runtime-manifest` metadata on `ListNodes` | Pass: runtime name/version, protocol version, module formats, TypeScript mode, npm compatibility, permissions, cancellation, streaming, and max message size are Zod-validated at worker boot and advertised on every `ListNodes` response. |
+| Cross-runtime conformance | `tests/e2e/cross-runtime/spec-b-typed-e2e.ts`; `tests/e2e/cross-runtime/run-spec-b-e2e.sh`; `.github/workflows/ci.yml` (`cross-runtime`) | Pass for the shared fixture suite: `nodejs`, `bun`, and `deno` are rows in the same 14-runtime harness as the language SDKs — typed schema reflection, capability-manifest equality against the canonical fixture, structured validation errors, `blob-v1` claim-check, user-node discovery, and a mixed Node.js → Bun → Deno chain. The full portable-fixture matrix (control flow, sub-workflows, module-resolution cases) is slice 2. |
+| CLI worker lifecycle | `packages/cli/src/services/js-worker.ts`; `packages/cli/src/commands/dev/index.ts`; `packages/cli/src/commands/runtime/list.ts`; `packages/cli/src/services/runtime-detector.ts` | Pass: `blokctl dev` spawns and health-probes the worker when the target differs from the orchestrator host, reports exact remediation for a missing/too-old binary or a missing worker package, and `runtime list --json` probes the engine instead of trusting the config. |
 | Editor surfaces | `packages/lsp-server/src/constants.ts`; `packages/vscode-extension/src/providers/WorkflowDiagnostics.ts`; `packages/vscode-extension/schemas/workflow.v2.json`; `packages/vscode-extension/snippets/workflow.json` | Pass for canonical completion/validation coverage; compatibility aliases remain schema-only inputs where legacy workflows require them. |
 | Architecture and migration | `docs/architecture/adr-0016-javascript-runtimes.md`; `docs/migration/single-to-multi-runtime.md`; `docs/d/cli/runtimes.mdx` | Pass: host/target separation, naming, package-manager separation, fail-closed behavior, portability boundary, and permission policy are documented. |
 
@@ -24,21 +30,20 @@ runtime is executable.
 
 The following issue criteria are not claimed by this slice:
 
-- A persistent Bun or Deno worker/sidecar with readiness, health checks,
-  bounded concurrency, backpressure, cancellation, timeout, shutdown, and
-  crash recovery.
-- A Deno adapter and least-privilege permission generation from capability
-  manifests.
-- Cross-runtime execution of one portable fixture, including mixed Node.js →
-  Bun → Deno workflows and trace/deadline/error propagation.
-- A regression proof that cross-host production runtime execution reuses
-  workers with bounded process count. The old Node-host `bun eval` per-call
-  path has been removed; Bun is registered only for Bun-hosted in-process use.
-- Runtime-specific install/type-check/build/test/start commands, pinned
-  deployment/container metadata, packed-consumer smoke tests under Bun and
-  Deno, and CI jobs pinned to supported Bun/Deno versions.
+- The complete portable conformance fixture matrix: branch/switch/loop/
+  try-catch paths, sub-workflows, trace correlation, secret redaction,
+  non-serializable results, worker crash + restart recovery, and the documented
+  ESM/module-resolution and npm-dependency cases, executed identically against
+  all three engines. The current cross-runtime suite covers the shared
+  `typed-greet` / `chain-test` / user-node fixture only.
+- Packed-consumer smoke tests (`npm pack` → install → run) under Bun and Deno.
+- Runtime-specific install/type-check/build/start command generation in the
+  scaffold, and pinned deployment/container metadata for a selected target.
 - Performance artifacts containing environment, workload, throughput,
   p50/p95/p99 latency, errors, CPU, and memory.
+- Fine-grained Deno permissions (per-path `--allow-read`/`--allow-write`,
+  per-host `--allow-net`) derived from capability identifiers rather than the
+  coarse effect buckets.
 
 These are release-blocking gaps, not reasons to silently fall back to Node.js.
 Issue #942 must remain open until the blocked rows have implementation and
@@ -57,7 +62,23 @@ bun run build
 bun run ci:packaging
 ```
 
-The full acceptance gate remains `bun run ci:fast` plus runtime-version CI
-jobs for each supported worker. The current repository has no supported Deno
-worker image or persistent Bun worker fixture, so those jobs must not be
-represented as passing by a schema-only test.
+Worker evidence:
+
+```bash
+cd packages/js-runtime-worker
+bunx vitest run tests/worker.unit.test.ts          # under Node.js
+bun test tests/worker.unit.test.ts                 # under Bun
+bunx vitest run tests/worker.integration.test.ts   # boots the worker under node, bun and deno
+```
+
+Cross-runtime evidence (boots the three workers alongside the language SDKs):
+
+```bash
+bun run build
+bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
+```
+
+The full acceptance gate remains `bun run ci:fast` plus the `js-runtime-targets`
+and `cross-runtime` CI lanes, which pin Bun, Node.js, and Deno versions. A row
+above is marked Pass only where a test in this repository exercises it; the
+schema-only rows from the first slice are not evidence for the worker rows.
