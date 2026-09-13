@@ -7,13 +7,14 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { http, defineNode, workflow } from "@blokjs/core";
+import { http, defineNode, step, workflow } from "@blokjs/core";
 import { runWorkflow } from "@blokjs/core/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import "../src/index.js"; // registers the @blokjs/inertia serializer node
 import { always, defer, definePage, merge, once, optional, scroll, shared } from "../src/define-page.js";
 import type { PageObject } from "../src/protocol.js";
+import { configureHistory, historyNode, logoutNode } from "../src/security/index.js";
 
 // =============================================================================
 // Counter nodes — one per prop, so "did it run, and how often" is observable.
@@ -557,5 +558,60 @@ describe("load-time guards", () => {
 			steps: [{ id: "page", page: { component: "NoUse/Index", props: { orders: { mode: "always" } } } }],
 		};
 		await expect(runWorkflow(JSON.stringify(wf))).rejects.toThrow(/missing `use`/);
+	});
+});
+
+// =============================================================================
+// #1013 composition — the history marks a middleware / logout leaves on the
+// live request have to reach a page rendered by the CONTROL step, not just one
+// rendered by a hand-written `@blokjs/inertia` step.
+// =============================================================================
+
+const HistoryPage = definePage("History/Index", { auth: always(currentUser) });
+
+function historyWorkflow(name: string, path: string, build: (req: unknown) => void) {
+	return workflow(name, { version: "1.0.0", trigger: http.get(path) }, (req) => build(req));
+}
+
+describe("history encryption through the page step (#1013)", () => {
+	it("picks up the `encryptHistory` mark an earlier step left on the request", async () => {
+		const wf = await historyWorkflow("page-encrypt-mark", "/enc", (req) => {
+			step("mark", historyNode, { encrypt: true });
+			HistoryPage.render(req as never, "page", "/enc", {});
+		});
+		const run = await runWorkflow(wf, {}, { headers: INERTIA });
+
+		expect(run.ok).toBe(true);
+		expect(pageOf(run.response).encryptHistory).toBe(true);
+	});
+
+	it("picks up the `clearHistory` mark `logoutResponse` leaves", async () => {
+		const wf = await historyWorkflow("page-clear-mark", "/out", (req) => {
+			step("logout", logoutNode, { redirectTo: "/login" }, { ephemeral: true });
+			HistoryPage.render(req as never, "page", "/out", {});
+		});
+		const run = await runWorkflow(wf, {}, { headers: INERTIA });
+
+		expect(run.ok).toBe(true);
+		expect(pageOf(run.response).clearHistory).toBe(true);
+	});
+
+	it("honours the app-wide default, and lets one page opt out", async () => {
+		configureHistory({ encrypt: true });
+		try {
+			const on = await historyWorkflow("page-encrypt-global", "/g-on", (req) => {
+				HistoryPage.render(req as never, "page", "/g-on", {});
+			});
+			expect(pageOf((await runWorkflow(on, {}, { headers: INERTIA })).response).encryptHistory).toBe(true);
+
+			const off = await historyWorkflow("page-encrypt-optout", "/g-off", (req) => {
+				HistoryPage.render(req as never, "page", "/g-off", {}, { encryptHistory: false });
+			});
+			const page = pageOf((await runWorkflow(off, {}, { headers: INERTIA })).response);
+			// The page object never carries `encryptHistory: false` — it is omitted.
+			expect(page.encryptHistory).toBeUndefined();
+		} finally {
+			configureHistory({ encrypt: false });
+		}
 	});
 });

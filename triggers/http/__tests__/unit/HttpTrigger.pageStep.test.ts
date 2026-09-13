@@ -86,6 +86,10 @@ vi.mock("../../src/Nodes", async (importOriginal) => {
 		},
 	});
 
+	// #1013's marking node is deliberately NOT in HELPER_NODES, so the
+	// `inertia.encryptHistory` middleware below needs it registered here.
+	const { historyNode } = await import("@blokjs/inertia");
+
 	return {
 		default: {
 			...actual.default,
@@ -94,6 +98,7 @@ vi.mock("../../src/Nodes", async (importOriginal) => {
 			"pg-filters": filters,
 			"pg-stats": stats,
 			"pg-posts": posts,
+			[historyNode.name]: historyNode,
 		},
 	};
 });
@@ -116,10 +121,27 @@ vi.mock("../../src/Workflows", () => {
 		other: { use: "pg-orders", mode: "defer", group: "sidebar" },
 		posts: { use: "pg-posts" },
 	});
+	// #1013 — a route guarded by the real `inertia.encryptHistory` middleware.
+	const encrypted = page("page-encrypted", "/orders-encrypted", props(false));
+	(encrypted._config.trigger as { http: Record<string, unknown> }).http.middleware = ["inertia.encryptHistory"];
+
 	return {
 		default: {
 			"page-orders": page("page-orders", "/orders", props(false)),
 			"page-rescue": page("page-rescue", "/orders-rescue", props(true)),
+			"page-encrypted": encrypted,
+			"inertia.encryptHistory": {
+				_blokV2: true,
+				_config: {
+					name: "inertia.encryptHistory",
+					version: "1.0.0",
+					middleware: true,
+					trigger: {},
+					steps: [
+						{ id: "encrypt-history", use: "@blokjs/inertia.history", inputs: { encrypt: true }, ephemeral: true },
+					],
+				},
+			},
 		},
 	};
 });
@@ -147,6 +169,7 @@ interface PageObject {
 	version: string;
 	deferredProps?: Record<string, string[]>;
 	rescuedProps?: string[];
+	encryptHistory?: true;
 }
 
 async function buildApp() {
@@ -251,6 +274,20 @@ describe("HttpTrigger — the `page` control step (#1008, test 14)", () => {
 
 		const strict = await get(await buildApp(), "/orders", { ...PARTIAL, "x-inertia-partial-data": "stats" });
 		expect(strict.status).toBeGreaterThanOrEqual(400);
+	});
+
+	it("#1013 — the `inertia.encryptHistory` middleware reaches a page rendered by the control step", async () => {
+		const res = await get(await buildApp(), "/orders-encrypted", INERTIA);
+		expect(res.status).toBe(200);
+		const page = (await res.json()) as PageObject;
+		// The middleware marks the live ctx; the control step's serializer resolves
+		// the flag off that same request, so a control-step page is encrypted too.
+		expect(page.encryptHistory).toBe(true);
+		expect(page.props.orders).toEqual({ items: ["o-1"] });
+
+		// An unguarded route on the same app is untouched.
+		const plain = (await (await get(await buildApp(), "/orders", INERTIA)).json()) as PageObject;
+		expect(plain.encryptHistory).toBeUndefined();
 	});
 
 	it("8 — a dot path narrows the nested prop; an unknown path is ignored", async () => {
