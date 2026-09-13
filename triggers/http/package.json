@@ -18,7 +18,8 @@
 		"infra:dev": "rimraf ./dist && tsc && copyfiles -u 1 src/nodes/**/*.html src/nodes/**/*.md dist/ && docker compose --file ./infra/docker-compose.yml up --build --watch",
 		"infra:build": "tsc --watch -p tsconfig.json --diagnostics",
 		"test": "vitest run",
-		"test:dev": "vitest"
+		"test:dev": "vitest",
+		"test:bun": "bun test __tests__/unit/HttpTrigger.staticAssets.test.ts"
 	},
 	"devDependencies": {
 		"@types/ejs": "^3.1.5",

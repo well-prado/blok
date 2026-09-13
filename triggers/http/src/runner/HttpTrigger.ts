@@ -42,7 +42,7 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { v4 as uuid } from "uuid";
-import apps from "../AppRoutes.js";
+import apps, { prepareStaticRoutes, readAssetVersion } from "../AppRoutes.js";
 import nodes from "../Nodes.js";
 import workflows from "../Workflows.js";
 import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter.js";
@@ -152,6 +152,53 @@ function extractTriggerKinds(wf: unknown): string[] {
  * the unknown-route 404, the boot log, and the zero-route info line.
  */
 const DOCS_ROUTING_URL = "https://blok.build/docs/d/triggers/http#file-based-routing";
+
+/**
+ * #1000 — request headers `BLOK_CORS_ORIGIN` allows. The ordinary four come
+ * first (an explicit `allowHeaders` REPLACES Hono's echo of the request's
+ * `Access-Control-Request-Headers`, so leaving `content-type` out would break
+ * every JSON POST), then the Inertia / Precognition / devtools protocol
+ * headers the standalone SPA sends.
+ */
+const CORS_ALLOW_HEADERS = [
+	"Content-Type",
+	"Authorization",
+	"Accept",
+	"X-Requested-With",
+	"X-Inertia",
+	"X-Inertia-Version",
+	"X-Inertia-Partial-Component",
+	"X-Inertia-Partial-Data",
+	"X-Inertia-Partial-Except",
+	"X-Inertia-Reset",
+	"X-Inertia-Error-Bag",
+	"X-Inertia-Except-Once-Props",
+	"X-Inertia-Infinite-Scroll-Merge-Intent",
+	"X-XSRF-TOKEN",
+	"Precognition",
+	"Precognition-Validate-Only",
+	"X-Inertia-Devtools-Tab",
+	"X-Inertia-Devtools-Visit",
+	"X-Inertia-Devtools-Parent",
+	"X-Inertia-Devtools-Deferred",
+	"X-Inertia-Devtools-Poll",
+];
+
+/**
+ * #1000 — response headers the browser may READ cross-origin. Without
+ * `X-Inertia-Location` here the client cannot follow the 409 external-redirect
+ * that is the whole point of standalone mode.
+ */
+const CORS_EXPOSE_HEADERS = [
+	"X-Inertia",
+	"X-Inertia-Location",
+	"X-Inertia-Redirect",
+	"X-Inertia-Version",
+	"Precognition",
+	"Precognition-Success",
+	"X-Inertia-Devtools-Id",
+	"X-Inertia-Devtools-Parent-Out",
+];
 
 /**
  * #693 — the shared dev-mode gate for rich diagnostics (unknown-route 404
@@ -1360,6 +1407,24 @@ export default class HttpTrigger extends TriggerBase {
 			}
 		}
 
+		// #1000 — SPA mode. `BLOK_STATIC_DIR` (e.g. `client/dist`) mounts the
+		// built client and publishes its asset version, which is what makes the
+		// Inertia 409 reload path work after a deploy. An explicit
+		// `ASSET_VERSION` wins over the file the Vite plugin wrote. With the var
+		// unset none of this registers and the welcome page stays.
+		const staticDir = process.env.BLOK_STATIC_DIR;
+		let mountStatic: Awaited<ReturnType<typeof prepareStaticRoutes>> | null = null;
+		if (staticDir) {
+			if (!process.env.ASSET_VERSION) {
+				const version = readAssetVersion(staticDir);
+				if (version) process.env.ASSET_VERSION = version;
+			}
+			mountStatic = await prepareStaticRoutes(staticDir);
+			this.logger.log(
+				`[blok][static] serving ${staticDir} at /assets/* — asset version ${process.env.ASSET_VERSION ?? "(none)"}`,
+			);
+		}
+
 		return new Promise((done, fail) => {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
@@ -1378,9 +1443,29 @@ export default class HttpTrigger extends TriggerBase {
 					.map((s) => s.trim())
 					.filter((s) => s.length > 0);
 				if (origins.length > 0) {
-					this.app.use(cors({ origin: origins.length === 1 ? origins[0] : origins }));
+					this.app.use(
+						cors({
+							origin: origins.length === 1 ? origins[0] : origins,
+							// #1000 — a named origin is the standalone-SPA case (Vite on
+							// :5173, session cookie on the API), and an allow-LIST is
+							// just as much that case (dev + preview): Hono echoes the
+							// one matched origin, never the list, so credentials stay
+							// valid. The wildcard is the exception: `Allow-Origin: *`
+							// with `Allow-Credentials: true` is rejected by every
+							// browser, so a list containing `*` stays uncredentialed.
+							credentials: !origins.includes("*"),
+							allowHeaders: CORS_ALLOW_HEADERS,
+							exposeHeaders: CORS_EXPOSE_HEADERS,
+						}),
+					);
 				}
 			}
+
+			// #1000 — the built client. Registered AFTER the CORS middleware so
+			// asset responses carry the same CORS headers as everything else,
+			// and BEFORE the workflow routes so `/assets/*` is never dispatched
+			// as a workflow.
+			mountStatic?.(this.app);
 
 			// Health check
 			this.app.all("/health-check", (c) => {
