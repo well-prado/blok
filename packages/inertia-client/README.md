@@ -23,6 +23,10 @@ plugin:
 `vite` and `@inertiajs/vite` are optional peers needed only by the
 `@blokjs/inertia-client/vite` subpath.
 
+Node 20.19 or newer is required — that is Vite 7's own floor, and the Vite
+plugin reads the page directory with `readdirSync(…, { recursive: true,
+withFileTypes: true })` and `Dirent.parentPath`, which land in Node 20.12.
+
 > **pnpm:** module augmentation of `@inertiajs/core` only resolves if the
 > package is reachable at the top of `node_modules`. Add
 > `public-hoist-pattern[]=@inertiajs/core` to `.npmrc`, or
