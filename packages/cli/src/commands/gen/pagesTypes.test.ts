@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { collectTsFiles, generateAppTypes, resolveOutPaths } from "./appTypes.js";
@@ -20,6 +20,7 @@ import {
 	buildRoutesModuleSource,
 	generatePages,
 	importFailureMessage,
+	tsFallbackUrl,
 	zodToTs,
 } from "./pagesTypes.js";
 
@@ -325,6 +326,21 @@ describe("zodToTs", () => {
 		expect(zodToTs(z.number().brand<"cents">())).toBe("number");
 		// Dates cross the wire as JSON.
 		expect(zodToTs(z.date())).toBe("string");
+	});
+
+	it("resolves the TS-style specifiers a real workflow module is written with", () => {
+		// `../nodes.js` and `../nodes` both mean `../nodes.ts` on disk. Node resolves
+		// them literally, so without this the shipped binary fails on a project's
+		// very first local import — vitest hides it, because Vite rewrites them.
+		const parent = pathToFileURL(path.join(inertiaApp, "workflows", "orders-index.ts")).href;
+		const nodes = pathToFileURL(path.join(inertiaApp, "nodes.ts")).href;
+		expect(tsFallbackUrl("../nodes.js", parent)).toBe(nodes);
+		expect(tsFallbackUrl("../nodes", parent)).toBe(nodes);
+		// A specifier that resolves on its own, a bare package and a miss are left alone.
+		expect(tsFallbackUrl("./orders-show.ts", parent)).toBeUndefined();
+		expect(tsFallbackUrl("@blokjs/core", parent)).toBeUndefined();
+		expect(tsFallbackUrl("../nope.js", parent)).toBeUndefined();
+		expect(tsFallbackUrl("../nodes.js", undefined)).toBeUndefined();
 	});
 
 	it("explains the one import failure whose raw message hides the fix", () => {
