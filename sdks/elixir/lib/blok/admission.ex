@@ -14,16 +14,24 @@ defmodule Blok.Admission do
             max_concurrency: 16,
             max_queue: 64,
             accepting: true,
-            grace_ms: 250
+            grace_ms: 250,
+            task_supervisor: Blok.ExecutionTaskSupervisor
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
-  def run(fun, timeout_ms),
-    do: GenServer.call(__MODULE__, {:run, fun, timeout_ms}, timeout_ms + 1_000)
+  def run(fun, timeout_ms), do: run(__MODULE__, fun, timeout_ms)
 
-  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
-  def stop_admission, do: GenServer.call(__MODULE__, :stop_admission)
-  def drain(timeout_ms), do: GenServer.call(__MODULE__, {:drain, timeout_ms}, timeout_ms + 1_000)
+  def run(server, fun, timeout_ms),
+    do: GenServer.call(server, {:run, fun, timeout_ms}, timeout_ms + 1_000)
+
+  def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
+  def stop_admission(server \\ __MODULE__), do: GenServer.call(server, :stop_admission)
+
+  def drain(timeout_ms) when is_integer(timeout_ms), do: drain(__MODULE__, timeout_ms)
+
+  def drain(server, timeout_ms),
+    do: GenServer.call(server, {:drain, timeout_ms}, timeout_ms + 1_000)
 
   @impl true
   def init(opts) do
@@ -31,7 +39,8 @@ defmodule Blok.Admission do
      %__MODULE__{
        max_concurrency: Keyword.get(opts, :max_concurrency, 16),
        max_queue: Keyword.get(opts, :max_queue, 64),
-       grace_ms: Keyword.get(opts, :cancellation_grace_ms, 250)
+       grace_ms: Keyword.get(opts, :cancellation_grace_ms, 250),
+       task_supervisor: Keyword.get(opts, :task_supervisor, Blok.ExecutionTaskSupervisor)
      }}
   end
 
@@ -62,10 +71,11 @@ defmodule Blok.Admission do
      }, state}
   end
 
-  def handle_call(:stop_admission, _from, state), do: {:reply, :ok, %{state | accepting: false}}
+  def handle_call(:stop_admission, _from, state),
+    do: {:reply, :ok, flush_queue(%{state | accepting: false})}
 
   def handle_call({:drain, timeout_ms}, from, state) do
-    state = %{state | accepting: false}
+    state = flush_queue(%{state | accepting: false})
 
     if map_size(state.active) == 0 do
       {:reply, :ok, state}
@@ -128,8 +138,8 @@ defmodule Blok.Admission do
     server = self()
     job_ref = make_ref()
 
-    {:ok, pid} =
-      Task.Supervisor.start_child(Blok.ExecutionTaskSupervisor, fn ->
+    child =
+      Task.Supervisor.start_child(state.task_supervisor, fn ->
         result =
           try do
             {:ok, job.fun.()}
@@ -140,18 +150,27 @@ defmodule Blok.Admission do
         send(server, {:job_finished, job_ref, result})
       end)
 
-    monitor = Process.monitor(pid)
-    timer = Process.send_after(self(), {:job_deadline, job_ref}, job.timeout_ms)
+    case child do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+        timer = Process.send_after(self(), {:job_deadline, job_ref}, job.timeout_ms)
 
-    %{
-      state
-      | active:
-          Map.put(
-            state.active,
-            job_ref,
-            Map.merge(job, %{pid: pid, monitor: monitor, timer: timer})
-          )
-    }
+        %{
+          state
+          | active:
+              Map.put(
+                state.active,
+                job_ref,
+                Map.merge(job, %{pid: pid, monitor: monitor, timer: timer})
+              )
+        }
+
+      # The task supervisor is its own ceiling. Never let it crash admission:
+      # a saturated runtime answers deterministically instead of dying.
+      {:error, _reason} ->
+        GenServer.reply(job.from, {:error, :overloaded})
+        state
+    end
   end
 
   defp start_queued_job(%{accepting: false} = state), do: state
@@ -175,4 +194,14 @@ defmodule Blok.Admission do
   end
 
   defp maybe_finish_drain(state), do: state
+
+  # A queued job has no deadline timer yet, so a drain that simply stopped
+  # dequeuing would leave its caller blocked until the call timeout. Answer now.
+  defp flush_queue(state) do
+    state.queue
+    |> :queue.to_list()
+    |> Enum.each(&GenServer.reply(&1.from, {:error, :draining}))
+
+    %{state | queue: :queue.new()}
+  end
 end
