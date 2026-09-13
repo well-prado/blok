@@ -23,6 +23,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { JavaScriptRuntime } from "@blokjs/shared";
 import { builtinNodes } from "./builtins.js";
+import { conformanceNodes } from "./conformance/index.js";
 import { DEFAULT_WORKER_PORTS, detectHostRuntime } from "./host.js";
 import { WorkerRegistry, loadNodesFromModule } from "./registry.js";
 import { WORKER_DEFAULTS, type WorkerHandle, startWorkerServer } from "./server.js";
@@ -37,13 +38,20 @@ export {
 	runtimeKindOf,
 	sdkNameOf,
 } from "./host.js";
-export { WorkerRegistry, loadNodesFromModule } from "./registry.js";
-export type { NodeDescriptor, WorkerNode } from "./registry.js";
+export { WorkerRegistry, isRuntimeCompatible, loadNodesFromModule } from "./registry.js";
+export type { IncompatibleNode, NodeDescriptor, WorkerNode } from "./registry.js";
+export { RUNTIME_SPECIFIC_FIXTURES, conformanceNodes } from "./conformance/index.js";
 export { RUNTIME_MANIFEST_METADATA_KEY, WORKER_DEFAULTS, startWorkerServer } from "./server.js";
 export type { WorkerHandle, WorkerServerOptions } from "./server.js";
 export { BLOB_CAPABILITY, resolveBlobDir } from "./claimCheck.js";
-export { declaredEffects, denoIntrospectionFlags, denoPermissionFlags } from "./permissions.js";
-export type { DenoPermissionOptions } from "./permissions.js";
+export {
+	declaredEffects,
+	denoIntrospectionFlags,
+	denoPermissionFlags,
+	denoPermissionGrants,
+	parseNetAllowList,
+} from "./permissions.js";
+export type { DenoGrant, DenoPermissionOptions } from "./permissions.js";
 export { WorkerError, toNodeError } from "./errors.js";
 
 export interface StartWorkerOptions {
@@ -57,6 +65,9 @@ export interface StartWorkerOptions {
 	projectRoot?: string;
 	/** Register the cross-runtime conformance fixtures. Default true. */
 	builtins?: boolean;
+	/** Register the portable conformance fixture set (ADR 0016 §4). Default
+	 * false; `BLOK_WORKER_CONFORMANCE=1` turns it on for a worker under test. */
+	conformance?: boolean;
 	maxMessageBytes?: number;
 	maxConcurrency?: number;
 	maxQueue?: number;
@@ -101,6 +112,18 @@ export async function createWorkerRegistry(options: StartWorkerOptions = {}): Pr
 		for (const node of builtinNodes(() => registry.executions)) registry.register(node);
 	}
 
+	if (options.conformance === true || process.env.BLOK_WORKER_CONFORMANCE === "1") {
+		for (const node of conformanceNodes()) registry.register(node);
+	}
+
+	// ADR 0016 §4 — a runtime-specific node loaded into the wrong engine is
+	// reported HERE, at boot, with both sides named. It stays out of the
+	// catalog, and executing it returns NODE_RUNTIME_INCOMPATIBLE rather than
+	// failing mid-run with a ReferenceError.
+	const reportRejections = (): void => {
+		for (const rejection of registry.rejected()) console.error(`[blok][worker] ${rejection.message}`);
+	};
+
 	const specifier = resolveNodesModule(options, runtime);
 	if (specifier === null) {
 		const hint =
@@ -110,6 +133,7 @@ export async function createWorkerRegistry(options: StartWorkerOptions = {}): Pr
 		console.warn(
 			`[blok][worker] no project node module found under ${options.projectRoot ?? process.cwd()} (looked for ${nodeModuleCandidates(runtime).join(", ")}). Serving built-in nodes only — runtime.${runtime === "node" ? "nodejs" : runtime} steps referencing a project node will fail with NODE_NOT_FOUND. ${hint}`,
 		);
+		reportRejections();
 		return registry;
 	}
 	const loaded = await loadNodesFromModule(specifier);
@@ -120,6 +144,7 @@ export async function createWorkerRegistry(options: StartWorkerOptions = {}): Pr
 		registry.register(node);
 	}
 	console.log(`[blok][worker] loaded ${loaded.length} project node(s) from ${specifier}`);
+	reportRejections();
 	return registry;
 }
 

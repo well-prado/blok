@@ -28,7 +28,7 @@ import { parseCapabilityManifest } from "@blokjs/shared";
 import { resolveBlobDir } from "./claimCheck.js";
 import { buildRuntimeCapabilityManifest, detectHostRuntime, detectHostVersion } from "./host.js";
 import { createWorkerRegistry, startWorker } from "./index.js";
-import { declaredEffects, denoPermissionFlags } from "./permissions.js";
+import { declaredEffects, denoPermissionGrants, parseNetAllowList } from "./permissions.js";
 import { WORKER_DEFAULTS } from "./server.js";
 
 /** This package's own version, read from the package.json beside `dist/`. */
@@ -58,11 +58,14 @@ Environment:
   HOST                           Bind address (default 127.0.0.1)
   BLOK_WORKER_NODES              Project node module (default: auto-detected from cwd)
   BLOK_WORKER_BUILTINS=0         Serve only the project's nodes
+  BLOK_WORKER_CONFORMANCE=1      Also serve the portable conformance fixture set (ADR 0016 §4)
   BLOK_GRPC_MAX_MESSAGE_BYTES    Symmetric message ceiling (default 16 MiB)
   BLOK_WORKER_MAX_CONCURRENCY    In-flight executions (default 64)
   BLOK_WORKER_MAX_QUEUE          Queued executions before overload (default 256)
   BLOK_BLOB_DIR                  Shared claim-check directory (enables blob-v1)
   BLOK_DENO_ALLOW_ALL=1          Launch Deno with --allow-all (diagnosed; not a production default)
+  BLOK_DENO_ALLOW_NET            Comma-separated host[:port] allow-list scoping the network effect's
+                                 --allow-net grant (default: unrestricted when a node declares network)
 
 Docs: https://github.com/well-prado/blok/blob/main/docs/d/cli/runtimes.mdx`;
 
@@ -117,13 +120,15 @@ async function main(): Promise<void> {
 			// `dist/bin.js` → the package root, resolved through any symlink.
 			workerRoot: path.resolve(path.dirname(realpathSync(fileURLToPath(import.meta.url))), ".."),
 			allowAll: process.env.BLOK_DENO_ALLOW_ALL === "1",
+			netAllow: parseNetAllowList(process.env.BLOK_DENO_ALLOW_NET),
 		};
 		if (options.allowAll) {
 			console.warn(
 				"[blok][worker] BLOK_DENO_ALLOW_ALL=1 — the Deno worker will run with --allow-all. This is NOT a production default; it disables the only native permission boundary Blok has.",
 			);
 		}
-		console.log(`BLOK_PERMISSIONS ${JSON.stringify({ effects, flags: denoPermissionFlags(effects, options) })}`);
+		const grants = denoPermissionGrants(effects, options);
+		console.log(`BLOK_PERMISSIONS ${JSON.stringify({ effects, flags: grants.map((g) => g.flag), grants })}`);
 		return;
 	}
 

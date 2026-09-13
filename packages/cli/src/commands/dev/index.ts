@@ -20,6 +20,7 @@ import {
 	readProjectConfig,
 	validateProjectRuntimes,
 } from "../../services/runtime-setup.js";
+import { type SupervisorHandle, superviseProcess } from "../../services/supervisor.js";
 import { regenRuntimeStubs } from "../nodes/syncNodes.js";
 import { startDevWatcher } from "./watch.js";
 
@@ -104,6 +105,35 @@ function spawnProcess(
 	});
 
 	return child;
+}
+
+/**
+ * Spawn a runtime sidecar UNDER SUPERVISION (ADR 0016 §3).
+ *
+ * A crashed sidecar used to stay dead for the life of the dev session, so every
+ * `runtime.*` step targeting it kept failing until the operator restarted the
+ * whole stack. This restarts it with bounded backoff, keeps `runningProcesses`
+ * pointed at the live child so shutdown still reaps it, and gives up loudly
+ * rather than looping forever on a process that cannot boot.
+ */
+function superviseRuntime(
+	def: { cmd: string; args: string[]; name: string; cwd?: string; env?: Record<string, string> },
+	currentPath: string,
+): SupervisorHandle {
+	let previous: ChildProcess | null = null;
+	return superviseProcess({
+		name: def.name,
+		spawn: () => spawnProcess(def.cmd, def.args, def.name, currentPath, def.cwd, def.env),
+		onSpawn: (child) => {
+			// `spawnProcess` already pushed the new child; drop the dead one so
+			// the shutdown sweep doesn't grow a list of exited pids.
+			if (previous !== null) {
+				const index = runningProcesses.indexOf(previous);
+				if (index !== -1) runningProcesses.splice(index, 1);
+			}
+			previous = child;
+		},
+	});
 }
 
 /** Everything needed to respawn one trigger after a restart-class change. */
@@ -436,12 +466,26 @@ export async function devProject(opts: OptionValues) {
 		);
 	}
 
-	// 1. Start all runtime processes
-	const healthChecks: Array<{ port: number; proc: ChildProcess }> = [];
+	// 1. Start all runtime processes, each under bounded restart supervision.
+	const supervisors: SupervisorHandle[] = [];
+	const healthChecks: Array<{ port: number; proc: { exitCode: number | null; on(e: "exit", l: () => void): void } }> =
+		[];
 	for (const def of runtimeDefs) {
-		const child = spawnProcess(def.cmd, def.args, def.name, currentPath, def.cwd, def.env);
+		const handle = superviseRuntime(def, currentPath);
+		supervisors.push(handle);
 		if (def.port) {
-			healthChecks.push({ port: def.port, proc: child });
+			// The readiness probe fast-fails on a dead process. Under supervision
+			// "dead" means the supervisor GAVE UP — an exit with a restart still
+			// pending is not a failure to report.
+			healthChecks.push({
+				port: def.port,
+				proc: {
+					get exitCode() {
+						return handle.gaveUp ? (handle.child.exitCode ?? 1) : null;
+					},
+					on: (_event, listener) => handle.onGiveUp(listener),
+				},
+			});
 		}
 	}
 
@@ -639,6 +683,9 @@ export async function devProject(opts: OptionValues) {
 		console.log("\nStopping processes...");
 		clearInterval(keepAlive);
 		watcher.stop();
+		// Release BEFORE signalling: a supervised sidecar must not be restarted
+		// out from under its own shutdown.
+		for (const handle of supervisors) handle.release();
 
 		killAllGroups("SIGTERM");
 
@@ -659,6 +706,7 @@ export async function devProject(opts: OptionValues) {
 	// Safety net: SIGKILL all process groups synchronously on exit.
 	// process.kill() is synchronous and works inside 'exit' handlers.
 	process.on("exit", () => {
+		for (const handle of supervisors) handle.release();
 		killAllGroups("SIGKILL");
 	});
 }
