@@ -142,6 +142,26 @@ import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
 import { NamedMissingStateError } from "./utils/NamedMissingStateError";
 import { type StructuralRef, type StructuralTpl, isStructuralRef, isStructuralTpl, lowerRefs } from "./utils/lowerRefs";
+// #1016 — shared HTTP request-body builder: content-type dispatch, multipart
+// uploads (spooled to disk, size-capped) and `_method` spoofing.
+export {
+	DEFAULT_MAX_UPLOAD_BYTES,
+	DEFAULT_UPLOAD_SPOOL_BYTES,
+	SPOOFABLE_METHODS,
+	applyMethodSpoofing,
+	parseHttpRequest,
+	uploadLimits,
+} from "./utils/httpRequestBody";
+export type { ParseHttpRequestOptions, ParsedHttpRequest } from "./utils/httpRequestBody";
+export {
+	MalformedMultipartError,
+	SpooledFile,
+	UploadTooLargeError,
+	parseMultipartBody,
+	readBoundary,
+} from "./utils/multipart";
+export type { MultipartBody, MultipartOptions } from "./utils/multipart";
+export { MAX_FIELD_DEPTH, UNSAFE_KEY_SEGMENTS, expandFormEntries } from "./utils/nestedFields";
 export {
 	AGENT_CAPABILITY_CONTRACT_VERSION,
 	CAPABILITY_MAX_ID_LENGTH,

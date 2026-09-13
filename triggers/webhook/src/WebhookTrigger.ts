@@ -61,7 +61,15 @@ import {
 	TriggerBase,
 	WorkflowRegistry,
 } from "@blokjs/runner";
-import { type Context, type GlobalError, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
+import {
+	type Context,
+	type GlobalError,
+	type ParsedHttpRequest,
+	type RequestContext,
+	UploadTooLargeError,
+	isNonRetryableValidationError,
+	parseHttpRequest,
+} from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import type { Hono, Context as HonoContext } from "hono";
 import { v4 as uuid } from "uuid";
@@ -242,18 +250,25 @@ export default class WebhookTrigger extends TriggerBase {
 	): Promise<Response> {
 		this.counterReceived.add(1, { workflow_name: workflowName });
 
-		// 1. Capture raw body BEFORE parsing — verifiers sign the wire bytes.
-		const rawBody = await c.req.text();
-		let parsedBody: unknown = {};
-		if (rawBody.length > 0) {
-			try {
-				parsedBody = JSON.parse(rawBody) as unknown;
-			} catch {
-				// Non-JSON body — leave parsed as the raw text. Slack
-				// challenges & Shopify can post non-JSON occasionally.
-				parsedBody = rawBody;
-			}
+		// 1. Parse through the shared builder (#1016) — one body contract for
+		// every HTTP-speaking trigger: raw body captured BEFORE parsing (the
+		// verifiers sign the wire bytes) and `jsonFallback` for providers that
+		// post JSON under a sloppy content-type (Slack challenges, Shopify).
+		//
+		// Multipart is OFF: parsing the stream would empty `rawBody` and no
+		// provider signs a multipart delivery. `_method` spoofing is OFF too: a
+		// webhook body is provider-controlled DATA, not a browser form, so a
+		// delivery carrying `"_method": "delete"` must not rewrite the method.
+		let parsed: ParsedHttpRequest;
+		try {
+			parsed = await parseHttpRequest(c.req.raw, { multipart: false, jsonFallback: true, spoofing: false });
+		} catch (err) {
+			if (!(err instanceof UploadTooLargeError)) throw err;
+			this.counterRejected.add(1, { workflow_name: workflowName, reason: "payload_too_large" });
+			return c.json({ error: "Payload too large", maxBytes: err.maxBytes, configurable: "BLOK_MAX_UPLOAD_BYTES" }, 413);
 		}
+		const rawBody = parsed.rawBody;
+		const parsedBody = parsed.body;
 
 		const headers = Object.fromEntries(c.req.raw.headers);
 		const pathParams = c.req.param() as Record<string, string>;
@@ -326,6 +341,8 @@ export default class WebhookTrigger extends TriggerBase {
 				headers,
 				body: parsedBody,
 				rawBody,
+				method: parsed.method,
+				originalMethod: parsed.originalMethod,
 				pathParams,
 				queryParams,
 				eventId: result.eventId,
@@ -409,6 +426,10 @@ export default class WebhookTrigger extends TriggerBase {
 		headers: Record<string, string>;
 		body: unknown;
 		rawBody: string;
+		/** Effective method after `_method` spoofing (#1016). */
+		method: string;
+		/** The method actually on the wire — always POST for a webhook. */
+		originalMethod: string;
 		pathParams: Record<string, string>;
 		queryParams: Record<string, string>;
 		eventId: string;
@@ -432,6 +453,8 @@ export default class WebhookTrigger extends TriggerBase {
 					headers,
 					params: pathParams,
 					query: queryParams,
+					method: opts.method,
+					originalMethod: opts.originalMethod,
 				} as unknown as RequestContext;
 
 				// Stamp webhook metadata onto ctx so polymorphic dispatch

@@ -105,8 +105,10 @@ The build callback's `req` argument reads the incoming request:
 
 | Read | Source |
 |---|---|
-| `req.method` | HTTP verb (lowercase) |
-| `req.body` | Parsed JSON / form / raw text depending on `Content-Type` |
+| `req.method` | HTTP verb — the **effective** one after `_method` spoofing |
+| `req.originalMethod` | The verb actually on the wire (`POST` for a spoofed request) |
+| `req.body` | Parsed JSON / form / multipart / raw text depending on `Content-Type` |
+| `req.files` | Multipart file parts by field name (also present on `req.body`) |
 | `req.headers["x-…"]` | Lowercased header map |
 | `req.params.id` | Path params (from `:id` in `path`) |
 | `req.query.q` | Parsed query string |
@@ -115,6 +117,65 @@ The build callback's `req` argument reads the incoming request:
 The raw body is captured before parsing — webhook trigger HMAC
 verifiers need the wire bytes, not the JSON-parsed object. See
 [webhook trigger](./webhook.mdx) for that flow.
+
+### File uploads
+
+A `multipart/form-data` request is parsed straight off the stream. Text
+parts arrive as strings; file parts arrive as Web
+[`File`](https://developer.mozilla.org/docs/Web/API/File) objects on both
+`req.body` and `req.files`. A part bigger than the spool threshold is
+written to a temp file and handed over as a disk-backed `File` — read it
+with `file.stream()`, `file.bytes()` or `file.text()`; the temp file is
+deleted when the request finishes, so a node that needs to keep it must
+copy it during the run.
+
+Bracket names are expanded back into structure — the same for multipart
+and urlencoded bodies — so the shape a client flattens into field names
+arrives as the object you declared:
+
+| Posted field names | `req.body` |
+|---|---|
+| `user[name]=ada` | `{ user: { name: "ada" } }` |
+| `tags[0]=x`, `tags[1]=y` (or `tags[]` twice) | `{ tags: ["x", "y"] }` |
+| `docs[0]`, `docs[1]` (files) | `req.files.docs` is a `File[]` |
+
+Nesting stops at 5 segments (deeper names stay flat), a name used both as
+a value and as a container keeps its flat key rather than guessing, and
+`__proto__` / `constructor` / `prototype` in a name drops the field
+outright — a form value never reaches an object's prototype.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `BLOK_MAX_UPLOAD_BYTES` | `33554432` (32 MiB) | Bodies over the cap are refused with `413` before any step runs |
+| `BLOK_UPLOAD_SPOOL_BYTES` | `1048576` (1 MiB) | File parts over this size are streamed to disk instead of held in memory |
+
+### Method spoofing (`_method`)
+
+Browsers cannot send a multipart body over `PUT`/`PATCH`/`DELETE`, which
+is why Inertia's [file upload
+docs](https://inertiajs.com/docs/v3/the-basics/file-uploads) post the form
+with a `_method` field instead. Blok honours it:
+
+```ts
+// The browser posts to /profile with `_method=put` + an avatar file …
+export default workflow("update-profile", { version: "1.0.0", trigger: http.put("/profile") }, (req) => {
+  step("save", saveAvatar, { avatar: req.body }); // … and THIS workflow runs
+});
+```
+
+- Only a `POST` can spoof, and only into `put`, `patch` or `delete`
+  (case-insensitive). Anything else is left alone.
+- Works for multipart, urlencoded and JSON bodies alike.
+- The field is removed from `req.body`; `req.method` reports the
+  effective verb and `req.originalMethod` stays `POST`.
+- Routing, the middleware chain, and concurrency keys all see the
+  effective method — the request runs the `http.put()` workflow's chain,
+  not the `http.post()` one's.
+- Set `BLOK_METHOD_SPOOFING=0` to turn it off; `_method` is then an
+  ordinary body field.
+- HTTP only. The [webhook trigger](./webhook.mdx) never spoofs: a
+  provider payload is data, not a browser form, so a delivery carrying
+  `"_method": "delete"` leaves `ctx.request.method` at `POST`.
 
 ## Controlling the response
 

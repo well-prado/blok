@@ -10,7 +10,8 @@
 		"build:dev": "tsc --watch",
 		"build": "rm -rf dist && bun run tsc",
 		"test": "vitest run",
-		"test:dev": "vitest"
+		"test:dev": "vitest",
+		"test:bun": "bun run __tests__/bun/multipart.bun.ts"
 	},
 	"keywords": ["api", "blueprint"],
 	"author": "Deskree Inc",

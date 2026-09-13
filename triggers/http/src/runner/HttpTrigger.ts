@@ -22,8 +22,17 @@ import { RunTracker } from "@blokjs/runner";
 import { traceRedactSensitive } from "@blokjs/runner";
 import type { TraceAuthorizeFn } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
-import type { NodeBase } from "@blokjs/shared";
-import { type Context, GlobalError, type RequestContext, type StreamContext } from "@blokjs/shared";
+import type { NodeBase, ParsedHttpRequest } from "@blokjs/shared";
+import {
+	type Context,
+	GlobalError,
+	type RequestContext,
+	SPOOFABLE_METHODS,
+	type StreamContext,
+	UploadTooLargeError,
+	parseHttpRequest,
+	uploadLimits,
+} from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -107,6 +116,20 @@ export function isFileBasedRoutingEnabled(): boolean {
 /** Stable key for one route in the live table. */
 function routeKey(method: string, path: string): string {
 	return `${method.toUpperCase()} ${path}`;
+}
+
+/**
+ * #1016 — paths that carry a PUT/PATCH/DELETE workflow but no POST one. A
+ * browser can only send multipart over POST, so these paths need a POST mount
+ * to catch the `_method`-spoofed request (see `mountSpoofRoute`).
+ */
+function spoofOnlyPaths(routes: readonly { method: string; path: string }[]): string[] {
+	const posted = new Set(routes.filter((r) => ["POST", "ANY"].includes(r.method.toUpperCase())).map((r) => r.path));
+	const paths = new Set<string>();
+	for (const route of routes) {
+		if (SPOOFABLE_METHODS.includes(route.method.toUpperCase()) && !posted.has(route.path)) paths.add(route.path);
+	}
+	return [...paths];
 }
 
 function readWorkflowName(wf: unknown): string | undefined {
@@ -336,6 +359,14 @@ export default class HttpTrigger extends TriggerBase {
 
 	/** Route keys mounted on the Hono app at boot (see {@link hmrOverlay}). */
 	private bootRouteKeys = new Set<string>();
+
+	/**
+	 * #1016 — parsed body per in-flight request, keyed by the raw `Request`.
+	 * A body stream reads once, but a request can reach more than one handler
+	 * (HMR overlay → main app, `_method` spoof mount → catch-all), and the
+	 * entry also carries the `cleanup()` that deletes spooled upload temp files.
+	 */
+	private parsedRequests = new WeakMap<Request, ParsedHttpRequest>();
 
 	/**
 	 * Routes that appeared AFTER boot, mounted on a throwaway Hono app.
@@ -1074,6 +1105,32 @@ export default class HttpTrigger extends TriggerBase {
 			this.bootRouteKeys.add(key);
 			this.mountRoute(this.app, key, route.method, route.path);
 		}
+		for (const path of spoofOnlyPaths(routes)) this.mountSpoofRoute(this.app, path);
+	}
+
+	/**
+	 * #1016 — a POST mount for a path that only has PUT/PATCH/DELETE workflows.
+	 * Without it Hono never sees the browser's spoofed POST (no POST route on
+	 * that path) and the request falls through to the legacy catch-all. The
+	 * handler only claims the request when `_method` actually spoofs into a
+	 * registered method; otherwise it calls `next()` and the request continues
+	 * down the chain exactly as before.
+	 */
+	private mountSpoofRoute(app: Hono<AppBindings>, path: string): void {
+		app.on("POST", path, async (c, next) => {
+			const parsed = await this.parseRequestOr413(c as HonoContext<AppBindings>);
+			if (parsed instanceof Response) return parsed;
+			const live = parsed.method === "POST" ? undefined : this.liveRoutes.get(routeKey(parsed.method, path));
+			if (!live) return next();
+			return this.runWorkflowExecution(c as HonoContext<AppBindings>, {
+				workflowName: live.workflowKey,
+				subPath: "/",
+				parsed,
+				requestId: c.req.query("requestId") || (uuid() as string),
+				explicitRoute: true,
+				preloadedWorkflow: live.workflow,
+			});
+		});
 	}
 
 	/**
@@ -1083,18 +1140,23 @@ export default class HttpTrigger extends TriggerBase {
 	 */
 	private mountRoute(app: Hono<AppBindings>, key: string, method: string, path: string): void {
 		const handler = async (c: HonoContext<AppBindings>): Promise<Response> => {
-			const live = this.liveRoutes.get(key);
+			const parsed = await this.parseRequestOr413(c);
+			if (parsed instanceof Response) return parsed;
+			// #1016 — `_method` spoofing: a POST carrying `_method=put` is
+			// routed to the workflow registered for PUT on THIS path (so its
+			// middleware chain runs, not the POST one's). With no such route
+			// registered the wire-method workflow handles it as before.
+			const spoofed =
+				parsed.method !== c.req.method.toUpperCase() ? this.liveRoutes.get(routeKey(parsed.method, path)) : undefined;
 			// Gone: the workflow file was deleted since boot and the Hono route
 			// outlives it (Hono has no route removal). 404 is the honest answer.
+			const live = spoofed ?? this.liveRoutes.get(key);
 			if (!live) return c.json({ error: "Not found" }, 404);
-			const requestId = c.req.query("requestId") || (uuid() as string);
-			const { body, rawBody } = await this.parseBody(c);
 			return this.runWorkflowExecution(c, {
 				workflowName: live.workflowKey,
 				subPath: "/",
-				body,
-				rawBody,
-				requestId,
+				parsed,
+				requestId: c.req.query("requestId") || (uuid() as string),
 				explicitRoute: true,
 				preloadedWorkflow: live.workflow,
 			});
@@ -1153,6 +1215,9 @@ export default class HttpTrigger extends TriggerBase {
 		}
 
 		const overlay = new Hono<AppBindings>();
+		// #1016 — a PUT/PATCH/DELETE workflow created mid-session needs the same
+		// POST spoof mount the boot path gives it.
+		for (const path of spoofOnlyPaths([...this.hmrOverlayRoutes.values()])) this.mountSpoofRoute(overlay, path);
 		for (const [key, route] of this.hmrOverlayRoutes) {
 			this.mountRoute(overlay, key, route.method, route.path);
 		}
@@ -1167,77 +1232,71 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	/**
-	 * Parse the request body using the same content-type rules the
-	 * catch-all handler uses. Extracted so both paths (catch-all and
-	 * explicit routes) parse bodies identically.
+	 * Parse the request body ONCE per request, through the shared builder
+	 * (`@blokjs/shared` · `parseHttpRequest`) every HTTP-speaking trigger uses.
+	 * It returns the parsed body, the raw body text captured BEFORE parsing,
+	 * multipart file parts (spooled to disk past `BLOK_UPLOAD_SPOOL_BYTES`) and
+	 * the effective/original method after `_method` spoofing.
 	 *
-	 * Returns BOTH the parsed body (whatever shape the content-type
-	 * dictates) AND the raw body string captured BEFORE parsing.
-	 * `rawBody` is what webhook HMAC verifiers need to match a
-	 * provider's signature byte-exactly (Stripe `Stripe-Signature`,
-	 * Slack `X-Slack-Signature`, GitHub when bodies contain content
-	 * the JSON.stringify round-trip would mangle). For application/json
-	 * payloads we parse the raw text manually instead of calling
-	 * `c.req.json()` because `c.req.text()` and `c.req.json()` both
-	 * consume the body stream — we only get one shot.
+	 * `rawBody` is what webhook HMAC verifiers need to match a provider's
+	 * signature byte-exactly (Stripe `Stripe-Signature`, Slack
+	 * `X-Slack-Signature`, GitHub when bodies contain content the
+	 * JSON.stringify round-trip would mangle). It is the empty string for
+	 * GET/HEAD (no body), for multipart (the stream is parsed, not captured)
+	 * and when the underlying read throws.
 	 *
-	 * `rawBody` is the empty string for GET/HEAD (no body), for
-	 * non-text content-types where capture doesn't apply
-	 * (multipart/form-data — Hono's `parseBody()` reads the stream and
-	 * we can't get the raw bytes back without parsing twice), and
-	 * when the underlying read throws.
+	 * The result is memoised against the raw `Request`: the body stream can
+	 * only be read once, and a request may pass through more than one handler
+	 * (HMR overlay → main app, spoof mount → catch-all). The same memo is what
+	 * `releaseRequest` uses to delete spooled temp files when the run ends.
+	 *
+	 * @throws {UploadTooLargeError} past `BLOK_MAX_UPLOAD_BYTES` — the
+	 *   request-scope middleware turns it into a 413 before any workflow runs.
 	 */
-	private async parseBody(c: HonoContext<AppBindings>): Promise<{ body: unknown; rawBody: string }> {
-		if (c.req.method === "GET" || c.req.method === "HEAD") return { body: {}, rawBody: "" };
-		const contentType = c.req.header("content-type") || "";
+	private async parseRequest(c: HonoContext<AppBindings>): Promise<ParsedHttpRequest> {
+		const raw = c.req.raw;
+		const memo = this.parsedRequests.get(raw);
+		if (memo) return memo;
+		const parsed = await parseHttpRequest(raw);
+		this.parsedRequests.set(raw, parsed);
+		return parsed;
+	}
 
-		// multipart needs Hono's stream parser — raw bytes aren't recoverable
-		// after the parse, so rawBody stays empty. Webhook providers that
-		// sign multipart bodies are vanishingly rare; the rest is the
-		// common case.
-		if (contentType.includes("multipart/form-data")) {
-			try {
-				return { body: await c.req.parseBody(), rawBody: "" };
-			} catch {
-				return { body: {}, rawBody: "" };
-			}
-		}
-
-		// For application/json and application/x-www-form-urlencoded we
-		// CAN capture the raw body and still parse — read the text once,
-		// then parse off the captured string ourselves.
-		let rawBody = "";
+	/**
+	 * {@link parseRequest}, with the over-cap case already turned into the 413
+	 * response. Hono's compose converts a thrown error into a 500 at the handler
+	 * that threw — an enclosing middleware never sees it — so the status has to
+	 * be decided here, at the call site, before any workflow runs.
+	 */
+	private async parseRequestOr413(c: HonoContext<AppBindings>): Promise<ParsedHttpRequest | Response> {
 		try {
-			rawBody = await c.req.text();
-		} catch {
-			return { body: {}, rawBody: "" };
+			return await this.parseRequest(c);
+		} catch (err) {
+			if (!(err instanceof UploadTooLargeError)) throw err;
+			const { maxBytes } = uploadLimits();
+			this.logger.error(`[blok] upload rejected: body exceeds ${maxBytes} bytes → 413`);
+			return c.json(
+				{
+					error: "Payload too large",
+					maxBytes,
+					...(err.actualBytes !== undefined ? { actualBytes: err.actualBytes } : {}),
+					configurable: "BLOK_MAX_UPLOAD_BYTES",
+				},
+				413,
+			);
 		}
+	}
 
-		if (contentType.includes("application/json")) {
-			try {
-				return { body: rawBody.length === 0 ? {} : JSON.parse(rawBody), rawBody };
-			} catch {
-				// Malformed JSON — preserve rawBody (a webhook verifier
-				// might still want it for its 4xx error response) and let
-				// downstream handle the empty parsed body. Matches pre-
-				// v0.6 behaviour of returning {} on parse failure.
-				return { body: {}, rawBody };
-			}
+	/** Drop any temp file the request spooled. Called once the response is out. */
+	private async releaseRequest(c: HonoContext<AppBindings>): Promise<void> {
+		const parsed = this.parsedRequests.get(c.req.raw);
+		if (!parsed) return;
+		this.parsedRequests.delete(c.req.raw);
+		try {
+			await parsed.cleanup();
+		} catch (err) {
+			this.logger.error(`[blok] upload cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
-
-		if (contentType.includes("application/x-www-form-urlencoded")) {
-			try {
-				const parsed: Record<string, string> = {};
-				for (const [k, v] of new URLSearchParams(rawBody)) parsed[k] = v;
-				return { body: parsed, rawBody };
-			} catch {
-				return { body: {}, rawBody };
-			}
-		}
-
-		// Default — text body, parsed body = raw text. Matches pre-v0.6
-		// `c.req.text()` fallback.
-		return { body: rawBody, rawBody };
 	}
 
 	/**
@@ -1467,6 +1526,19 @@ export default class HttpTrigger extends TriggerBase {
 			// as a workflow.
 			mountStatic?.(this.app);
 
+			// #1016 · request scope for parsed bodies — deletes the temp files a
+			// spooled multipart upload left behind, once the response is out.
+			// (The over-cap 413 is decided in `parseRequestOr413`, at the handler
+			// that parses: Hono turns a throw into a 500 before an enclosing
+			// middleware could map it.)
+			this.app.use("*", async (c, next) => {
+				try {
+					await next();
+				} finally {
+					await this.releaseRequest(c as HonoContext<AppBindings>);
+				}
+			});
+
 			// Health check
 			this.app.all("/health-check", (c) => {
 				return c.text("Online and ready for action", 200);
@@ -1575,7 +1647,9 @@ export default class HttpTrigger extends TriggerBase {
 				}
 
 				const requestId = c.req.query("requestId") || (uuid() as string);
-				const { body, rawBody } = await this.parseBody(c);
+				const parsed = await this.parseRequestOr413(c);
+				if (parsed instanceof Response) return parsed;
+				const body = parsed.body;
 				const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 
 				// Streaming request (P3.2): when the client asks for an SSE stream,
@@ -1587,8 +1661,7 @@ export default class HttpTrigger extends TriggerBase {
 				return this.runWorkflowExecution(c, {
 					workflowName: name,
 					subPath: "",
-					body: input,
-					rawBody,
+					parsed: { ...parsed, body: input },
 					requestId,
 					explicitRoute: true,
 					preloadedWorkflow: entry.workflow,
@@ -1681,7 +1754,9 @@ export default class HttpTrigger extends TriggerBase {
 				const fullPath = c.req.path;
 				const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
 
-				const { body, rawBody } = await this.parseBody(c);
+				const parsed = await this.parseRequestOr413(c);
+				if (parsed instanceof Response) return parsed;
+				const body = parsed.body;
 
 				// Remote node execution dispatch (header-based) — only meaningful for
 				// the catch-all path, never for explicit routes.
@@ -1697,8 +1772,7 @@ export default class HttpTrigger extends TriggerBase {
 				return this.runWorkflowExecution(c, {
 					workflowName: workflowNameInPath,
 					subPath,
-					body,
-					rawBody,
+					parsed,
 					requestId,
 					remoteNodeExecution,
 					runtimeWorkflow,
@@ -2001,15 +2075,13 @@ export default class HttpTrigger extends TriggerBase {
 		opts: {
 			workflowName: string;
 			subPath: string;
-			body: unknown;
 			/**
-			 * Raw request body string captured BEFORE JSON / form parsing.
-			 * Empty string when the trigger couldn't (or didn't need to)
-			 * capture it. Surfaced as `ctx.request.rawBody` so webhook HMAC
-			 * verifiers (Stripe, Slack, byte-exact GitHub) can sign the
-			 * exact bytes the provider signed.
+			 * The parsed request envelope from {@link parseRequest}: body, the
+			 * raw body string captured BEFORE parsing (what webhook HMAC
+			 * verifiers sign), multipart file parts, and the effective /
+			 * original method after `_method` spoofing.
 			 */
-			rawBody?: string;
+			parsed: ParsedHttpRequest;
 			requestId: string;
 			explicitRoute?: boolean;
 			preloadedWorkflow?: unknown;
@@ -2029,8 +2101,11 @@ export default class HttpTrigger extends TriggerBase {
 		const id = opts.requestId;
 		let workflowNameInPath = opts.workflowName;
 		const subPath = opts.subPath;
-		const body = opts.body;
-		const rawBody = opts.rawBody ?? "";
+		const body = opts.parsed.body;
+		const rawBody = opts.parsed.rawBody;
+		// #1016 — the EFFECTIVE method (`_method` applied) is what routing,
+		// middleware chains, concurrency keys and the workflow itself see.
+		const effectiveMethod = opts.parsed.method;
 		const explicitRoute = opts.explicitRoute === true;
 		let remoteNodeExecution = opts.remoteNodeExecution === true;
 		const runtimeWorkflow = opts.runtimeWorkflow;
@@ -2162,13 +2237,15 @@ export default class HttpTrigger extends TriggerBase {
 						);
 					}
 
-					ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
+					ctx.logger.log(`Version: ${this.configuration.version}, Method: ${effectiveMethod}`);
 
 					// Method/path validation only for the catch-all path. Hono
-					// already enforced both for explicit routes.
+					// already enforced both for explicit routes. Validated against
+					// the EFFECTIVE method, so a `_method`-spoofed POST reaches a
+					// `http.put()` workflow on the legacy dispatch path too.
 					if (!explicitRoute) {
 						const { method, path } = this.configuration.trigger.http;
-						if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
+						if (method && method !== "*" && method !== "ANY" && effectiveMethod.toLowerCase() !== method.toLowerCase())
 							throw new Error("Invalid HTTP method");
 						if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
 					}
@@ -2188,7 +2265,12 @@ export default class HttpTrigger extends TriggerBase {
 						headers: Object.fromEntries([...c.req.raw.headers.entries()]),
 						params: resolvedParams,
 						query: queryObj,
-						method: c.req.method,
+						// #1016 — `method` is the EFFECTIVE method (spoofed when the
+						// body carried `_method`); `originalMethod` is what was on the
+						// wire. `files` holds the multipart file parts by field name.
+						method: effectiveMethod,
+						originalMethod: opts.parsed.originalMethod,
+						files: opts.parsed.files,
 						path: explicitRoute ? c.req.path : subPath,
 						url: c.req.url,
 					} as unknown as RequestContext;
