@@ -7,9 +7,30 @@ defmodule Blok.Logger do
   def warning(context, message, metadata \\ []), do: log(:warning, context, message, metadata)
   def error(context, message, metadata \\ []), do: log(:error, context, message, metadata)
 
+  @doc """
+  Bounded `inspect/2` for untrusted terms.
+
+  Crash reasons and exit payloads can carry an entire node input. Structured
+  errors and telemetry metadata quote this instead of the raw term so a failure
+  never turns into a payload leak.
+  """
+  @spec safe_inspect(term()) :: String.t()
+  def safe_inspect(term),
+    do: inspect(term, limit: 20, printable_limit: 256, structs: false) |> truncate()
+
+  defp truncate(value) when byte_size(value) > 512,
+    do: binary_part(value, 0, 512) <> "... [TRUNCATED]"
+
+  defp truncate(value), do: value
+
   defp log(level, context, message, metadata) do
     safe = metadata |> Enum.into(%{}) |> redact()
-    Logger.log(level, message, metadata: Map.merge(Map.get(context, :logger_metadata, %{}), safe))
+
+    Logger.log(
+      level,
+      message,
+      context |> Map.get(:logger_metadata, %{}) |> Map.merge(safe) |> Map.to_list()
+    )
   end
 
   defp redact(value) when is_map(value),
