@@ -89,11 +89,29 @@ export default class Configuration implements Config {
 		assertGrpcOnlyTransport();
 		const registry = RuntimeRegistry.getInstance();
 
-		if (NodeJsRuntimeAdapter.isAvailable() && !registry.has("nodejs")) {
-			registry.register(new NodeJsRuntimeAdapter());
+		// ADR 0016 §3 — the three JavaScript targets resolve through the SAME
+		// registry path as every other runtime. In-process wins when the
+		// orchestrator host IS the selected engine (zero overhead, the historic
+		// `runtime.nodejs` path); otherwise the kind resolves to a gRPC adapter
+		// pointing at the persistent `@blokjs/runtime-worker` for that engine.
+		// There is no fallback to a different engine in either direction — a
+		// missing worker fails the step with an explicit, actionable error.
+		if (!registry.has("nodejs")) {
+			registry.register(
+				NodeJsRuntimeAdapter.isAvailable()
+					? new NodeJsRuntimeAdapter()
+					: this.buildJavaScriptWorkerAdapter("nodejs", "node"),
+			);
 		}
-		if (BunRuntimeAdapter.isAvailable() && !registry.has("bun")) {
-			registry.register(new BunRuntimeAdapter());
+		if (!registry.has("bun")) {
+			registry.register(
+				BunRuntimeAdapter.isAvailable() ? new BunRuntimeAdapter() : this.buildJavaScriptWorkerAdapter("bun", "bun"),
+			);
+		}
+		if (!registry.has("deno")) {
+			// The runner is never hosted by Deno, so `runtime.deno` is always the
+			// out-of-process worker.
+			registry.register(this.buildJavaScriptWorkerAdapter("deno", "deno"));
 		}
 		if (!registry.has("wasi")) {
 			// The first slice exposes the identity and policy boundary but does
@@ -128,7 +146,26 @@ export default class Configuration implements Config {
 		}
 	}
 
-	private buildGrpcAdapter(kind: RuntimeKind, host: string, portEnv: string): GrpcRuntimeAdapter {
+	/**
+	 * gRPC adapter for one JavaScript execution target, pointed at the
+	 * `@blokjs/runtime-worker` process serving that engine. The remediation is
+	 * baked in here because an unreachable JavaScript worker looks exactly like
+	 * an unreachable language sidecar on the wire, and the operator's next step
+	 * is different: start the worker for the engine the project selected.
+	 */
+	private buildJavaScriptWorkerAdapter(kind: RuntimeKind, target: "node" | "bun" | "deno"): GrpcRuntimeAdapter {
+		const hostEnv = `RUNTIME_${kind.toUpperCase()}_HOST`;
+		const portEnv = `RUNTIME_${kind.toUpperCase()}_GRPC_PORT`;
+		const host = process.env[hostEnv] || "localhost";
+		return this.buildGrpcAdapter(
+			kind,
+			host,
+			portEnv,
+			`runtime.${kind} runs in the persistent ${target} worker, which is not reachable. Start it with \`blokctl dev\` (which spawns it for the project's selected runtime), or run \`${target === "deno" ? "deno run --allow-net --allow-read --allow-env" : target} node_modules/@blokjs/runtime-worker/dist/bin.js\` with GRPC_PORT=${DEFAULT_GRPC_PORTS[kind]}. Blok never falls back to another JavaScript engine.`,
+		);
+	}
+
+	private buildGrpcAdapter(kind: RuntimeKind, host: string, portEnv: string, remediation?: string): GrpcRuntimeAdapter {
 		const defaultPort = DEFAULT_GRPC_PORTS[kind];
 		const port = process.env[portEnv] ? Number.parseInt(process.env[portEnv] as string, 10) : defaultPort;
 		const tls = loadTlsConfigForKind(kind);
@@ -166,6 +203,7 @@ export default class Configuration implements Config {
 			tls,
 			healthCheckIntervalMs: resolveHealthCheckIntervalMs(),
 			healthCheckFailureThreshold: resolveHealthCheckFailureThreshold(),
+			remediation,
 		};
 		const adapter = new GrpcRuntimeAdapter(config);
 		// Start the background health probe loop now so the circuit breaker

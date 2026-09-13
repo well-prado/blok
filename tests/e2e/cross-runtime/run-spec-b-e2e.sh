@@ -9,8 +9,10 @@
 #     structured NODE_INPUT_VALIDATION error)
 #   - a cross-runtime chain threads ctx data through every runtime in order
 #
-# Boots whatever toolchains are present — all 10 polyglot runtimes:
-# Go, Rust, C#, Java, Kotlin, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3, Swift, Dart, Elixir.
+# Boots whatever toolchains are present — the 11 polyglot runtimes (Go, Rust,
+# C#, Java, Kotlin, PHP via RoadRunner `rr`, Ruby >= 3.1, Python3, Swift, Dart,
+# Elixir) plus the three JavaScript execution targets served by
+# `@blokjs/runtime-worker` under Node.js, Bun, and Deno (ADR 0016).
 # The harness probes reachability and runs against whatever subset is up.
 #
 # Usage:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
@@ -132,9 +134,42 @@ if command -v mix >/dev/null && [ -f "$ROOT/sdks/elixir/mix.exs" ]; then
   PIDS+=($!); wait_port 20010 && echo "Elixir gRPC up :20010"
 fi
 
+# --- JavaScript workers (gRPC 20012/20013/20014) — ADR 0016 ---
+# One persistent `@blokjs/runtime-worker` process per engine, from the SAME
+# built entrypoint a scaffolded project runs. Requires `bun run build`.
+JS_WORKER="$ROOT/packages/js-runtime-worker/dist/bin.js"
+if [ -f "$JS_WORKER" ]; then
+  if command -v node >/dev/null; then
+    echo "--- booting Node.js worker ---"
+    (cd "$ROOT" && GRPC_PORT=20012 node "$JS_WORKER") >/tmp/blok-jsworker-node.log 2>&1 &
+    PIDS+=($!)
+    wait_port 20012 && echo "Node.js worker gRPC up :20012" || { echo "Node.js worker NEVER came up:"; tail -20 /tmp/blok-jsworker-node.log; }
+  fi
+  if command -v bun >/dev/null; then
+    echo "--- booting Bun worker ---"
+    (cd "$ROOT" && GRPC_PORT=20013 bun "$JS_WORKER") >/tmp/blok-jsworker-bun.log 2>&1 &
+    PIDS+=($!)
+    wait_port 20013 && echo "Bun worker gRPC up :20013" || { echo "Bun worker NEVER came up:"; tail -20 /tmp/blok-jsworker-bun.log; }
+  fi
+  if command -v deno >/dev/null; then
+    echo "--- booting Deno worker ---"
+    # Least-privilege: bind one port, read the repo (node_modules + the blob
+    # dir), read env. No write, no run, no ffi — and never --allow-all.
+    (cd "$ROOT" && GRPC_PORT=20014 deno run \
+      "--allow-net=127.0.0.1:20014,localhost:20014" \
+      "--allow-read=$ROOT,$BLOK_BLOB_DIR" --allow-env --node-modules-dir=manual \
+      "$JS_WORKER") >/tmp/blok-jsworker-deno.log 2>&1 &
+    PIDS+=($!)
+    wait_port 20014 && echo "Deno worker gRPC up :20014" || { echo "Deno worker NEVER came up:"; tail -20 /tmp/blok-jsworker-deno.log; }
+  fi
+else
+  echo "--- skipping JavaScript workers: $JS_WORKER missing (run \`bun run build\`) ---"
+fi
+
 echo "--- running harness ---"
 # This script boots on 2000x (offset from a local dev stack's 1000x); the
 # harness defaults to the 1000x convention, so pass the boot ports explicitly.
 cd "$ROOT" && GO_GRPC_PORT=20001 RUST_GRPC_PORT=20002 JAVA_GRPC_PORT=20003 \
 	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 SWIFT_GRPC_PORT=20008 DART_GRPC_PORT=20009 KOTLIN_GRPC_PORT=20011 ELIXIR_GRPC_PORT=20010 \
+	NODEJS_GRPC_PORT=20012 BUN_GRPC_PORT=20013 DENO_GRPC_PORT=20014 \
 	bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts

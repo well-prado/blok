@@ -411,15 +411,90 @@ jobs:
         run: bash tests/e2e/scaffold-smoke/combos.sh
 
   # ==========================================================================
-  # Was cross-runtime.yml. Builds all 11 SDK runtimes (Go/Rust/Java/Kotlin/C#/PHP/
+  # ADR 0016 — the three selectable JavaScript execution targets. Scaffolds a
+  # real project per target and boots it under `blokctl dev`, which must bring
+  # up the persistent @blokjs/runtime-worker whenever the target differs from
+  # the engine hosting the orchestrator. Also runs the worker's own unit suite
+  # under BOTH Node.js (vitest) and Bun (`bun test`), and its integration suite,
+  # which boots the worker binary under every engine present.
+  #
+  # Cheap on purpose: HTTP trigger only, no language sidecars. The maximal
+  # scaffold lane above stays on the default target.
+  # ==========================================================================
+  js-runtime-targets:
+    name: JavaScript targets (node / bun / deno)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [node, bun, deno]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+
+      # Pinned to the worker's exact floor, so CI proves the floor it claims.
+      # Below 2.7.5 the gRPC server binds but no client call ever completes
+      # (Deno's Node-compat HTTP/2 server), so the workers look "not running".
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.7.5
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Worker unit suite under Node.js (vitest)
+        working-directory: packages/js-runtime-worker
+        run: bunx vitest run tests/worker.unit.test.ts
+
+      - name: Worker unit suite under Bun
+        working-directory: packages/js-runtime-worker
+        run: bun test tests/worker.unit.test.ts
+
+      # Boots dist/bin.js under node, bun AND deno and asserts the topology:
+      # one process per engine, N concurrent executions, nothing spawned per
+      # step, deadline honoured, graceful drain.
+      - name: Worker integration suite (node + bun + deno)
+        working-directory: packages/js-runtime-worker
+        run: bunx vitest run tests/worker.integration.test.ts
+
+      - name: Scaffold → boot with --runtime ${{ matrix.target }}
+        env:
+          SMOKE_JS_RUNTIME: ${{ matrix.target }}
+          SMOKE_RUNTIMES: none
+          SMOKE_TRIGGERS: http
+          SMOKE_SKIP_BUILD: '1'
+          BLOK_SMOKE_REQUIRE_ALL: '1'
+        run: bash tests/e2e/scaffold-smoke/run.sh
+
+  # ==========================================================================
+  # Was cross-runtime.yml. Builds the 11 SDK runtimes (Go/Rust/Java/Kotlin/C#/PHP/
   # Ruby/Python3/Swift/Dart/Elixir) in gRPC mode and drives them through the runner's own
-  # GrpcRuntimeAdapter. This is the only lane that exercises the polyglot
-  # runtimes end-to-end — without it they silently rot (the whole reason this
-  # gate exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if any single runtime
-  # fails to come up, so a broken Dockerfile can't pass as a skip.
+  # GrpcRuntimeAdapter, alongside the three JavaScript execution targets served
+  # by @blokjs/runtime-worker under Node.js/Bun/Deno (ADR 0016) — 14 runtimes on
+  # one contract. This is the only lane that exercises the polyglot runtimes
+  # end-to-end — without it they silently rot (the whole reason this gate
+  # exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if any single runtime fails to
+  # come up, so a broken Dockerfile (or a worker that stops booting under one
+  # engine) can't pass as a skip.
   # ==========================================================================
   cross-runtime:
-    name: Cross-runtime chain over gRPC (11 languages)
+    name: Cross-runtime chain over gRPC (11 languages + 3 JavaScript targets)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -434,9 +509,28 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The harness imports GrpcRuntimeAdapter from @blokjs/runner.
-      - name: Build @blokjs/runner
-        run: bunx nx build @blokjs/runner
+      # The three JavaScript workers run on the HOST (not in compose) — they are
+      # the same built entrypoint a scaffolded project spawns. Pinned so a
+      # toolchain bump is a deliberate commit, not a silent drift.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+
+      # Pinned to the worker's exact floor, so CI proves the floor it claims.
+      # Below 2.7.5 the gRPC server binds but no client call ever completes
+      # (Deno's Node-compat HTTP/2 server), so the workers look "not running".
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.7.5
+
+      # The harness imports GrpcRuntimeAdapter from @blokjs/runner; the worker
+      # entrypoint is @blokjs/runtime-worker's dist/bin.js.
+      # @blokjs/core is what the REAL node template the fixtures use imports, so
+      # it must be built even though nothing in the harness imports it directly.
+      - name: Build @blokjs/runner, @blokjs/runtime-worker and @blokjs/core
+        run: bunx nx run-many -t build -p @blokjs/runtime-worker @blokjs/core && bun run scripts/fix-esm-extensions.ts
 
       # Bake a scaffolded `e2e-user` node into each SDK build context (real
       # codegen for compiled langs, BLOK_NODES_DIR node-dir for dynamic) so the
@@ -453,7 +547,34 @@ jobs:
       - name: Build + start the 11 SDK gRPC runtimes
         run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
 
-      - name: Run cross-runtime gRPC harness (all 11 required, user nodes + claim-check asserted)
+      # One persistent worker per engine on the harness's default JS ports. The
+      # Deno one is launched with least-privilege flags, never --allow-all.
+      - name: Start the JavaScript runtime workers (node / bun / deno)
+        env:
+          BLOK_BLOB_DIR: ${{ github.workspace }}/tests/e2e/cross-runtime/.blobs
+          BLOK_WORKER_NODES: ${{ github.workspace }}/tests/e2e/cross-runtime/.build/javascript/dist/Nodes.js
+        run: |
+          set -e
+          WORKER=packages/js-runtime-worker/dist/bin.js
+          GRPC_PORT=10012 node "$WORKER" > /tmp/worker-node.log 2>&1 &
+          GRPC_PORT=10013 bun "$WORKER" > /tmp/worker-bun.log 2>&1 &
+          GRPC_PORT=10014 deno run \
+            "--allow-net=127.0.0.1:10014,localhost:10014" \
+            "--allow-read=${{ github.workspace }},$BLOK_BLOB_DIR" \
+            --allow-env --node-modules-dir=manual "$WORKER" > /tmp/worker-deno.log 2>&1 &
+          # Requested-but-absent is a FAILURE, never a skip: a worker that never
+          # binds would otherwise reach the harness as "not running" and read
+          # like a missing runtime instead of a worker that died on boot.
+          fail=0
+          for port in 10012 10013 10014; do
+            up=""
+            for _ in $(seq 1 60); do nc -z 127.0.0.1 "$port" && { up=1; break; }; sleep 1; done
+            if [ -z "$up" ]; then echo "::error::JavaScript worker never listened on :$port"; fail=1; fi
+          done
+          tail -n +1 /tmp/worker-*.log
+          exit "$fail"
+
+      - name: Run cross-runtime gRPC harness (all 14 required, user nodes + claim-check asserted)
         env:
           BLOK_E2E_REQUIRE_ALL: "1"
           BLOK_E2E_USERNODES: "1"
@@ -464,7 +585,9 @@ jobs:
 
       - name: Print runtime logs on failure
         if: failure()
-        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml logs --tail=100
+        run: |
+          docker compose -f tests/e2e/cross-runtime/docker-compose.yml logs --tail=100
+          tail -n 50 /tmp/worker-*.log || true
 
       - name: Tear down
         if: always()

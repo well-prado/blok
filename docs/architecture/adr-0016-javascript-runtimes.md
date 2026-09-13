@@ -113,6 +113,35 @@ workflow config, logs, traces, or model context.
 - The Bun adapter's current subprocess fallback is not a conforming production
   worker implementation and must not be expanded or relied upon by this slice.
 
+### Worker slice (implemented)
+
+The persistent worker described in §3 is `@blokjs/runtime-worker`: one gRPC
+server, one process per engine, running unchanged under Node.js, Bun, and Deno.
+It serves the canonical `blok.runtime.v1` service, loads the SAME
+`defineNode()` modules the in-process path loads (the project's `Nodes` module,
+the source of truth the runner's `NodeMap` is built from), reflects Zod schemas
+and capability manifests into `NodeDescriptor`, resolves `blob-v1` claim-check
+references, and maps failures to the canonical `NodeError` envelope with
+`sdk = blok-js-<node|bun|deno>` and `runtime_kind = runtime.<nodejs|bun|deno>`.
+
+Consequences of that slice:
+
+- `runtime.deno` executes. `runtime.bun` and `runtime.nodejs` execute
+  in-process when the orchestrator host is that engine, and through the worker
+  otherwise. The registry decides once, at `Configuration` boot.
+- Default worker ports are `10012` (Node.js), `10013` (Bun), and `10014`
+  (Deno), continuing the `HTTP_PORT + 1000` convention, overridable per kind
+  via `RUNTIME_<KIND>_GRPC_PORT`.
+- The runtime capability manifest of §4 is advertised on every `ListNodes`
+  response in the `blok-runtime-manifest` gRPC metadata header, and validated
+  against `RuntimeCapabilityManifestSchema` at worker boot.
+- Deno `--allow-*` flags are derived from the effects nodes declare, over a
+  least-privilege baseline of one bound port, project read, and env read.
+  `--allow-all` requires `BLOK_DENO_ALLOW_ALL=1` and prints a diagnostic.
+- Only resolved inputs and the documented projection cross the boundary. A
+  node in the worker sees an EMPTY `ctx.state`; anything it publishes travels
+  back as `vars_delta`.
+
 ## Conformance requirements
 
 The following are machine-checked in the first slice:

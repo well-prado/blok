@@ -281,6 +281,7 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			message: `Runtime ${this.kind} unavailable — circuit breaker is open after consecutive Health failures`,
 			description: `The background health probe could not reach ${this.config.host}:${this.config.port} for the configured failure threshold. Calls fail fast until a probe succeeds.`,
 			remediation:
+				this.config.remediation ??
 				"Check the SDK process is running and reachable, then wait for the next health probe to recover the circuit.",
 			retryable: true,
 			retryAfterMs: this.config.healthCheckIntervalMs ?? GRPC_DEFAULTS.HEALTH_INTERVAL_MS,
@@ -876,6 +877,7 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			sdk: `blok-${this.kind}`,
 			sdkVersion: "",
 			runtimeKind: `runtime.${this.kind}`,
+			remediation: this.config.remediation,
 		};
 	}
 }

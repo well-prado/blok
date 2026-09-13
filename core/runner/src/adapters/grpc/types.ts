@@ -38,6 +38,15 @@ export interface GrpcAdapterConfig {
 	 * {@link GRPC_DEFAULTS.HEALTH_FAILURE_THRESHOLD}.
 	 */
 	readonly healthCheckFailureThreshold?: number;
+	/**
+	 * Operator-facing next step attached to transport-level failures (an
+	 * unreachable or unconfigured sidecar). The SDK's OWN remediation always
+	 * wins when it returns a structured `NodeError`; this only fills the gap
+	 * where the call never reached a server — which is exactly the case the
+	 * JavaScript worker targets need to stay explicit about instead of
+	 * silently falling back to another engine.
+	 */
+	readonly remediation?: string;
 }
 
 /**
@@ -103,9 +112,14 @@ export const GRPC_DEFAULTS = {
  * override per language via `RUNTIME_<KIND>_GRPC_PORT`.
  */
 export const DEFAULT_GRPC_PORTS: Readonly<Record<RuntimeKind, number>> = {
-	nodejs: 0, // in-process; no port
-	bun: 0,
-	deno: 0, // persistent worker target; no sidecar port until registered
+	// The three JavaScript targets are served by `@blokjs/runtime-worker`, one
+	// long-lived process per engine. In-process execution still wins when the
+	// orchestrator host IS the selected engine; these ports are the
+	// cross-host/out-of-process path (ADR 0016 §3). They continue the
+	// HTTP_PORT+1000 convention from 9012/9013/9014.
+	nodejs: 10012,
+	bun: 10013,
+	deno: 10014,
 	go: 10001,
 	rust: 10002,
 	java: 10003,

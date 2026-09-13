@@ -5,6 +5,7 @@ import util from "node:util";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import { findOccupiedGrpcPorts, waitForGrpcPort } from "../../services/health-probe.js";
+import { hostTargetFromStartCommands, planJsWorker } from "../../services/js-worker.js";
 import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	buildSwiftIfChanged,
@@ -399,6 +400,30 @@ export async function devProject(opts: OptionValues) {
 				name: "Python3 Runner (legacy)",
 			});
 		}
+	}
+
+	// ADR 0016 §3 — the project's JavaScript execution target. When it differs
+	// from the engine hosting the orchestrator, `runtime.nodejs` / `runtime.bun`
+	// / `runtime.deno` steps run in ONE persistent worker process, spawned and
+	// health-probed exactly like a language sidecar. Same target as the host →
+	// in-process, nothing to spawn. Missing/too-old binary → reported skip with
+	// remediation; never a silent swap to another engine.
+	const jsTarget = config?.runtime ?? "node";
+	const hostTarget = hostTargetFromStartCommands(Object.values(config?.triggers ?? {}).map((t) => t.startCmd));
+	const jsPlan = await planJsWorker({
+		projectRoot: currentPath,
+		target: jsTarget,
+		hostTarget,
+		blobDir: process.env.BLOK_BLOB_DIR ?? null,
+	});
+	if (jsPlan.kind === "spawn") {
+		runtimeDefs.push(jsPlan.spawn);
+	} else if (jsPlan.kind === "skip") {
+		console.log(
+			`  Warning: JavaScript worker for target "${jsTarget}" not started — ${jsPlan.reason}\n           runtime.${jsTarget === "node" ? "nodejs" : jsTarget} steps will fail until it is available.`,
+		);
+	} else {
+		console.log(`  JavaScript target: ${jsTarget} — ${jsPlan.reason}.`);
 	}
 
 	// Never mistake somebody else's listener for a runtime we just spawned.

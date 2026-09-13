@@ -1,5 +1,6 @@
 import child_process from "node:child_process";
 import util from "node:util";
+import type { JavaScriptRuntime } from "@blokjs/shared";
 import { compareSemver } from "./semver-utils.js";
 
 const exec = util.promisify(child_process.exec);
@@ -446,4 +447,117 @@ export function getRuntimeDefinition(kind: string): Omit<RuntimeInfo, "available
  */
 export function getAllRuntimeDefinitions(): Omit<RuntimeInfo, "available" | "version">[] {
 	return [...RUNTIME_DEFINITIONS];
+}
+
+// ============================================================================
+// JavaScript execution targets (ADR 0016)
+// ============================================================================
+//
+// `node`, `bun`, and `deno` are NOT sidecar language runtimes — they are the
+// project's JavaScript execution target, served by one persistent
+// `@blokjs/runtime-worker` process per engine. They deliberately live outside
+// RUNTIME_DEFINITIONS (which drives `runtime add`/`remove`) and are selected
+// with `blokctl runtime use <target>` instead.
+
+/** Relative path to the worker entrypoint inside a project's node_modules. */
+export const JS_WORKER_ENTRY = "node_modules/@blokjs/runtime-worker/dist/bin.js";
+
+export interface JavaScriptRuntimeDefinition {
+	/** Project-level target as written in `.blok/config.json`. */
+	target: JavaScriptRuntime;
+	/** Canonical runner/step kind (`node` → `nodejs`). */
+	kind: string;
+	label: string;
+	/** Executable that hosts the worker. */
+	binary: string;
+	versionCommand: string;
+	minVersion: string;
+	/** Mirrors `DEFAULT_GRPC_PORTS` in `@blokjs/runner`. One source of truth per
+	 * repo convention: HTTP 9012/9013/9014 + 1000. */
+	defaultGrpcPort: number;
+	installHint: string;
+}
+
+export const JAVASCRIPT_RUNTIME_DEFINITIONS: readonly JavaScriptRuntimeDefinition[] = [
+	{
+		target: "node",
+		kind: "nodejs",
+		label: "Node.js",
+		binary: "node",
+		versionCommand: "node --version",
+		minVersion: "20.0.0",
+		defaultGrpcPort: 10012,
+		installHint: "Install Node.js 20+: https://nodejs.org/en/download",
+	},
+	{
+		target: "bun",
+		kind: "bun",
+		label: "Bun",
+		binary: "bun",
+		versionCommand: "bun --version",
+		minVersion: "1.1.0",
+		defaultGrpcPort: 10013,
+		installHint: "Install Bun 1.1+: https://bun.sh/docs/installation",
+	},
+	{
+		target: "deno",
+		kind: "deno",
+		label: "Deno",
+		binary: "deno",
+		versionCommand: "deno --version",
+		// Deno's Node-compat HTTP/2 SERVER could not complete a gRPC connection
+		// before 2.7.5: the worker binds its port and then never answers a call,
+		// so an older Deno reads as "worker not running" rather than as a version
+		// problem. Bisected against the worker's own integration suite.
+		minVersion: "2.7.5",
+		defaultGrpcPort: 10014,
+		installHint:
+			"Install Deno 2.7.5+: https://docs.deno.com/runtime/getting_started/installation/ (older Deno binds the port but its Node-compat HTTP/2 server never completes a gRPC connection)",
+	},
+];
+
+export interface JavaScriptRuntimeInfo extends JavaScriptRuntimeDefinition {
+	available: boolean;
+	version?: string;
+	/** Exact next step when `available` is false. Empty when it is true. */
+	remediation: string;
+}
+
+export function getJavaScriptRuntimeDefinition(target: string): JavaScriptRuntimeDefinition | undefined {
+	return JAVASCRIPT_RUNTIME_DEFINITIONS.find((d) => d.target === target);
+}
+
+/** Parse `node -v` / `bun -v` / `deno --version` output. */
+export function parseJavaScriptVersion(output: string, target: JavaScriptRuntime): string | undefined {
+	if (target === "deno") return output.match(/deno\s+(\d+\.\d+\.\d+)/i)?.[1];
+	return output.match(/(\d+\.\d+\.\d+)/)?.[1];
+}
+
+/**
+ * Probe one JavaScript execution target's binary and version. Truthful by
+ * construction: a missing or too-old binary reports `available: false` with the
+ * exact remediation, and is never silently substituted with another engine.
+ */
+export async function detectJavaScriptRuntime(target: JavaScriptRuntime): Promise<JavaScriptRuntimeInfo> {
+	const def = getJavaScriptRuntimeDefinition(target);
+	if (!def) throw new Error(`Unknown JavaScript runtime target "${target}".`);
+	const output = await tryExec(def.versionCommand);
+	if (output === null) {
+		return { ...def, available: false, remediation: `\`${def.binary}\` is not on PATH. ${def.installHint}` };
+	}
+	const version = parseJavaScriptVersion(output, target);
+	if (version && compareSemver(version, def.minVersion) < 0) {
+		return {
+			...def,
+			available: false,
+			version,
+			remediation: `${def.label} ${version} is older than the required ${def.minVersion}. ${def.installHint}`,
+		};
+	}
+	return { ...def, available: true, version, remediation: "" };
+}
+
+/** Detect every JavaScript execution target. */
+export async function detectJavaScriptRuntimes(): Promise<JavaScriptRuntimeInfo[]> {
+	return Promise.all(JAVASCRIPT_RUNTIME_DEFINITIONS.map((d) => detectJavaScriptRuntime(d.target)));
 }

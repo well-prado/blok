@@ -35,7 +35,7 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 				data: null,
 				errors: {
 					message:
-						"runtime.nodejs requires the Blok runner to be hosted by Node.js until the persistent Node.js worker is configured",
+						"runtime.nodejs cannot execute in-process: this runner is not hosted by Node.js. Configuration registers the persistent Node.js worker (gRPC) for this case — reaching this branch means the adapter was registered manually on a mismatched host.",
 				},
 			};
 		}

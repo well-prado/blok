@@ -68,6 +68,7 @@ import { runtimeList } from "../../../src/commands/runtime/list.js";
 import { runtimeRemove } from "../../../src/commands/runtime/remove.js";
 import { assertSidecarKind } from "../../../src/commands/runtime/shared.js";
 import { runtimeUse } from "../../../src/commands/runtime/use.js";
+import { getJavaScriptRuntimeDefinition } from "../../../src/services/runtime-detector.js";
 import { detectRuntimes, getAllRuntimeDefinitions } from "../../../src/services/runtime-detector.js";
 
 interface FixtureRuntime {
@@ -467,7 +468,22 @@ describe("runtime list --json", () => {
 		spy.mockRestore();
 
 		const out = JSON.parse(lines.join("\n"));
-		expect(out.javascript).toEqual({ target: "deno", execution: "persistent-worker", available: false });
+		// The JavaScript block is PROBED, not read back from config: `available`
+		// reflects whether this machine actually has the engine, and carries the
+		// exact remediation when it does not.
+		expect(out.javascript).toMatchObject({
+			target: "deno",
+			kind: "runtime.deno",
+			execution: "persistent-worker",
+			binary: "deno",
+			// Sourced, not duplicated: the floor is pinned once, in
+			// tests/services/js-worker.test.ts, alongside the CI-pin drift guard.
+			minVersion: getJavaScriptRuntimeDefinition("deno")?.minVersion,
+			grpcPort: 10014,
+		});
+		expect(typeof out.javascript.available).toBe("boolean");
+		// Unavailable must always come with a next step; available needs none.
+		expect(out.javascript.available || Boolean(out.javascript.remediation)).toBe(true);
 		expect(out.installed.map((r: { kind: string }) => r.kind)).toContain("go");
 		expect(out.available.map((r: { kind: string }) => r.kind)).not.toContain("go");
 		expect(out.available.length).toBeGreaterThan(0);

@@ -16,12 +16,14 @@
  *
  * Run:  bun tests/e2e/cross-runtime/prepare-usernodes.ts
  */
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	csharp_node_file,
 	dart_node_file,
 	elixir_node_file,
+	function_first_node_file,
 	go_node_file,
 	java_node_file,
 	kotlin_node_file,
@@ -134,9 +136,98 @@ prepCompiled("swift", "node.swift", swift_node_file, generateSwiftNodeRegistry);
 prepCompiled("dart", "node.dart", dart_node_file, generateDartNodeRegistry);
 prepCompiled("elixir", "node.ex", elixir_node_file, generateElixirNodeRegistry);
 
+/**
+ * Build a workspace package on demand. The cross-runtime lane builds only what
+ * the HARNESS imports, so anything the FIXTURES need must be asked for
+ * explicitly instead of assumed to be lying around from someone's full build.
+ */
+function ensureBuilt(pkg: string, entry: string): void {
+	if (existsSync(entry)) return;
+	console.log(`  javascript: ${pkg} is not built yet — building it`);
+	const built = spawnSync("bunx", ["nx", "build", pkg], { cwd: ROOT, stdio: "inherit" });
+	if (built.status !== 0 || !existsSync(entry)) {
+		console.error(`  javascript: FAILED to build ${pkg} (expected ${entry})`);
+		process.exit(1);
+	}
+	// #687 — a BARE `nx build` emits extensionless relative specifiers, which Bun
+	// resolves and Node does not. Skipping this leaves every dist it touched
+	// (the package AND its dependencies, via `dependsOn: ^build`) unloadable
+	// under Node, which is exactly how a Node worker ends up failing on
+	// `Cannot find module '.../core/shared/dist/BlokError'`.
+	const fixed = spawnSync("bun", ["run", "scripts/fix-esm-extensions.ts"], { cwd: ROOT, stdio: "inherit" });
+	if (fixed.status !== 0) {
+		console.error("  javascript: FAILED to apply the Node-ESM specifier fixup after building");
+		process.exit(1);
+	}
+}
+
+/**
+ * JavaScript — the three engines share ONE build context because they share one
+ * worker. This mirrors what a scaffolded project actually does: the REAL
+ * `defineNode` template under `src/nodes/<name>/index.ts`, a `src/Nodes.ts`
+ * default-exporting the node record, and the project's own `tsc` emitting
+ * `dist/Nodes.js`. The worker then loads that module — Node.js needs the
+ * compiled output, Bun and Deno would take either.
+ */
+function prepJavaScript(): void {
+	const ctx = join(BUILD, "javascript");
+	rmSync(ctx, { recursive: true, force: true });
+	write(join(ctx, "src", "nodes", NAME, "index.ts"), render(function_first_node_file));
+	write(
+		join(ctx, "src", "Nodes.ts"),
+		`import e2eUser from "./nodes/${NAME}/index.js";\n\nconst nodes = { "${NAME}": e2eUser };\n\nexport default nodes;\n`,
+	);
+	// `"type": "module"` so Node loads the emitted ESM without reparsing it.
+	write(
+		join(ctx, "package.json"),
+		`${JSON.stringify({ name: "blok-e2e-javascript-usernodes", private: true, type: "module" }, null, 2)}\n`,
+	);
+	write(
+		join(ctx, "tsconfig.json"),
+		`${JSON.stringify(
+			{
+				compilerOptions: {
+					target: "es2022",
+					module: "es2022",
+					moduleResolution: "bundler",
+					lib: ["es2022"],
+					rootDir: "./src",
+					outDir: "./dist",
+					strict: true,
+					skipLibCheck: true,
+					// No partial emit: a Nodes.js that compiled with errors is a
+					// worker that boots and then dies on its first import.
+					noEmitOnError: true,
+				},
+				include: ["./src"],
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	// The REAL template imports `@blokjs/core`, so that workspace package must be
+	// BUILT — for `tsc` (its types) and at run time (the emitted `Nodes.js`
+	// imports it for real). A lane that builds only @blokjs/runtime-worker never
+	// builds @blokjs/core, which is how this used to emit a `Nodes.js` no worker
+	// could load, and then read as "runtime not running" three steps later.
+	ensureBuilt("@blokjs/core", join(ROOT, "core", "core", "dist", "index.js"));
+
+	const built = spawnSync("bunx", ["tsc", "-p", ctx], { cwd: ROOT, encoding: "utf8" });
+	if (built.status !== 0 || !existsSync(join(ctx, "dist", "Nodes.js"))) {
+		// Loud, never lenient. A silently-degraded fixture surfaces as a missing
+		// runtime in the harness, which reads like a broken worker.
+		console.error(`  javascript: FAILED to compile the e2e-user node\n${built.stdout ?? ""}${built.stderr ?? ""}`);
+		process.exit(1);
+	}
+	console.log(`  javascript: node compiled → ${join(ctx, "dist", "Nodes.js").replace(ROOT, ".")} (BLOK_WORKER_NODES)`);
+}
+
 // Dynamic — BLOK_NODES_DIR fs-scan at boot.
 prepDynamic("python3", "node.py", python3_file, { "__init__.py": "" });
 prepDynamic("ruby", "node.rb", ruby_node_file);
 prepDynamic("php", `src/Nodes/${PASCAL}Node.php`, php_node_file);
+
+// JavaScript (node/bun/deno) — one worker, one compiled node module.
+prepJavaScript();
 
 console.log("Done. Build with: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build");

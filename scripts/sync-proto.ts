@@ -24,6 +24,7 @@ const CANONICAL = "proto/blok/runtime/v1/runtime.proto";
 // expects it (java nests under src/main/proto; the runner under its adapter).
 const CONSUMERS = [
 	"core/runner/src/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
+	"packages/js-runtime-worker/src/proto/blok/runtime/v1/runtime.proto",
 	"sdks/go/proto/blok/runtime/v1/runtime.proto",
 	"sdks/rust/proto/blok/runtime/v1/runtime.proto",
 	"sdks/java/src/main/proto/blok/runtime/v1/runtime.proto",

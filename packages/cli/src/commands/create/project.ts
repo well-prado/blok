@@ -15,7 +15,12 @@ import { setupObservabilityStack } from "../../services/obs-setup.js";
 import { type ObsStackTier, parseObsTier } from "../../services/obs-tiers.js";
 import { rewriteObservabilityEnvBlock } from "../../services/observability-mutations.js";
 import { manager as pm } from "../../services/package-manager.js";
-import { type RuntimeInfo, detectRuntimes, getRuntimeDefinition } from "../../services/runtime-detector.js";
+import {
+	type RuntimeInfo,
+	detectRuntimes,
+	getJavaScriptRuntimeDefinition,
+	getRuntimeDefinition,
+} from "../../services/runtime-detector.js";
 import {
 	type RuntimeConfig,
 	type TriggerConfig,
@@ -1099,6 +1104,12 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blokjs/api-call": localRepoPath ? localDep("nodes/web/api-call@1.0.0") : BLOKJS_DEP_RANGE,
 			"@blokjs/if-else": localRepoPath ? localDep("nodes/control-flow/if-else@1.0.0") : BLOKJS_DEP_RANGE,
 			"@blokjs/helpers": localRepoPath ? localDep("nodes/utility/helpers@1.0.0") : BLOKJS_DEP_RANGE,
+			// ADR 0016 — the persistent JavaScript execution worker. Every project
+			// declares it because the orchestrator host and the project's
+			// JavaScript target are independent: a `node`-target project hosted by
+			// Bun (what `blokctl dev` does) needs the worker just as much as a
+			// `bun`- or `deno`-target one.
+			"@blokjs/runtime-worker": localRepoPath ? localDep("packages/js-runtime-worker") : BLOKJS_DEP_RANGE,
 		};
 
 		// #709 — the base tsconfig is copied from the primary trigger package,
@@ -1312,6 +1323,11 @@ export async function createProject(opts: OptionValues, version: string, current
 				fsExtra.appendFileSync(envLocal, envVars);
 			}
 		}
+
+		// ADR 0016 — the JavaScript worker's gRPC port. Written for EVERY project
+		// so the runner and `blokctl dev` read the same number from one place, and
+		// so two projects on one machine can be moved apart by editing this file.
+		fsExtra.appendFileSync(envLocal, generateJavaScriptWorkerEnvVars(selectedJavaScriptRuntime));
 
 		// Resolve the selected observability modules (+ their dependencies) into a
 		// config map + env blocks. obs-stack is handled by --obs-stack, not here.
@@ -2913,4 +2929,22 @@ NATS_STREAM_NAME=blok-queue`,
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * `.env.local` block for the project's JavaScript execution target. The port
+ * mirrors `DEFAULT_GRPC_PORTS` in `@blokjs/runner`; exporting it here is what
+ * lets an operator move the worker without editing two files.
+ */
+export function generateJavaScriptWorkerEnvVars(target: JavaScriptRuntime): string {
+	const def = getJavaScriptRuntimeDefinition(target);
+	if (!def) return "";
+	return [
+		"",
+		"# JavaScript execution target (blokctl runtime use <node|bun|deno>).",
+		`# runtime.${def.kind} steps execute in the persistent @blokjs/runtime-worker`,
+		"# process when the orchestrator host is a different engine.",
+		`RUNTIME_${def.kind.toUpperCase()}_GRPC_PORT=${def.defaultGrpcPort}`,
+		"",
+	].join("\n");
 }
