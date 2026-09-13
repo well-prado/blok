@@ -149,6 +149,16 @@ function ensureBuilt(pkg: string, entry: string): void {
 		console.error(`  javascript: FAILED to build ${pkg} (expected ${entry})`);
 		process.exit(1);
 	}
+	// #687 — a BARE `nx build` emits extensionless relative specifiers, which Bun
+	// resolves and Node does not. Skipping this leaves every dist it touched
+	// (the package AND its dependencies, via `dependsOn: ^build`) unloadable
+	// under Node, which is exactly how a Node worker ends up failing on
+	// `Cannot find module '.../core/shared/dist/BlokError'`.
+	const fixed = spawnSync("bun", ["run", "scripts/fix-esm-extensions.ts"], { cwd: ROOT, stdio: "inherit" });
+	if (fixed.status !== 0) {
+		console.error("  javascript: FAILED to apply the Node-ESM specifier fixup after building");
+		process.exit(1);
+	}
 }
 
 /**
