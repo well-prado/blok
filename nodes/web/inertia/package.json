@@ -20,7 +20,7 @@
 	"devDependencies": {
 		"@inertiajs/core": "^3.7.1",
 		"@types/node": "^22.15.21",
-		"jsdom": "^26.1.0",
+		"jsdom": "^27.4.0",
 		"rimraf": "^6.1.2",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"
