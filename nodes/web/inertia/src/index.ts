@@ -34,6 +34,38 @@ export { buildPage, isInertiaRequest, isPartialReload } from "./page.js";
 export type { BuildPageInput, PageMetadata } from "./page.js";
 export * from "./security/index.js";
 
+// --- typed page contracts (#995, v3 shape per #1008) -------------------------
+export {
+	_resetPageRegistry,
+	always,
+	defer,
+	definePage,
+	getPageRegistry,
+	merge,
+	once,
+	optional,
+	scroll,
+	shared,
+} from "./define-page.js";
+export type {
+	DeferOptions,
+	MergeOptions,
+	ModeProp,
+	NodeLike,
+	OnceOptions,
+	PageDef,
+	PageProps,
+	PageRegistryEntry,
+	PageRegistryProp,
+	PageShape,
+	PropMode,
+	PropsOf,
+	PropValue,
+	RenderInputs,
+	RenderOptions,
+	ScrollOptions,
+} from "./define-page.js";
+
 const scrollPropSchema = z.object({
 	pageName: z.string(),
 	previousPage: z.union([z.number(), z.string(), z.null()]).optional(),

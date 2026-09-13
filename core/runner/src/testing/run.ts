@@ -232,7 +232,7 @@ interface DeclaredStep {
 }
 
 /** Normalized step types the runner resolves internally — no node to register. */
-const STRUCTURAL_TYPES = new Set(["forEach", "switch", "tryCatch", "loop", "wait"]);
+const STRUCTURAL_TYPES = new Set(["forEach", "switch", "tryCatch", "loop", "wait", "page"]);
 
 /** Unwrap whatever the author passed into the plain v2 workflow object. */
 function toWorkflowModel(source: unknown): Record<string, unknown> {

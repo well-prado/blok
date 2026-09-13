@@ -20,6 +20,8 @@ export {
 	complete,
 	completion,
 	evidence,
+	makeHandle,
+	page,
 	subworkflow,
 	// Escape hatch to a dynamically-published state key (#333) — see dsl.ts for
 	// the full rationale. Was missing from this hand-list (#717).
@@ -65,6 +67,12 @@ export type {
 	Handle,
 	EphemeralHandle,
 	ErrorHandle,
+	InputOf,
+	OutputOf,
+	NodeTypeWitness,
+	PagePropMode,
+	PagePropSpec,
+	PageStepOptions,
 	Refable,
 	RuntimeNode,
 	ModuleNode,

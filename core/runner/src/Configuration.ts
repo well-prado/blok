@@ -721,6 +721,12 @@ export default class Configuration implements Config {
 			tryCatch: {
 				resolver: async (node: RunnerNode) => await this.tryCatchResolver(node),
 			},
+			// #1008 · `page({...})` step — lazy Inertia prop resolution. The inner
+			// prop steps + the serializer are pre-resolved by the
+			// isFlowWithProperties path in `getNodes()`.
+			page: {
+				resolver: async (node: RunnerNode) => await this.pageResolver(node),
+			},
 		};
 	}
 
@@ -989,6 +995,22 @@ export default class Configuration implements Config {
 	protected async tryCatchResolver(node: RunnerNode): Promise<RunnerNode> {
 		const { TryCatchNode } = await import("./TryCatchNode");
 		const n = new TryCatchNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		return n;
+	}
+
+	/**
+	 * #1008 · resolve a `page` step. The header-driven prop-resolution logic
+	 * lives in `PageNode.run()`; the inner `steps` array (one step per prop plus
+	 * the serializer) is pre-resolved by the isFlowWithProperties path.
+	 */
+	protected async pageResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { PageNode } = await import("./PageNode");
+		const n = new PageNode();
 		n.node = node.node;
 		n.name = node.name;
 		n.type = node.type;

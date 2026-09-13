@@ -76,6 +76,7 @@ import {
 	not as condNot,
 	evidence,
 	makeHandle,
+	page,
 	state,
 	step,
 	subworkflow,
@@ -405,6 +406,8 @@ export {
 	callbackSwitchOn as switchOn,
 	// tryCatch over handles (#317)
 	callbackTryCatch as tryCatch,
+	// Inertia page control step (#1008)
+	page,
 	// enforced-agent workflow contracts (#919)
 	agentStep,
 	approval,

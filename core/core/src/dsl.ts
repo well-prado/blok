@@ -15,6 +15,8 @@ export {
 	complete,
 	completion,
 	evidence,
+	makeHandle,
+	page,
 	step,
 	subworkflow,
 	state,
@@ -46,11 +48,24 @@ export type {
 	EvidenceRef,
 	GateRef,
 	GateRequirement,
+	PagePropMode,
+	PagePropSpec,
+	PageStepOptions,
 	SubworkflowOptions,
 	TriggerHandle,
 } from "@blokjs/runner/stepBuilder";
 export type { JoinContract, RetryResumeIdempotencyContract } from "@blokjs/shared";
-export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, ModuleNode } from "@blokjs/runner/handles";
+export type {
+	Handle,
+	EphemeralHandle,
+	ErrorHandle,
+	InputOf,
+	OutputOf,
+	Refable,
+	RuntimeNode,
+	ModuleNode,
+	NodeTypeWitness,
+} from "@blokjs/runner/handles";
 // `runtimeNode` / `node` are REAL values — `step()` lowers them to runtime /
 // module steps respectively (#424; node() = the typed-handle counterpart of a
 // bare `use: "<name>"` string for published/named nodes).
