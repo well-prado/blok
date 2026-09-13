@@ -92,18 +92,31 @@ vi.mock("../../src/Nodes", async (importActual) => {
 		},
 	});
 
+	/** One page PROP, fed the signed-in user's id through `shared()` (#995). */
+	const profile = defineNode({
+		name: "test/profile",
+		description: "A page prop that needs the middleware's user id.",
+		input: z.object({ userId: z.string().optional() }),
+		output: z.object({ userId: z.string(), plan: z.string() }),
+		async execute(_ctx, input) {
+			return { userId: input.userId ?? "anonymous", plan: "pro" };
+		},
+	});
+
 	return {
 		default: {
 			...actual.default,
 			"test/current-user": currentUser,
 			"test/probe": probeNode,
 			"test/create-order": createOrder,
+			"test/profile": profile,
 		},
 	};
 });
 
 vi.mock("../../src/Workflows", async () => {
-	const { createAuthMiddleware, createSharedMiddleware } = await import("@blokjs/inertia");
+	const { createAuthMiddleware, createSharedMiddleware, definePage, shared } = await import("@blokjs/inertia");
+	const { http, node, workflow } = await import("@blokjs/core");
 
 	const ref = (step: string, ...path: string[]) => ({ $ref: { step, path } });
 	/** A page route: probe first (so "did it run?" is observable), then render. */
@@ -137,8 +150,23 @@ vi.mock("../../src/Workflows", async () => {
 		},
 	});
 
+	// A `page` control step (#1008) behind `inertia.shared`: it wires NOTHING by
+	// hand — no errors, no flash, no clearing cookie — and `shared()` (#995)
+	// feeds the middleware's user id into the one prop.
+	const AccountPage = definePage("Account/Index", { profile: node("test/profile") });
+	const accountPage = await workflow("account", { version: "1.0.0", trigger: http.get("/account") }, (req: unknown) => {
+		AccountPage.render(
+			req as never,
+			"page",
+			"/account",
+			{ profile: { userId: shared({ name: "test/current-user" }, "auth").id } } as never,
+			{ version: "v1" },
+		);
+	});
+
 	return {
 		default: {
+			account: accountPage,
 			"inertia.shared": await createSharedMiddleware({ currentUser: { name: "test/current-user" } }),
 			"inertia.auth": await createAuthMiddleware(),
 			orders: page("orders", "/orders", ["inertia.auth"]),
@@ -336,6 +364,40 @@ describe("HttpTrigger — Inertia middleware pack (#996)", () => {
 		// One-shot here too: the very next page must not re-clear the history.
 		const after = await fetchIt(app, "/orders/open", { headers: { ...INERTIA, ...SIGNED_IN } });
 		expect(((await after.json()) as { clearHistory?: true }).clearHistory).toBeUndefined();
+	});
+
+	// The #996 seam in `PageNode`, end to end: the page workflow wires no flash
+	// at all and still shows the errors, the flash and the clearing cookie.
+	it("a `page` step behind inertia.shared picks the flash up with no wiring", async () => {
+		const app = await buildApp();
+
+		const posted = await fetchIt(app, "/orders", {
+			method: "POST",
+			headers: { ...INERTIA, "content-type": "application/json", referer: "/account" },
+			body: "{}",
+		});
+		expect(posted.status).toBe(303);
+
+		const shown = await fetchIt(app, "/account", {
+			headers: { ...INERTIA, ...SIGNED_IN, cookie: `session=ada; ${cookiePair(posted.headers.get("set-cookie"))}` },
+		});
+		expect(shown.status).toBe(200);
+		const page = (await shown.json()) as {
+			component: string;
+			props: { errors: Record<string, string>; profile: { userId: string } };
+			flash?: Record<string, unknown>;
+		};
+		expect(page.component).toBe("Account/Index");
+		expect(page.props.errors.sku).toBe("Required.");
+		expect(page.flash).toEqual({ toast: "Check the form." });
+		// `shared()` fed the middleware's user into the prop.
+		expect(page.props.profile.userId).toBe("u-1");
+		expect(shown.headers.get("set-cookie")).toContain("Max-Age=0");
+
+		const again = await fetchIt(app, "/account", { headers: { ...INERTIA, ...SIGNED_IN } });
+		const second = (await again.json()) as { props: { errors: Record<string, string> }; flash?: unknown };
+		expect(second.props.errors).toEqual({});
+		expect(second.flash).toBeUndefined();
 	});
 
 	it("a guest POST redirect is a 303, so the safety net never has to rewrite it", async () => {

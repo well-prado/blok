@@ -332,10 +332,27 @@ WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared"]);
 > ids are prefixed (`inertiaGuest`, `inertiaAuthGate`,
 > `inertiaAuthRedirect`) for the same reason.
 
+**With the `page` control step (#1008) there is nothing to wire.** `page`
+reads the `flash` state slot itself and folds it into the serializer's inputs:
+errors, the error bag, page flash, `preserveFragment`, `clearHistory`, and the
+clearing `Set-Cookie`. Anything you pass through `render()`'s options wins —
+`errors` and `flash` MERGE, with your keys on top of the middleware's. Read
+`auth` with `shared()`:
+
+```ts
+import { definePage, shared } from "@blokjs/inertia";
+
+const OrdersPage = definePage("Orders/Index", { auth: shared(currentUser, "auth") });
+export default workflow("orders", { version: "1.0.0", trigger: http.get("/orders") }, () => {
+  OrdersPage.render("page", { auth: shared(currentUser, "auth") });
+});
+```
+
+A hand-written serializer step (no `page` step) wires the same fields itself —
 `inertia.shared`'s `flash` step exposes `{ errors, bag, flash,
-preserveFragment, clearHistory, cookie, present }`. Wire them into the render
-step — and pass `cookie` through as `cookies`, because the response that
-CONSUMED the flash is the one that has to expire it:
+preserveFragment, clearHistory, cookie, present }`, and `cookie` has to go
+through as `cookies`, because the response that CONSUMED the flash is the one
+that expires it:
 
 ```json
 { "id": "render", "use": "@blokjs/inertia", "inputs": {

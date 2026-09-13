@@ -103,6 +103,70 @@ function lowerHeaders(headers: unknown): Record<string, string> {
 	return out;
 }
 
+// ─────────────────────────── the flash bag (#996) ───────────────────────────
+
+/** What `@blokjs/flash`'s `read` op leaves at `ctx.state.flash`. */
+interface FlashState {
+	present: boolean;
+	errors?: Record<string, unknown>;
+	bag?: string;
+	flash?: Record<string, unknown>;
+	preserveFragment?: boolean;
+	clearHistory?: boolean;
+	cookie: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Duck-type `ctx.state.flash` against the `@blokjs/flash` read output. Only
+ * THAT shape is honored — a page whose own step is called `flash` (a plain prop,
+ * a different node) contributes nothing here rather than being misread.
+ */
+function readFlashState(ctx: Context): FlashState | undefined {
+	const candidate = (ctx.state as Record<string, unknown> | undefined)?.flash;
+	if (!isRecord(candidate)) return undefined;
+	if (typeof candidate.present !== "boolean" || typeof candidate.cookie !== "string") return undefined;
+	return candidate as unknown as FlashState;
+}
+
+/**
+ * Fold the `inertia.shared` flash bag into the serializer's inputs, so a page
+ * never has to wire `errors` / `flash` / the clearing cookie by hand.
+ *
+ * `explicit` is what the author passed through `render()`'s options; it WINS
+ * everywhere, with two deliberate exceptions that merge instead of replacing:
+ * `errors` and `flash` are objects whose keys come from two different places
+ * (the failed write that redirected, and this render), so the author's keys sit
+ * ON TOP of the middleware's rather than erasing them.
+ */
+function flashInputs(ctx: Context, explicit: Record<string, unknown>): Record<string, unknown> {
+	const state = readFlashState(ctx);
+	if (!state) return {};
+	const out: Record<string, unknown> = {};
+
+	const explicitErrors = isRecord(explicit.errors) ? explicit.errors : undefined;
+	const merged = { ...(state.errors ?? {}), ...(explicitErrors ?? {}) };
+	if (Object.keys(merged).length > 0) out.errors = merged;
+
+	const mergedFlash = { ...(state.flash ?? {}), ...(isRecord(explicit.flash) ? explicit.flash : {}) };
+	if (Object.keys(mergedFlash).length > 0) out.flash = mergedFlash;
+
+	if (explicit.errorBag === undefined && state.bag !== undefined) out.errorBag = state.bag;
+	if (explicit.preserveFragment === undefined && state.preserveFragment === true) out.preserveFragment = true;
+	// `clearHistory` only ever travels as `true` (#1013): a `false` here would
+	// override a mark set by `logoutResponse()` earlier in the SAME request.
+	if (explicit.clearHistory === undefined && state.clearHistory === true) out.clearHistory = true;
+
+	// One-shot: the response that consumed the flash is the one that expires it.
+	const explicitCookies = Array.isArray(explicit.cookies) ? explicit.cookies : [];
+	out.cookies = [...explicitCookies, state.cookie];
+
+	return out;
+}
+
 /** Split a comma-separated header value into trimmed, non-empty items. */
 function headerList(value: string | undefined): string[] {
 	if (!value) return [];
@@ -219,17 +283,24 @@ export class PageNode extends RunnerNode {
 		// --- hand everything to the serializer -------------------------------
 		const metadata = buildMetadata(props, selection, resolved, rescued);
 		const serializer = steps[props.length] as NodeBase;
+		const explicitInputs = ((ctx.config as Record<string, Record<string, unknown>> | undefined)?.[serializer.name]
+			?.inputs ?? {}) as Record<string, unknown>;
 		const serializerInputs = {
-			...((ctx.config as Record<string, Record<string, unknown>> | undefined)?.[serializer.name]?.inputs ?? {}),
+			...explicitInputs,
 			component,
 			props: resolved,
 			...(opts.url !== undefined ? { url: opts.url } : {}),
 			headers: request.headers ?? {},
 			method: request.method ?? "GET",
 			...metadata,
-			// #1015 / #996 seams — the shared-prop registry and the flash bag do not
-			// exist yet. They ride the SAME serializer inputs when they land.
+			// #1015 seam — the shared-prop registry does not exist yet. It rides
+			// these SAME serializer inputs when it lands.
 			sharedProps: [],
+			// #996 — the flash bag `inertia.shared` left at `ctx.state.flash`:
+			// validation errors, page flash, the error bag, preserveFragment,
+			// clearHistory and the cookie that expires it. Absent middleware (or a
+			// `flash` state slot of another shape) contributes nothing.
+			...flashInputs(ctx, explicitInputs),
 		};
 
 		// The serializer's own `BlokResponse` envelope IS this step's result: the

@@ -32,11 +32,14 @@ export interface AuthMiddlewareOptions {
 export function createAuthMiddleware(opts: AuthMiddlewareOptions = {}) {
 	const { redirectTo = "/login", name = "inertia.auth", status = 302 } = opts;
 	return workflow(name, { version: "1.0.0", middleware: true }, () => {
-		// ponytail: the guest test goes through `@blokjs/expr` rather than
-		// `not(state("auth").id)` so it OPTIONAL-CHAINS. A branch condition
-		// lowers to a bare `ctx.state.auth.id` string evaluated with
-		// `new Function` — with `inertia.shared` missing from the chain that is
-		// a TypeError and a 500, instead of the redirect the author asked for.
+		// ponytail: the guest test goes through `@blokjs/expr` rather than a
+		// handle condition (`not(shared(currentUser, "auth").id)`) so it
+		// OPTIONAL-CHAINS. A branch condition lowers to a bare
+		// `ctx.state.auth.id` string evaluated with `new Function` — with
+		// `inertia.shared` missing from the chain that is a TypeError and a 500,
+		// instead of the redirect the author asked for. `shared()` (#995) IS the
+		// typed read path everywhere the slot is known to exist — page workflows
+		// read `auth` with it; it just cannot express the guard's own absence.
 		const guest = step("inertiaGuest", node<boolean>("@blokjs/expr"), {
 			expression: "!ctx.state.auth?.id",
 		});

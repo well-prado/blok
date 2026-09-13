@@ -9,9 +9,12 @@
  * the trigger can prove a middleware chain actually short-circuits.
  */
 
-import { runNode } from "@blokjs/core/testing";
+import { http, defineNode, step, workflow } from "@blokjs/core";
+import { runNode, runWorkflow } from "@blokjs/core/testing";
 import { type RespondEnvelope, verifyFlash } from "@blokjs/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { definePage } from "../src/define-page.js";
 import InertiaNode, { back, flash, logoutResponse, normalizeErrors, redirectBack } from "../src/index.js";
 import type { PageObject } from "../src/protocol.js";
 
@@ -197,5 +200,163 @@ describe("409 re-flash (test 15)", () => {
 		const env = await run(conflict);
 		expect(env.status).toBe(409);
 		expect(env.cookies).toBeUndefined();
+	});
+});
+
+// =============================================================================
+// The `page` control step folds the flash bag in (the #996 seam in PageNode)
+// =============================================================================
+
+/**
+ * Stands in for `@blokjs/flash`'s `read` op: same state slot, same output
+ * shape. A local node keeps this package's tests free of a static import of
+ * `@blokjs/helpers`, which imports THIS package dynamically. The real node
+ * behind the real middleware is exercised in
+ * `triggers/http/__tests__/unit/HttpTrigger.inertiaMiddleware.test.ts`.
+ */
+const CLEARING = "blok_flash=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0";
+const flashSlot = defineNode({
+	name: "test/flash-slot",
+	description: "Fill ctx.state.flash the way @blokjs/flash's read op does.",
+	input: z.object({
+		errors: z.record(z.unknown()).optional(),
+		bag: z.string().optional(),
+		flash: z.record(z.unknown()).optional(),
+		preserveFragment: z.boolean().optional(),
+		clearHistory: z.boolean().optional(),
+	}),
+	output: z.object({
+		present: z.boolean(),
+		errors: z.record(z.unknown()),
+		bag: z.string().optional(),
+		flash: z.record(z.unknown()),
+		preserveFragment: z.boolean(),
+		clearHistory: z.boolean().optional(),
+		cookie: z.string(),
+	}),
+	async execute(_ctx, input) {
+		return {
+			present: true,
+			errors: input.errors ?? {},
+			bag: input.bag,
+			flash: input.flash ?? {},
+			preserveFragment: input.preserveFragment === true,
+			clearHistory: input.clearHistory === true ? true : undefined,
+			cookie: CLEARING,
+		};
+	},
+});
+
+const hint = defineNode({
+	name: "test/flash-hint",
+	description: "one ordinary page prop",
+	input: z.object({}),
+	output: z.object({ text: z.string() }),
+	async execute() {
+		return { text: "fill in the sku" };
+	},
+});
+
+const FlashPage = definePage("Orders/New", { hint });
+
+/** `middleware` = what the flash step reports; `opts` = explicit render options. */
+function flashPageWorkflow(middleware: Record<string, unknown> | null, opts: Record<string, unknown> = {}) {
+	return workflow("flash-page", { version: "1.0.0", trigger: http.get("/orders/new") }, (req) => {
+		if (middleware) step("flash", flashSlot, middleware);
+		FlashPage.render(req, "page", "/orders/new", {}, { version: "v1", ...opts });
+	});
+}
+
+describe("page step folds the flash bag into the serializer", () => {
+	// Test (d)
+	it("hands the merged flash fields to the serializer step's inputs", async () => {
+		const run = await runWorkflow(
+			await flashPageWorkflow({ errors: { sku: "Required." }, bag: "createOrder", flash: { toast: "saved" } }),
+			{},
+			{ headers: INERTIA },
+		);
+		expect(run.ok).toBe(true);
+
+		const inputs = run.step("page.$render")?.inputs as Record<string, unknown>;
+		expect(inputs.errors).toEqual({ sku: "Required." });
+		expect(inputs.errorBag).toBe("createOrder");
+		expect(inputs.flash).toEqual({ toast: "saved" });
+		expect(inputs.cookies).toEqual([CLEARING]);
+
+		const page = pageOf(run.response as RespondEnvelope);
+		expect(page.props.errors).toEqual({ createOrder: { sku: "Required." } });
+		expect(page.flash).toEqual({ toast: "saved" });
+		expect((run.response as RespondEnvelope).cookies).toEqual([CLEARING]);
+	});
+
+	it("carries preserveFragment and clearHistory, and only when they are true", async () => {
+		const on = await runWorkflow(
+			await flashPageWorkflow({ flash: { a: 1 }, preserveFragment: true, clearHistory: true }),
+			{},
+			{ headers: INERTIA },
+		);
+		const onPage = pageOf(on.response as RespondEnvelope);
+		expect(onPage.preserveFragment).toBe(true);
+		expect(onPage.clearHistory).toBe(true);
+
+		const off = await runWorkflow(await flashPageWorkflow({ flash: { a: 1 } }), {}, { headers: INERTIA });
+		const offPage = pageOf(off.response as RespondEnvelope);
+		expect(offPage.preserveFragment).toBeUndefined();
+		expect(offPage.clearHistory).toBeUndefined();
+	});
+
+	// Test (b)
+	it("lets explicit render() options win, merging errors and flash on top", async () => {
+		const run = await runWorkflow(
+			await flashPageWorkflow(
+				{ errors: { sku: "Required.", name: "From the middleware." }, bag: "createOrder", flash: { toast: "old" } },
+				{ errors: { name: "From render()." }, flash: { toast: "new" }, errorBag: "explicitBag" },
+			),
+			{},
+			{ headers: INERTIA },
+		);
+
+		const inputs = run.step("page.$render")?.inputs as Record<string, unknown>;
+		// The author's key replaces; the middleware's other key survives.
+		expect(inputs.errors).toEqual({ sku: "Required.", name: "From render()." });
+		expect(inputs.flash).toEqual({ toast: "new" });
+		expect(inputs.errorBag).toBe("explicitBag");
+	});
+
+	it("appends the clearing cookie to explicit cookies rather than replacing them", async () => {
+		const mine = "sid=abc; Path=/";
+		const run = await runWorkflow(
+			await flashPageWorkflow({ flash: { a: 1 } }, { cookies: [mine] }),
+			{},
+			{ headers: INERTIA },
+		);
+		expect((run.response as RespondEnvelope).cookies).toEqual([mine, CLEARING]);
+	});
+
+	// Test (c)
+	it("renders with errors: {} and no cookie when no flash middleware ran", async () => {
+		const run = await runWorkflow(await flashPageWorkflow(null), {}, { headers: INERTIA });
+		expect(run.ok).toBe(true);
+
+		const page = pageOf(run.response as RespondEnvelope);
+		expect(page.props.errors).toEqual({});
+		expect(page.props.hint).toEqual({ text: "fill in the sku" });
+		expect(page.flash).toBeUndefined();
+		expect((run.response as RespondEnvelope).cookies).toBeUndefined();
+	});
+
+	it("ignores a `flash` state slot that is not the flash node's output", async () => {
+		const run = await runWorkflow(
+			await workflow("flash-page-shadowed", { version: "1.0.0", trigger: http.get("/orders/new") }, (req) => {
+				// A page whose own step happens to be called `flash`.
+				step("flash", hint, {});
+				FlashPage.render(req, "page", "/orders/new", {}, { version: "v1" });
+			}),
+			{},
+			{ headers: INERTIA },
+		);
+		expect(run.ok).toBe(true);
+		expect(pageOf(run.response as RespondEnvelope).props.errors).toEqual({});
+		expect((run.response as RespondEnvelope).cookies).toBeUndefined();
 	});
 });
