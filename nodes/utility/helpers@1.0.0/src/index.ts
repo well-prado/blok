@@ -25,6 +25,7 @@ import AuditLogNode, { _resetAuditEventsForTests, getAuditEvents } from "./audit
 import CtxPublishNode from "./ctxPublish";
 import CtxPublishManyNode from "./ctxPublishMany";
 import ExprNode from "./expr";
+import FlashNode from "./flash";
 import HmacVerifyNode from "./hmacVerify";
 import InMemoryKvNode, { _resetInMemoryKvForTests } from "./inMemoryKv";
 import JsonSchemaNode from "./jsonSchema";
@@ -51,6 +52,7 @@ export {
 	CtxPublishNode,
 	CtxPublishManyNode,
 	ExprNode,
+	FlashNode,
 	HmacVerifyNode,
 	InMemoryKvNode,
 	JsonSchemaNode,
@@ -120,6 +122,7 @@ export const HELPER_NODES = {
 	"@blokjs/ctx-publish": CtxPublishNode,
 	"@blokjs/ctx-publish-many": CtxPublishManyNode,
 	"@blokjs/expr": ExprNode,
+	"@blokjs/flash": FlashNode,
 	"@blokjs/hmac-verify": HmacVerifyNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
 	...(InertiaNode ? { "@blokjs/inertia": InertiaNode } : {}),

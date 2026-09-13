@@ -211,9 +211,10 @@ export function redirect(url: string, opts: RedirectOptions = {}): RespondEnvelo
 		return envelope({ status: 409, headers });
 	}
 	headers.Location = url;
-	// ponytail: `preserveFragment` reaches the NEXT page object through this
-	// marker header — the session flash that carries it server-side is #996's
-	// job. Feed it back as the node's `preserveFragment` input to emit the field.
+	// `preserveFragment` reaches the NEXT page object through this marker header.
+	// #996 shipped the real carrier — `redirectBack()` persists the flag in the
+	// signed flash cookie, and `inertia.shared` reads it back — so prefer that;
+	// this header stays for a hand-rolled `redirect()` that has no flash cookie.
 	if (opts.preserveFragment) headers["X-Inertia-Preserve-Fragment"] = "true";
 	return envelope({
 		status: SEE_OTHER_METHODS.has((opts.method ?? "GET").toUpperCase()) ? 303 : 302,

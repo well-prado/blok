@@ -74,6 +74,19 @@ export type {
 	WasiComponentReadiness,
 	WasiComponentWorld,
 } from "./WasiComponentContracts";
+import {
+	FLASH_COOKIE,
+	FLASH_SECRET_ENV,
+	type FlashCookieOptions,
+	type FlashPayload,
+	clearFlashCookie,
+	flashSetCookie,
+	isEmptyFlash,
+	readCookie,
+	resolveFlashSecret,
+	signFlash,
+	verifyFlash,
+} from "./flash";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
@@ -674,6 +687,19 @@ export {
 	RESPOND_BRAND,
 	type RespondEnvelope,
 	isRespondEnvelope,
+	// #996 — signed one-shot flash cookie, shared by the `@blokjs/flash` node
+	// and `@blokjs/inertia`'s `redirectBack()`.
+	FLASH_COOKIE,
+	FLASH_SECRET_ENV,
+	type FlashCookieOptions,
+	type FlashPayload,
+	clearFlashCookie,
+	flashSetCookie,
+	isEmptyFlash,
+	readCookie,
+	resolveFlashSecret,
+	signFlash,
+	verifyFlash,
 	type EnvContext,
 	type ErrorContext,
 	type LoggerContext,

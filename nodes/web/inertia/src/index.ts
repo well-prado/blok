@@ -11,6 +11,7 @@
 import { defineNode } from "@blokjs/core";
 import { RESPOND_BRAND, type RespondEnvelope } from "@blokjs/shared";
 import { z } from "zod";
+import { flashCookie, normalizeErrors } from "./flash.js";
 import { buildPage, isInertiaRequest } from "./page.js";
 import { type PageObject, location, normalizeHeaders, redirect, renderShell, versionConflict } from "./protocol.js";
 // #1013 — the request mark left by the `inertia.encryptHistory` middleware and
@@ -33,6 +34,9 @@ export type { OnceProp, PageObject, RedirectOptions, RenderShellOptions, ScrollP
 export { buildPage, isInertiaRequest, isPartialReload } from "./page.js";
 export type { BuildPageInput, PageMetadata } from "./page.js";
 export * from "./security/index.js";
+export { back, flash, flashCookie, normalizeErrors, redirectBack } from "./flash.js";
+export type { FlashBuilder, FlashPayload, FlashPersistOptions, FlashRequest, RedirectBackOptions } from "./flash.js";
+export * from "./middleware/index.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
 export {
@@ -90,6 +94,16 @@ const inputSchema = z.object({
 		.record(z.unknown())
 		.optional()
 		.describe("Validation errors. Always emitted as props.errors ({} when none)."),
+	withAllErrors: z
+		.boolean()
+		.optional()
+		.describe("true ships EVERY message per field (string[]); default is one message per field (string)."),
+	cookies: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"Raw Set-Cookie values to emit, e.g. the clearing flash cookie from the `flash` middleware step (#996).",
+		),
 
 	// --- request surface (supplied by the page control step / definePage) ---
 	headers: z.record(z.unknown()).optional().describe("Request headers. Defaults to ctx.request.headers."),
@@ -186,7 +200,8 @@ export default defineNode({
 		// --- control responses come before any page work ---
 		if (input.location !== undefined) return location(input.location);
 		if (input.redirect !== undefined) {
-			return redirect(input.redirect, { method, prefetch, preserveFragment: input.preserveFragment });
+			const env = redirect(input.redirect, { method, prefetch, preserveFragment: input.preserveFragment });
+			return input.cookies?.length ? { ...env, cookies: input.cookies } : env;
 		}
 
 		if (!input.component) {
@@ -197,9 +212,19 @@ export default defineNode({
 		// body if the client replayed it as a fresh visit).
 		const clientVersion = headers["x-inertia-version"];
 		if (isInertiaRequest(headers) && method === "GET" && clientVersion !== undefined && clientVersion !== version) {
-			// TODO(#996): re-flash session flash data here so it survives the
-			// follow-up visit the client makes after this 409.
-			return versionConflict(url, version);
+			// #996 — RE-FLASH. This 409 throws the render away and makes the client
+			// re-visit, so a flash the request had already consumed (the middleware
+			// read and cleared the cookie) would vanish between the two visits.
+			// Sign it straight back into a fresh cookie, and drop the clearing
+			// cookie that would otherwise cancel it.
+			const reflash = flashCookie({
+				errors: input.errors as Record<string, unknown> | undefined,
+				bag: headers["x-inertia-error-bag"],
+				flash: input.flash as Record<string, unknown> | undefined,
+				preserveFragment: input.preserveFragment,
+			});
+			const conflict = versionConflict(url, version);
+			return reflash ? { ...conflict, cookies: [reflash] } : conflict;
 		}
 
 		const page: PageObject = buildPage({
@@ -207,7 +232,9 @@ export default defineNode({
 			props: (input.props as Record<string, unknown> | undefined) ?? {},
 			url,
 			version,
-			errors: input.errors as Record<string, unknown> | undefined,
+			errors: normalizeErrors(input.errors as Record<string, unknown> | undefined, {
+				withAllErrors: input.withAllErrors,
+			}),
 			errorBag: headers["x-inertia-error-bag"],
 			headers,
 			mergeProps: input.mergeProps,
@@ -229,12 +256,17 @@ export default defineNode({
 			exposeSharedPropKeys: input.exposeSharedPropKeys,
 		});
 
+		// The response that CONSUMED a flash is the response that expires it: the
+		// `flash` middleware step hands its clearing `Set-Cookie` here (#996).
+		const cookies = input.cookies?.length ? { cookies: input.cookies } : {};
+
 		if (isInertiaRequest(headers)) {
 			return {
 				[RESPOND_BRAND]: true,
 				status: 200,
 				contentType: "application/json",
 				headers: { ...VARY, "X-Inertia": "true" },
+				...cookies,
 				body: page,
 			};
 		}
@@ -244,6 +276,7 @@ export default defineNode({
 			status: 200,
 			contentType: "text/html; charset=utf-8",
 			headers: { ...VARY },
+			...cookies,
 			body: renderShell(page, {
 				shell: input.shell,
 				rootId: input.rootId,
