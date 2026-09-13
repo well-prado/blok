@@ -240,3 +240,7 @@ triggers/http/.hmr-e2e-tmp/
 
 # cross-runtime e2e shared claim-check directory (ADR 0014)
 tests/e2e/cross-runtime/.blobs/
+
+# `gen app-types --watch` scratch project (pagesTypes.test.ts; removed on
+# teardown, ignored so a crashed run cannot leave it staged)
+packages/cli/tests/fixtures/tmp-watch-*/

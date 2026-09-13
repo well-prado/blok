@@ -1,0 +1,9 @@
+{
+	"name": "blok-fixture-plain-app",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@blokjs/core": "*",
+		"zod": "*"
+	}
+}
