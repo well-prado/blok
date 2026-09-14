@@ -7,6 +7,7 @@ export { default as layout } from "../components/AppLayout.svelte";
 import type { PageProps } from "@blokjs/inertia";
 import { Deferred, InfiniteScroll } from "@inertiajs/svelte";
 import type { Dashboard } from "../../../src/workflows/dashboard.js";
+import { pageTitle } from "../title.js";
 
 // The page contract types the stock Svelte props — no Blok wrapper component.
 const { orders, stats, posts }: PageProps<typeof Dashboard> = $props();
@@ -15,7 +16,7 @@ const orderValue = $derived(orders.reduce((sum, order) => sum + order.total, 0))
 </script>
 
 <svelte:head>
-	<title>Dashboard · Blok</title>
+	<title>{pageTitle("Dashboard")}</title>
 </svelte:head>
 
 <div class="blok-page-header">
@@ -33,6 +34,12 @@ const orderValue = $derived(orders.reduce((sum, order) => sum + order.total, 0))
 			{#snippet fallback()}
 				<div class="blok-skeleton blok-skeleton--wide" style="height: 1.75rem"></div>
 				<div class="blok-skeleton" style="width: 40%"></div>
+			{/snippet}
+			<!-- The prop is `defer(..., { rescue: true })`: when the node fails the
+			     page still renders, and THIS is what the tile shows instead of "$". -->
+			{#snippet rescue()}
+				<p class="blok-stat__value">—</p>
+				<p class="blok-stat__delta">stats node unavailable</p>
 			{/snippet}
 			<p class="blok-stat__value">${stats?.revenue}</p>
 			<p class="blok-stat__delta blok-stat__delta--up">defer() · fetched after the first paint</p>

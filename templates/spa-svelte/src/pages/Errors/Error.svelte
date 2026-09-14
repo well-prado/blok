@@ -10,6 +10,7 @@ export { default as layout } from "../../components/AppLayout.svelte";
  * standard reason phrase, never the thrown error's message.
  */
 import { Link } from "@inertiajs/svelte";
+import { pageTitle } from "../../title.js";
 
 const { status, message }: { status: number; message: string } = $props();
 
@@ -24,7 +25,7 @@ const help = $derived(HELP[status] ?? "That request could not be completed.");
 </script>
 
 <svelte:head>
-	<title>{status} {message}</title>
+	<title>{pageTitle(`${status} ${message}`)}</title>
 </svelte:head>
 
 <div class="blok-error-page">

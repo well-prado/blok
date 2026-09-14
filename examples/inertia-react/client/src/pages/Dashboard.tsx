@@ -97,10 +97,18 @@ export default function Dashboard({ auth, orders, stats, plans, posts }: PagePro
 									<td>{order.sku}</td>
 									<td className="blok-num">${order.total}</td>
 									<td className="blok-actions">
+										{/* There is no edit route in this example, so the action is an
+										    `aria-disabled` control rather than a <Link> that 404s. It stays
+										    focusable on purpose, so the reason is reachable. */}
 										{canEdit ? (
-											<Link href="/orders/new" className="blok-btn blok-btn--ghost">
+											<button
+												type="button"
+												className="blok-btn blok-btn--ghost"
+												aria-disabled="true"
+												title="This example has no edit route yet"
+											>
 												Edit
-											</Link>
+											</button>
 										) : (
 											<span className="blok-muted">—</span>
 										)}

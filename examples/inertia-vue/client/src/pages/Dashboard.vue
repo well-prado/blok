@@ -33,6 +33,12 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 					<div class="blok-skeleton blok-skeleton--wide" style="height: 1.75rem" />
 					<div class="blok-skeleton" style="width: 40%" />
 				</template>
+				<!-- The prop is `defer(..., { rescue: true })`: when the node fails the
+				     page still renders, and THIS is what the tile shows instead of "$". -->
+				<template #rescue>
+					<p class="blok-stat__value">—</p>
+					<p class="blok-stat__delta">stats node unavailable</p>
+				</template>
 				<p class="blok-stat__value">${{ props.stats?.revenue }}</p>
 				<p class="blok-stat__delta blok-stat__delta--up">defer() · fetched after the first paint</p>
 			</Deferred>

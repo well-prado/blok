@@ -358,6 +358,19 @@ pre {
 	display: block;
 }
 
+/* `.blok-user` is hidden below 48rem, so the compact panel is where the
+   signed-in identity lives at phone width instead of disappearing. */
+.blok-menu__user {
+	padding: var(--blok-space-2) var(--blok-space-3);
+	margin-bottom: var(--blok-space-2);
+	border-bottom: 1px solid var(--blok-line);
+	color: var(--blok-muted);
+	font-size: 0.8125rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 /* ── controls ─────────────────────────────────────────────────────────────── */
 
 .blok-btn {
@@ -473,8 +486,7 @@ pre {
 	padding: var(--blok-space-5);
 }
 
-.blok-card + .blok-card,
-.blok-stack > * + * {
+.blok-card + .blok-card {
 	margin-top: var(--blok-space-5);
 }
 
@@ -507,13 +519,6 @@ pre {
 	clip-path: inset(50%);
 	white-space: nowrap;
 	border: 0;
-}
-
-.blok-empty {
-	padding: var(--blok-space-6);
-	text-align: center;
-	color: var(--blok-muted);
-	font-size: 0.875rem;
 }
 
 /* ── stat tiles ───────────────────────────────────────────────────────────── */
@@ -560,10 +565,6 @@ pre {
 
 .blok-stat__delta--up {
 	color: var(--blok-accent-ink);
-}
-
-.blok-stat__delta--down {
-	color: var(--blok-danger);
 }
 
 /* ── table ────────────────────────────────────────────────────────────────── */
@@ -938,25 +939,6 @@ p.blok-error-page__status {
 	background: var(--blok-surface);
 	color: var(--blok-text-strong);
 	font-size: 0.875rem;
-	box-shadow: var(--blok-shadow-lg);
-}
-
-/* ── guest / auth card ────────────────────────────────────────────────────── */
-
-.blok-guest {
-	display: grid;
-	place-items: center;
-	min-height: 100vh;
-	padding: var(--blok-space-5);
-}
-
-.blok-guest__card {
-	width: 100%;
-	max-width: 24rem;
-	padding: var(--blok-space-6);
-	background: var(--blok-surface);
-	border: 1px solid var(--blok-line);
-	border-radius: var(--blok-radius-lg);
 	box-shadow: var(--blok-shadow-lg);
 }
 

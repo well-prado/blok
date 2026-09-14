@@ -25,14 +25,25 @@ const NAV: NavItem[] = [
 ];
 
 const { children, auth }: { children?: Snippet; auth?: { email?: string } } = $props();
+
+/**
+ * The 375px menu is a native `<details>` inside a PERSISTENT layout, so an
+ * Inertia visit swaps the page underneath it and leaves it open, covering the
+ * page it just navigated to. One line closes it; nothing else here needs JS.
+ */
+function closeMenu(event: MouseEvent): void {
+	(event.currentTarget as HTMLElement | null)?.closest("details")?.removeAttribute("open");
+}
 </script>
 
 {#snippet navLinks()}
 	{#each NAV as item (item.href)}
 		{#if item.external}
-			<a href={item.href} rel="noreferrer">{item.label}</a>
+			<a href={item.href} rel="noreferrer" onclick={closeMenu}>{item.label}</a>
 		{:else}
-			<Link href={item.href} aria-current={page.url === item.href ? "page" : undefined}>{item.label}</Link>
+			<Link href={item.href} aria-current={page.url === item.href ? "page" : undefined} onclick={closeMenu}>
+				{item.label}
+			</Link>
 		{/if}
 	{/each}
 {/snippet}
@@ -106,9 +117,14 @@ const { children, auth }: { children?: Snippet; auth?: { email?: string } } = $p
 							<path d="M3 6h18M3 12h18M3 18h18" />
 						</svg>
 					</summary>
-					<nav class="blok-menu__panel blok-nav" aria-label="Primary, compact">
-						{@render navLinks()}
-					</nav>
+					<div class="blok-menu__panel">
+						{#if auth?.email}
+							<p class="blok-menu__user">{auth.email}</p>
+						{/if}
+						<nav class="blok-nav" aria-label="Primary, compact">
+							{@render navLinks()}
+						</nav>
+					</div>
 				</details>
 			</div>
 		</div>

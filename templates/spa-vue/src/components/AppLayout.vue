@@ -8,12 +8,7 @@ import { Link, usePage } from "@inertiajs/vue3";
 import { computed } from "vue";
 import { toggleTheme } from "../styles/theme.js";
 import BlokLogo from "./BlokLogo.vue";
-
-interface NavItem {
-	href: string;
-	label: string;
-	external?: boolean;
-}
+import NavLinks, { type NavItem } from "./NavLinks.vue";
 
 const NAV: NavItem[] = [
 	{ href: "/", label: "Home" },
@@ -34,12 +29,7 @@ const email = computed(() => page.props.auth?.email);
 				</Link>
 
 				<nav class="blok-nav" aria-label="Primary">
-					<template v-for="item in NAV" :key="item.href">
-						<a v-if="item.external" :href="item.href" rel="noreferrer">{{ item.label }}</a>
-						<Link v-else :href="item.href" :aria-current="page.url === item.href ? 'page' : undefined">
-							{{ item.label }}
-						</Link>
-					</template>
+					<NavLinks :items="NAV" :current-url="page.url" />
 				</nav>
 
 				<div class="blok-header__end">
@@ -98,12 +88,12 @@ const email = computed(() => page.props.auth?.email);
 								<path d="M3 6h18M3 12h18M3 18h18" />
 							</svg>
 						</summary>
-						<nav class="blok-menu__panel blok-nav" aria-label="Primary, compact">
-							<template v-for="item in NAV" :key="item.href">
-								<a v-if="item.external" :href="item.href" rel="noreferrer">{{ item.label }}</a>
-								<Link v-else :href="item.href">{{ item.label }}</Link>
-							</template>
-						</nav>
+						<div class="blok-menu__panel">
+							<p v-if="email" class="blok-menu__user">{{ email }}</p>
+							<nav class="blok-nav" aria-label="Primary, compact">
+								<NavLinks :items="NAV" :current-url="page.url" />
+							</nav>
+						</div>
 					</details>
 				</div>
 			</div>

@@ -17,7 +17,11 @@ listenForFlash();
 // Vite resolves a template-literal dynamic import only ONE directory deep, so a
 // nested page throws "Unknown variable dynamic import" in production.
 void createInertiaApp({
-	title: (title) => (title ? `${title} · Blok` : "Blok"),
+	// No `title:` here on purpose: @inertiajs/svelte has no <Head> and its head
+	// manager hard-codes the title resolver to identity, so the option is dead
+	// config. Svelte pages build their own <svelte:head> title from
+	// `src/title.ts` instead.
+	//
 	// The navigation bar at the top of the window, in the brand green.
 	progress: { color: "#2bcd71" },
 	setup({ el, App, props }) {

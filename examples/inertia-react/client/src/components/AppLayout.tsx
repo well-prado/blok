@@ -1,5 +1,5 @@
 import { Link, usePage } from "@inertiajs/react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { toggleTheme } from "../styles/theme.js";
 import { BlokLogo, ThemeIcons } from "./BlokLogo.js";
 
@@ -22,14 +22,23 @@ const NAV: NavItem[] = [
 	{ href: "https://blok.build", label: "Docs", external: true },
 ];
 
-function navLinks(url: string, onNavigate?: () => void): ReactNode {
+/**
+ * The 375px menu is a native `<details>` inside a PERSISTENT layout, so an
+ * Inertia visit swaps the page underneath it and leaves it open, covering the
+ * page it just navigated to. One line closes it; nothing else here needs JS.
+ */
+function closeMenu(event: MouseEvent<Element>): void {
+	event.currentTarget.closest("details")?.removeAttribute("open");
+}
+
+function navLinks(url: string): ReactNode {
 	return NAV.map((item) =>
 		item.external === true ? (
-			<a key={item.href} href={item.href} rel="noreferrer">
+			<a key={item.href} href={item.href} rel="noreferrer" onClick={closeMenu}>
 				{item.label}
 			</a>
 		) : (
-			<Link key={item.href} href={item.href} onClick={onNavigate} aria-current={url === item.href ? "page" : undefined}>
+			<Link key={item.href} href={item.href} onClick={closeMenu} aria-current={url === item.href ? "page" : undefined}>
 				{item.label}
 			</Link>
 		),
@@ -78,9 +87,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
 									<path d="M3 6h18M3 12h18M3 18h18" />
 								</svg>
 							</summary>
-							<nav className="blok-menu__panel blok-nav" aria-label="Primary, compact">
-								{navLinks(url)}
-							</nav>
+							<div className="blok-menu__panel">
+								{email === undefined ? null : <p className="blok-menu__user">{email}</p>}
+								<nav className="blok-nav" aria-label="Primary, compact">
+									{navLinks(url)}
+								</nav>
+							</div>
 						</details>
 					</div>
 				</div>

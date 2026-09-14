@@ -13,7 +13,10 @@ listenForFlash();
 // v3 `pages` shorthand: `@inertiajs/vite` compiles it into the `resolve` glob,
 // and the adapter supplies `setup` (mount, or hydrate after SSR) itself.
 createInertiaApp({
+	// No `title:` here on purpose: @inertiajs/svelte has no <Head> and its
+	// head manager hard-codes the title resolver to identity, so the option
+	// is dead config. Svelte pages build their own <svelte:head> title from
+	// `src/title.ts` instead.
 	pages: "./pages",
-	title: (title) => (title ? `${title} — __BLOK_SPA_NAME__` : "__BLOK_SPA_NAME__"),
 	progress: { color: "#2bcd71" },
 });

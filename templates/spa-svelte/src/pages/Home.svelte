@@ -13,6 +13,7 @@ export { default as layout } from "../components/AppLayout.svelte";
  */
 import type { PageProps } from "@blokjs/inertia-client";
 import BlokLogo from "../components/BlokLogo.svelte";
+import { pageTitle } from "../title.js";
 
 const { home }: PageProps<"Home"> = $props();
 
@@ -46,7 +47,7 @@ const { home }: PageProps<"Home"> =
 </script>
 
 <svelte:head>
-	<title>Home</title>
+	<title>{pageTitle("Home")}</title>
 </svelte:head>
 
 <section class="blok-hero">

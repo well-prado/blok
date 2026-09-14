@@ -17,9 +17,14 @@ interface FlashEventDetail {
 function toast(message: string): void {
 	const el = document.createElement("div");
 	el.className = "blok-toast";
-	el.textContent = message;
 	el.setAttribute("role", "status");
+	// The live region has to be in the DOM BEFORE its text changes, or a screen
+	// reader sees a node that was born with content and announces nothing. Append
+	// empty, fill on the next frame.
 	document.body.append(el);
+	requestAnimationFrame(() => {
+		el.textContent = message;
+	});
 	setTimeout(() => el.remove(), 4000);
 }
 
