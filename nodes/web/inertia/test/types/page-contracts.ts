@@ -224,3 +224,32 @@ export function readsBundledProps(props: TeamProps): string {
 	void open;
 	return props.auth.email;
 }
+
+// =============================================================================
+// #1009 — a composed prop keeps the INNER resolution mode's optionality
+// =============================================================================
+
+const ComposedPage = definePage("Ty/Composed", {
+	// `Inertia::defer(fn)->deepMerge()` — deferred, and mergeable when it lands.
+	results: defer(merge(listOrders, { deep: true }), { group: "dashboard" }),
+	// Written the other way round: a merge wrapper never takes the mode slot.
+	alsoDeferred: merge(defer(loadFilters), { append: "rows" }),
+	// A remembered, mergeable prop is still present on every visit.
+	activity: once(merge(loadPlans, { append: "tiers" })),
+});
+
+type ComposedProps = PageProps<typeof ComposedPage>;
+
+assertExact<Exact<ComposedProps["results"], { items: { id: string }[] } | undefined>>(true);
+assertExact<Exact<ComposedProps["alsoDeferred"], { open: boolean } | undefined>>(true);
+assertExact<Exact<ComposedProps["activity"], { tiers: string[] }>>(true);
+
+/** The WRAPPED node's input still drives `render()`. */
+export async function composedInputs() {
+	return workflow("ty-composed", { version: "1.0.0", trigger: http.get("/ty6") }, (req) => {
+		ComposedPage.render(req, "page", "/ty6", {
+			// @ts-expect-error #1009 — `listOrders` takes `{ userId: string }`.
+			results: { userId: 1 },
+		});
+	});
+}

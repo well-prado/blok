@@ -221,10 +221,11 @@ describe("1 — full visit", () => {
 		expect(page.props.filters).toBeUndefined();
 		expect(page.props.stats).toBeUndefined();
 		expect(page.deferredProps).toEqual({ dashboard: ["stats"], sidebar: ["other"] });
-		// merge / once / scroll resolve like a regular prop and carry their labels.
+		// merge / once / scroll resolve like a regular prop — but a FULL visit
+		// replaces props wholesale, so it carries no merge labels at all (#1009).
 		expect(page.props.feed).toEqual({ data: ["f-1"] });
-		expect(page.mergeProps).toContain("feed.data");
-		expect(page.matchPropsOn).toContain("feed.data.id");
+		expect(page.mergeProps).toBeUndefined();
+		expect(page.matchPropsOn).toBeUndefined();
 		expect(page.onceProps?.plans?.prop).toBe("plans");
 		expect(page.scrollProps?.["posts.data"]?.pageName).toBe("page");
 	});
@@ -509,11 +510,9 @@ describe("12 — JSON form (golden)", () => {
 		// runs differ by however long the first took. Assert the shape, compare the rest.
 		const stripExpiry = (page: PageObject): PageObject => ({
 			...page,
-			onceProps: Object.fromEntries(
-				Object.entries(page.onceProps ?? {}).map(([k, v]) => [k, { ...v, expiresAt: "<iso>" }]),
-			),
+			onceProps: Object.fromEntries(Object.entries(page.onceProps ?? {}).map(([k, v]) => [k, { ...v, expiresAt: 0 }])),
 		});
-		expect(pageOf(fromJson.response).onceProps?.plans?.expiresAt).toMatch(/^\d{4}-/);
+		expect(pageOf(fromJson.response).onceProps?.plans?.expiresAt).toBeGreaterThan(Date.now());
 		expect(stripExpiry(pageOf(fromJson.response))).toEqual(stripExpiry(pageOf(fromTs.response)));
 	});
 

@@ -206,7 +206,9 @@ describe("1 — a full page visit", () => {
 		expect(page.props.filters).toBeUndefined();
 		expect(page.deferred.sort()).toEqual(["feed", "stats"]);
 		expect(page.deferredProps).toEqual({ dashboard: ["stats"], sidebar: ["feed"] });
-		expect(page.mergeProps).toContain("notices.data");
+		// #1009 — a FULL visit replaces props wholesale, so it carries no merge
+		// labels at all. Test 10 below asserts them on the partial that does.
+		expect(page.mergeProps).toEqual([]);
 		expect(calls("rp-heavy-stats")).toBe(0);
 		expect(calls("rp-load-filters")).toBe(0);
 

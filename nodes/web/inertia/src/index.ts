@@ -72,6 +72,7 @@ export type { ComponentTransform, EnsurePagesExistOptions, InertiaRouteOptions, 
 export type {
 	DeferOptions,
 	MergeOptions,
+	MergeTarget,
 	ModeProp,
 	NodeLike,
 	OnceOptions,
@@ -151,9 +152,12 @@ const inputSchema = z.object({
 		.optional()
 		.describe("Top-level shared prop keys, so instant visits know what is shared."),
 	onceProps: z
-		.record(z.object({ prop: z.string(), expiresAt: z.string().nullable().optional() }))
+		.record(z.object({ prop: z.string(), expiresAt: z.number().nullable().optional() }))
 		.optional()
-		.describe("Cache key -> { prop, expiresAt }. expiresAt is null when the entry never expires."),
+		.describe(
+			"Cache key -> { prop, expiresAt }. expiresAt is epoch MILLISECONDS (the client compares it " +
+				"against Date.now()); null when the entry never expires.",
+		),
 	flash: z.record(z.unknown()).optional().describe("Flash data. Emitted only when non-empty."),
 	alwaysProps: z.array(z.string()).optional().describe("Prop paths that survive every partial-reload filter."),
 	exposeSharedPropKeys: z.boolean().optional().describe("false hides the sharedProps key list from the page object."),

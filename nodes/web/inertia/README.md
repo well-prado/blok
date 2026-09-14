@@ -41,9 +41,9 @@ hand-written workflow only needs `component` + `props`.
 | `X-Inertia-Partial-Component` | Must equal `component`, otherwise the request is treated as a full visit. |
 | `X-Inertia-Partial-Data` | Comma-separated prop paths (dot notation) to keep. |
 | `X-Inertia-Partial-Except` | Comma-separated prop paths to drop, applied after `Partial-Data`. |
-| `X-Inertia-Reset` | Prop paths returned unmerged: stripped from `mergeProps`/`prependProps`/`deepMergeProps`, and `scrollProps[path].reset = true`. |
+| `X-Inertia-Reset` | Prop paths returned unmerged: stripped from `mergeProps`/`prependProps`/`deepMergeProps` (and from the `matchPropsOn` entries that address them), with `scrollProps[path].reset = true`. |
 | `X-Inertia-Error-Bag` | Nests `props.errors` under that bag name. |
-| `X-Inertia-Except-Once-Props` | Once-prop cache keys the client still holds. Skipping the *value* is the resolver's job (#1008); the `onceProps` **entry is always echoed**, or the client would drop its cached copy. A value resolved anyway (the entry expired) ships alongside its entry. |
+| `X-Inertia-Except-Once-Props` | Once-prop cache keys the client still holds, so the resolver **skips those prop nodes entirely** (#1009). The `onceProps` **entry is always echoed**, or the client would drop its cached copy. A value resolved anyway — `fresh`, an elapsed `until`, or an explicit `only` — ships alongside its entry. |
 | `X-Inertia-Infinite-Scroll-Merge-Intent` | `prepend` / `append` — moves scroll props between `mergeProps` and `prependProps`. |
 | `Purpose: prefetch` | A fragment redirect stays an ordinary redirect instead of becoming a 409. |
 
@@ -60,15 +60,15 @@ does not apply — never `false`, never `[]`, never `{}`.
 | `encryptHistory` | input is `true`, or the request/adapter default says so (#1013) |
 | `clearHistory` | input is `true`, or the request was marked by `logoutResponse` (#1013) |
 | `preserveFragment` | input is `true` |
-| `mergeProps` | non-empty after reset filtering |
-| `prependProps` | non-empty after reset filtering |
-| `deepMergeProps` | non-empty after reset filtering |
-| `matchPropsOn` | non-empty (`"<propPath>.<keyField>"` entries) |
+| `mergeProps` | this is a **partial reload**, non-empty after reset filtering |
+| `prependProps` | this is a **partial reload**, non-empty after reset filtering |
+| `deepMergeProps` | this is a **partial reload**, non-empty after reset filtering |
+| `matchPropsOn` | this is a **partial reload**, non-empty (`"<propPath>.<keyField>"` entries) |
 | `scrollProps` | non-empty (`{ path: { pageName, previousPage, nextPage, currentPage, reset } }`) |
 | `deferredProps` | non-empty **and** this is a full visit |
 | `rescuedProps` | non-empty **and** this is a partial reload |
 | `sharedProps` | non-empty and `exposeSharedPropKeys` is not `false` |
-| `onceProps` | non-empty (`{ key: { prop, expiresAt } }`, `expiresAt` null when it never expires) |
+| `onceProps` | non-empty (`{ key: { prop, expiresAt } }`; `expiresAt` is epoch **milliseconds**, `null` when it never expires) |
 | `flash` | non-empty |
 
 ## Shell
@@ -247,9 +247,13 @@ per-prop mode metadata, Zod output schema and source `file:line` — which is wh
 
 | Visit | Runs | Does not run |
 | --- | --- | --- |
-| Full visit (no `X-Inertia-Partial-Component`, or one naming a different component) | `regular`, `always`, `merge`, `scroll`, and `once` unless listed in `X-Inertia-Except-Once-Props` | `optional`, `defer` |
-| Partial reload, `X-Inertia-Partial-Data` set | the named props (dot paths select by their ROOT segment) plus `always` | everything else |
-| Partial reload, only `X-Inertia-Partial-Except` set | `regular`, `merge`, `scroll` minus the named props; `always` is exempt | `optional`, `defer`, `once` |
+| Full visit (no `X-Inertia-Partial-Component`, or one naming a different component) | `regular`, `always`, `merge`, `scroll`, and `once` unless the client still holds it | `optional`, `defer` |
+| Partial reload, `X-Inertia-Partial-Data` set | the named props (dot paths select by their ROOT segment) plus `always` — naming a `once` prop ALWAYS resolves it | everything else |
+| Partial reload, no `X-Inertia-Partial-Data` | `regular`, `merge`, `scroll`, and `once` unless the client still holds it, minus any `X-Inertia-Partial-Except`; `always` is exempt | `optional`, `defer` |
+
+"the client still holds it" is `X-Inertia-Except-Once-Props` naming the prop's
+cache key, with no `fresh` and no elapsed `until` — see
+[merge props and once props](#merge-props-and-once-props-1009).
 
 Selected props run **in parallel**, each through the normal step machinery — so
 per-prop `retry`, `idempotencyKey` and `maxDuration` all work, and each result
@@ -277,7 +281,8 @@ The same step in a JSON workflow:
       "filters": { "use": "load-filters", "mode": "optional" },
       "stats":   { "use": "heavy-stats", "mode": "defer", "group": "dashboard", "rescue": true },
       "feed":    { "use": "load-feed", "mode": "merge", "merge": { "append": "data", "matchOn": "id" } },
-      "plans":   { "use": "load-plans", "mode": "once", "once": { "until": "1h" } },
+      "plans":   { "use": "load-plans", "mode": "once", "once": { "until": "1h", "as": "plans" } },
+      "results": { "use": "load-results", "mode": "defer", "group": "dashboard", "merge": { "deep": true } },
       "posts":   { "use": "paginate-posts", "mode": "scroll", "scroll": { "wrapper": "data" } }
     },
     "inputs": { "version": "v1" }
@@ -293,10 +298,72 @@ The same step in a JSON workflow:
 | `page.props.<key>.inputs` | that node's inputs — same `{$ref}` / `{$tpl}` surface a step takes |
 | `page.props.<key>.mode` | `regular` (default), `always`, `optional`, `defer`, `merge`, `once`, `scroll` |
 | `page.props.<key>.group` / `.rescue` | `defer` only |
-| `page.props.<key>.merge` / `.once` / `.scroll` | client-side metadata, emitted verbatim onto the page object |
+| `page.props.<key>.merge` / `.once` / `.scroll` | client-side metadata (#1009/#1010). Independent of `mode`, so `mode: "defer"` + `merge` is a deferred prop that merges when it arrives |
 | `page.props.<key>.retry` / `.idempotencyKey` / `.idempotencyKeyTTL` / `.maxDuration` | per-prop reliability knobs |
 | `page.serializer` | node ref; defaults to `@blokjs/inertia` |
 | `page.inputs` | extra serializer inputs (`version`, `errors`, `viewData`, `shell`, `encryptHistory`, …) |
+
+### Merge props and once props (#1009)
+
+`merge()` never changes WHEN a prop resolves — only what the client does with
+the value. Labels ride **partial reloads only**: a full visit replaces props
+wholesale, so it carries none of `mergeProps` / `prependProps` /
+`deepMergeProps` / `matchPropsOn`.
+
+```ts
+merge(loadTags)                                     // mergeProps: ["tags"]        (root append)
+merge(loadTags, { prepend: true })                  // prependProps: ["tags"]
+merge(loadUsers, { append: "data" })                // mergeProps: ["users.data"]
+merge(loadDash, { append: ["notifications", "activities"] })
+merge(loadForum, { append: "posts", prepend: "announcements" })
+merge(loadUsers, { append: "data", matchOn: "id" }) // + matchPropsOn: ["users.data.id"]
+merge(loadMixed, { append: { "users.data": "id", messages: "uuid" } })
+merge(loadChat,  { deep: true, matchOn: "messages.id" })  // deepMergeProps: ["chat"]
+```
+
+A `matchPropsOn` entry is `"<mergePath>.<field>"` — the client splits on the
+LAST dot and matches the head against the merge path, replacing items whose
+field matches instead of appending them. The map form gives each path its own
+field; `matchOn` applies the same field to every path the prop labels.
+
+`X-Inertia-Reset: <paths>` still RESOLVES those props — the client wants a fresh
+copy — and returns them without labels, so it replaces rather than merges.
+Client-side prop helpers (`router.replaceProp` / `appendToProp` /
+`prependToProp`) need nothing from the server.
+
+`once()` is the one mode that changes resolution: once the client holds the
+value it sends the cache key in `X-Inertia-Except-Once-Props`, and the prop's
+**node is not run at all** — only its `onceProps` entry comes back.
+
+| Option | Effect |
+| --- | --- |
+| `as: "roles"` | the cache key, so two pages can share one remembered value under different prop names. Defaults to the prop key. |
+| `until` | `"1h"` / `"500ms"` (a duration from now), a number of **seconds**, or an absolute date (`Date` / anything `Date.parse` takes). Emitted as `expiresAt` in epoch ms; an absolute deadline already in the past resolves again despite the header. |
+| `fresh: true` | resolve and resend even when the client says it still holds the value. |
+
+Explicit always wins: `router.reload({ only: ["plans"] })` resolves the prop
+whatever the header says. Prefetch requests (`Purpose: prefetch`) carry the
+remembered entries like any other request, so a prefetched page arrives with
+its once props already filled in.
+
+Conditional once props are the documented auth pattern — remember the user
+while signed in, and overwrite the remembered copy with `null` on sign-out:
+
+```ts
+const Layout = definePage("App/Layout", { auth: once(currentUser, { as: "auth" }) });
+// …and a signed-out response returns `auth: null` (a plain prop), which
+// replaces whatever the client remembered.
+```
+
+Both modes compose with the resolution modes by wrapping:
+
+```ts
+defer(merge(loadResults, { deep: true }), { group: "dashboard" })  // deferred, then mergeable
+once(merge(loadActivity, { append: "data" }))                      // remembered AND mergeable
+```
+
+The innermost resolution mode wins the mode slot (`defer` above); `merge` and
+`scroll` only contribute metadata, so every bag survives the composition.
 
 Internally the step lowers to one inner step per prop, named `<pageId>.<key>`,
 plus the serializer at `<pageId>.$render`. Studio tags those inner steps

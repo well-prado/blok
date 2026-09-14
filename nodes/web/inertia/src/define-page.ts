@@ -49,24 +49,40 @@ export interface DeferOptions {
 	rescue?: boolean;
 }
 
+/**
+ * One merge direction's target: the whole prop (`true`), one sub-path
+ * (`"data"`), several (`["notifications","activities"]`), or a map pairing each
+ * sub-path with the field to match items on (`{ "users.data": "id" }`).
+ */
+export type MergeTarget = boolean | string | string[] | Record<string, string>;
+
 /** Options for {@link merge} — client-side merge strategy (#1009). */
 export interface MergeOptions {
-	/** Sub-path the client APPENDS to (`append: "data"` labels `<key>.data`). */
-	append?: string;
-	/** Sub-path the client PREPENDS to. */
-	prepend?: string;
+	/** What the client APPENDS to (`append: "data"` labels `<key>.data`). Default: the whole prop. */
+	append?: MergeTarget;
+	/** What the client PREPENDS to. `prepend: true` prepends the whole prop. */
+	prepend?: MergeTarget;
 	/** Sub-path (or `true` for the whole prop) the client DEEP-merges. */
 	deep?: string | boolean;
-	/** Item field used to de-duplicate merged rows, e.g. `"id"`. */
+	/** Item field used to match+replace merged rows instead of appending, e.g. `"id"`. */
 	matchOn?: string;
 }
 
 /** Options for {@link once} — client-side one-shot caching (#1009). */
 export interface OnceOptions {
-	/** Cache key. Defaults to the prop key. */
+	/** Cache key. Defaults to the prop key — two props sharing one key share the value. */
 	as?: string;
-	/** Lifetime — a duration (`"1h"`), a ms number, or an absolute timestamp. */
-	until?: string | number;
+	/** Lifetime — a duration (`"1h"`), a number of SECONDS, or an absolute date. */
+	until?: string | number | Date;
+	/**
+	 * Resolve and resend even when the client still holds the value.
+	 *
+	 * A boolean, not a callback: prop metadata is workflow CONFIG, which is
+	 * JSON-cloned at boot, so a function would silently vanish. Decide per
+	 * request from the client instead (`router.reload({ only: ["plans"] })`
+	 * always resolves), or from inside the prop's own node.
+	 */
+	fresh?: boolean;
 }
 
 /** Options for {@link scroll} — infinite-scroll paging (#1010). */
@@ -82,60 +98,102 @@ export interface ScrollOptions {
 
 const PROP_BRAND = Symbol.for("blok.inertia.propMode");
 
+/**
+ * `merge` and `scroll` only describe what the CLIENT does with the value, so
+ * they never take the resolution slot: `defer(merge(node, …))` is a deferred
+ * prop that also carries merge labels.
+ */
+type MetadataMode = "merge" | "scroll";
+
+/** The modes that decide WHETHER a prop resolves, laziest first. */
+const RESOLUTION_ORDER = ["defer", "optional", "once", "always"] as const;
+
 /** A node wrapped in a resolution mode. Opaque to authors — pass it to {@link definePage}. */
 export interface ModeProp<N extends NodeLike, M extends PropMode> {
 	readonly [PROP_BRAND]: M;
 	readonly node: N;
 	readonly options: Readonly<Record<string, unknown>>;
+	/** Every wrapper in the chain, keyed by its own mode — `once(merge(n))` has both. */
+	readonly modes: Readonly<Partial<Record<PropMode, Record<string, unknown>>>>;
 }
 
-function wrap<N extends NodeLike, M extends PropMode>(
-	mode: M,
-	node: N,
-	options: Record<string, unknown> = {},
-): ModeProp<N, M> {
-	if (!node || typeof node.name !== "string" || node.name.length === 0) {
-		throw new Error(`${mode}() requires a node value (from defineNode/runtimeNode).`);
+/** The node behind a prop value, whether or not it is wrapped (possibly twice). */
+type Unwrap<V> = V extends ModeProp<infer N, PropMode> ? N : V;
+/** The mode a prop value already carries. A bare node is `"regular"`. */
+type InnerMode<V> = V extends ModeProp<NodeLike, infer M> ? M : "regular";
+/** Wrapping mode `O` around mode `I`: a metadata mode yields to whatever is inside. */
+type Fold<I extends PropMode, O extends PropMode> = O extends MetadataMode ? (I extends "regular" ? O : I) : O;
+
+function wrap(mode: PropMode, node: PropValue, options: Record<string, unknown> = {}): ModeProp<NodeLike, PropMode> {
+	const inner = readMode(node);
+	const base = (inner?.node ?? node) as NodeLike;
+	if (!base || typeof base.name !== "string" || base.name.length === 0) {
+		throw new Error(`${mode}() requires a node value (from defineNode/runtimeNode), or another mode wrapper.`);
 	}
-	return { [PROP_BRAND]: mode, node, options };
+	const modes = { ...(inner?.modes ?? {}), [mode]: options };
+	// The laziest resolution mode in the chain wins; with none, the outer
+	// metadata mode stands so a plain `merge(node)` still reports mode "merge".
+	const resolution =
+		RESOLUTION_ORDER.find((candidate) => modes[candidate] !== undefined) ??
+		(inner && inner.mode !== "regular" ? inner.mode : mode);
+	return { [PROP_BRAND]: resolution, node: base, options: modes[resolution] ?? {}, modes };
 }
 
 /** Always resolved, and exempt from every partial-reload `only`/`except` filter. */
-export function always<N extends NodeLike>(node: N): ModeProp<N, "always"> {
-	return wrap("always", node);
+export function always<V extends PropValue>(node: V): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "always">> {
+	return wrap("always", node) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "always">>;
 }
 
 /** Never resolved on a full visit — only when the client asks for it by name. */
-export function optional<N extends NodeLike>(node: N): ModeProp<N, "optional"> {
-	return wrap("optional", node);
+export function optional<V extends PropValue>(node: V): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "optional">> {
+	return wrap("optional", node) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "optional">>;
 }
 
 /** Announced on the full visit, resolved in the client's follow-up partial request. */
-export function defer<N extends NodeLike>(node: N, options: DeferOptions = {}): ModeProp<N, "defer"> {
-	return wrap("defer", node, { ...options });
+export function defer<V extends PropValue>(
+	node: V,
+	options: DeferOptions = {},
+): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "defer">> {
+	return wrap("defer", node, { ...options }) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "defer">>;
 }
 
 /** Resolves like a regular prop; the client APPENDS/PREPENDS/deep-merges it (#1009). */
-export function merge<N extends NodeLike>(node: N, options: MergeOptions = {}): ModeProp<N, "merge"> {
-	return wrap("merge", node, { ...options });
+export function merge<V extends PropValue>(
+	node: V,
+	options: MergeOptions = {},
+): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "merge">> {
+	return wrap("merge", node, { ...options }) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "merge">>;
 }
 
-/** Resolves like a regular prop; the client caches it and skips it next time (#1009). */
-export function once<N extends NodeLike>(node: N, options: OnceOptions = {}): ModeProp<N, "once"> {
-	return wrap("once", node, { ...options });
+/** Resolved once; afterwards the client replays its remembered copy and the node is skipped (#1009). */
+export function once<V extends PropValue>(
+	node: V,
+	options: OnceOptions = {},
+): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "once">> {
+	return wrap("once", node, { ...options }) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "once">>;
 }
 
 /** Resolves like a regular prop; the client grows it as the user scrolls (#1010). */
-export function scroll<N extends NodeLike>(node: N, options: ScrollOptions = {}): ModeProp<N, "scroll"> {
-	return wrap("scroll", node, { ...options });
+export function scroll<V extends PropValue>(
+	node: V,
+	options: ScrollOptions = {},
+): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "scroll">> {
+	return wrap("scroll", node, { ...options }) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "scroll">>;
 }
 
-function readMode(value: unknown): { mode: PropMode; node: NodeLike; options: Record<string, unknown> } | undefined {
+interface ReadMode {
+	mode: PropMode;
+	node: NodeLike;
+	options: Record<string, unknown>;
+	modes: Partial<Record<PropMode, Record<string, unknown>>>;
+}
+
+function readMode(value: unknown): ReadMode | undefined {
 	if (value === null || typeof value !== "object") return undefined;
 	const mode = (value as Record<symbol, unknown>)[PROP_BRAND];
 	if (typeof mode !== "string") return undefined;
 	const wrapped = value as unknown as ModeProp<NodeLike, PropMode>;
-	return { mode: mode as PropMode, node: wrapped.node, options: wrapped.options };
+	return { mode: mode as PropMode, node: wrapped.node, options: wrapped.options, modes: { ...wrapped.modes } };
 }
 
 // =============================================================================
@@ -356,15 +414,18 @@ export function definePage<P extends PageShape>(component: string, shape: P): Pa
 				`definePage("${component}") prop "${key}" must be a node value, or a node in a mode wrapper (always/optional/defer/merge/once/scroll).`,
 			);
 		}
-		const options = wrapped?.options ?? {};
+		// Each wrapper contributes its OWN bag, so a composed prop keeps all of
+		// them: `defer(merge(node, …))` is mode `defer` WITH merge labels (#1009).
+		const modes = wrapped?.modes ?? {};
+		const deferOptions = (modes.defer ?? {}) as DeferOptions;
 		const outputSchema = outputSchemaOf(node);
 		entry.props[key] = {
 			mode: wrapped?.mode ?? "regular",
-			...(typeof options.group === "string" ? { group: options.group } : {}),
-			...(options.rescue === true ? { rescue: true } : {}),
-			...(wrapped?.mode === "merge" ? { merge: options as MergeOptions } : {}),
-			...(wrapped?.mode === "once" ? { once: options as OnceOptions } : {}),
-			...(wrapped?.mode === "scroll" ? { scroll: options as ScrollOptions } : {}),
+			...(typeof deferOptions.group === "string" ? { group: deferOptions.group } : {}),
+			...(deferOptions.rescue === true ? { rescue: true } : {}),
+			...(modes.merge ? { merge: modes.merge as MergeOptions } : {}),
+			...(modes.once ? { once: modes.once as OnceOptions } : {}),
+			...(modes.scroll ? { scroll: modes.scroll as ScrollOptions } : {}),
 			...(outputSchema ? { outputSchema } : {}),
 			...(source ? { source } : {}),
 		};

@@ -26,10 +26,15 @@
  *     steps: NodeBase[],            // [...propSteps, serializerStep]
  *   }
  *
- * NOT implemented here (deliberately): the RESOLUTION semantics of
- * `merge` / `once` / `scroll` (#1009 / #1010). Those modes resolve exactly like
- * a regular prop and contribute only their client-side metadata, so the
- * features can land later without touching this executor.
+ * `merge` and `scroll` resolve exactly like a regular prop and contribute only
+ * client-side metadata. `once` is the one mode that changes RESOLUTION: the
+ * client tells us which remembered props it still holds
+ * (`X-Inertia-Except-Once-Props`) and those steps are not run at all (#1009).
+ *
+ * Whether a merge label survives onto the wire is the SERIALIZER's call, not
+ * this node's: "full visits always replace" and `X-Inertia-Reset` are wire
+ * rules, applied once in `@blokjs/inertia`'s `buildPage` so a hand-written
+ * serializer step obeys them too.
  */
 
 import { type Context, type NodeBase, type ResponseContext, isStructuralRef, isStructuralTpl } from "@blokjs/shared";
@@ -42,10 +47,17 @@ import { applyStepOutput } from "./workflow/PersistenceHelper";
 /** How a prop is resolved. `merge`/`once`/`scroll` resolve like `regular`. */
 export type PagePropMode = "regular" | "always" | "optional" | "defer" | "merge" | "once" | "scroll";
 
+/**
+ * One merge direction's target (#1009):
+ * `true` (the whole prop), `"data"`, `["a","b"]`, or `{ "users.data": "id" }`
+ * — the map form carries the `matchOn` field per path.
+ */
+export type PageMergeTarget = boolean | string | string[] | Record<string, string>;
+
 /** Client merge-strategy metadata (#1009) — passed through to the serializer. */
 export interface PageMergeMeta {
-	append?: string;
-	prepend?: string;
+	append?: PageMergeTarget;
+	prepend?: PageMergeTarget;
 	deep?: string | boolean;
 	matchOn?: string;
 }
@@ -53,7 +65,10 @@ export interface PageMergeMeta {
 /** Once-prop cache metadata (#1009). */
 export interface PageOnceMeta {
 	as?: string;
-	until?: string | number;
+	/** Duration (`"1h"`), SECONDS (`3600`), or an absolute date (ISO / `Date`). */
+	until?: string | number | Date;
+	/** Resolve and resend even when the client says it still holds the value. */
+	fresh?: boolean;
 }
 
 /** Infinite-scroll paging metadata (#1010). */
@@ -233,14 +248,71 @@ function unwrapResult(resp: unknown): unknown {
 const DURATION = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/;
 const DURATION_UNITS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
-/** A once-prop's `until` → an ISO expiry, or `null` when it never expires. */
-function onceExpiry(until: string | number | undefined): string | null {
+/**
+ * A once-prop's `until` → the expiry as EPOCH MILLISECONDS, or `null` when it
+ * never expires.
+ *
+ * Milliseconds, not an ISO string, because that is what the client compares:
+ * `@inertiajs/core` filters its remembered entries with
+ * `onceProp.expiresAt > Date.now()`. An ISO string loses that comparison every
+ * time, so the client would treat every entry as expired and never send
+ * `X-Inertia-Except-Once-Props` — the whole feature, silently off.
+ *
+ * `until` is read the way Laravel's `until()` reads it: a DURATION from now
+ * (`"1h"`, `"500ms"`), a number of SECONDS, or an ABSOLUTE date (a `Date`, or
+ * anything `Date.parse` accepts).
+ */
+function onceExpiry(until: string | number | Date | undefined): number | null {
 	if (until === undefined) return null;
-	if (typeof until === "number") return new Date(Date.now() + until).toISOString();
+	if (until instanceof Date) return Number.isNaN(until.getTime()) ? null : until.getTime();
+	if (typeof until === "number") return Date.now() + until * 1000;
 	const match = DURATION.exec(until.trim());
-	if (match) return new Date(Date.now() + Number(match[1]) * (DURATION_UNITS[match[2]] as number)).toISOString();
+	if (match) return Date.now() + Number(match[1]) * (DURATION_UNITS[match[2]] as number);
 	const parsed = Date.parse(until);
-	return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+	return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Has an ABSOLUTE `until` already passed? A relative duration is measured from
+ * NOW, so it is never expired at emission time and this is always `false` —
+ * enforcing THAT deadline is the client's job (it stops listing the key). An
+ * absolute one the server can and must check itself.
+ */
+function onceExpired(until: string | number | Date | undefined): boolean {
+	const expiry = onceExpiry(until);
+	return expiry !== null && expiry <= Date.now();
+}
+
+/**
+ * Does this once-prop resolve on THIS request?
+ *
+ * `explicit` is a partial reload naming it in `only` — the client asking for a
+ * fresh copy outranks everything. Otherwise it resolves unless the client says
+ * it still holds a live copy (`X-Inertia-Except-Once-Props`), with `fresh`
+ * forcing a resolve and an elapsed absolute `until` invalidating the claim.
+ */
+function resolveOnce(prop: PagePropMeta, exceptOnce: Set<string>, explicit: boolean): boolean {
+	if (explicit) return true;
+	const once = prop.once ?? {};
+	if (once.fresh === true) return true;
+	if (!exceptOnce.has(once.as ?? prop.key)) return true;
+	return onceExpired(once.until);
+}
+
+/**
+ * One merge direction → the `[path, matchOn?]` pairs it labels (#1009).
+ *
+ * `true` targets the prop itself, a string a sub-path (`"data"` →
+ * `<key>.data`), an array several of them, and the map form pairs each path
+ * with the field the client matches items on (`{ "users.data": "id" }`).
+ */
+function mergeTargets(key: string, target: PageMergeTarget | undefined): Array<[string, string | undefined]> {
+	if (target === undefined || target === false) return [];
+	const path = (suffix?: string) => (suffix ? `${key}.${suffix}` : key);
+	if (target === true) return [[key, undefined]];
+	if (typeof target === "string") return [[path(target), undefined]];
+	if (Array.isArray(target)) return target.map((suffix) => [path(suffix), undefined]);
+	return Object.entries(target).map(([suffix, field]) => [path(suffix), field]);
 }
 
 /** The prop-metadata bundle the serializer needs. Every field is optional on the wire. */
@@ -252,7 +324,7 @@ interface PageMetadata {
 	prependProps?: string[];
 	deepMergeProps?: string[];
 	matchPropsOn?: string[];
-	onceProps?: Record<string, { prop: string; expiresAt: string | null }>;
+	onceProps?: Record<string, { prop: string; expiresAt: number | null }>;
 	scrollProps?: Record<string, PageScrollMeta & { pageName: string }>;
 }
 
@@ -424,26 +496,27 @@ interface Selection {
  * Partial reload of THIS component:
  *   `only` (dot paths target a prop's sub-path, so the ROOT segment selects the
  *   prop) narrows first, then `except` removes whole props; `always` props are
- *   exempt from both; `optional`, `defer` and `once` run ONLY when explicitly
- *   named in `only`.
+ *   exempt from both; `optional` and `defer` run ONLY when explicitly named in
+ *   `only`.
+ *
+ * A `once` prop is NOT a lazy mode: it belongs to the regular set on a full
+ * visit AND on a partial without `only`, and stays out only while the client
+ * says it still holds a live copy. Naming it in `only` always resolves it.
  */
 function selectProps(props: PagePropMeta[], headers: Record<string, string>, partial: boolean): Selection {
 	const onlyRoots = new Set(headerList(headers["x-inertia-partial-data"]).map(rootSegment));
 	const exceptExact = new Set(headerList(headers["x-inertia-partial-except"]));
 	const exceptOnce = new Set(headerList(headers["x-inertia-except-once-props"]));
+	const narrowed = partial && onlyRoots.size > 0;
 
 	const run = props.filter((prop) => {
 		if (prop.mode === "always") return true;
-		const requested = onlyRoots.has(prop.key);
-		if (!partial) {
-			if (prop.mode === "optional" || prop.mode === "defer") return false;
-			if (prop.mode === "once") return !exceptOnce.has(prop.once?.as ?? prop.key);
-			return true;
-		}
-		if (onlyRoots.size > 0) return requested;
-		// A partial without `only` reloads the regular set. Lazy modes stay lazy:
-		// the client has to ask for them by name.
-		return prop.mode !== "optional" && prop.mode !== "defer" && prop.mode !== "once";
+		// `only` narrows to exactly what it names — including the lazy modes.
+		if (narrowed) return onlyRoots.has(prop.key);
+		// Full visit, or a partial without `only`: the regular set runs.
+		if (prop.mode === "optional" || prop.mode === "defer") return false;
+		if (prop.mode === "once") return resolveOnce(prop, exceptOnce, false);
+		return true;
 	});
 
 	// `except` never overrides an always-prop; a dot path (`posts.data`) narrows
@@ -467,7 +540,7 @@ function buildMetadata(
 	const prependProps: string[] = [];
 	const deepMergeProps: string[] = [];
 	const matchPropsOn: string[] = [];
-	const onceProps: Record<string, { prop: string; expiresAt: string | null }> = {};
+	const onceProps: Record<string, { prop: string; expiresAt: number | null }> = {};
 	const scrollProps: Record<string, PageScrollMeta & { pageName: string }> = {};
 
 	for (const prop of props) {
@@ -480,21 +553,40 @@ function buildMetadata(
 		}
 		// Labels describe props that are actually IN this response.
 		const present = Object.hasOwn(resolved, prop.key);
-		if (prop.mode === "merge" && present) {
-			const m = prop.merge ?? {};
-			const path = (suffix?: string) => (suffix ? `${prop.key}.${suffix}` : prop.key);
-			if (m.prepend !== undefined) prependProps.push(path(m.prepend));
-			if (m.deep !== undefined) deepMergeProps.push(path(typeof m.deep === "string" ? m.deep : undefined));
-			if (m.append !== undefined || (m.prepend === undefined && m.deep === undefined)) {
-				mergeProps.push(path(m.append));
+		// The mode is the RESOLUTION rule; the metadata bags are independent, so a
+		// composed prop — `defer(merge(node, …))` — carries mode `defer` and still
+		// labels itself for the client (#1009). A JSON prop that sets only
+		// `mode: "merge"` gets the default (root append) bag.
+		const mergeMeta = prop.merge ?? (prop.mode === "merge" ? {} : undefined);
+		const onceMeta = prop.once ?? (prop.mode === "once" ? {} : undefined);
+		const scrollMeta = prop.scroll ?? (prop.mode === "scroll" ? {} : undefined);
+
+		if (mergeMeta && present) {
+			const appends = mergeTargets(prop.key, mergeMeta.append);
+			const prepends = mergeTargets(prop.key, mergeMeta.prepend);
+			const deeps = mergeTargets(prop.key, mergeMeta.deep);
+			// Plain `merge(node)` means "append the whole prop".
+			if (appends.length + prepends.length + deeps.length === 0) appends.push([prop.key, undefined]);
+			for (const [path] of appends) mergeProps.push(path);
+			for (const [path] of prepends) prependProps.push(path);
+			for (const [path] of deeps) deepMergeProps.push(path);
+			// `<mergePath>.<field>` — the client splits on the LAST dot and matches
+			// the head against the merge path, so the field rides the path it
+			// belongs to. A per-path field (the map form) wins over the shared one.
+			for (const [path, field] of [...appends, ...prepends, ...deeps]) {
+				const on = field ?? mergeMeta.matchOn;
+				if (on !== undefined && !matchPropsOn.includes(`${path}.${on}`)) matchPropsOn.push(`${path}.${on}`);
 			}
-			if (m.matchOn !== undefined) matchPropsOn.push(`${path(m.append ?? m.prepend)}.${m.matchOn}`);
 		}
-		if (prop.mode === "once" && present) {
-			onceProps[prop.once?.as ?? prop.key] = { prop: prop.key, expiresAt: onceExpiry(prop.once?.until) };
+		// The once entry describes the CACHE, not the payload, so it ships even
+		// when the value does not: a skipped once prop whose entry went missing
+		// would read to the client as "your copy is stale, forget it" — exactly
+		// the opposite of what the skip means.
+		if (onceMeta) {
+			onceProps[onceMeta.as ?? prop.key] = { prop: prop.key, expiresAt: onceExpiry(onceMeta.until) };
 		}
-		if (prop.mode === "scroll" && present) {
-			const s = prop.scroll ?? {};
+		if (scrollMeta && present) {
+			const s = scrollMeta;
 			const path = s.wrapper ? `${prop.key}.${s.wrapper}` : prop.key;
 			scrollProps[path] = { ...s, pageName: s.pageName ?? "page" };
 			if (!mergeProps.includes(path)) mergeProps.push(path);

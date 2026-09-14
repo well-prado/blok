@@ -12,10 +12,13 @@
  */
 
 import { type Server, createServer } from "node:http";
-import { runNode } from "@blokjs/core/testing";
+import { http, defineNode, workflow } from "@blokjs/core";
+import { runNode, runWorkflow } from "@blokjs/core/testing";
 import type { RespondEnvelope } from "@blokjs/shared";
 import { type Page, getInitialPageFromDOM, router } from "@inertiajs/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { definePage, merge, once } from "../src/define-page.js";
 import InertiaNode, { clearHistory } from "../src/index.js";
 
 const PORT = 39441;
@@ -36,6 +39,13 @@ const routes = new Map<string, RespondEnvelope>();
 
 /** Every request the client actually put on the wire (#1015 test 12). */
 let requests = 0;
+
+/**
+ * Path -> a LIVE handler (#1009). Where `routes` replays a canned envelope,
+ * these run the real workflow per request, so the CLIENT's own headers decide
+ * what the runner resolves and which labels come back.
+ */
+const dynamic = new Map<string, (headers: Record<string, string>) => Promise<RespondEnvelope>>();
 
 async function render(input: Record<string, unknown>): Promise<RespondEnvelope> {
 	return (await runNode(InertiaNode, input as never)) as unknown as RespondEnvelope;
@@ -71,13 +81,17 @@ beforeAll(async () => {
 	routes.set("/orders", flashed);
 	server = createServer((req, res) => {
 		requests += 1;
-		const env = routes.get((req.url ?? "/").split("?")[0] as string) ?? visit;
-		res.writeHead(env.status ?? 200, {
-			"Content-Type": env.contentType ?? "application/json",
-			...(env.headers ?? {}),
-			...(env.cookies?.length ? { "Set-Cookie": env.cookies } : {}),
-		});
-		res.end(JSON.stringify(env.body));
+		void (async () => {
+			const path = (req.url ?? "/").split("?")[0] as string;
+			const live = dynamic.get(path);
+			const env = live ? await live(req.headers as Record<string, string>) : (routes.get(path) ?? visit);
+			res.writeHead(env.status ?? 200, {
+				"Content-Type": env.contentType ?? "application/json",
+				...(env.headers ?? {}),
+				...(env.cookies?.length ? { "Set-Cookie": env.cookies } : {}),
+			});
+			res.end(typeof env.body === "string" ? env.body : JSON.stringify(env.body));
+		})();
 	});
 	await new Promise<void>((resolve) => server.listen(PORT, "127.0.0.1", resolve));
 });
@@ -283,6 +297,143 @@ describe("12 (#1015) — an instant visit renders shared props first, then the r
 		expect(landed.props.auth).toEqual(AUTH);
 		expect((dashboards[1] as Page).props.stats).toEqual({ total: 42 });
 		expect(requests - before).toBe(1);
+
+ * Issue #1009, test 13 — merge props and once props through the STOCK client.
+ *
+ * The server half is the real thing: every request below runs the whole
+ * `workflow() -> PageNode -> @blokjs/inertia` pipeline against the headers the
+ * CLIENT actually sent, so what is under test is the pair — the labels we emit
+ * and what the client does with them. The prop nodes count their runs, so
+ * "the once prop was not re-requested" is asserted as "the node never ran
+ * again", not as an absent key.
+ *
+ * Declared BEFORE the #1013 block below, which deliberately leaves an
+ * undecryptable history entry behind.
+ */
+
+let feedRuns = 0;
+let planRuns = 0;
+
+const loadFeed = defineNode({
+	name: "jsdom-feed",
+	description: "one more row per call",
+	input: z.object({}),
+	output: z.object({ data: z.array(z.object({ id: z.number() })) }),
+	async execute() {
+		feedRuns += 1;
+		return { data: [{ id: feedRuns }] };
+	},
+});
+
+const loadPlans = defineNode({
+	name: "jsdom-plans",
+	description: "expensive, remembered by the client",
+	input: z.object({}),
+	output: z.object({ tiers: z.array(z.string()) }),
+	async execute() {
+		planRuns += 1;
+		return { tiers: ["pro"] };
+	},
+});
+
+const FeedPage = definePage("Feed/Index", {
+	feed: merge(loadFeed, { append: "data", matchOn: "id" }),
+	plans: once(loadPlans),
+});
+
+const BillingPage = definePage("Billing/Index", { plans: once(loadPlans) });
+
+function feedWorkflow() {
+	return workflow("jsdom-feed-page", { version: "1.0.0", trigger: http.get("/feed") }, (req) => {
+		FeedPage.render(req, "page", "/feed", {}, { version: "v1" });
+	});
+}
+
+function billingWorkflow() {
+	return workflow("jsdom-billing-page", { version: "1.0.0", trigger: http.get("/billing") }, (req) => {
+		BillingPage.render(req, "page", "/billing", {}, { version: "v1" });
+	});
+}
+
+async function serve(
+	build: () => Promise<unknown>,
+	headers: Record<string, string>,
+	url: string,
+): Promise<RespondEnvelope> {
+	const run = await runWorkflow((await build()) as never, {}, { headers, path: url });
+	if (!run.ok) throw run.error;
+	return run.response as unknown as RespondEnvelope;
+}
+
+/** Resolve on the client's own success callback, or fail loudly on a timeout. */
+function clientVisit(start: (hooks: Record<string, unknown>) => void, what: string): Promise<Page> {
+	return new Promise<Page>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${what} never resolved`)), 5000);
+		start({
+			onSuccess: (page: Page) => {
+				clearTimeout(timer);
+				resolve(page);
+			},
+			onError: (errors: unknown) => {
+				clearTimeout(timer);
+				reject(new Error(`${what} failed: ${JSON.stringify(errors)}`));
+			},
+		});
+	});
+}
+
+describe("13 (#1009) — the client appends, resets, and stops asking for a once prop", () => {
+	it("reload({only}) appends, reset replaces, and the once prop resolves exactly once", async () => {
+		dynamic.set("/feed", (headers) => serve(feedWorkflow, headers, "/feed"));
+		dynamic.set("/billing", (headers) => serve(billingWorkflow, headers, "/billing"));
+
+		// The first load is a plain browser GET: the HTML shell with the boot
+		// script, exactly what the server would send a cold browser.
+		const html = (await serve(feedWorkflow, {}, "/feed")).body as string;
+		document.documentElement.innerHTML = html;
+		const initialPage = getInitialPageFromDOM("app") as Page;
+		expect(initialPage.props.feed).toEqual({ data: [{ id: 1 }] });
+		expect(initialPage.onceProps?.plans).toEqual({ prop: "plans", expiresAt: null });
+		expect(planRuns).toBe(1);
+
+		// `router.reload()` reloads `window.location.href`, so the document has to
+		// be standing on the page we just booted from.
+		window.history.replaceState({}, "", "/feed");
+		router.init({
+			initialPage,
+			resolveComponent: async (name: string) => ({ name }),
+			swapComponent: async () => {},
+		});
+
+		// A partial reload of the merge prop: the client sends `only: feed` AND
+		// `X-Inertia-Except-Once-Props: plans`, so the server labels `feed.data`
+		// and never touches the plans node.
+		const appended = await clientVisit(
+			(hooks) => router.reload({ only: ["feed"], ...hooks }),
+			"reload({only: [feed]})",
+		);
+		expect(appended.props.feed).toEqual({ data: [{ id: 1 }, { id: 2 }] });
+		expect(planRuns).toBe(1);
+		expect(appended.props.plans).toEqual({ tiers: ["pro"] });
+
+		// `reset` asks for a fresh copy: the label is stripped, so the client
+		// REPLACES instead of appending.
+		const replaced = await clientVisit(
+			(hooks) => router.reload({ only: ["feed"], reset: ["feed.data"], ...hooks }),
+			"reload({reset})",
+		);
+		expect(replaced.props.feed).toEqual({ data: [{ id: 3 }] });
+
+		// A second navigation, to a different page declaring the same once prop:
+		// the client replays its remembered copy and the node stays untouched.
+		const billing = await clientVisit(
+			(hooks) => router.visit("/billing", { method: "get", ...hooks }),
+			"visit(/billing)",
+		);
+		expect(billing.component).toBe("Billing/Index");
+		expect(planRuns).toBe(1);
+		expect(billing.props.plans).toEqual({ tiers: ["pro"] });
+		expect(feedRuns).toBe(3);
 	});
 });
 

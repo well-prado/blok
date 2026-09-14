@@ -2550,7 +2550,7 @@
 														"once",
 														"scroll"
 													],
-													"description": "Resolution mode. 'regular' (default) runs on full visits and when selected on a partial; 'always' ignores only/except; 'optional' and 'defer' run ONLY when explicitly requested; 'merge'/'once'/'scroll' resolve like 'regular' and add client-side prop metadata."
+													"description": "Resolution mode. 'regular' (default) runs on full visits and when selected on a partial; 'always' ignores only/except; 'optional' and 'defer' run ONLY when explicitly requested; 'merge'/'scroll' resolve like 'regular' and add client-side prop metadata; 'once' resolves like 'regular' but is SKIPPED while the client says it still holds the remembered value."
 												},
 												"group": {
 													"type": "string",
@@ -2565,10 +2565,48 @@
 													"type": "object",
 													"properties": {
 														"append": {
-															"type": "string"
+															"anyOf": [
+																{
+																	"type": "boolean"
+																},
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																{
+																	"type": "object",
+																	"additionalProperties": {
+																		"type": "string"
+																	}
+																}
+															]
 														},
 														"prepend": {
-															"type": "string"
+															"anyOf": [
+																{
+																	"type": "boolean"
+																},
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																{
+																	"type": "object",
+																	"additionalProperties": {
+																		"type": "string"
+																	}
+																}
+															]
 														},
 														"deep": {
 															"type": [
@@ -2593,7 +2631,12 @@
 															"type": [
 																"string",
 																"number"
-															]
+															],
+															"description": "A duration ('1h'), a number of SECONDS, or an absolute date."
+														},
+														"fresh": {
+															"type": "boolean",
+															"description": "Resolve even when the client still holds the remembered value."
 														}
 													},
 													"additionalProperties": false,

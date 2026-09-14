@@ -1325,8 +1325,18 @@ export interface PagePropSpec {
 	group?: string;
 	/** A throw omits the prop and lists it in `rescuedProps` instead of failing the run. */
 	rescue?: boolean;
-	merge?: { append?: string; prepend?: string; deep?: string | boolean; matchOn?: string };
-	once?: { as?: string; until?: string | number };
+	/**
+	 * Client merge strategy (#1009). `append`/`prepend` take `true` (the whole
+	 * prop), a sub-path, a list of them, or a `{ path: matchField }` map.
+	 */
+	merge?: {
+		append?: boolean | string | string[] | Record<string, string>;
+		prepend?: boolean | string | string[] | Record<string, string>;
+		deep?: string | boolean;
+		matchOn?: string;
+	};
+	/** Once-prop cache (#1009). `until`: a duration, SECONDS, or an absolute date. */
+	once?: { as?: string; until?: string | number | Date; fresh?: boolean };
 	scroll?: {
 		wrapper?: string;
 		pageName?: string;

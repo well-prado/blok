@@ -150,16 +150,20 @@ describe("4 — history + fragment flags are omitted unless true", () => {
 });
 
 describe("5 — merge metadata", () => {
-	it("emits merge labels verbatim", async () => {
+	const labels = {
+		mergeProps: ["posts.data"],
+		matchPropsOn: ["posts.data.id"],
+		prependProps: ["feed.items"],
+		deepMergeProps: ["settings"],
+	};
+
+	it("emits merge labels verbatim on a partial reload", async () => {
 		const page = pageOf(
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: INERTIA,
-				mergeProps: ["posts.data"],
-				matchPropsOn: ["posts.data.id"],
-				prependProps: ["feed.items"],
-				deepMergeProps: ["settings"],
+				headers: { ...INERTIA, "x-inertia-partial-component": "Posts" },
+				...labels,
 			}),
 		);
 		expect(page.mergeProps).toEqual(["posts.data"]);
@@ -168,12 +172,22 @@ describe("5 — merge metadata", () => {
 		expect(page.deepMergeProps).toEqual(["settings"]);
 	});
 
+	it("drops every one of them on a full visit (#1009)", async () => {
+		// "Prop merging only works during partial reloads. Full page visits will
+		// always replace props entirely, even if you've marked them for merging."
+		const page = pageOf(await run({ component: "Posts", url: "/posts", headers: INERTIA, ...labels }));
+		expect(page.mergeProps).toBeUndefined();
+		expect(page.matchPropsOn).toBeUndefined();
+		expect(page.prependProps).toBeUndefined();
+		expect(page.deepMergeProps).toBeUndefined();
+	});
+
 	it("omits every empty array", async () => {
 		const page = pageOf(
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: INERTIA,
+				headers: { ...INERTIA, "x-inertia-partial-component": "Posts" },
 				mergeProps: [],
 				matchPropsOn: [],
 				prependProps: [],
@@ -246,12 +260,14 @@ describe("8 — onceProps", () => {
 				url: "/",
 				headers: INERTIA,
 				props: { menu: ["a"], config: { x: 1 } },
-				onceProps: { "menu:v1": { prop: "menu" }, "config:v1": { prop: "config", expiresAt: "2030-01-01T00:00:00Z" } },
+				// `expiresAt` is epoch MILLISECONDS — the client keeps an entry while
+				// `expiresAt > Date.now()`, a comparison an ISO string always loses.
+				onceProps: { "menu:v1": { prop: "menu" }, "config:v1": { prop: "config", expiresAt: 1_893_456_000_000 } },
 			}),
 		);
 		expect(page.onceProps).toEqual({
 			"menu:v1": { prop: "menu", expiresAt: null },
-			"config:v1": { prop: "config", expiresAt: "2030-01-01T00:00:00Z" },
+			"config:v1": { prop: "config", expiresAt: 1_893_456_000_000 },
 		});
 	});
 
@@ -278,11 +294,11 @@ describe("8 — onceProps", () => {
 				url: "/",
 				headers: { ...INERTIA, "x-inertia-except-once-props": "menu:v1" },
 				props: { menu: ["a"], other: 1 },
-				onceProps: { "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } },
+				onceProps: { "menu:v1": { prop: "menu", expiresAt: 1_924_992_000_000 } },
 			}),
 		);
 		expect(page.props).toEqual({ menu: ["a"], other: 1, errors: {} });
-		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } });
+		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: 1_924_992_000_000 } });
 	});
 });
 
@@ -474,7 +490,11 @@ describe("16 — reset", () => {
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: { ...INERTIA, "x-inertia-infinite-scroll-merge-intent": "prepend" },
+				headers: {
+					...INERTIA,
+					"x-inertia-partial-component": "Posts",
+					"x-inertia-infinite-scroll-merge-intent": "prepend",
+				},
 				mergeProps: ["posts.data"],
 				scrollProps: { "posts.data": { pageName: "page" } },
 			}),
