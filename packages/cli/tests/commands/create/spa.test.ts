@@ -243,7 +243,9 @@ describe("blokctl create spa / add spa (#999)", () => {
 		expect(files).toContain("src/workflows/home.ts");
 		expect(files).toContain("src/nodes/home-greeting/index.ts");
 		expect(files).toContain("src/nodes/current-user/index.ts");
-		expect(files).toContain("src/inertia-shell.ts");
+		// #1051 — the adapter's default shell loads the bundle from `.blok-vite.json`; no custom shell.
+		expect(files).not.toContain("src/inertia-shell.ts");
+		expect(fsExtra.readFileSync(path.join(workDir, "src/workflows/home.ts"), "utf8")).not.toContain("inertia-shell");
 		expect(files).toContain("client/vite.config.ts");
 	});
 

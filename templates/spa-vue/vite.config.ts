@@ -18,21 +18,12 @@ export default defineConfig(({ isSsrBuild }) => ({
 		? {
 				// `blokctl inertia start-ssr` looks for `client/dist-ssr/ssr.js`
 				// first. Its own outDir also keeps `vite build --ssr` from
-				// overwriting the client bundle, which shares the name `app.js`.
+				// overwriting the client bundle.
 				outDir: "dist-ssr",
 				rollupOptions: { output: { entryFileNames: "ssr.js" } },
 			}
-		: {
-				// ponytail: a FIXED entry filename, so the Blok HTML shell can
-				// point at `/assets/app.js` without reading the Vite manifest.
-				// Chunks and other assets stay fingerprinted. Read the manifest
-				// instead if you ever need the entry itself content-hashed.
-				rollupOptions: {
-					output: {
-						entryFileNames: "assets/app.js",
-						chunkFileNames: "assets/[name]-[hash].js",
-						assetFileNames: "assets/[name]-[hash][extname]",
-					},
-				},
-			},
+		: // Default (hashed) filenames: the Blok shell reads them from the
+			// `.blok-vite.json` descriptor blokInertia() writes, so nothing here
+			// has to be predictable — and every deploy gets fresh, immutable URLs.
+			{},
 }));

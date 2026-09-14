@@ -434,7 +434,6 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 	fsExtra.ensureDirSync(path.join(projectDir, "src", "nodes", "home-greeting"));
 	fsExtra.writeFileSync(path.join(projectDir, "src", "nodes", "home-greeting", "index.ts"), HOME_GREETING_NODE);
 	fsExtra.ensureDirSync(path.join(projectDir, "src", "workflows"));
-	fsExtra.writeFileSync(path.join(projectDir, "src", "inertia-shell.ts"), inertiaShell(framework));
 	fsExtra.writeFileSync(path.join(projectDir, "src", "workflows", "home.ts"), HOME_WORKFLOW);
 
 	if (opts.install !== false) {
@@ -505,75 +504,12 @@ export default defineNode({
 });
 `;
 
-/**
- * The project's HTML shell. Framework-dependent only in the dev entry path,
- * which is the Vite module URL of the client's own entry file.
- */
-function inertiaShell(framework: SpaFramework): string {
-	return `import { existsSync, readFileSync } from "node:fs";
-import { APP_MARKER, HEAD_MARKER } from "@blokjs/inertia";
-
-const CLIENT_OUT = "${CLIENT_DIR}/dist";
-
-/**
- * The HTML document Blok wraps around the first page load. The default shell in
- * \`@blokjs/inertia\` carries no <script> tag — it cannot know where YOUR bundle
- * lives — so the scaffold supplies one here.
- *
- * ponytail: which entry to reference is decided by whether a build EXISTS, not
- * by an env var. With \`${CLIENT_DIR}/dist\` present (\`run build\` then \`run start\`)
- * the built bundle wins; otherwise the Vite dev server is assumed to be in
- * front and its module graph is loaded directly.
- */
-const built = existsSync(\`\${CLIENT_OUT}/assets/app.js\`);
-
-/**
- * The client build's version: \`"dev"\` while the Vite dev server owns the file,
- * a manifest hash after \`run build:client\`. Inertia's 409 reload path compares
- * it against \`X-Inertia-Version\`, so a page rendered WITHOUT it can never tell
- * a client its bundle is stale.
- *
- * ponytail: read once, at boot, from the file the Vite plugin writes.
- * \`process.env.ASSET_VERSION\` is not an option — the HTTP trigger sets it only
- * AFTER it has already scanned this workflow. Restart Blok after the first
- * client build.
- */
-export const assetVersion = ((): string => {
-	try {
-		return readFileSync(\`\${CLIENT_OUT}/.blok-asset-version\`, "utf8").trim();
-	} catch {
-		return "";
-	}
-})();
-
-const scripts = built
-	? '<script type="module" src="/assets/app.js"></script>'
-	: '<script type="module" src="/@vite/client"></script><script type="module" src="/src/app.${ENTRY_EXT[framework]}"></script>';
-
-export const shell = \`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title data-inertia>{{title}}</title>
-\${HEAD_MARKER}
-</head>
-<body>
-\${APP_MARKER}
-\${scripts}
-</body>
-</html>
-\`;
-`;
-}
-
 const HOME_WORKFLOW = `import { http, workflow } from "@blokjs/core";
 import { definePage } from "@blokjs/inertia";
 // \`#app/*\` — a package.json subpath import, not a relative path. The HTTP
 // trigger's TS auto-router imports THIS SOURCE FILE even in a built process,
 // and Node does not rewrite \`./x.js\` to \`./x.ts\`; the subpath resolves to the
 // source under Bun and to \`dist/\` under Node, so both work unchanged.
-import { assetVersion, shell } from "#app/inertia-shell";
 import homeGreeting from "#app/nodes/home-greeting/index";
 
 /**
@@ -585,7 +521,11 @@ export const Home = definePage("Home", {
 	home: homeGreeting,
 });
 
+// No shell here: \`@blokjs/inertia\`'s default shell reads \`.blok-vite.json\`
+// from \`BLOK_STATIC_DIR\` (written by the Vite plugin in dev AND build), so the
+// page loads the right bundle in both, and the asset version rides along for
+// Inertia's stale-asset reload.
 export default workflow("home", { version: "1.0.0", trigger: http.get("/") }, (req) => {
-	Home.render(req, "page", "/", {}, { shell, version: assetVersion, viewData: { title: "Home" } });
+	Home.render(req, "page", "/", {}, { viewData: { title: "Home" } });
 });
 `;

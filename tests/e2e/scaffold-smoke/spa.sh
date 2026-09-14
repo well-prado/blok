@@ -10,7 +10,7 @@
 #
 #   GET /                       200 HTML carrying the `data-page` script tag
 #   GET / (X-Inertia: true)     200 JSON with component "Home"
-#   GET /assets/app.js          200 JavaScript from client/dist
+#   GET <shell script src>      200 JavaScript from client/dist (hashed entry, per .blok-vite.json)
 #
 # It also covers the STANDALONE half (`blokctl create spa`): install + build,
 # asserting `dist/.blok-asset-version` exists. The browser half of issue #999
@@ -87,6 +87,12 @@ check_tsc() {
   fi
 }
 
+# The hashed client entry a build wrote, per the descriptor the Vite plugin
+# leaves in outDir (#1051). Empty when there is no descriptor.
+descriptor_entry() {
+  sed -n 's/.*"entry": *"\([^"]*\)".*/\1/p' "$1/.blok-vite.json" 2>/dev/null | head -1
+}
+
 # ── test 7: create project → add spa → install → build → start → curl ─────────
 in_project() {
   local fw="$1"
@@ -109,7 +115,7 @@ in_project() {
   if ! (cd "$project" && bun run build) >"$WORKDIR/build-$fw.log" 2>&1; then
     fail "[$fw] bun run build — tail:"; tail -30 "$WORKDIR/build-$fw.log"; return
   fi
-  [ -f "$project/client/dist/assets/app.js" ] || fail "[$fw] client/dist/assets/app.js missing after build"
+  [ -f "$project/client/dist/.blok-vite.json" ] || fail "[$fw] client/dist/.blok-vite.json missing after build (blokInertia() did not run)"
 
   # Regenerating the typed pages/routes against the real workflows must keep the
   # client type-clean — issue #999 extra test 10.
@@ -126,7 +132,7 @@ in_project() {
   # `create project` scaffold, whose copied trigger sources carry pre-existing
   # import-order violations (`fixRunnerImportPaths` rewrites the specifiers and
   # never re-sorts) — real, but not this issue's to fix.
-  check_biome "$project/src/workflows/home.ts $project/src/inertia-shell.ts $project/src/nodes/current-user $project/src/nodes/home-greeting $project/src/Workflows.ts" "inproj-$fw-server"
+  check_biome "$project/src/workflows/home.ts $project/src/nodes/current-user $project/src/nodes/home-greeting $project/src/Workflows.ts" "inproj-$fw-server"
 
   log "[$fw] bun run start …"
   (cd "$project" && PORT="$HTTP_PORT" TRIGGER_HTTP_PORT="$HTTP_PORT" BLOK_TRACING_DISABLED=1 bun run start) \
@@ -151,9 +157,14 @@ in_project() {
   else
     fail "7. GET / is not an Inertia HTML document ($fw): $(echo "$html" | head -c 300)"
   fi
-  echo "$html" | grep -q '<script type="module" src="/assets/app.js">' \
-    && ok "7. the shell references the built bundle ($fw)" \
-    || fail "7. the shell has no /assets/app.js script tag ($fw)"
+  # #1051 — the shell's module script is the HASHED entry from .blok-vite.json,
+  # and it must name a file that exists under client/dist.
+  local src; src="$(echo "$html" | grep -o '<script type="module" src="[^"]*"' | head -1 | sed 's/.*src="//; s/"$//')"
+  if [ -n "$src" ] && [ -f "$project/client/dist/${src#/}" ]; then
+    ok "7. the shell's script tag $src exists under client/dist ($fw)"
+  else
+    fail "7. the shell's script tag (${src:-none}) is not a file under client/dist ($fw)"
+  fi
 
   # 7b — the same URL as an Inertia XHR is the bare page object.
   local json; json="$(curl -fsS -H 'X-Inertia: true' "http://localhost:$HTTP_PORT/")"
@@ -162,8 +173,8 @@ in_project() {
     || fail "7. X-Inertia response is not the Home page object ($fw): $(echo "$json" | head -c 300)"
 
   # 7c — the bundle itself is served from client/dist.
-  local code; code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$HTTP_PORT/assets/app.js")"
-  [ "$code" = "200" ] && ok "7. GET /assets/app.js is 200 ($fw)" || fail "7. GET /assets/app.js is $code ($fw)"
+  local code; code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$HTTP_PORT$src")"
+  [ "$code" = "200" ] && ok "7. GET $src is 200 ($fw)" || fail "7. GET $src is $code ($fw)"
 
   kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""
 }
@@ -185,9 +196,10 @@ standalone() {
   [ -f "$dir/web/dist/.blok-asset-version" ] \
     && ok "8. standalone build wrote dist/.blok-asset-version ($fw)" \
     || fail "8. dist/.blok-asset-version missing ($fw)"
-  [ -s "$dir/web/dist/assets/app.js" ] \
-    && ok "8. standalone build emitted assets/app.js ($fw)" \
-    || fail "8. standalone assets/app.js missing ($fw)"
+  local entry; entry="$(descriptor_entry "$dir/web/dist")"
+  [ -n "$entry" ] && [ -s "$dir/web/dist/$entry" ] \
+    && ok "8. standalone build emitted its entry $entry, per .blok-vite.json ($fw)" \
+    || fail "8. standalone entry missing (descriptor says '${entry:-none}') ($fw)"
 
   check_tsc "$dir/web" "standalone-$fw"
   check_biome "$dir/web/src" "standalone-$fw"
@@ -207,14 +219,15 @@ ssr_build() {
   if ! (cd "$dir/web" && bun run build && bun run build:ssr) >"$WORKDIR/ssrbuild-$fw.log" 2>&1; then
     fail "[$fw] --ssr build — tail:"; tail -30 "$WORKDIR/ssrbuild-$fw.log"; return
   fi
-  # The SSR bundle goes to its OWN outDir: both entries are called `app.js`
-  # otherwise, and `vite build --ssr` would silently overwrite the client one.
+  # The SSR bundle goes to its OWN outDir, so `vite build --ssr` can never
+  # overwrite the client bundle.
   [ -s "$dir/web/dist-ssr/ssr.js" ] \
     && ok "11. --ssr built dist-ssr/ssr.js, where blokctl inertia start-ssr looks ($fw)" \
     || fail "11. dist-ssr/ssr.js missing ($fw)"
-  [ -s "$dir/web/dist/assets/app.js" ] \
+  local entry; entry="$(descriptor_entry "$dir/web/dist")"
+  [ -n "$entry" ] && [ -s "$dir/web/dist/$entry" ] \
     && ok "11. the client bundle survived the SSR build ($fw)" \
-    || fail "11. the SSR build clobbered dist/assets/app.js ($fw)"
+    || fail "11. the SSR build clobbered the client entry (descriptor says '${entry:-none}') ($fw)"
   check_tsc "$dir/web" "ssr-$fw"
 }
 
