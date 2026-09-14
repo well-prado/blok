@@ -93,6 +93,23 @@ descriptor_entry() {
   sed -n 's/.*"entry": *"\([^"]*\)".*/\1/p' "$1/.blok-vite.json" 2>/dev/null | head -1
 }
 
+# `bun run start` is a wrapper around `node dist/triggers/http/index.js`;
+# killing only the wrapper leaves the node child listening, and the next
+# framework's curls would hit it. Kill the tree, then wait for the port.
+stop_server() {
+  [ -n "$SERVER_PID" ] || return 0
+  pkill -P "$SERVER_PID" 2>/dev/null
+  kill "$SERVER_PID" 2>/dev/null
+  wait "$SERVER_PID" 2>/dev/null
+  SERVER_PID=""
+  for _ in $(seq 1 20); do
+    curl -fsS "http://localhost:$HTTP_PORT/health-check" >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+  pkill -f "dist/triggers/http/index.js" 2>/dev/null
+  sleep 1
+}
+
 # ── test 7: create project → add spa → install → build → start → curl ─────────
 in_project() {
   local fw="$1"
@@ -134,6 +151,12 @@ in_project() {
   # never re-sorts) — real, but not this issue's to fix.
   check_biome "$project/src/workflows/home.ts $project/src/nodes/current-user $project/src/nodes/home-greeting $project/src/Workflows.ts" "inproj-$fw-server"
 
+  # The port must be OURS: a server left over from the previous framework would
+  # answer every curl below and pass this framework on the other one's build.
+  if curl -fsS "http://localhost:$HTTP_PORT/health-check" >/dev/null 2>&1; then
+    fail "[$fw] port $HTTP_PORT is already answering — a previous server survived"; return
+  fi
+
   log "[$fw] bun run start …"
   (cd "$project" && PORT="$HTTP_PORT" TRIGGER_HTTP_PORT="$HTTP_PORT" BLOK_TRACING_DISABLED=1 bun run start) \
     >"$WORKDIR/start-$fw.log" 2>&1 &
@@ -147,7 +170,7 @@ in_project() {
   done
   if [ -z "$ready" ]; then
     fail "[$fw] server never became ready — tail of start log:"; tail -30 "$WORKDIR/start-$fw.log"
-    kill "$SERVER_PID" 2>/dev/null; SERVER_PID=""; return
+    stop_server; return
   fi
 
   # 7a — the first load is an HTML document carrying the page object.
@@ -176,7 +199,7 @@ in_project() {
   local code; code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$HTTP_PORT$src")"
   [ "$code" = "200" ] && ok "7. GET $src is 200 ($fw)" || fail "7. GET $src is $code ($fw)"
 
-  kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""
+  stop_server
 }
 
 # ── test 8 (non-browser half): standalone create spa → install → build ────────

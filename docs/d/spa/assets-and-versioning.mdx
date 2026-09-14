@@ -36,7 +36,7 @@ reads:
 | File / value | What it is |
 | --- | --- |
 | `dist/.blok-vite.json` | **what to load**: the entry, its stylesheets and its static imports, or the dev server's URL. See below |
-| `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`. The server reads it into `ASSET_VERSION` and sends it as `X-Inertia-Version`. `"dev"` while the dev server runs |
+| `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`, `"dev"` while the dev server runs. The serializer reads it on every render as the page object's `version` (a page's own `render(..., { version })` still wins), so a rebuild is announced without a restart |
 | `import.meta.env.BLOK_ASSET_VERSION` | the same value, inlined into the bundle |
 | `dist/pages.json` | `{ root, pages }` — the page components found on disk, for [`ensurePagesExist()`](/d/spa/routing#fail-the-boot-not-the-route) |
 | `dist/.blok-ssr-url` + `import.meta.env.BLOK_SSR_URL` | where the server POSTs a page to be [rendered](/d/spa/ssr) |
@@ -109,14 +109,15 @@ request, so a dev visit can never 409 on a version mismatch mid-edit.
 | Variable | Effect |
 | --- | --- |
 | `BLOK_STATIC_DIR` | mounts the directory: `/assets/*` with `Cache-Control: public, max-age=31536000, immutable`, plus `favicon.ico` and `robots.txt` uncached. A miss under `/assets/*` is a hard `404`, never a fall-through to a workflow |
-| `ASSET_VERSION` | read from `<staticDir>/.blok-asset-version` when `BLOK_STATIC_DIR` is set and the variable is not already set. An explicit value always wins |
+| `ASSET_VERSION` | fallback for the page `version` when `<staticDir>/.blok-asset-version` does not exist (the trigger also fills it from that file at boot, for its own log line) |
 
 ```bash
 BLOK_STATIC_DIR=client/dist blokctl dev
 ```
 
 With neither set, nothing static is mounted and `version` is `""` — "untracked",
-which disables version checking entirely.
+which disables version checking entirely. Nothing in a workflow has to pass
+`version`: the value comes from the build, in dev and in production alike.
 
 ## Standalone mode and CORS
 
