@@ -39,6 +39,23 @@ bun run e2e:smoke                      # detect + scaffold + boot + curl + teard
 bash tests/e2e/scaffold-smoke/run.sh
 ```
 
+### The Inertia SPA lane (`spa.sh`, #999)
+
+`run.sh` covers triggers and language runtimes. The SPA scaffolds have their own
+driver, because they install real frontend toolchains and need no sidecars:
+
+```bash
+bun run e2e:smoke:spa                  # react + vue + svelte
+SMOKE_SPA_FRAMEWORKS=react bun run e2e:smoke:spa
+```
+
+Per framework it runs `blokctl create project` → `blokctl add spa` → install →
+build → start, then curls `/` (HTML with `data-page`), `/` with `X-Inertia`
+(the JSON page object) and `/assets/app.js`; plus the standalone
+`blokctl create spa` build (asset-version file), the `--ssr` two-bundle build,
+`biome check` + `tsc --noEmit` on everything generated, and the
+`create project --spa <fw>` sugar against the two-step result.
+
 It **gates on what's installed** and reports what it SKIPPED and why — no silent
 truncation. `pubsub` needs a NATS broker; each runtime needs its toolchain
 (interpreted runtimes are skipped when the toolchain is missing/too old — Ruby

@@ -125,6 +125,23 @@ describe("#1000 static assets", () => {
 		expect(home.status).toBe(200);
 		expect(await home.text()).toContain("Welcome to blok");
 	});
+
+	// #999 — in SPA mode the app owns `/`. `AppRoutes` is registered BEFORE the
+	// file-based workflow routes, so a welcome page that answered here would
+	// permanently shadow a scaffolded SPA's home-page workflow.
+	it("hands `/` on to the workflow routes when BLOK_STATIC_DIR is set", async () => {
+		process.env.BLOK_STATIC_DIR = staticDir;
+		const app = await boot();
+
+		const home = await app.request("/");
+		const body = await home.text();
+		// Nothing is registered at `/` in this fixture, so the request falls all
+		// the way past every route to a bare 404 — proof the welcome page did
+		// not answer it. With the var unset (test 3 above) the same request is a
+		// 200 welcome page.
+		expect(body).not.toContain("Welcome to blok");
+		expect(home.status).toBe(404);
+	});
 });
 
 describe("#1000 ASSET_VERSION", () => {
