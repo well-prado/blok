@@ -67,6 +67,7 @@ import {
 	readMiddlewareFlag,
 } from "./WorkflowRouter.js";
 import { bounded } from "./bootTimeout.js";
+import { inertiaDevtools } from "./inertiaDevtools.js";
 import { bootstrapMetrics } from "./metrics/opentelemetry_metrics.js";
 import { buildNodeCatalog } from "./nodeCatalog.js";
 import {
@@ -1559,6 +1560,10 @@ export default class HttpTrigger extends TriggerBase {
 		}
 
 		return new Promise((done, fail) => {
+			this.app.use(
+				"*",
+				inertiaDevtools(() => this.routeTable),
+			);
 			// Inertia's 303 rule — outermost middleware so it also covers the
 			// error branch (a middleware `throw` with `code: 302`), which never
 			// reaches `emitWorkflowResponse`. No-op for every non-Inertia
