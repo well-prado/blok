@@ -18,6 +18,7 @@ import {
 	WORKFLOWS_IMPORT_BLOCK,
 	addSpa,
 	createSpa,
+	twoTerminalRecipe,
 } from "../../../src/commands/create/spa.js";
 import { setNonInteractive } from "../../../src/services/non-interactive.js";
 
@@ -39,7 +40,9 @@ export default workflows;
 function treeHash(dir: string): string {
 	const hash = createHash("sha256");
 	const walk = (current: string, rel: string): void => {
-		for (const entry of fsExtra.readdirSync(current, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+		for (const entry of fsExtra
+			.readdirSync(current, { withFileTypes: true })
+			.sort((a, b) => (a.name < b.name ? -1 : 1))) {
 			const next = path.join(current, entry.name);
 			const nextRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
 			if (entry.isDirectory()) {
@@ -264,6 +267,28 @@ describe("blokctl create spa / add spa (#999)", () => {
 		expect(fileList(ssr)).toContain("src/ssr.tsx");
 		expect(fsExtra.readJsonSync(path.join(ssr, "package.json")).scripts["build:ssr"]).toBe("vite build --ssr");
 		expect(fsExtra.readFileSync(path.join(ssr, "vite.config.ts"), "utf8")).toContain('ssr: "src/ssr.tsx"');
+	});
+
+	// --- docs check -----------------------------------------------------------
+	it("the printed two-terminal recipe matches what docs/d/spa/getting-started.mdx documents", () => {
+		const recipe = twoTerminalRecipe({
+			framework: "react",
+			dir: "client",
+			blokUrl: "http://localhost:4000",
+			managerName: "npm",
+			ssr: false,
+		});
+		const doc = fsExtra.readFileSync(path.join(REPO_ROOT, "docs/d/spa/getting-started.mdx"), "utf8");
+
+		// Terminal 1 is the Blok server; terminal 2 is Vite proxying to it.
+		expect(recipe).toContain("blokctl dev");
+		expect(doc).toContain("blokctl dev");
+		expect(recipe).toContain("http://localhost:4000");
+		expect(doc).toContain("http://localhost:4000");
+		expect(recipe).toContain("gen:types");
+		// ...and the doc advertises the commands this file implements.
+		expect(doc).toContain("blokctl create spa");
+		expect(doc).toContain("blokctl add spa");
 	});
 
 	it("refuses to scaffold into a non-empty directory", async () => {
