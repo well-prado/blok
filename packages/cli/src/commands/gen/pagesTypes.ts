@@ -186,6 +186,12 @@ export interface PagesScan {
 	schemaless: string[];
 	/** Zod types this converter does not model — emitted as `unknown`. */
 	unsupported: string[];
+	/**
+	 * Custom HTML shells passed to `render()` (#1019) — what `blokctl inertia
+	 * doctor` checks for the `<!--blok:app-->` / `<!--blok:head-->` markers.
+	 * Empty when every page uses the built-in shell.
+	 */
+	shells: { component: string; shell: string }[];
 }
 
 // =============================================================================
@@ -253,19 +259,28 @@ interface WorkflowConfig {
 	steps?: unknown;
 }
 
+/** One `page` control step, as the generator reads it. */
+interface PageStep {
+	component: string;
+	props: Record<string, { use?: string }>;
+	/** Serializer inputs carried verbatim (`shell`, `head`, `rootId`, `version`, …). */
+	inputs: Record<string, unknown>;
+}
+
 /** Every `page` control step in a step tree, in declaration order. */
-function collectPageSteps(node: unknown, out: { component: string; props: Record<string, { use?: string }> }[]): void {
+function collectPageSteps(node: unknown, out: PageStep[]): void {
 	if (Array.isArray(node)) {
 		for (const item of node) collectPageSteps(item, out);
 		return;
 	}
 	if (node === null || typeof node !== "object") return;
 	const record = node as Record<string, unknown>;
-	const pageStep = record.page as { component?: unknown; props?: unknown } | undefined;
+	const pageStep = record.page as { component?: unknown; props?: unknown; inputs?: unknown } | undefined;
 	if (pageStep && typeof pageStep.component === "string") {
 		out.push({
 			component: pageStep.component,
 			props: (pageStep.props ?? {}) as Record<string, { use?: string }>,
+			inputs: (pageStep.inputs ?? {}) as Record<string, unknown>,
 		});
 	}
 	for (const value of Object.values(record)) collectPageSteps(value, out);
@@ -378,10 +393,12 @@ export async function scanInertiaProject(files: readonly string[], projectRoot: 
 	// component -> prop key -> node name, for the schemaless-prop warning.
 	const nodeNames = new Map<string, Record<string, string>>();
 	const routes: ScannedRoute[] = [];
+	const shells: PagesScan["shells"] = [];
 	for (const config of configs) {
-		const pageSteps: { component: string; props: Record<string, { use?: string }> }[] = [];
+		const pageSteps: PageStep[] = [];
 		collectPageSteps(config.steps, pageSteps);
 		for (const step of pageSteps) {
+			if (typeof step.inputs.shell === "string") shells.push({ component: step.component, shell: step.inputs.shell });
 			const names: Record<string, string> = {};
 			for (const [key, spec] of Object.entries(step.props)) {
 				if (typeof spec?.use === "string") names[key] = spec.use;
@@ -426,6 +443,7 @@ export async function scanInertiaProject(files: readonly string[], projectRoot: 
 		failures,
 		schemaless,
 		unsupported: [...new Set(unsupported)],
+		shells,
 	};
 }
 

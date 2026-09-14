@@ -1,4 +1,5 @@
 import { Command, type OptionValues, program, withErrorBoundary } from "../../services/commander.js";
+import { runDoctor } from "./doctor.js";
 import { checkSsr, startSsr, stopSsr } from "./ssr.js";
 
 const inertia = new Command("inertia").description("Manage the Inertia integration");
@@ -27,6 +28,14 @@ inertia
 		}),
 	);
 
+inertia
+	.command("doctor")
+	.description("Check an Inertia project's shell, pages, secrets, assets, CSRF and SSR wiring")
+	.option("--dir <dir>", "Directory holding the workflow modules", "src")
+	.action(withErrorBoundary(async (options: OptionValues) => runDoctor({ dir: options.dir as string | undefined })));
+
 program.addCommand(inertia);
 
 export { checkSsr, startSsr, stopSsr } from "./ssr.js";
+export { inertiaDoctor, runDoctor } from "./doctor.js";
+export type { DoctorCheck, DoctorOptions } from "./doctor.js";
