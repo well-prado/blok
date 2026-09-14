@@ -90,6 +90,24 @@ The page JSON is escaped for a `<script>` context — every `/` as `\/`, every
 HTML-entity encoding, because the browser does not decode entities inside a
 script element. `JSON.parse(el.textContent)` round-trips it exactly.
 
+### Server-side rendering
+
+```ts
+import { configureSsr, disableSsr, withoutSsr } from "@blokjs/inertia";
+
+configureSsr({ bundle: "client/dist-ssr/ssr.mjs", timeoutMs: 2_000, withoutSsr: ["admin/*"] });
+withoutSsr(["admin/*", "dashboard"]);
+disableSsr(() => process.env.NODE_ENV === "test");
+```
+
+Initial non-prefetch visits POST the page object to `BLOK_SSR_URL`, the
+Vite-written `client/dist/.blok-ssr-url`, or
+`http://127.0.0.1:13714/render`. Failures emit `SsrRenderFailed`, log once per
+asset version and component, and fall back to the client-rendered shell.
+`configureSsr({ throwOnError: true })` makes tests fail instead. Text fragments
+such as `#:~:text=` require SSR because the browser needs the target text in the
+initial HTML.
+
 ## Control responses
 
 | Input / export | Response |

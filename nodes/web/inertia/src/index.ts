@@ -22,6 +22,7 @@ import { resolveUrl, transformComponent } from "./routing.js";
 // by `logoutResponse()`, plus the adapter-wide `history.encrypt` default.
 import { resolveClearHistory, resolveEncryptHistory } from "./security/history.js";
 import { resolveSharedProps } from "./shared.js";
+import { renderSsr } from "./ssr.js";
 
 export {
 	APP_MARKER,
@@ -44,6 +45,7 @@ export type { FlashBuilder, FlashPayload, FlashPersistOptions, FlashRequest, Red
 export * from "./middleware/index.js";
 // --- production error pages (#1014) ------------------------------------------
 export * from "./errors.js";
+export * from "./ssr.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
 export {
@@ -181,6 +183,21 @@ const inputSchema = z.object({
 	encryptHistory: z.boolean().optional().describe("true encrypts this history entry client-side."),
 	clearHistory: z.boolean().optional().describe("true clears the client's history state."),
 	preserveFragment: z.boolean().optional().describe("true keeps the current URL fragment across the visit."),
+	ssr: z
+		.union([
+			z.boolean(),
+			z.object({
+				enabled: z.boolean().optional(),
+				url: z.string().optional(),
+				bundle: z.string().optional(),
+				withoutSsr: z.array(z.string()).optional(),
+				ensureBundleExists: z.boolean().optional(),
+				throwOnError: z.boolean().optional(),
+				timeoutMs: z.number().positive().optional(),
+			}),
+		])
+		.optional()
+		.describe("SSR override for this page. App-wide defaults come from configureSsr()."),
 
 	// --- HTML shell (first load only) ---
 	rootId: z.string().optional().describe("Root element id and data-page attribute value. Default 'app'."),
@@ -404,6 +421,8 @@ export default defineNode({
 			};
 		}
 
+		const ssr = prefetch ? null : await renderSsr(ctx, page, input.ssr);
+
 		return {
 			[RESPOND_BRAND]: true,
 			status: 200,
@@ -413,8 +432,9 @@ export default defineNode({
 			body: renderShell(page, {
 				shell: input.shell,
 				rootId: input.rootId,
-				head: input.head,
+				head: [input.head, ...(ssr?.head ?? [])].filter(Boolean).join("\n"),
 				viewData: input.viewData as Record<string, unknown> | undefined,
+				body: ssr?.body,
 			}),
 		};
 	},
