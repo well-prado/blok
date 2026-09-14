@@ -2,6 +2,7 @@ import { promises as fsp } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildRouteTable } from "../../src/runner/WorkflowRouter.js";
 import { deriveUrlFromFilePath, scanWorkflows } from "../../src/runner/scanWorkflows.js";
 
 describe("deriveUrlFromFilePath", () => {
@@ -148,5 +149,23 @@ describe("scanWorkflows — disk integration", () => {
 		expect(out).toHaveLength(1);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]).toContain("bad.json");
+	});
+
+	it("routes every workflow export from one TS file", async () => {
+		const root = path.join(tmpDir, "workflows");
+		await fsp.mkdir(root, { recursive: true });
+		await fsp.writeFile(
+			path.join(root, "orders.ts"),
+			[
+				'export const create = { name: "orders-create", trigger: { http: { method: "GET", path: "/orders/new" } } };',
+				'export default Promise.resolve({ name: "orders-submit", trigger: { http: { method: "POST", path: "/orders" } } });',
+				"",
+			].join("\n"),
+		);
+
+		const scanned = await scanWorkflows([{ dir: root, kind: "ts" }]);
+		expect(scanned.map((workflow) => workflow.name)).toEqual(["orders-submit", "orders-create"]);
+		const routes = buildRouteTable(scanned);
+		expect(routes.map((route) => `${route.method} ${route.path}`)).toEqual(["GET /orders/new", "POST /orders"]);
 	});
 });

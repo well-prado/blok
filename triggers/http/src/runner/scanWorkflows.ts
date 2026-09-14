@@ -26,7 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  * - Files whose extension isn't allowed (only `.ts`, `.js`, `.json` for now)
  *
  * **Workflow detection**:
- * - For TS/JS: dynamic-imports, takes `default` export.
+ * - For TS/JS: dynamic-imports, takes every exported workflow.
  * - For JSON: `readFile` + `JSON.parse`.
  * - Files that don't yield a recognisable workflow shape are skipped with
  *   a warning (caller decides whether to surface to the operator).
@@ -170,39 +170,52 @@ async function walk(
 				options.cacheBust && (!options.cacheBustOnly || options.cacheBustOnly.has(fullPath))
 					? options.cacheBust
 					: undefined;
-			const wf = await loadOne(fullPath, root.kind, bust);
-			if (wf === null) continue;
-			out.push({
-				source: fullPath,
-				kind: root.kind,
-				defaultPath,
-				workflow: wf,
-				name: extractWorkflowName(wf),
-			});
+			const workflows = await loadOne(fullPath, root.kind, bust);
+			for (const wf of workflows) {
+				out.push({
+					source: fullPath,
+					kind: root.kind,
+					defaultPath,
+					workflow: wf,
+					name: extractWorkflowName(wf),
+				});
+			}
 		} catch (err) {
 			options.onLoadError?.(fullPath, err as Error);
 		}
 	}
 }
 
-async function loadOne(file: string, kind: "ts" | "json", cacheBust?: string): Promise<unknown> {
+async function loadOne(file: string, kind: "ts" | "json", cacheBust?: string): Promise<unknown[]> {
 	if (kind === "json") {
 		const text = await fsp.readFile(file, "utf8");
-		return JSON.parse(text);
+		return [JSON.parse(text)];
 	}
-	// TS / JS — dynamic import; default export is the workflow. A cache-buster
+	// TS / JS — dynamic import; every export may be a workflow. A cache-buster
 	// needs a proper file: URL to carry the query string, so only the hot-reload
 	// path pays the conversion; boot keeps importing the bare path as before.
 	enableTsSpecifierResolution();
 	const specifier = cacheBust ? `${pathToFileURL(file).href}?blokHmr=${cacheBust}` : file;
-	let mod: { default?: unknown };
+	let mod: Record<string, unknown>;
 	try {
-		mod = (await import(specifier)) as { default?: unknown };
+		mod = (await import(specifier)) as Record<string, unknown>;
 	} catch (err) {
 		throw explainTsSiblingMiss(err);
 	}
-	if (mod.default === undefined) return null;
-	return mod.default;
+	// Keep the default export first for backwards-compatible route precedence.
+	// Module namespace keys are otherwise sorted by the ESM loader.
+	const exports = [
+		await mod.default,
+		...Object.keys(mod)
+			.filter((key) => key !== "default")
+			.map((key) => mod[key]),
+	];
+	const seen = new Set<unknown>();
+	return exports.flatMap((value) => {
+		if (value === undefined || seen.has(value)) return [];
+		seen.add(value);
+		return [value];
+	});
 }
 
 /**
