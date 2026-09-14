@@ -439,19 +439,29 @@ BLOK_STATIC_DIR=client/dist
 
 ## The dev loop
 
-Two terminals, one origin in the browser:
+Two terminals:
 
 ```bash
 # terminal 1 — the Blok server
-blokctl dev
+BLOK_STATIC_DIR=client/dist blokctl dev
 
-# terminal 2 — Vite, which proxies everything it does not own to Blok
+# terminal 2 — Vite
 cd client && npx vite
 ```
 
-Open the **Vite** URL. Requests that are not Vite-owned are proxied to
-`BLOK_URL` (default `http://localhost:4000`) with `X-Inertia-Version: dev`
-attached, so a dev visit can never 409 on a stale asset version.
+Open the **Blok** URL (`http://localhost:4000`). The Vite plugin writes
+`client/dist/.blok-vite.json` while its dev server runs, and the HTML shell
+loads the entry and the HMR client straight from Vite — so edits hot-reload on
+Blok's own origin. The **Vite** URL works too: everything it does not own is
+proxied to `BLOK_URL` (default `http://localhost:4000`) with
+`X-Inertia-Version: dev` attached, so a dev visit can never 409 on a stale
+asset version.
+
+<Note>
+`BLOK_STATIC_DIR` matters in dev as well: it is where the server looks for
+`.blok-vite.json`. Without it the shell has no `<script>` tag and the page is
+blank — the server says so once, with the fix, in the log.
+</Note>
 
 For production: `vite build`, then start Blok with `BLOK_STATIC_DIR=client/dist`.
 Blok serves `/assets/*` immutable and answers every other path from a workflow.
@@ -1166,12 +1176,13 @@ export default defineConfig({
 
 `blokInertia()` **wraps** `@inertiajs/vite`: page resolution, lazy pages, the
 SSR transform and the HMR-backed dev SSR endpoint are all upstream behaviour,
-and every `@inertiajs/vite` option is passed through. On top it writes four
-things into the Vite `outDir` (`dist/` by default) — the handoff directory the
-Blok server reads:
+and every `@inertiajs/vite` option is passed through. On top it writes into the
+Vite `outDir` (`dist/` by default) — the handoff directory the Blok server
+reads:
 
 | File / value | What it is |
 | --- | --- |
+| `dist/.blok-vite.json` | **what to load**: the entry, its stylesheets and its static imports, or the dev server's URL. See below |
 | `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`. The server reads it into `ASSET_VERSION` and sends it as `X-Inertia-Version`. `"dev"` while the dev server runs |
 | `import.meta.env.BLOK_ASSET_VERSION` | the same value, inlined into the bundle |
 | `dist/pages.json` | `{ root, pages }` — the page components found on disk, for [`ensurePagesExist()`](/d/spa/routing#fail-the-boot-not-the-route) |
@@ -1179,6 +1190,51 @@ Blok server reads:
 
 `build.manifest` is forced on — the asset version is a hash of that manifest, so
 turning it off is an error.
+
+## Loading the bundle — Blok's `@vite`
+
+Laravel's Blade template calls `@vite('resources/js/app.jsx')`. Blok's HTML
+shell carries a marker, `<!--blok:assets-->`, and the serializer fills it from
+`<BLOK_STATIC_DIR>/.blok-vite.json`. Vite hashes its filenames and, in dev,
+serves the entry from its own origin, so the tags cannot be hard-coded.
+
+After `vite build` the descriptor names the built files:
+
+```json client/dist/.blok-vite.json
+{
+  "mode": "build",
+  "entry": "assets/index-DucLcArp.js",
+  "css": ["assets/index-DCQtc1cu.css"],
+  "imports": [],
+  "framework": "react"
+}
+```
+
+and the shell emits, in order, a `<link rel="modulepreload">` per static import,
+a `<link rel="stylesheet">` per stylesheet, and the module script:
+
+```html
+<link rel="stylesheet" href="/assets/index-DCQtc1cu.css" />
+<script type="module" src="/assets/index-DucLcArp.js"></script>
+```
+
+While `vite` is running the descriptor points at the dev server instead
+(`{ "mode": "dev", "devUrl": "http://localhost:5173", "entry": "src/main.tsx" }`),
+and the shell emits `/@vite/client`, the entry, and — for React — the
+`@vitejs/plugin-react` refresh preamble, all as absolute URLs. That is what
+makes the [dev loop](/d/spa/getting-started#the-dev-loop) work from the *Blok*
+URL. The file is deleted when the dev server stops, so a later production boot
+never points at a dead port.
+
+<Note>
+No descriptor means no `<script>` tag and a blank page, so the server logs one
+warning naming the fix and still serves the HTML. The usual causes: the client
+was never built, or `BLOK_STATIC_DIR` is not set.
+</Note>
+
+A custom `shell` without the `<!--blok:assets-->` marker is left exactly as
+written — add the marker inside `<head>`, or pass your own tags as the
+serializer's `assets` input.
 
 ## The 409 reload
 

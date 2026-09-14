@@ -122,7 +122,10 @@ export function configureDevtools(options: DevtoolsOptions): void {
 
 /** Register the policy named by `BLOK_INERTIA_DEVTOOLS_GATE`. */
 export function defineDevtoolsGate(name: string, gate: DevtoolsGate): void {
-	if (!name) throw new Error("defineDevtoolsGate() requires a non-empty name.");
+	if (!name)
+		throw new Error(
+			'defineDevtoolsGate() requires a non-empty name. Fix: pass the same name you set in BLOK_INERTIA_DEVTOOLS_GATE, e.g. defineDevtoolsGate("admins", gate).',
+		);
 	gates.set(name, gate);
 }
 
@@ -512,7 +515,18 @@ export async function recordDevtools({
 	if (!isDevtoolsEnabled() || excluded(path)) return response;
 
 	const id = ulid();
-	const inspected = await responseBody(response, request.headers.get("x-inertia") === "true");
+	// #1051 — buffer the body ONCE and rebuild the response from the buffer.
+	// Bun does not leave the original readable after a clone has been consumed,
+	// so inspecting the body and then returning the same `response` shipped an
+	// empty 200 for every Inertia XHR — i.e. every SPA navigation in dev.
+	const buffered = response.body === null ? null : await response.arrayBuffer();
+	const carried = (): Response =>
+		new Response(buffered, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: response.headers,
+		});
+	const inspected = await responseBody(carried(), request.headers.get("x-inertia") === "true");
 	const page = inspected.page;
 	const requestType = deriveRequestType(request.headers, page?.component ?? null);
 	const parent = request.headers.get("x-inertia-devtools-parent");
@@ -554,7 +568,7 @@ export async function recordDevtools({
 		componentPath: componentPath(page?.component ?? null),
 	};
 	await store(entry);
-	return await discovery(response, id, requestType === "initial");
+	return await discovery(carried(), id, requestType === "initial");
 }
 
 async function authorizeRead(request: Request): Promise<boolean> {
