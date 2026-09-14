@@ -491,6 +491,87 @@ A page object over 8 MiB logs one warning per process and still ships —
 browsers keep the page object in history state and Firefox hard-fails at
 16 MiB. Move the bulk behind `defer()` / `optional()`, or paginate it.
 
+## Validation, error bags and Precognition (#1011)
+
+### `@blokjs/validate`
+
+A validation step that RETURNS its verdict instead of throwing, because a form
+failure is data, not an exception:
+
+```ts
+import { z } from "zod";
+
+const OrderSchema = z.object({ sku: z.string().min(1, "Required."), qty: z.number().min(1, "Too few.") });
+
+const checked = step("check", validateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+```
+
+`{ ok, data, errors }` out. `errors` is keyed by DOT PATH — `user.name`,
+`items.0.name` — which is what Inertia's client expects and what saves every
+app from hand-mapping a `ZodError`. One message per key by default;
+`withAllErrors: true` gives every message as a `string[]`, matching the
+adapter option of the same name. `schema` takes a Zod schema VALUE in
+TypeScript, or a plain JSON Schema object in a JSON workflow (validated with
+`ajv`); both produce identical keys.
+
+Feed the failure straight into `redirectBack()`:
+
+```ts
+return redirectBack(ctx.request, { errors });
+```
+
+The error BAG now defaults to the request's `X-Inertia-Error-Bag`, so a page
+with two forms keeps them apart without the workflow plumbing the header — the
+bag name rides the signed cookie, because the bounce-back GET does not carry
+the header.
+
+### Precognition
+
+Inertia's live validation sends the real form to the real endpoint with
+`Precognition: true` and asks only "would this validate?". Mark the validation
+step and the runner does the rest:
+
+```ts
+export default workflow("orders-create", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  const checked = step("check", validateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+  branch("route", eq(checked.ok, true), {
+    then: () => { step("create", createOrder, { order: checked.data }); },
+    else: () => { step("reject", bounceBack, { errors: checked.errors }); },
+  });
+});
+```
+
+On a request carrying the marker header, the runner STOPS after the marked
+step and answers from its `{ ok, errors }`:
+
+| Outcome | Response |
+| --- | --- |
+| no errors in the asked-about fields | `204` + `Precognition: true`, `Precognition-Success: true`, empty body |
+| errors | `422 { "errors": { … } }` + `Precognition: true` |
+| any request on a route with a marked step | `Vary: Precognition` |
+
+`Precognition-Validate-Only: sku,user.name` narrows the reported errors to
+those fields (a parent path also covers its children). **No step after the
+marked one runs** — that is the entire point: a keystroke must not charge a
+card. A request WITHOUT the header runs the workflow end to end, and a
+workflow with no marked step is never dry-run by accident, so the same
+workflow serves both the live validation and the real submit.
+
+The mechanism is the runner's, not the http trigger's: a worker or cron run
+carries no such header and is unaffected, and any transport that understands a
+`RespondEnvelope` gets the 204/422 for free.
+
+Test it without a server:
+
+```ts
+import { runPrecognition } from "@blokjs/core/testing";
+
+const dry = await runPrecognition(ordersCreate, { body: { sku: "" }, fields: ["sku"] });
+dry.status;                            // 422
+dry.errors;                            // { sku: "Required." }
+dry.run.step("create")?.executed;      // false — the assertion that matters
+```
+
 ## Exports
 
 ```ts

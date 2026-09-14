@@ -17,5 +17,7 @@ export type {
 	AssertableRedirect,
 	PageResult,
 	PageScope,
+	PrecognitionResult,
 	RunPageOptions,
+	RunPrecognitionOptions,
 } from "./testing-page.js";

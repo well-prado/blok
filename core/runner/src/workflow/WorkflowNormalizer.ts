@@ -77,6 +77,12 @@ interface InternalStep {
 	as?: string;
 	spread?: boolean;
 	ephemeral?: boolean;
+	/**
+	 * #1011 — Inertia Precognition marker. The runner stops right after this
+	 * step when the request carries `Precognition: true` and answers 204/422
+	 * from its `{ ok, errors }` output.
+	 */
+	precognition?: boolean;
 	stream_logs?: boolean;
 	/**
 	 * Live data-event destination for a runtime step's `PartialResult`
@@ -444,6 +450,9 @@ function normalizeRegularStep(
 	const ephemeral = step.ephemeral === true;
 	const as = pickString(step.as);
 	const spread = step.spread === true;
+	// #1011 — the Precognition marker rides through verbatim; RunnerSteps is
+	// what acts on it, and only when the request carries the marker header.
+	const precognition = step.precognition === true;
 
 	// `as` and `spread` are mutually exclusive — caught at schema level too,
 	// repeated here so JSON workflows that bypass Zod still fail loudly.
@@ -462,6 +471,7 @@ function normalizeRegularStep(
 		as,
 		spread,
 		ephemeral,
+		precognition,
 		...copyStepMeta(step),
 	};
 	if (typeof step.stream_logs === "boolean") internalStep.stream_logs = step.stream_logs;

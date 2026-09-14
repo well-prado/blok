@@ -930,6 +930,14 @@ export interface StepOptions {
 	spread?: boolean;
 	/** Skip persistence; only `ctx.prev` carries the result to the next step. */
 	ephemeral?: boolean;
+	/**
+	 * #1011 — mark this step as the workflow's validation boundary for Inertia
+	 * Precognition. On a request carrying `Precognition: true` the runner stops
+	 * right after this step and answers `204` / `422 { errors }` from its
+	 * `{ ok, errors }` output, so no later step (the write, the charge, the
+	 * email) runs. Every other request executes the workflow unchanged.
+	 */
+	precognition?: boolean;
 	/** Node type override (module/local/runtime.*). Inferred from `use` when omitted. */
 	type?: string;
 	/** Literal string or handle lowered to the `js/ctx...` string consumed by resolveIdempotencyKey. */

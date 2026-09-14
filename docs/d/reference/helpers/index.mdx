@@ -4,7 +4,7 @@ description: "The @blokjs/helpers package — pre-built node objects you pass to
 icon: "puzzle"
 ---
 
-`@blokjs/helpers` ships 24 pre-built nodes covering the most common
+`@blokjs/helpers` ships 25 pre-built nodes covering the most common
 workflow plumbing — logging, conditionals, KV state, HMAC verification,
 JWT auth, LLM streaming + tool calls, HTTP response shaping, webhook
 dispatch, and SSE / WS / worker / pub-sub publishers. Each helper has a
@@ -68,6 +68,9 @@ JSON workflows.
 <Columns cols={2}>
   <Card title="@blokjs/json-schema" icon="braces" href="./json-schema">
     Validate data against a JSON Schema. Throws on failure with structured error paths.
+  </Card>
+  <Card title="@blokjs/validate" icon="list-checks" href="./validate">
+    Validate against Zod or JSON Schema and RETURN { ok, data, errors } with dot-path keys. For forms, where a failure is data.
   </Card>
   <Card title="@blokjs/hmac-verify" icon="shield-check" href="./hmac-verify">
     DIY HMAC verification inside a regular HTTP workflow.

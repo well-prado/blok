@@ -1,0 +1,122 @@
+---
+title: "@blokjs/validate"
+description: "Validate data and RETURN { ok, data, errors } with dot-path keys — the form-friendly sibling of @blokjs/json-schema."
+icon: "list-checks"
+---
+
+Validates `data` against a **Zod schema or a JSON Schema** and returns the
+verdict instead of throwing:
+
+```ts
+{ ok: boolean, data: unknown, errors: Record<string, string | string[]> }
+```
+
+That is the whole difference from [`@blokjs/json-schema`](./json-schema), which
+throws. A machine API wants the throw. A **form** does not: a failed submit has
+to become a redirect-back with the errors flashed, or a Precognition `422` — and
+you cannot build either out of an exception without a `tryCatch` around every
+write.
+
+`errors` is keyed by **dot path**, the shape Inertia's client expects and
+Laravel emits: `user.name` for a nested field, `items.0.name` for an array
+element. One message per key by default; `withAllErrors: true` gives every
+message as a `string[]`.
+
+Registered as `@blokjs/validate`. In the handle DSL, import the node object
+(`ValidateNode`) from `@blokjs/helpers` and pass it to `step()`.
+
+## Quickstart
+
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { ValidateNode } from "@blokjs/helpers";
+import { z } from "zod";
+
+const OrderSchema = z.object({
+  sku: z.string().min(1, "Required."),
+  qty: z.number().min(1, "Must be at least 1."),
+});
+
+export default workflow("create-order", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body });
+  // checked.ok / checked.data / checked.errors
+});
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema` | Zod schema value, or a JSON Schema object | Required. A Zod value carries your custom messages; a JSON Schema is validated with Ajv. |
+| `data` | unknown | The value to validate. Required. |
+| `withAllErrors` | boolean | `true` → every message per key as `string[]`. Default `false` (first message, as a `string`). |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `ok` | `true` when `data` satisfied the schema. |
+| `data` | The PARSED value on success (Zod coercions and defaults applied); `undefined` on failure. |
+| `errors` | Dot-path keyed messages, `{}` when valid. A root-level refinement lands under the key `_`. |
+
+The node never throws on invalid input. It DOES throw when `schema` is neither
+a Zod schema nor an object — that is an authoring mistake, not a user one.
+
+## Error keys
+
+```ts
+await runNode(ValidateNode, {
+  schema: z.object({ user: z.object({ name: z.string().min(1, "Required.") }) }),
+  data: { user: { name: "" } },
+});
+// { ok: false, data: undefined, errors: { "user.name": "Required." } }
+
+await runNode(ValidateNode, {
+  schema: z.object({ items: z.array(z.object({ name: z.string().min(1, "Required.") })) }),
+  data: { items: [{ name: "ok" }, { name: "" }] },
+});
+// errors: { "items.1.name": "Required." }
+```
+
+A JSON Schema produces the identical keys, so a JSON workflow and a TypeScript
+one are interchangeable on the wire.
+
+## Common patterns
+
+### Redirect back with the errors flashed (Inertia)
+
+```ts
+import { redirectBack } from "@blokjs/inertia";
+
+// inside your own node, reading the validate step's output:
+return redirectBack(ctx.request, { errors });
+```
+
+The error bag defaults to the request's `X-Inertia-Error-Bag`, so two forms on
+one page keep their errors apart.
+
+### Precognition dry runs
+
+Mark the step and the runner answers `204` / `422 { errors }` on a request
+carrying `Precognition: true`, without running anything after it:
+
+```ts
+const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+```
+
+See [the http trigger's Precognition notes](/d/triggers/http) and the
+`@blokjs/inertia` README for the full contract.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/json-schema" icon="braces" href="./json-schema">
+    The throwing sibling. Right for machine APIs.
+  </Card>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    Turn a verdict into a custom 4xx.
+  </Card>
+  <Card title="Custom nodes" icon="hammer" href="/c/extensions/nodes">
+    `defineNode`'s own `input` Zod already validates — this node is for when you need the errors as DATA.
+  </Card>
+</Columns>

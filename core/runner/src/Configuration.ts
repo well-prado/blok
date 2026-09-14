@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { sep as pathSep, resolve as resolvePath } from "node:path";
 import { tryParseDuration } from "@blokjs/helper";
-import { type NodeBase, type WasiComponentManifestV1, normalizeRuntimeKind } from "@blokjs/shared";
+import { type NodeBase, type WasiComponentManifestV1, cloneResolvable, normalizeRuntimeKind } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
@@ -240,11 +240,19 @@ export default class Configuration implements Config {
 			// (`NodeBase.blueprintMapper` → `mapper.replaceObjectStrings`
 			// resolves `js/...` expressions in place) don't bleed across
 			// requests by baking the first request's resolved values into
-			// the shared route-table workflow object. JSON-clone is safe:
-			// workflow definitions are pure data — every input is already a
-			// plain `js/...` string or literal by the time it reaches here.
+			// the shared route-table workflow object.
+			//
+			// `cloneResolvable` (#874), not a JSON round-trip: it copies
+			// exactly the plain objects and arrays the mapper can mutate and
+			// SHARES everything else by reference — the same set, by
+			// construction, so the isolation guarantee is unchanged. The JSON
+			// clone additionally flattened every class instance in a step's
+			// `inputs` into a prototype-less husk, which is what made a Zod
+			// schema value (`{ schema: OrderSchema }` for `@blokjs/validate`,
+			// #1011) arrive at the node as an inert object. It is also cheaper:
+			// no serialize/parse of the whole workflow per boot.
 			const { normalizeWorkflow } = await import("./workflow/WorkflowNormalizer");
-			const fresh = JSON.parse(JSON.stringify(preloaded));
+			const fresh = cloneResolvable(preloaded);
 			this.workflow = normalizeWorkflow(fresh, workflowNameInPath) as unknown as typeof this.workflow;
 		} else {
 			const resolver = new ConfigurationResolver(opts as GlobalOptions);
@@ -404,6 +412,9 @@ export default class Configuration implements Config {
 			node.as = (step as RunnerNode & { as?: string }).as;
 			node.spread = (step as RunnerNode & { spread?: boolean }).spread === true;
 			node.ephemeral = (step as RunnerNode & { ephemeral?: boolean }).ephemeral === true;
+			// #1011 — the precognition marker: RunnerSteps stops after this step on a
+			// `Precognition: true` request and answers 204/422 from its output.
+			node.precognition = (step as RunnerNode & { precognition?: boolean }).precognition === true;
 			const enforcement = step as RunnerNode & {
 				agentStep?: NodeBase["agentStep"];
 				approval?: NodeBase["approval"];
@@ -589,6 +600,7 @@ export default class Configuration implements Config {
 				as?: string;
 				spread?: boolean;
 				ephemeral?: boolean;
+				precognition?: boolean;
 				idempotencyKey?: string;
 				idempotencyKeyTTL?: number;
 				retry?: NodeBase["retry"];
@@ -604,6 +616,7 @@ export default class Configuration implements Config {
 			if (v2Flow.as !== undefined) node.as = v2Flow.as;
 			node.spread = v2Flow.spread === true;
 			node.ephemeral = v2Flow.ephemeral === true;
+			node.precognition = v2Flow.precognition === true;
 			if (v2Flow.agentStep !== undefined) node.agentStep = v2Flow.agentStep;
 			if (v2Flow.approval !== undefined) node.approval = v2Flow.approval;
 			if (v2Flow.assertionGate !== undefined) node.assertionGate = v2Flow.assertionGate;
@@ -775,6 +788,7 @@ export default class Configuration implements Config {
 			as?: string;
 			spread?: boolean;
 			ephemeral?: boolean;
+			precognition?: boolean;
 			idempotencyKey?: string;
 			idempotencyKeyTTL?: number;
 			retry?: NodeBase["retry"];
@@ -788,6 +802,7 @@ export default class Configuration implements Config {
 		if (v2.as !== undefined) targetNode.as = v2.as;
 		targetNode.spread = v2.spread === true;
 		targetNode.ephemeral = v2.ephemeral === true;
+		targetNode.precognition = v2.precognition === true;
 		// V2 idempotency cache + retry knobs — copied here so the targetNode
 		// surfaces them for any future code that inspects the inner SDK node
 		// directly. The OUTER RuntimeAdapterNode also carries them via

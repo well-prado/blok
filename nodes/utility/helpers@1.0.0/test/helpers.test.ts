@@ -84,6 +84,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/sse-stream",
 				"@blokjs/sse-subscribe",
 				"@blokjs/throw",
+				"@blokjs/validate",
 				"@blokjs/worker-publish",
 				"@blokjs/ws-broadcast",
 				"@blokjs/ws-close",

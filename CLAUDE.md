@@ -83,6 +83,15 @@ execution compatibility but is not agent-safe. Only a valid
 `trusted-legacy`, `denied-to-agents`, missing, and invalid metadata fail closed.
 See `docs/d/fundamentals/capability-manifests.mdx` and ADR 0003.
 
+A step marked `{ precognition: true }` is the workflow's validation boundary
+for Inertia Precognition: when the request carries `Precognition: true` the
+runner STOPS after that step and answers `204` (+ `Precognition-Success: true`)
+or `422 { errors }` from its `{ ok, errors }` output, filtered by
+`Precognition-Validate-Only`. Nothing after it runs. Requests without the header
+run the workflow unchanged, so one workflow serves both live validation and the
+real submit. Use `@blokjs/validate` for the step itself — it returns
+`{ ok, data, errors }` with dot-path error keys instead of throwing.
+
 Agent-facing steps may declare `agentStep`, `approval`, `assertionGate`,
 `evidenceGate`, and `outputTrust` metadata. The runner requires explicit agent
 completion, routes approval `ask` through the durable H1-01 interaction port,
@@ -96,8 +105,8 @@ deterministic non-agent implementation and valid capability manifest.
 - A thrown step writes nothing.
 - The handle returned by `step()` is the authoring read path.
 - Fourth-arg knobs: `{ as: "name" }`, `{ spread: true }`,
-  `{ ephemeral: true }`, plus reliability fields such as `idempotencyKey`,
-  `retry`, and `maxDuration`.
+  `{ ephemeral: true }`, `{ precognition: true }`, plus reliability fields such
+  as `idempotencyKey`, `retry`, and `maxDuration`.
 - `ephemeral: true` means no state slot; do not read the returned handle.
 
 ## Testing

@@ -42,6 +42,7 @@ import SsePublishNode from "./ssePublish";
 import SseStreamNode from "./sseStream";
 import SseSubscribeNode from "./sseSubscribe";
 import ThrowNode from "./throw";
+import ValidateNode from "./validate";
 import WorkerPublishNode from "./workerPublish";
 import WsBroadcastNode from "./wsBroadcast";
 import WsCloseNode from "./wsClose";
@@ -69,6 +70,7 @@ export {
 	SseStreamNode,
 	SseSubscribeNode,
 	ThrowNode,
+	ValidateNode,
 	WorkerPublishNode,
 	WsBroadcastNode,
 	WsCloseNode,
@@ -153,6 +155,7 @@ export const HELPER_NODES = {
 	"@blokjs/sse-stream": SseStreamNode,
 	"@blokjs/sse-subscribe": SseSubscribeNode,
 	"@blokjs/throw": ThrowNode,
+	"@blokjs/validate": ValidateNode,
 	"@blokjs/worker-publish": WorkerPublishNode,
 	"@blokjs/ws-broadcast": WsBroadcastNode,
 	"@blokjs/ws-close": WsCloseNode,
@@ -160,3 +163,4 @@ export const HELPER_NODES = {
 } as const;
 
 export type { AuditEvent } from "./auditLog";
+export { jsonSchemaErrors, zodErrors } from "./validate";

@@ -597,6 +597,20 @@ export type {
 	TryCatchArms,
 } from "./stepBuilder";
 
+// #1011 · Inertia Precognition dry runs — the runner-level mechanism the http
+// trigger reads to add `Vary: Precognition`.
+export {
+	PRECOGNITION_HEADER,
+	PRECOGNITION_ROUTE,
+	PRECOGNITION_VALIDATE_ONLY,
+	applyPrecognition,
+	filterErrors,
+	precognitionEnvelope,
+	precognitionFields,
+	precognitionOutcome,
+	readValidationErrors,
+} from "./precognition";
+
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
 
