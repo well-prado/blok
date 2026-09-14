@@ -18,8 +18,9 @@ import type { RespondEnvelope } from "@blokjs/shared";
 import { type Page, getInitialPageFromDOM, router } from "@inertiajs/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { definePage, merge, once } from "../src/define-page.js";
+import { definePage, merge, once, scroll } from "../src/define-page.js";
 import InertiaNode, { clearHistory } from "../src/index.js";
+import { paginate, paginatedSchema } from "../src/paginate.js";
 
 const PORT = 39441;
 const SENT_PROPS = { user: { name: "Ada", href: "/users/1" }, count: 2 };
@@ -45,7 +46,10 @@ let requests = 0;
  * these run the real workflow per request, so the CLIENT's own headers decide
  * what the runner resolves and which labels come back.
  */
-const dynamic = new Map<string, (headers: Record<string, string>) => Promise<RespondEnvelope>>();
+const dynamic = new Map<
+	string,
+	(headers: Record<string, string>, query: Record<string, string>) => Promise<RespondEnvelope>
+>();
 
 async function render(input: Record<string, unknown>): Promise<RespondEnvelope> {
 	return (await runNode(InertiaNode, input as never)) as unknown as RespondEnvelope;
@@ -82,9 +86,12 @@ beforeAll(async () => {
 	server = createServer((req, res) => {
 		requests += 1;
 		void (async () => {
-			const path = (req.url ?? "/").split("?")[0] as string;
+			const [path, search = ""] = (req.url ?? "/").split("?") as [string, string?];
+			// The scroll cursor rides the QUERY STRING (#1010), so the replay
+			// server has to hand it to the workflow the way the trigger would.
+			const query = Object.fromEntries(new URLSearchParams(search));
 			const live = dynamic.get(path);
-			const env = live ? await live(req.headers as Record<string, string>) : (routes.get(path) ?? visit);
+			const env = live ? await live(req.headers as Record<string, string>, query) : (routes.get(path) ?? visit);
 			res.writeHead(env.status ?? 200, {
 				"Content-Type": env.contentType ?? "application/json",
 				...(env.headers ?? {}),
@@ -365,8 +372,9 @@ async function serve(
 	build: () => Promise<unknown>,
 	headers: Record<string, string>,
 	url: string,
+	query: Record<string, string> = {},
 ): Promise<RespondEnvelope> {
-	const run = await runWorkflow((await build()) as never, {}, { headers, path: url });
+	const run = await runWorkflow((await build()) as never, {}, { headers, path: url, query });
 	if (!run.ok) throw run.error;
 	return run.response as unknown as RespondEnvelope;
 }
@@ -512,5 +520,124 @@ describe("4 (#1013) — clearHistory re-keys the client's history on logout", ()
 		// where the auth middleware redirects to login.
 		window.history.replaceState({ page: new ArrayBuffer(8) }, "", "/secret");
 		await expect(router.decryptHistory()).rejects.toThrow(/Unable to decrypt history/);
+	});
+});
+
+/**
+ * Issue #1010, test 10 — infinite scroll, through the stock client.
+ *
+ * The issue asks for Playwright: scroll to the bottom and see page 2 load once,
+ * scroll up on a middle page and see page 1 load, plus the `reverse` and
+ * `manual` fixtures. The browser half of that — a layout engine,
+ * `IntersectionObserver` firing on real scrolling, and the `<InfiniteScroll>`
+ * component in React/Vue/Svelte — lands with the Playwright harness in #1003.
+ *
+ * What is testable HERE, with the REAL `@inertiajs/core` client against
+ * responses THIS adapter produced, is the mechanism that component sits on:
+ * `useInfiniteScrollData.fetchPage()` is nothing more than a
+ * `router.reload({ only: [prop], data: { [pageName]: n }, preserveUrl: true,
+ * headers: { "X-Inertia-Infinite-Scroll-Merge-Intent": … } })`. So this block
+ * issues exactly that call — the same headers, the same `only`, the same
+ * cursor in the query string — and asserts the client GROWS the list in the
+ * right direction and resets it on demand.
+ */
+
+const SCROLL_POSTS = Array.from({ length: 20 }, (_, i) => ({ id: i + 1 }));
+
+const loadPosts = defineNode({
+	name: "jsdom-posts",
+	description: "offset-paginated posts",
+	input: z.object({ page: z.union([z.number(), z.string()]).optional() }),
+	output: paginatedSchema(z.object({ id: z.number() })),
+	async execute(_ctx, input) {
+		return paginate(SCROLL_POSTS, { page: input.page ?? 1, perPage: 10 });
+	},
+});
+
+const PostsPage = definePage("Posts/Index", { posts: scroll(loadPosts) });
+
+function postsWorkflow() {
+	return workflow("jsdom-posts-page", { version: "1.0.0", trigger: http.get("/posts") }, (req) => {
+		PostsPage.render(req, "page", "/posts", { posts: { page: req.query.page } }, { version: "v1" });
+	});
+}
+
+/** The exact call `@inertiajs/core`'s `fetchPage(side)` makes. */
+function fetchPage(side: "next" | "previous", pageNumber: number): Promise<Page> {
+	return clientVisit(
+		(hooks) =>
+			router.reload({
+				only: ["posts"],
+				data: { page: pageNumber },
+				preserveUrl: true,
+				headers: { "X-Inertia-Infinite-Scroll-Merge-Intent": side === "previous" ? "prepend" : "append" },
+				...hooks,
+			}),
+		`fetchPage(${side}, ${pageNumber})`,
+	);
+}
+
+function ids(page: Page): number[] {
+	return (page.props.posts as { data: { id: number }[] }).data.map((row) => row.id);
+}
+
+describe("10 (#1010) — the client appends, prepends and resets a scroll prop", () => {
+	it("grows the list in both directions off the scrollProps cursors", async () => {
+		dynamic.set("/posts", (headers, query) => serve(postsWorkflow, headers, "/posts", query));
+
+		// Land on page 2 — the "user opened a deep link into the middle of the
+		// feed" case, which is what makes a PREVIOUS page exist at all.
+		const html = (await serve(postsWorkflow, {}, "/posts", { page: "2" })).body as string;
+		document.documentElement.innerHTML = html;
+		const initialPage = getInitialPageFromDOM("app") as Page;
+		expect(ids(initialPage)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+		// This is the entry `<InfiniteScroll data="posts">` reads: keyed by the
+		// PROP name, with the cursors it grows from.
+		expect(initialPage.scrollProps?.posts).toEqual({
+			pageName: "page",
+			previousPage: 1,
+			nextPage: null,
+			currentPage: 2,
+			reset: false,
+		});
+
+		window.history.replaceState({}, "", "/posts?page=2");
+		router.init({
+			initialPage,
+			resolveComponent: async (name: string) => ({ name }),
+			swapComponent: async () => {},
+		});
+
+		// Scrolling UP on a middle page: the client asks for page 1 with a
+		// prepend intent, and the server's `prependProps` makes it grow upwards.
+		const before = requests;
+		const prepended = await fetchPage("previous", 1);
+		expect(requests).toBe(before + 1);
+		expect(prepended.prependProps).toEqual(["posts.data"]);
+		expect(prepended.mergeProps).toBeUndefined();
+		expect(ids(prepended)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+		// The cursors are REPLACED, not merged: page 1 has nothing before it.
+		expect(prepended.scrollProps?.posts).toMatchObject({ currentPage: 1, previousPage: null, nextPage: 2 });
+
+		// Scrolling DOWN again: the same list, appended to this time. The server
+		// re-labels on every scroll response, so page 2's rows land at the end
+		// rather than replacing the twenty already rendered.
+		const appended = await fetchPage("next", 2);
+		expect(appended.mergeProps).toEqual(["posts.data"]);
+		expect(appended.prependProps).toBeUndefined();
+		expect(ids(appended)).toHaveLength(30);
+		expect(ids(appended).slice(-10)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+
+		// `reset` is how the component starts the feed over (a filter changed):
+		// the label comes off, so the client REPLACES, and `scrollProps.reset`
+		// tells its own state machine to forget the pages it had loaded.
+		const reset = await clientVisit(
+			(hooks) => router.reload({ only: ["posts"], data: { page: 1 }, reset: ["posts"], preserveUrl: true, ...hooks }),
+			"reload({reset: [posts]})",
+		);
+		expect(reset.mergeProps).toBeUndefined();
+		expect(reset.prependProps).toBeUndefined();
+		expect(reset.scrollProps?.posts).toMatchObject({ reset: true, currentPage: 1 });
+		expect(ids(reset)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 	});
 });

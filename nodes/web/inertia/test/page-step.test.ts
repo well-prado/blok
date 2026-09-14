@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import "../src/index.js"; // registers the @blokjs/inertia serializer node
 import { always, defer, definePage, merge, once, optional, scroll, shared } from "../src/define-page.js";
+import { paginate, paginatedSchema } from "../src/paginate.js";
 import type { PageObject } from "../src/protocol.js";
 import { configureHistory, historyNode, logoutNode } from "../src/security/index.js";
 
@@ -83,12 +84,12 @@ const otherStats = defineNode({
 
 const paginatePosts = defineNode({
 	name: "page-paginate-posts",
-	description: "counter prop with a nested shape",
+	description: "counter prop returning a scroll envelope",
 	input: z.object({}),
-	output: z.object({ data: z.array(z.string()), meta: z.object({ page: z.number() }) }),
+	output: paginatedSchema(z.string()),
 	async execute() {
 		counts["page-paginate-posts"] = calls("page-paginate-posts") + 1;
-		return { data: ["p-1"], meta: { page: 1 } };
+		return paginate(["p-1", "p-2"], { page: 1, perPage: 1 });
 	},
 });
 
@@ -227,7 +228,7 @@ describe("1 — full visit", () => {
 		expect(page.mergeProps).toBeUndefined();
 		expect(page.matchPropsOn).toBeUndefined();
 		expect(page.onceProps?.plans?.prop).toBe("plans");
-		expect(page.scrollProps?.["posts.data"]?.pageName).toBe("page");
+		expect(page.scrollProps?.posts?.pageName).toBe("page");
 	});
 });
 
@@ -441,7 +442,7 @@ describe("8b — `X-Inertia-Reset` with a dot path", () => {
 		// …but its merge labels are gone, and the scroll prop is flagged reset.
 		expect(page.mergeProps ?? []).not.toContain("feed.data");
 		expect(page.mergeProps ?? []).not.toContain("posts.data");
-		expect(page.scrollProps?.["posts.data"]?.reset).toBe(true);
+		expect(page.scrollProps?.posts?.reset).toBe(true);
 	});
 });
 

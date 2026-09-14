@@ -2646,35 +2646,19 @@
 													"type": "object",
 													"properties": {
 														"wrapper": {
-															"type": "string"
+															"type": "string",
+															"description": "Sub-path holding the item array the client grows. Default 'data'; '' grows the whole prop."
 														},
 														"pageName": {
-															"type": "string"
+															"type": "string",
+															"description": "Query parameter the client bumps. Default 'page'; two scroll props on one page need distinct names."
 														},
-														"previousPage": {
-															"type": [
-																"number",
-																"string",
-																"null"
-															]
-														},
-														"nextPage": {
-															"type": [
-																"number",
-																"string",
-																"null"
-															]
-														},
-														"currentPage": {
-															"type": [
-																"number",
-																"string",
-																"null"
-															]
+														"metadata": {
+															"description": "TS-only resolver mapping an arbitrary prop output onto ScrollMetadata. JSON workflows cannot carry a function — return through `paginate()` / `cursorPaginate()` instead."
 														}
 													},
 													"additionalProperties": false,
-													"description": "Infinite-scroll paging metadata (#1010). Emitted as the page object's `scrollProps` entry."
+													"description": "Infinite-scroll paging declaration (#1010). The cursors themselves come from the prop's RESOLVED output and are emitted as the page object's `scrollProps[<propKey>]` entry."
 												},
 												"idempotencyKey": {
 													"anyOf": [
