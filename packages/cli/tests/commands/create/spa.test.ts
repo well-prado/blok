@@ -120,9 +120,15 @@ describe("blokctl create spa / add spa (#999)", () => {
 			"src/app.tsx",
 			"src/blok-pages.d.ts",
 			"src/blok-routes.ts",
+			"src/components/AppLayout.tsx",
+			"src/components/BlokLogo.tsx",
 			"src/flash-toast.ts",
 			"src/pages/Errors/Error.tsx",
 			"src/pages/Home.tsx",
+			// The design system (#1054): identical bytes in every template and
+			// example, guarded by tests/docs/spa-design.test.ts.
+			"src/styles/blok.css",
+			"src/styles/theme.ts",
 			"src/vite-env.d.ts",
 			"tsconfig.json",
 			"vite.config.ts",

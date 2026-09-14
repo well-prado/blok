@@ -23,7 +23,7 @@ export const page = workflow(
 	"orders-create-page",
 	{ version: "1.0.0", trigger: http.get("/orders/new", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		OrdersCreate.render(req, "page", "/orders/new", {});
+		OrdersCreate.render(req, "page", "/orders/new", {}, { viewData: { title: "New order" } });
 	},
 );
 

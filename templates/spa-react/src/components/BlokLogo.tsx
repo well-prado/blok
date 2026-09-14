@@ -1,0 +1,96 @@
+/**
+ * The Blok logo, inlined from `docs/assets/logo/` — never hotlinked, and no
+ * asset route to serve.
+ *
+ * ONE file instead of the repo's `light.svg` / `dark.svg` pair: those two
+ * differ only in the wordmark's `fill` (black vs white), so the wordmark here
+ * paints with `currentColor` and follows the theme by itself. The diamond mark
+ * keeps the fixed brand green in both themes.
+ */
+
+export interface BlokLogoProps {
+	/** `wordmark` = mark + "Blok"; `mark` = the diamond alone. */
+	variant?: "wordmark" | "mark";
+	/** Rendered height in px. The width follows the aspect ratio. */
+	height?: number;
+	/** Accessible name. Omit inside a link that already has text. */
+	title?: string;
+}
+
+const GREEN = "#2BCD71";
+
+export function BlokLogo({ variant = "wordmark", height = 24, title }: BlokLogoProps) {
+	const mark = variant === "mark";
+	return (
+		<svg
+			viewBox={mark ? "0 0 40 32" : "0 0 122 32"}
+			height={height}
+			width={(height * (mark ? 40 : 122)) / 32}
+			fill="none"
+			role={title === undefined ? "presentation" : "img"}
+			aria-hidden={title === undefined ? true : undefined}
+			aria-label={title}
+			xmlns="http://www.w3.org/2000/svg"
+		>
+			<path
+				d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z"
+				fill={GREEN}
+			/>
+			<path
+				fillRule="evenodd"
+				clipRule="evenodd"
+				d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z"
+				fill={GREEN}
+			/>
+			<path
+				d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z"
+				fill={GREEN}
+			/>
+			{mark ? null : (
+				<g fill="currentColor">
+					<path d="M97.5879 23.8602V8.13977H102.079V14.8771H104.325V12.6313H106.571V10.3855H108.817V8.13977H113.308V10.3855H111.063V12.6313H108.817V14.8771H106.571V17.1229H108.817V19.3687H111.063V21.6144H113.308V23.8602H106.571V21.6144H104.325V19.3687H102.079V23.8602H97.5879Z" />
+					<path d="M81.8669 23.8602V21.6144H79.6211V10.3855H81.8669V8.13977H93.0958V10.3855H95.3416V21.6144H93.0958V23.8602H81.8669ZM84.1127 21.6144H90.85V10.3855H84.1127V21.6144Z" />
+					<path d="M65.6973 23.8602V8.13977H70.1888V21.6144H79.1719V23.8602H65.6973Z" />
+					<path d="M48 23.8602V8.13977H61.4747V10.3855H63.7205V14.8771H61.4747V17.1229H63.7205V21.6144H61.4747V23.8602H48ZM52.4916 14.8771H59.2289V10.3855H52.4916V14.8771ZM52.4916 21.6144H59.2289V17.1229H52.4916V21.6144Z" />
+				</g>
+			)}
+		</svg>
+	);
+}
+
+/** The two-icon theme button. `blok.css` decides which icon is visible. */
+export function ThemeIcons() {
+	return (
+		<>
+			<svg
+				className="blok-icon--moon"
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+			</svg>
+			<svg
+				className="blok-icon--sun"
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				aria-hidden="true"
+			>
+				<circle cx="12" cy="12" r="4" />
+				<path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+			</svg>
+		</>
+	);
+}

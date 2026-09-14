@@ -21,9 +21,15 @@ export const index = workflow(
 	"orders.index",
 	{ version: "1.0.0", trigger: http.get("/orders", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		OrdersIndex.render(req, "page", "/orders", {
-			orders: { userId: shared(currentUser, "auth").id },
-		});
+		OrdersIndex.render(
+			req,
+			"page",
+			"/orders",
+			{
+				orders: { userId: shared(currentUser, "auth").id },
+			},
+			{ viewData: { title: "Orders" } },
+		);
 	},
 );
 
@@ -31,6 +37,6 @@ export default workflow(
 	"orders.show",
 	{ version: "1.0.0", trigger: http.get("/orders/:id", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		OrdersShow.render(req, "page", "/orders", { order: { id: req.params.id } });
+		OrdersShow.render(req, "page", "/orders", { order: { id: req.params.id } }, { viewData: { title: "Order" } });
 	},
 );
