@@ -39,7 +39,7 @@ Per route: `trigger: http.get("/orders", { middleware: ["inertia.auth"] })`.
 | `inertia.shared` | `auth`, `flash` | runs your `currentUser` node into `ctx.state.auth`, then verifies and clears the signed [flash cookie](/d/spa/flash-data) into `ctx.state.flash` |
 | `inertia.auth` | `inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect` | when `auth.id` is missing, throws `302 Location: /login` — an Inertia visit follows a redirect, but has nothing to render from a bare 401 |
 | `inertia.csrf` | `csrf` (ephemeral) | issues and verifies the [`XSRF-TOKEN` double submit](/d/spa/csrf) |
-| `inertia.encryptHistory` | `history` | marks the request so every page in it encrypts its [history entry](/d/spa/history-encryption) |
+| `inertia.encryptHistory` | `encrypt-history` (ephemeral) | marks the request so every page in it encrypts its [history entry](/d/spa/history-encryption) |
 
 <Warning>
 **Reserved step ids: `auth` and `flash`.** Step ids are one flat namespace per
