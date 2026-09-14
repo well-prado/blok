@@ -38,4 +38,6 @@ import McpTrigger, { _getActiveMcpTrigger, _setActiveMcpTrigger, parseUserContex
 export default McpTrigger;
 export { McpTrigger, _getActiveMcpTrigger, _setActiveMcpTrigger, parseUserContext };
 export type { McpTriggerConfig, McpUserContext } from "./McpTrigger.js";
+export { inertiaMcpTools, inertiaToolsEnabled, listInertiaRoutes, _resetInertiaModule } from "./inertiaTools.js";
+export type { InertiaMcpTool, InertiaRoute } from "./inertiaTools.js";
 export type { McpTriggerOpts } from "@blokjs/helper";
