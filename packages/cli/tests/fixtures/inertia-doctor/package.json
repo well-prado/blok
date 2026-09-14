@@ -1,0 +1,11 @@
+{
+	"name": "blok-fixture-inertia-doctor",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@blokjs/core": "*",
+		"@blokjs/inertia": "*",
+		"@blokjs/session": "*",
+		"zod": "*"
+	}
+}

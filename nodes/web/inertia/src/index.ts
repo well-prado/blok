@@ -333,7 +333,9 @@ export default defineNode({
 		}
 
 		if (!input.component) {
-			throw new Error("@blokjs/inertia: `component` is required unless `redirect` or `location` is set.");
+			throw new Error(
+				"@blokjs/inertia: `component` is required unless `redirect` or `location` is set. Fix: pass `component`, or return redirect()/location() instead.",
+			);
 		}
 		// #1015 — the server-side component rename, applied BEFORE anything else
 		// reads the name: the client echoes the transformed name back in

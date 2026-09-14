@@ -38,6 +38,7 @@
 		"check:go-fmt": "bash scripts/check-go-fmt.sh",
 		"check:source-imports": "bun run scripts/check-source-imports.ts",
 		"check:skill-samples": "bun run scripts/check-skill-samples.ts",
+		"docs:llms": "bun run scripts/gen-llms-txt.ts",
 		"test": "VITEST_MAX_WORKERS=3 nx run-many -t test",
 		"test:coverage": "VITEST_MAX_WORKERS=3 nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage",
 		"test:integration": "bash scripts/integration-test.sh",

@@ -472,6 +472,20 @@ export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") 
   prop's step id is `"<pageId>.<propKey>"`.
 - Never hand-roll the page object — the wire format lives only in
   `@blokjs/inertia`.
+- Two deployment modes: **in-project** (Vite app in `client/`, built into
+  `client/dist`, served by Blok via `BLOK_STATIC_DIR`) and **standalone** (a
+  separate Vite app on its own origin, reaching Blok through
+  `BLOK_CORS_ORIGIN`). Both speak the same protocol; only static serving and
+  CORS differ.
+- The commands: `blokctl gen app-types` (writes `blok-pages.d.ts` +
+  `blok-routes.ts`), `blokctl add spa` (scaffolds the client into an existing
+  project; `blokctl create spa` for a new one), `blokctl inertia start-ssr` /
+  `stop-ssr` / `check-ssr`, and `blokctl inertia doctor` (shell markers, page
+  existence, secrets, `ASSET_VERSION`, `inertia.csrf`, SSR health).
+- An agent can read the page contract without reading source: the MCP tools
+  `inertia.pages.list`, `inertia.page.get(component)` and
+  `inertia.routes.list` (read-only, dev-only unless `BLOK_INERTIA_MCP=1`), and
+  `docs/llms.txt` / `docs/llms-full.txt`.
 
 Author docs: `docs/d/spa/` (start at `docs/d/spa/index.mdx`). Runnable
 examples: `examples/inertia-{react,vue,svelte,standalone}`.

@@ -69,6 +69,7 @@ import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import type { Hono, Context as HonoContext } from "hono";
 import { v4 as uuid } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { type InertiaMcpTool, inertiaMcpTools } from "./inertiaTools.js";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -151,6 +152,12 @@ interface ToolEntry {
 	annotations?: McpToolMeta["annotations"];
 	// biome-ignore lint/suspicious/noExplicitAny: workflow `input` is an opaque ZodType
 	inputZod: any | undefined;
+	/**
+	 * A built-in tool answered IN PROCESS instead of by running a workflow
+	 * (#1019 — the Inertia page-registry tools). Its `inputSchema` is already
+	 * JSON Schema, so `inputZod` stays undefined.
+	 */
+	builtin?: InertiaMcpTool;
 }
 
 /** A workflow exposed as an MCP resource. */
@@ -318,7 +325,7 @@ export default class McpTrigger extends TriggerBase {
 		if (this.httpTrigger) {
 			this.httpTrigger.addPreCatchAllHook(() => this.registerRoutesFromRegistry());
 		} else {
-			this.registerRoutesFromRegistry();
+			await this.registerRoutesFromRegistry();
 		}
 		return this.endCounter(startTime);
 	}
@@ -346,13 +353,30 @@ export default class McpTrigger extends TriggerBase {
 	// Registry scan + grouping
 	// ---------------------------------------------------------------------------
 
-	private registerRoutesFromRegistry(): void {
+	private async registerRoutesFromRegistry(): Promise<void> {
 		const groups = this.getServerGroups();
 		if (groups.length === 0) {
 			this.logger.log("[blok][mcp] no workflows with trigger.mcp found");
 			return;
 		}
+		// #1019 — the Inertia page tools ride on EVERY server this app serves:
+		// they describe the app, not one workflow group, and an agent should not
+		// have to guess which MCP endpoint carries them. Empty when the adapter
+		// is absent or the tools are gated off (production without
+		// BLOK_INERTIA_MCP).
+		const builtins = await inertiaMcpTools();
 		for (const group of groups) {
+			for (const builtin of builtins) {
+				group.tools.push({
+					workflowName: builtin.name,
+					toolName: builtin.name,
+					description: builtin.description,
+					annotations: builtin.annotations,
+					inputZod: undefined,
+					builtin,
+				});
+			}
+			group.tools.sort((a, b) => a.toolName.localeCompare(b.toolName));
 			this.registerGroupRoutes(group);
 		}
 	}
@@ -446,7 +470,7 @@ export default class McpTrigger extends TriggerBase {
 			tools: group.tools.map((t) => ({
 				name: t.toolName,
 				description: t.description,
-				inputSchema: toInputJsonSchema(t.inputZod),
+				inputSchema: t.builtin ? t.builtin.inputSchema : toInputJsonSchema(t.inputZod),
 				annotations: t.annotations,
 			})),
 		}));
@@ -521,7 +545,11 @@ export default class McpTrigger extends TriggerBase {
 	): Promise<CallToolResult> {
 		this.counterToolCalls.add(1, { tool: tool.toolName });
 		try {
-			const data = await this.runWorkflow(tool.workflowName, args, userContext, `mcp.tool:${tool.toolName}`);
+			// A built-in tool is a pure read of in-process state — no workflow, no
+			// node, no runner. Its throw is still a tool error, not a crash.
+			const data = tool.builtin
+				? await tool.builtin.run(args)
+				: await this.runWorkflow(tool.workflowName, args, userContext, `mcp.tool:${tool.toolName}`);
 			return toToolResult(data);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

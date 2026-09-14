@@ -1,0 +1,3612 @@
+# Blok — SPA (Inertia)
+
+> Generated from docs/d/spa/**.mdx by `bun run docs:llms` — do not edit by hand.
+
+Blok is a modular workflow platform. Its SPA layer speaks the Inertia v3
+protocol against the stock `@inertiajs/react | vue3 | svelte` client: a page
+is a workflow, a prop is a step (in any runtime), and the page contract is
+declared once with `definePage()` outside the workflow callback so the
+frontend can `import type` it.
+
+
+---
+
+# SPA (Inertia)
+
+Source: /d/spa/index
+
+Build a React, Vue or Svelte SPA on Blok — a page is a workflow, a prop is a step, navigation is the Inertia v3 protocol.
+
+Blok speaks [Inertia.js **v3**](https://inertiajs.com/docs/v3/core-concepts/how-it-works).
+You keep the stock `@inertiajs/react | vue3 | svelte` client — nothing is forked,
+nothing is wrapped — and the server half is ordinary Blok:
+
+- **a page is a workflow**, declared with `definePage()` and rendered by one
+  `page` control step;
+- **a prop is a step**, so any prop can run in any runtime (a Python node
+  computing `stats` next to a TypeScript node listing `orders`);
+- **navigation is the protocol**: the same URL answers an HTML shell on the
+  first load and a JSON page object on an Inertia visit.
+
+```ts src/workflows/dashboard.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, defer, definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Recent orders.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: () => [{ id: "o-1", total: 120 }],
+});
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "Expensive dashboard aggregates.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),
+  orders: listOrders,
+  stats: defer(heavyStats, { group: "dashboard" }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", { auth: {}, orders: {}, stats: {} });
+  },
+);
+```
+
+<Card title="Start here" icon="rocket" href="/d/spa/getting-started">
+  Wire a Vite SPA to a Blok server and render your first page.
+</Card>
+
+## The protocol in one table
+
+Everything the adapter reads and writes. The full field-by-field reference is
+[The protocol](/d/spa/the-protocol).
+
+| Direction | Name | Meaning |
+| --- | --- | --- |
+| → request | `X-Inertia: true` | answer with the JSON page object instead of the HTML shell |
+| → request | `X-Inertia-Version` | the asset version the client holds; a mismatch on a **GET** forces a hard reload |
+| → request | `X-Inertia-Partial-Component` | must equal the page's component, or the visit counts as a full one |
+| → request | `X-Inertia-Partial-Data` / `-Partial-Except` | which props to resolve ([partial reloads](/d/spa/partial-reloads)) |
+| → request | `X-Inertia-Reset` | return these merge props unmerged ([merging props](/d/spa/merging-props)) |
+| → request | `X-Inertia-Except-Once-Props` | cache keys the client still holds ([once props](/d/spa/once-props)) |
+| → request | `X-Inertia-Error-Bag` | nest `props.errors` under a bag name ([validation](/d/spa/validation)) |
+| → request | `X-Inertia-Infinite-Scroll-Merge-Intent` | `append` / `prepend` ([infinite scroll](/d/spa/infinite-scroll)) |
+| → request | `Precognition: true` | dry-run the validation step only ([validation](/d/spa/validation)) |
+| ← response | `200 text/html` | first load: the shell with the page object in `<script type="application/json" data-page="app">` |
+| ← response | `200 application/json` + `X-Inertia: true` | an Inertia visit: the bare page object |
+| ← response | `Vary: X-Inertia` | the same URL serves both |
+| ← response | `303` | after a `PUT`/`PATCH`/`DELETE` redirect, never `302` |
+| ← response | `409` + `X-Inertia-Location` | asset-version mismatch, or an external `location()` |
+| ← response | `409` + `X-Inertia-Redirect` | a redirect to a URL fragment |
+
+## Two deployment modes
+
+<Tabs>
+  <Tab title="In-project">
+    The SPA lives in `client/` inside the Blok project. Vite builds into
+    `client/dist`, the Blok HTTP trigger serves it (`BLOK_STATIC_DIR`), and one
+    origin answers everything. In dev, the Vite dev server proxies to Blok, so
+    there is still one origin in the browser.
+  </Tab>
+  <Tab title="Standalone">
+    The SPA is its own deployable (a CDN, `:5173`, another host) and talks to
+    Blok cross-origin. Blok sends CORS (`BLOK_CORS_ORIGIN`) that must **expose**
+    the Inertia response headers, and the types travel through
+    `blokctl gen app-types --out ../my-spa/src`.
+  </Tab>
+</Tabs>
+
+Both are first-class; see [assets and versioning](/d/spa/assets-and-versioning)
+for the wiring of each.
+
+## Page = workflow, prop = step
+
+`definePage()` declares the contract once, outside the workflow callback, so the
+type is importable by the frontend and readable by codegen. `render()` emits
+exactly **one** `page` control step, and the runner lowers it to one inner step
+per prop (`<pageId>.<key>`) plus the serializer (`<pageId>.$render`).
+
+That means props are ordinary steps: they run **in parallel**, each with its own
+`retry`, `idempotencyKey` and `maxDuration`, each persisted to
+`ctx.state["<pageId>.<key>"]`, and each free to be a node in another language.
+Because they are concurrent, one prop can never read another's output — read the
+request, or a middleware's output through [`shared()`](/d/spa/middleware).
+
+| Mode | Full visit | Partial reload | Wrapper |
+| --- | --- | --- | --- |
+| regular | resolved | when named, or when nothing is named | — |
+| `always` | resolved | always, exempt from `only`/`except` | `always(node)` |
+| `optional` | never | only when named | `optional(node)` |
+| `defer` | never (announced) | only when named / by group | `defer(node, { group, rescue })` |
+| `merge` | resolved | resolved; labels ride partials only | `merge(node, { append, prepend, deep, matchOn })` |
+| `once` | resolved unless the client holds it | same | `once(node, { as, until, fresh })` |
+| `scroll` | resolved | resolved, with cursors | `scroll(node, { wrapper, pageName, metadata })` |
+
+## What differs from Laravel
+
+The adapter targets feature parity with
+[`inertia-laravel`](https://github.com/inertiajs/inertia-laravel) **v3.3.4**
+(released 2026-09-11), which is the version every row below was checked against.
+Three things are deliberately different:
+
+1. **No session store.** Laravel's flash rides the session; Blok has no session,
+   so flash and error bags ride a **signed one-shot cookie**
+   (`BLOK_FLASH_SECRET` is required). See [flash data](/d/spa/flash-data).
+2. **Middleware is Blok's middleware.** There is no `HandleInertiaRequests`
+   class. `inertia.shared`, `inertia.auth` and `inertia.csrf` are ordinary
+   middleware **workflows** registered by name. See [middleware](/d/spa/middleware).
+3. **Props are steps, not closures.** A prop is a node reference plus its
+   inputs, resolved by the runner — which is why a prop can be Python, Go or
+   Rust, and why per-prop retries exist at all.
+
+### Every v3 doc page, and its Blok equivalent
+
+<Note>
+One row per page of [the Inertia v3 documentation](https://inertiajs.com/docs/llms.txt).
+"Client only" means the behaviour lives entirely in the stock client and Blok
+has nothing to configure — see [client features](/d/spa/client-features).
+</Note>
+
+| Inertia v3 page | Laravel (`inertia-laravel` v3.3.4) | Blok |
+| --- | --- | --- |
+| [Introduction](https://inertiajs.com/docs/v3/getting-started/index) | `inertia-laravel` | [`@blokjs/inertia`](/d/spa/index) |
+| [Demo Application](https://inertiajs.com/docs/v3/getting-started/demo-application) | Ping CRM | [`examples/inertia-react`](/d/spa/getting-started#examples) |
+| [Upgrade Guide for v3.0](https://inertiajs.com/docs/v3/getting-started/upgrade-guide) | v2 → v3 upgrade | Blok ships v3 only; the v1 node's move is [migration](/d/migration/react-node-to-inertia) |
+| [Server-Side Setup](https://inertiajs.com/docs/v3/installation/server-side-setup) | `inertia:middleware`, `app.blade.php` | [getting started](/d/spa/getting-started) — `definePage()`, no root view |
+| [Client-Side Setup](https://inertiajs.com/docs/v3/installation/client-side-setup) | `createInertiaApp` | identical; plus `blokInertia()` ([assets](/d/spa/assets-and-versioning)) |
+| [Who Is Inertia.js For?](https://inertiajs.com/docs/v3/core-concepts/who-is-it-for) | — | unchanged |
+| [How It Works](https://inertiajs.com/docs/v3/core-concepts/how-it-works) | — | [page = workflow, prop = step](/d/spa/index#page--workflow-prop--step) |
+| [The Protocol](https://inertiajs.com/docs/v3/core-concepts/the-protocol) | adapter internals | [the protocol](/d/spa/the-protocol) |
+| [Pages](https://inertiajs.com/docs/v3/the-basics/pages) | `Inertia::render()` | [`definePage()` + `render()`](/d/spa/pages-and-props) |
+| [Responses](https://inertiajs.com/docs/v3/the-basics/responses) | `Inertia::render`, `Inertia::location` | the `page` step; [`location()`](/d/spa/the-protocol#control-responses) |
+| [Redirects](https://inertiajs.com/docs/v3/the-basics/redirects) | `back()`, `redirect()`, 303 rule | [`redirectBack()` / `back()`](/d/spa/forms-and-redirects) |
+| [Routing](https://inertiajs.com/docs/v3/the-basics/routing) | `Route::inertia()`, Ziggy/Wayfinder | [`inertia.page()`, `route()`](/d/spa/routing) |
+| [Title & Meta](https://inertiajs.com/docs/v3/the-basics/title-and-meta) | `@inertiaHead`, `rootView` | [`head` / `shell` / `viewData`](/d/spa/title-and-meta) |
+| [Links](https://inertiajs.com/docs/v3/the-basics/links) | client only | [client only](/d/spa/client-features) |
+| [Manual Visits](https://inertiajs.com/docs/v3/the-basics/manual-visits) | client only | [client only](/d/spa/client-features) |
+| [Instant Visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) | `sharedProps` on the page object | [`share()` announces its keys](/d/spa/shared-data) |
+| [Forms](https://inertiajs.com/docs/v3/the-basics/forms) | `useForm`, `$request->validate()` | [forms and redirects](/d/spa/forms-and-redirects) |
+| [HTTP Requests](https://inertiajs.com/docs/v3/the-basics/http-requests) | client only | [client only](/d/spa/client-features) |
+| [Optimistic Updates](https://inertiajs.com/docs/v3/the-basics/optimistic-updates) | client only | [client only](/d/spa/client-features) |
+| [File Uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads) | `_method` spoofing, `UploadedFile` | [`ctx.request.files`, `_method`](/d/spa/file-uploads) |
+| [Validation](https://inertiajs.com/docs/v3/the-basics/validation) | `withErrors`, error bags, Precognition | [`@blokjs/validate`, bags, Precognition](/d/spa/validation) |
+| [Layouts](https://inertiajs.com/docs/v3/the-basics/layouts) | client only | [client only](/d/spa/client-features) |
+| [View Transitions](https://inertiajs.com/docs/v3/the-basics/view-transitions) | client only | [client only](/d/spa/client-features) |
+| [Shared Data](https://inertiajs.com/docs/v3/data-props/shared-data) | `HandleInertiaRequests::share`, `Inertia::share` | [`share()` / `inertia.shared`](/d/spa/shared-data) |
+| [Flash Data](https://inertiajs.com/docs/v3/data-props/flash-data) | session flash | [signed one-shot cookie](/d/spa/flash-data) |
+| [Partial Reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads) | `Inertia::optional`, `Inertia::always` | [`optional()` / `always()`](/d/spa/partial-reloads) |
+| [Deferred Props](https://inertiajs.com/docs/v3/data-props/deferred-props) | `Inertia::defer()` | [`defer()`](/d/spa/deferred-props) |
+| [Merging Props](https://inertiajs.com/docs/v3/data-props/merging-props) | `Inertia::merge()`, `->deepMerge()`, `->matchOn()` | [`merge()`](/d/spa/merging-props) |
+| [Once Props](https://inertiajs.com/docs/v3/data-props/once-props) | `Inertia::once()`, `shareOnce()` | [`once()` / `shareOnce()`](/d/spa/once-props) |
+| [Polling](https://inertiajs.com/docs/v3/data-props/polling) | client only | [client only](/d/spa/client-features) |
+| [Prefetching](https://inertiajs.com/docs/v3/data-props/prefetching) | `Purpose: prefetch` handling | [honoured by the serializer](/d/spa/the-protocol#prefetch) |
+| [Load When Visible](https://inertiajs.com/docs/v3/data-props/load-when-visible) | `WhenVisible` + deferred props | [`defer()` + client only](/d/spa/deferred-props) |
+| [Infinite Scroll](https://inertiajs.com/docs/v3/data-props/infinite-scroll) | `Inertia::scroll()` | [`scroll()`, `paginate()`](/d/spa/infinite-scroll) |
+| [Remembering State](https://inertiajs.com/docs/v3/data-props/remembering-state) | client only | [client only](/d/spa/client-features) |
+| [Authentication](https://inertiajs.com/docs/v3/security/authentication) | Breeze / starter kits | [`inertia.auth`, starter kit](/d/spa/starter-kit) |
+| [Authorization](https://inertiajs.com/docs/v3/security/authorization) | Gates and Policies, `can` prop | [`can()` / `authorize()`](/d/spa/authorization) |
+| [CSRF Protection](https://inertiajs.com/docs/v3/security/csrf-protection) | `VerifyCsrfToken` middleware | [`inertia.csrf`](/d/spa/csrf) |
+| [History Encryption](https://inertiajs.com/docs/v3/security/history-encryption) | `Inertia::encryptHistory()`, `clearHistory()` | [`encryptHistory()`, `logoutResponse()`](/d/spa/history-encryption) |
+| [Asset Versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning) | `HandleInertiaRequests::version()` | [`ASSET_VERSION` from the Vite plugin](/d/spa/assets-and-versioning) |
+| [Code Splitting](https://inertiajs.com/docs/v3/advanced/code-splitting) | Vite `lazy` page resolution | identical — [`blokInertia()` passes it through](/d/spa/assets-and-versioning) |
+| [DevTools](https://inertiajs.com/docs/v3/advanced/devtools) | devtools protocol server | [devtools](/d/spa/devtools) |
+| [Error Handling](https://inertiajs.com/docs/v3/advanced/error-handling) | `bootstrap/app.php` `respond()` | [`configureErrorPages()`](/d/spa/error-handling) |
+| [Events](https://inertiajs.com/docs/v3/advanced/events) | client only | [client only](/d/spa/client-features) |
+| [Progress Indicators](https://inertiajs.com/docs/v3/advanced/progress-indicators) | client only | [client only](/d/spa/client-features) |
+| [Scroll Management](https://inertiajs.com/docs/v3/advanced/scroll-management) | client only | [client only](/d/spa/client-features) |
+| [Server-Side Rendering (SSR)](https://inertiajs.com/docs/v3/advanced/server-side-rendering) | `php artisan inertia:start-ssr` | [`blokctl inertia start-ssr`](/d/spa/ssr) |
+| [Testing](https://inertiajs.com/docs/v3/advanced/testing) | `AssertableInertia` | [`runPage()`](/d/fundamentals/testing#recipe-4--an-inertia-page-workflow) |
+| [TypeScript](https://inertiajs.com/docs/v3/advanced/typescript) | hand-written `types/index.d.ts` | [`PageProps`, `blokctl gen app-types`](/d/spa/pages-and-props#typing-the-client) |
+
+## Packages
+
+| Package | What it is |
+| --- | --- |
+| `@blokjs/inertia` | the serializer node, `definePage()`, the middleware pack, shared data, routing, errors, SSR |
+| `@blokjs/inertia-client` | typed `Pages`/`Routes`, `route()`, and the `blokInertia()` Vite plugin |
+| `@blokjs/helpers` | the `@blokjs/flash`, `@blokjs/validate`, `@blokjs/csrf` and `@blokjs/throw` nodes |
+| `@inertiajs/react` · `vue3` · `svelte` | the **stock** client, unforked |
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    From an empty project to a rendered page.
+  </Card>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    `definePage`, prop modes, cross-runtime props, typing the client.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    Every header, every page-object field, every status code.
+  </Card>
+  <Card title="Migrating from @blokjs/react" icon="arrow-right" href="/d/migration/react-node-to-inertia">
+    The old server-rendered React node, and the three-step move.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Getting started
+
+Source: /d/spa/getting-started
+
+Wire a Vite SPA to a Blok server by hand, render the first page, and run the two-terminal dev loop.
+
+Counterpart: [Server-side setup](https://inertiajs.com/docs/v3/installation/server-side-setup)
+and [client-side setup](https://inertiajs.com/docs/v3/installation/client-side-setup)
+in the Inertia docs. Everything they say about `createInertiaApp` still holds —
+only the server half is Blok's.
+
+<Warning>
+**The scaffold is not shipped yet.** `blokctl create spa` / `blokctl add spa`
+land with [#999](https://github.com/well-prado/blok/issues/999), once
+`@blokjs/inertia` and `@blokjs/inertia-client` are published. Until then, do the
+five steps below by hand — they are exactly what the scaffold will write.
+</Warning>
+
+## 0. The one-liner, later
+
+When #999 lands this whole page collapses into:
+
+```bash
+blokctl create spa my-app --framework react   # pending #999 — a new SPA project
+blokctl add spa --framework vue               # pending #999 — a SPA in an existing project
+blokctl add spa --kit auth                    # pending #999 + #1018 — with the auth starter kit
+```
+
+The exact flags land with the command; what is fixed is the shape of what it
+writes, which is the five steps below.
+
+## 1. Install
+
+<CodeGroup>
+```bash React
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/react @inertiajs/vite react react-dom
+npm i -D vite @vitejs/plugin-react
+```
+
+```bash Vue
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/vue3 @inertiajs/vite vue
+npm i -D vite @vitejs/plugin-vue
+```
+
+```bash Svelte
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/svelte @inertiajs/vite svelte
+npm i -D vite @sveltejs/vite-plugin-svelte
+```
+</CodeGroup>
+
+Node 20.19+ is required (Vite's own floor). `@blokjs/inertia` registers its
+nodes through `@blokjs/helpers` the moment it is installed — there is nothing to
+wire into the node registry.
+
+## 2. The client
+
+The SPA lives in `client/` (in-project mode: Blok serves the built assets from
+one origin).
+
+```ts client/vite.config.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [react(), blokInertia({ pages: { path: "src/pages" } })],
+});
+```
+
+`blokInertia()` wraps `@inertiajs/vite`, so page resolution, lazy pages and the
+SSR transform are upstream behaviour. On top it writes the four files the Blok
+server reads — see [assets and versioning](/d/spa/assets-and-versioning).
+
+```tsx client/src/main.tsx
+import { createInertiaApp } from "@inertiajs/react";
+import { createRoot } from "react-dom/client";
+
+void createInertiaApp({
+  resolve: (name: string) => import(`./pages/${name}.tsx`),
+  setup({ el, App, props }) {
+    createRoot(el).render(<App {...props} />);
+  },
+});
+```
+
+```tsx client/src/pages/Dashboard.tsx
+interface Props {
+  auth: { email: string };
+  orders: { id: string; total: number }[];
+}
+
+export default function Dashboard({ auth, orders }: Props) {
+  return (
+    <main>
+      <h1>{auth.email}</h1>
+      <ul>
+        {orders.map((order) => (
+          <li key={order.id}>{order.total}</li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+```
+
+## 3. The page workflow
+
+A page is a workflow. The contract is declared **outside** the callback so the
+frontend can `import type` it.
+
+```ts src/workflows/dashboard.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, definePage, shared } from "@blokjs/inertia";
+import { z } from "zod";
+
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user, from the request headers.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "This user's orders.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: (_ctx, input) => [{ id: `o-${input.userId}`, total: 120 }],
+});
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),
+  orders: listOrders,
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", {
+      auth: {},
+      orders: { userId: shared(currentUser, "auth").id },
+    });
+  },
+);
+```
+
+<Note>
+`render(req, id, url, inputs, options?)` takes **node inputs per prop**, not
+values: the runner decides per request which prop nodes actually run. `shared()`
+is the typed read of a state slot the middleware filled in.
+</Note>
+
+## 4. Register the middleware
+
+`inertia.shared` is an ordinary Blok middleware workflow. It fills `auth` and
+reads the signed flash cookie; the `page` step folds the flash into the response
+by itself.
+
+```ts src/Workflows.ts
+import { createAuthMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+import dashboard, { currentUser } from "./workflows/dashboard";
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
+  dashboard,
+};
+
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared"]);
+```
+
+Guard a route with `trigger: http.get("/orders", { middleware: ["inertia.auth"] })`.
+Details in [middleware](/d/spa/middleware).
+
+## 5. Environment
+
+| Variable | Why |
+| --- | --- |
+| `BLOK_FLASH_SECRET` | **required** — signs the one-shot flash cookie (there is no session store) |
+| `BLOK_STATIC_DIR` | `client/dist` — makes Blok serve the built SPA and read `ASSET_VERSION` |
+| `BLOK_CORS_ORIGIN` | standalone mode only: the SPA's origin |
+
+```bash
+BLOK_FLASH_SECRET="$(openssl rand -hex 32)"
+BLOK_STATIC_DIR=client/dist
+```
+
+## The dev loop
+
+Two terminals, one origin in the browser:
+
+```bash
+# terminal 1 — the Blok server
+blokctl dev
+
+# terminal 2 — Vite, which proxies everything it does not own to Blok
+cd client && npx vite
+```
+
+Open the **Vite** URL. Requests that are not Vite-owned are proxied to
+`BLOK_URL` (default `http://localhost:4000`) with `X-Inertia-Version: dev`
+attached, so a dev visit can never 409 on a stale asset version.
+
+For production: `vite build`, then start Blok with `BLOK_STATIC_DIR=client/dist`.
+Blok serves `/assets/*` immutable and answers every other path from a workflow.
+
+## Typing the client
+
+Two paths, both real:
+
+- **monorepo** — `import type { Dashboard }` and read
+  `PageProps<typeof Dashboard>`;
+- **separate repo** — `blokctl gen app-types --pages-only --out ../my-spa/src`
+  writes `blok-pages.d.ts` and `blok-routes.ts`.
+
+Both are spelled out in [pages and props](/d/spa/pages-and-props#typing-the-client)
+and in the [`gen app-types`](/d/cli/gen) reference.
+
+## Examples
+
+Four runnable examples live in the repository:
+
+| Example | What it shows |
+| --- | --- |
+| `examples/inertia-react` | in-project mode, a `runtime.python3` prop, defer/merge/once/scroll, a form with validation |
+| `examples/inertia-vue` | the same server, a Vue 3 client |
+| `examples/inertia-svelte` | the same server, a Svelte 5 client |
+| `examples/inertia-standalone` | `backend/` + `frontend/` on two origins, CORS and `gen app-types --out` |
+
+Each has a README, and `bun run e2e` runs its `runPage` suite.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    Prop modes, cross-runtime props, typed props on the client.
+  </Card>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    `useForm`, the 303 rule, errors and flash.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Pages and props
+
+Source: /d/spa/pages-and-props
+
+definePage, the seven prop modes, cross-runtime props, and the two ways the client gets its types.
+
+Counterpart: [Pages](https://inertiajs.com/docs/v3/the-basics/pages) and
+[Responses](https://inertiajs.com/docs/v3/the-basics/responses).
+
+A page is declared **once**, outside the workflow callback. That placement is
+the whole point: a contract declared inside the callback cannot leak its
+inferred type to module scope, so the frontend would have nothing to import.
+
+```ts src/pages/orders.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, defer, definePage, merge, once, optional, scroll } from "@blokjs/inertia";
+import { z } from "zod";
+
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders for one user.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: (_ctx, input) => [{ id: `o-${input.userId}`, total: 120 }],
+});
+
+const loadFilters = defineNode({
+  name: "load-filters",
+  description: "Filter chips — only when the client asks.",
+  input: z.object({}),
+  output: z.object({ statuses: z.array(z.string()) }),
+  execute: () => ({ statuses: ["open", "paid"] }),
+});
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "Expensive aggregates.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+const loadFeed = defineNode({
+  name: "load-feed",
+  description: "Activity feed page.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.object({ id: z.string() })) }),
+  execute: () => ({ data: [{ id: "a-1" }] }),
+});
+
+const loadPlans = defineNode({
+  name: "load-plans",
+  description: "Pricing plans — rarely change.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), price: z.number() })),
+  execute: () => [{ id: "pro", price: 20 }],
+});
+
+const listPosts = defineNode({
+  name: "list-posts",
+  description: "One page of posts.",
+  input: z.object({ page: z.union([z.number(), z.string()]).optional() }),
+  output: z.object({
+    data: z.array(z.object({ id: z.string() })),
+    pageName: z.string(),
+    currentPage: z.number(),
+    nextPage: z.number().nullable(),
+    previousPage: z.number().nullable(),
+  }),
+  execute: () => ({
+    data: [{ id: "p-1" }],
+    pageName: "page",
+    currentPage: 1,
+    nextPage: 2,
+    previousPage: null,
+  }),
+});
+
+export const OrdersIndex = definePage("Orders/Index", {
+  auth: always(currentUser),      // ignores every only/except filter
+  orders: listOrders,             // regular
+  filters: optional(loadFilters), // only when asked for by name
+  stats: defer(heavyStats, { group: "dashboard", rescue: true }),
+  feed: merge(loadFeed, { append: "data", matchOn: "id" }),
+  plans: once(loadPlans, { until: "1h" }),
+  posts: scroll(listPosts),
+});
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders") },
+  (req) => {
+    OrdersIndex.render(
+      req,
+      "page",
+      "/orders",
+      { orders: { userId: "u-1" }, posts: { page: req.query.page } },
+      { version: "v1" },
+    );
+  },
+);
+```
+
+## `render()`
+
+```text
+render(req, id, url, inputs, options?) -> Handle<RespondEnvelope>
+```
+
+| Argument | What it is |
+| --- | --- |
+| `req` | the trigger entry handle (the workflow callback's argument) |
+| `id` | the step id. Prop steps become `<id>.<propKey>`, the serializer `<id>.$render` |
+| `url` | the page-object `url` — a literal or a handle |
+| `inputs` | **node inputs per prop**, handles allowed. A prop whose node needs no input may be omitted |
+| `options` | page-level knobs: `version`, `errors`, `flash`, `viewData`, `shell`, `head`, `rootId`, `encryptHistory`, `clearHistory`, `preserveFragment`, `exposeSharedPropKeys` |
+
+It emits exactly one `page` control step. The runner lowers it to one inner step
+per selected prop plus the serializer, resolves the selected props **in
+parallel**, and persists each to `ctx.state["<id>.<key>"]`.
+
+<Warning>
+Because props run concurrently, **one prop can never read another's output**.
+Read the request, or a middleware step's output through `shared()`.
+</Warning>
+
+## The seven modes
+
+| Mode | Full visit | Partial reload | Notes |
+| --- | --- | --- | --- |
+| regular | resolved | when named, or when nothing is named | the default |
+| `always(node)` | resolved | always | exempt from `only` **and** `except` |
+| `optional(node)` | never | only when named | [partial reloads](/d/spa/partial-reloads) |
+| `defer(node, opts)` | announced, not resolved | on the follow-up request | [deferred props](/d/spa/deferred-props) |
+| `merge(node, opts)` | resolved | resolved + labelled | [merging props](/d/spa/merging-props) |
+| `once(node, opts)` | resolved unless the client holds it | same | [once props](/d/spa/once-props) |
+| `scroll(node, opts)` | resolved with cursors | resolved with cursors | [infinite scroll](/d/spa/infinite-scroll) |
+
+`merge` and `scroll` describe what the **client** does with a value, so they
+never take the resolution slot. Wrappers compose, and the innermost resolution
+mode wins:
+
+```ts src/compose.ts
+import { defineNode } from "@blokjs/core";
+import { defer, merge, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadResults = defineNode({
+  name: "load-results",
+  description: "Search results.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.string()) }),
+  execute: () => ({ data: ["a"] }),
+});
+
+export const deferredAndMergeable = defer(merge(loadResults, { deep: true }), { group: "dashboard" });
+export const rememberedAndMergeable = once(merge(loadResults, { append: "data" }));
+```
+
+### Per-prop reliability
+
+A prop is a step, so the step knobs apply per prop in the JSON form
+(`retry`, `idempotencyKey`, `idempotencyKeyTTL`, `maxDuration`):
+
+```json
+{
+  "id": "page",
+  "page": {
+    "component": "Orders/Index",
+    "props": {
+      "stats": { "use": "heavy-stats", "mode": "defer", "group": "dashboard", "rescue": true, "maxDuration": 5000 }
+    }
+  }
+}
+```
+
+A prop declared `rescue: true` that throws is omitted from `props`, listed in
+`rescuedProps`, and logged — the run still succeeds. Without `rescue`, a throw
+fails the workflow like any other step.
+
+## Cross-runtime props
+
+A prop is a node reference, so a prop can live in any runtime Blok speaks. Declare
+the sidecar node with `runtimeNode<In, Out>(name, kind)` and use it like any other:
+
+```ts src/python-prop.ts
+import { http, runtimeNode, workflow } from "@blokjs/core";
+import { defer, definePage } from "@blokjs/inertia";
+
+const stats = runtimeNode<{ since: string }, { revenue: number; orders: number }>(
+  "dashboard-stats",
+  "runtime.python3",
+);
+
+export const Dashboard = definePage("Dashboard", {
+  stats: defer(stats, { group: "dashboard" }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", { stats: { since: "2026-01-01" } });
+  },
+);
+```
+
+The Python node is ordinary Blok — `runtimes/python3/nodes/dashboard_stats/node.py`
+with a `@node("dashboard-stats", …)` function. Nothing about Inertia reaches it:
+it gets inputs, it returns output, the runner persists the result and the
+serializer ships it. `examples/inertia-react` has the full version.
+
+<Note>
+A `runtimeNode()` stub carries no Zod schema, so `blokctl gen app-types` types
+that prop `unknown` and warns. Give the stub explicit `In`/`Out` type
+parameters — that is what `PageProps` reads in the monorepo path.
+</Note>
+
+## Typing the client
+
+### Path A — one repository
+
+```tsx client/src/pages/Orders/Index.tsx
+import type { PageProps } from "@blokjs/inertia";
+import type { OrdersIndex } from "../../../../src/pages/orders";
+
+export default function Index({ orders, stats }: PageProps<typeof OrdersIndex>) {
+  return (
+    <ul>
+      {orders.map((order) => (
+        <li key={order.id}>
+          {order.total} {stats?.revenue}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`optional` and `defer` keys are `T | undefined` — the client only receives them
+on the visit that asked. Every other mode is present. `errors` is always there.
+
+### Path B — separate repositories
+
+```bash
+blokctl gen app-types --pages-only --out ../my-spa/src
+```
+
+writes `blok-pages.d.ts` (augments `Pages`, `Routes` and Inertia's own
+`InertiaConfig`) and `blok-routes.ts` (a `registerRoutes()` call). The client
+then reads `PageProps<"Orders/Index">` from `@blokjs/inertia-client` with no
+import from the server at all. Full reference: [`gen app-types`](/d/cli/gen).
+
+## Reusable prop bundles
+
+```ts src/bundles.ts
+import { defineNode } from "@blokjs/core";
+import { always, definePage, withProps } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "u-1" }),
+});
+
+const loadNav = defineNode({
+  name: "load-nav",
+  description: "Navigation items.",
+  input: z.object({}),
+  output: z.array(z.string()),
+  execute: () => ["orders"],
+});
+
+const loadStats = defineNode({
+  name: "load-stats",
+  description: "Home statistics.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 1 }),
+});
+
+const dashboard = withProps({ auth: always(currentUser), nav: loadNav });
+
+export const Home = definePage("Home", { ...dashboard, stats: loadStats });
+```
+
+`definePage()` throws if a component name is declared twice — the component name
+is the page's identity, for `PageProps`, for codegen and for the registry.
+`getPageRegistry()` returns every page declared in the process (component,
+per-prop mode metadata, Zod output schema, source `file:line`), which is what
+`blokctl gen` and [DevTools](/d/spa/devtools) read.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    Which props resolve, and when.
+  </Card>
+  <Card title="Testing" icon="flask-conical" href="/d/fundamentals/testing#recipe-4--an-inertia-page-workflow">
+    `runPage()` — assert the page object without a server.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Forms and redirects
+
+Source: /d/spa/forms-and-redirects
+
+useForm on the client, redirectBack on the server, the 303 rule, and where errors come from.
+
+Counterparts: [Forms](https://inertiajs.com/docs/v3/the-basics/forms) and
+[Redirects](https://inertiajs.com/docs/v3/the-basics/redirects).
+
+The client half is stock Inertia — `useForm`, `<Form>`, `router.post()`. The
+server half is one workflow that validates, writes, and **redirects back**.
+
+```tsx client/src/pages/Orders/Create.tsx
+import { useForm } from "@inertiajs/react";
+
+export default function Create() {
+  const form = useForm({ sku: "", qty: 1 });
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        form.post("/orders");
+      }}
+    >
+      <input value={form.data.sku} onChange={(e) => form.setData("sku", e.target.value)} />
+      {form.errors.sku && <span>{form.errors.sku}</span>}
+      <button type="submit" disabled={form.processing}>
+        Save
+      </button>
+    </form>
+  );
+}
+```
+
+```ts src/workflows/orders-create.ts
+import { branch, defineNode, eq, http, step, workflow } from "@blokjs/core";
+import { ValidateNode } from "@blokjs/helpers";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const OrderSchema = z.object({
+  sku: z.string().min(1, "Required."),
+  qty: z.number().min(1, "Too few."),
+});
+
+const createOrder = defineNode({
+  name: "create-order",
+  description: "Persist an order and bounce back with a toast.",
+  input: z.object({ order: z.unknown() }),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "o-1" }),
+});
+
+const bounceBack = defineNode({
+  name: "bounce-back",
+  description: "Redirect back with the validation errors.",
+  input: z.object({ errors: z.record(z.unknown()) }),
+  output: z.unknown(),
+  execute: (ctx, input) =>
+    redirectBack(ctx.request, { errors: input.errors, fallback: "/orders/new" }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  (req) => {
+    const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body });
+    branch("route", eq(checked.ok, true), {
+      then: () => {
+        step("create", createOrder, { order: checked.data });
+      },
+      else: () => {
+        step("reject", bounceBack, { errors: checked.errors });
+      },
+    });
+  },
+);
+```
+
+<Note>
+`req.body` is `unknown` on the entry handle — an HTTP body is whatever the
+client sent. Feeding it to a validation step needs no cast; **reading a field
+off it** does:
+
+```ts src/body-cast.ts
+import type { Handle } from "@blokjs/core";
+
+declare const req: { body: Handle<unknown> };
+
+const body = req.body as Handle<{ sku: string; qty: number }>;
+export const sku = body.sku;
+```
+
+The Zod schema on the validation step is what actually enforces the shape; the
+cast only names it for the reads.
+</Note>
+
+## The 303 rule
+
+A redirect answering a `PUT`, `PATCH` or `DELETE` must be a **303**, never a
+302: a 302 makes the browser replay the write against the redirect target.
+`redirectBack()` and `redirect()` apply the rule from the request method, and
+the HTTP trigger runs a safety net — a `302` leaving the trigger on a non-GET
+Inertia request is rewritten to `303`, so a middleware short-circuit or a rate
+limiter cannot leak a replayable redirect.
+
+## `redirectBack()` and `flash()`
+
+```ts src/redirects.ts
+import { back, flash, redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders/new" }, method: "POST" };
+
+export const withErrors = redirectBack(request, {
+  errors: { sku: "Required." },
+  bag: "createOrder",
+  fallback: "/orders",
+});
+
+export const withToast = flash("toast", { type: "success" }).redirectBack(request);
+export const alias = back(request, { fallback: "/" });
+```
+
+| Option | Effect |
+| --- | --- |
+| `errors` | validation errors, persisted in the signed cookie |
+| `bag` | error-bag name — defaults to the request's `X-Inertia-Error-Bag` |
+| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form) |
+| `fallback` | where to go when the request carried no `Referer` |
+| `preserveFragment` | keep the URL fragment across the bounce |
+| `clearHistory` | ask the client to drop its encrypted history |
+
+Everything it persists rides the **signed one-shot cookie**, because Blok has no
+session — see [flash data](/d/spa/flash-data). `BLOK_FLASH_SECRET` is required.
+
+## Where `errors` comes from
+
+`props.errors` is always present (`{}` when there are none). Three sources, in
+this order:
+
+1. the `errors` option on `render()`,
+2. the flash cookie the `inertia.shared` middleware read back after a bounce,
+3. nothing — `{}`.
+
+`withAllErrors: true` ships **every** message per field (`string[]`) instead of
+the first (`string`); pass the same flag to `blokctl gen app-types` so the
+generated types agree. Error bags nest the object one level deeper, which is
+what lets two forms on one page keep their errors apart.
+
+## Redirecting elsewhere
+
+```ts src/elsewhere.ts
+import { location, redirect } from "@blokjs/inertia";
+
+export const toBilling = location("https://billing.example.com");   // 409 + X-Inertia-Location
+export const toOrders = redirect("/orders", { method: "PUT" });      // 303
+export const toSection = redirect("/orders#new");                    // 409 + X-Inertia-Redirect
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Error bags, `withAllErrors`, and Precognition live validation.
+  </Card>
+  <Card title="File uploads" icon="upload" href="/d/spa/file-uploads">
+    Multipart, `_method` spoofing, and the size caps.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Middleware
+
+Source: /d/spa/middleware
+
+There is no HandleInertiaRequests — inertia.shared, inertia.auth and inertia.csrf are ordinary Blok middleware workflows.
+
+Counterpart: [Authentication](https://inertiajs.com/docs/v3/security/authentication)
+(Laravel's `HandleInertiaRequests` middleware class). Blok has no adapter-specific
+middleware system: these are [ordinary middleware workflows](/d/reference/middleware),
+registered by name, running on the parent `ctx` before the page workflow.
+
+```ts src/Workflows.ts
+import { defineNode } from "@blokjs/core";
+import { createAuthMiddleware, createCsrfMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "Who is signed in, from the request headers.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string().optional(), email: z.string().optional() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
+  "inertia.csrf": await createCsrfMiddleware({ except: ["webhooks/*"] }),
+};
+
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared", "inertia.csrf"]);
+```
+
+Per route: `trigger: http.get("/orders", { middleware: ["inertia.auth"] })`.
+
+| Workflow | Steps | What it does |
+| --- | --- | --- |
+| `inertia.shared` | `auth`, `flash` | runs your `currentUser` node into `ctx.state.auth`, then verifies and clears the signed [flash cookie](/d/spa/flash-data) into `ctx.state.flash` |
+| `inertia.auth` | `inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect` | when `auth.id` is missing, throws `302 Location: /login` — an Inertia visit follows a redirect, but has nothing to render from a bare 401 |
+| `inertia.csrf` | `csrf` (ephemeral) | issues and verifies the [`XSRF-TOKEN` double submit](/d/spa/csrf) |
+| `inertia.encryptHistory` | `encrypt-history` (ephemeral) | marks the request so every page in it encrypts its [history entry](/d/spa/history-encryption) |
+
+<Warning>
+**Reserved step ids: `auth` and `flash`.** Step ids are one flat namespace per
+run, and middleware shares the page workflow's `ctx` — so a page step called
+`auth` overwrites the signed-in user. `inertia.auth`'s own ids are prefixed
+(`inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect`) for the same reason.
+</Warning>
+
+## Reading what the middleware left
+
+`shared()` is the typed read of a state slot this workflow did not declare:
+
+```ts src/read-auth.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, shared } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "Who is signed in.",
+  input: z.object({}),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders for one user.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "o-1" }],
+});
+
+const OrdersPage = definePage("Orders/Index", { orders: listOrders });
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders", { middleware: ["inertia.shared", "inertia.auth"] }) },
+  (req) => {
+    OrdersPage.render(req, "page", "/orders", {
+      orders: { userId: shared(currentUser, "auth").id },
+    });
+  },
+);
+```
+
+`shared(node, stepId)` is `makeHandle` with the node supplying the type — no
+runtime magic, just a typed reference to `ctx.state[stepId]`.
+
+## With the `page` step there is nothing to wire
+
+The `page` control step reads the `flash` slot itself and folds it into the
+serializer's inputs: `errors`, the error bag, page flash, `preserveFragment`,
+`clearHistory`, and the clearing `Set-Cookie`. Anything passed through
+`render()`'s options wins, and `errors` / `flash` **merge** with your keys on
+top.
+
+A hand-written serializer step wires those fields itself — see
+[flash data](/d/spa/flash-data#without-the-page-step).
+
+## Writing your own
+
+An Inertia middleware is just a middleware. Anything that belongs on every page
+(a tenant lookup, a locale, a feature-flag snapshot) can be either:
+
+- a **middleware step**, when a prop's *inputs* need the value
+  (`shared(node, "tenant")`), or
+- a [shared-data registry](/d/spa/shared-data) entry, when the *page* needs it
+  (`share("tenant", …)`).
+
+```ts src/tenant-middleware.ts
+import { defineNode, step, workflow } from "@blokjs/core";
+import { z } from "zod";
+
+const resolveTenant = defineNode({
+  name: "resolve-tenant",
+  description: "Tenant for this request.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "acme" }),
+});
+
+export const tenantMiddleware = workflow(
+  "app.tenant",
+  { version: "1.0.0", middleware: true },
+  () => {
+    step("tenant", resolveTenant, {});
+  },
+);
+```
+
+Register it under a name, add it to the global chain or a route's list, and read
+it with `shared(resolveTenant, "tenant")`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Shared data" icon="share-2" href="/d/spa/shared-data">
+    The registry half of the same story.
+  </Card>
+  <Card title="CSRF" icon="shield" href="/d/spa/csrf">
+    `inertia.csrf`, and why the stock client needs no configuration.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Assets and versioning
+
+Source: /d/spa/assets-and-versioning
+
+The blokInertia() Vite plugin, ASSET_VERSION, the 409 reload, static serving, and CORS for standalone mode.
+
+Counterpart: [Asset versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning).
+Laravel computes a version in `HandleInertiaRequests::version()`; Blok reads one
+the Vite plugin wrote.
+
+## The Vite plugin
+
+```ts client/vite.config.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    blokInertia({
+      pages: { path: "src/pages", extension: [".tsx"] },
+      proxy: { target: "http://localhost:4000" },
+      ssr: { entry: "src/ssr.tsx" },
+    }),
+  ],
+});
+```
+
+`blokInertia()` **wraps** `@inertiajs/vite`: page resolution, lazy pages, the
+SSR transform and the HMR-backed dev SSR endpoint are all upstream behaviour,
+and every `@inertiajs/vite` option is passed through. On top it writes four
+things into the Vite `outDir` (`dist/` by default) — the handoff directory the
+Blok server reads:
+
+| File / value | What it is |
+| --- | --- |
+| `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`. The server reads it into `ASSET_VERSION` and sends it as `X-Inertia-Version`. `"dev"` while the dev server runs |
+| `import.meta.env.BLOK_ASSET_VERSION` | the same value, inlined into the bundle |
+| `dist/pages.json` | `{ root, pages }` — the page components found on disk, for [`ensurePagesExist()`](/d/spa/routing#fail-the-boot-not-the-route) |
+| `dist/.blok-ssr-url` + `import.meta.env.BLOK_SSR_URL` | where the server POSTs a page to be [rendered](/d/spa/ssr) |
+
+`build.manifest` is forced on — the asset version is a hash of that manifest, so
+turning it off is an error.
+
+## The 409 reload
+
+When the client's `X-Inertia-Version` differs from the server's, a **GET**
+answers `409` with `X-Inertia-Location: <url>` and the current version, and the
+client does a hard visit — the new HTML pulls the new assets. It is never done
+on another method: a replayed write would lose its body.
+
+A pending [flash](/d/spa/flash-data) is re-signed onto that 409, so a toast
+survives the forced reload.
+
+<Note>
+In dev the plugin's proxy attaches `X-Inertia-Version: dev` to every proxied
+request, so a dev visit can never 409 on a version mismatch mid-edit.
+</Note>
+
+## Serving the build
+
+| Variable | Effect |
+| --- | --- |
+| `BLOK_STATIC_DIR` | mounts the directory: `/assets/*` with `Cache-Control: public, max-age=31536000, immutable`, plus `favicon.ico` and `robots.txt` uncached. A miss under `/assets/*` is a hard `404`, never a fall-through to a workflow |
+| `ASSET_VERSION` | read from `<staticDir>/.blok-asset-version` when `BLOK_STATIC_DIR` is set and the variable is not already set. An explicit value always wins |
+
+```bash
+BLOK_STATIC_DIR=client/dist blokctl dev
+```
+
+With neither set, nothing static is mounted and `version` is `""` — "untracked",
+which disables version checking entirely.
+
+## Standalone mode and CORS
+
+With the proxy off (`proxy: false`) the SPA is served from its own origin and
+talks to Blok cross-origin. Blok must then send CORS headers that cover
+Inertia's protocol headers — a missing `Access-Control-Expose-Headers` entry is
+invisible in the network tab but makes redirects and version mismatches
+unreadable to the client.
+
+```bash
+BLOK_CORS_ORIGIN=https://app.example.com
+```
+
+Setting it turns on the CORS middleware with `credentials: true` and the full
+Inertia / Precognition / DevTools header lists:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: X-Inertia, X-Inertia-Version, X-Inertia-Partial-Data,
+  X-Inertia-Partial-Component, X-Inertia-Partial-Except, X-Inertia-Reset,
+  X-Inertia-Error-Bag, X-Inertia-Devtools-Request, X-Inertia-Devtools-Session,
+  Precognition, Precognition-Validate-Only, X-XSRF-TOKEN
+Access-Control-Expose-Headers: X-Inertia, X-Inertia-Location, X-Inertia-Redirect,
+  X-Inertia-Version, Precognition, Precognition-Success
+```
+
+<Warning>
+`Access-Control-Allow-Origin` must name the SPA origin explicitly. A value
+containing `*` turns credentials **off** — and Inertia sends the session cookie
+on every visit, so a wildcard origin silently logs everybody out.
+</Warning>
+
+In standalone mode the initial page comes from a JSON fetch rather than a
+`data-page` attribute, through `createInertiaApp`'s `page` option, and the types
+travel with `blokctl gen app-types --pages-only --out ../my-spa/src`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="SSR" icon="server" href="/d/spa/ssr">
+    The other consumer of the Vite handoff directory.
+  </Card>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    The dev loop these variables belong to.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Server-side rendering
+
+Source: /d/spa/ssr
+
+The SSR wire contract, the entry file per framework, blokctl inertia start-ssr, and what happens when rendering fails.
+
+Counterpart: [Server-side rendering](https://inertiajs.com/docs/v3/advanced/server-side-rendering).
+Laravel runs `php artisan inertia:start-ssr`; Blok runs
+`blokctl inertia start-ssr`, and speaks the same wire contract.
+
+An initial, non-prefetch visit POSTs the page object to the SSR server and
+injects the returned `head` and `body` into the [shell](/d/spa/title-and-meta).
+Inertia visits (`X-Inertia: true`) are never server-rendered — there is no HTML
+to produce.
+
+## The entry file
+
+The SSR entry is ordinary Inertia; `@inertiajs/vite` builds it and
+`blokInertia()` records where it is.
+
+```tsx client/src/ssr.tsx
+import { createInertiaApp } from "@inertiajs/react";
+import createServer from "@inertiajs/react/server";
+import ReactDOMServer from "react-dom/server";
+
+createServer((page) =>
+  createInertiaApp({
+    page,
+    render: ReactDOMServer.renderToString,
+    resolve: (name: string) => import(`./pages/${name}.tsx`),
+    setup: ({ App, props }) => <App {...props} />,
+  }),
+);
+```
+
+Vue uses `@inertiajs/vue3/server` with `createSSRApp` + `renderToString`, Svelte
+`@inertiajs/svelte/server` — unchanged from the Inertia docs.
+
+```ts client/vite.config.ssr.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [blokInertia({ ssr: { entry: "src/ssr.tsx" } })],
+});
+```
+
+## Running it
+
+```bash
+vite build && vite build --ssr           # client + ssr bundles
+blokctl inertia start-ssr                # foreground; --port, --host, --runtime, --cluster
+blokctl inertia check-ssr                # prints OK, or exits 1
+blokctl inertia stop-ssr                 # POSTs /shutdown
+```
+
+| Flag | Default |
+| --- | --- |
+| `--runtime` | `BLOK_INERTIA_SSR_RUNTIME`, else `node` (`bun`, or an absolute path) |
+| `--port` | `13714` |
+| `--host` | `127.0.0.1` |
+| `--cluster` | off — Inertia's clustered SSR server |
+
+`start-ssr` runs in the foreground with the child's stdio inherited, so a
+process manager supervises it the way it would any other server.
+
+The bundle is discovered from `BLOK_INERTIA_SSR_BUNDLE`, else the first of
+`client/dist-ssr/ssr.{js,mjs}`, `client/dist/server/ssr.{js,mjs}`,
+`bootstrap/ssr/ssr.{js,mjs}`.
+
+## Configuring the server half
+
+```ts src/ssr-config.ts
+import { configureSsr, disableSsr, withoutSsr } from "@blokjs/inertia";
+
+configureSsr({ bundle: "client/dist-ssr/ssr.mjs", timeoutMs: 2_000, withoutSsr: ["admin/*"] });
+withoutSsr(["admin/*", "dashboard"]);
+disableSsr(() => process.env.NODE_ENV === "test");
+```
+
+| Where the endpoint comes from | Order |
+| --- | --- |
+| the page's own `ssr: { url }` input | first |
+| `BLOK_SSR_URL` (empty string turns SSR **off**) | then |
+| `<BLOK_STATIC_DIR ?? client/dist>/.blok-ssr-url`, written by the Vite plugin | then |
+| `http://127.0.0.1:13714/render` | last |
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `BLOK_INERTIA_SSR_ENABLED` | on | `0`/`false`/`off`/`no` disables SSR |
+| `BLOK_INERTIA_SSR_ENSURE_BUNDLE_EXISTS` | on | skip rendering when no bundle is on disk |
+| `BLOK_INERTIA_SSR_THROW_ON_ERROR` | off | fail the request instead of falling back |
+| `BLOK_INERTIA_SSR_TIMEOUT_MS` | `2000` | per-render timeout |
+
+## When it fails
+
+A failed render emits an `SsrRenderFailed` event (`ctx.publish`, plus any
+`onSsrRenderFailed()` listener), logs **once per asset version and component**,
+and **falls back to the client-rendered shell** — a broken SSR bundle degrades
+to a working SPA, not to a 500. `configureSsr({ throwOnError: true })` makes
+tests fail loudly instead.
+
+<Note>
+Text-fragment links (`#:~:text=`) require SSR, because the browser needs the
+target text present in the initial HTML.
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Assets and versioning" icon="package" href="/d/spa/assets-and-versioning">
+    The handoff directory SSR reads from.
+  </Card>
+  <Card title="Title and meta" icon="type" href="/d/spa/title-and-meta">
+    Where the rendered head tags land.
+  </Card>
+</CardGroup>
+
+
+---
+
+# The protocol
+
+Source: /d/spa/the-protocol
+
+Every request header the adapter reads, every page-object field it emits, and every control response.
+
+Counterpart: [The protocol](https://inertiajs.com/docs/v3/core-concepts/the-protocol).
+Blok implements Inertia **v3** exactly; this page is the field-by-field
+reference for `@blokjs/inertia`, the serializer node every page response passes
+through.
+
+The node takes a component name, already-resolved props and the request headers,
+and returns a response envelope the HTTP trigger emits verbatim:
+
+| Request | Response |
+| --- | --- |
+| no `X-Inertia` header | `200 text/html` — the shell, with the page object in `<script type="application/json" data-page="app">` |
+| `X-Inertia: true` | `200 application/json` — the bare page object |
+
+Both carry `Vary: X-Inertia`: one URL, two answers.
+
+## Request headers
+
+| Header | Effect |
+| --- | --- |
+| `X-Inertia` | `true` selects the JSON page object over the HTML shell. |
+| `X-Inertia-Version` | On a **GET**, a value different from the server's `version` produces the 409 conflict. Never on another method — a replayed write would lose its body. |
+| `X-Inertia-Partial-Component` | Must equal the page's component, otherwise the request is treated as a full visit. |
+| `X-Inertia-Partial-Data` | Comma-separated prop paths (dot notation) to keep. |
+| `X-Inertia-Partial-Except` | Comma-separated prop paths to drop, applied **after** `Partial-Data`. |
+| `X-Inertia-Reset` | Prop paths returned unmerged — stripped from `mergeProps` / `prependProps` / `deepMergeProps` (and from the `matchPropsOn` entries addressing them), with `scrollProps[<prop>].reset = true`. |
+| `X-Inertia-Error-Bag` | Nests `props.errors` under that bag name. |
+| `X-Inertia-Except-Once-Props` | Cache keys the client still holds; those prop **nodes do not run**, though their `onceProps` entry is always echoed back. |
+| `X-Inertia-Infinite-Scroll-Merge-Intent` | `append` / `prepend` — moves scroll props between `mergeProps` and `prependProps`. |
+| `Purpose: prefetch` | A fragment redirect stays an ordinary redirect instead of becoming a 409, and SSR is skipped. |
+| `Precognition` / `Precognition-Validate-Only` | Dry-run [validation](/d/spa/validation). |
+| `X-XSRF-TOKEN` | The [CSRF](/d/spa/csrf) double-submit header. |
+
+`errors` and every path in `alwaysProps` survive both partial-reload filters.
+
+## Page-object fields
+
+Always emitted: `component`, `props` (with `errors`, `{}` when there are none),
+`url`, `version` (`""` when untracked). Everything else is **omitted** when it
+does not apply — never `false`, never `[]`, never `{}`.
+
+| Field | Emitted when |
+| --- | --- |
+| `encryptHistory` | the input is `true`, or the request/adapter default says so |
+| `clearHistory` | the input is `true`, or the request was marked by `logoutResponse()` |
+| `preserveFragment` | the input is `true` |
+| `mergeProps` | this is a partial reload, non-empty after reset filtering |
+| `prependProps` | this is a partial reload, non-empty after reset filtering |
+| `deepMergeProps` | this is a partial reload, non-empty after reset filtering |
+| `matchPropsOn` | this is a partial reload, non-empty (`"<propPath>.<keyField>"` entries) |
+| `scrollProps` | non-empty — `{ <propKey>: { pageName, previousPage, nextPage, currentPage, reset } }`, keyed by the **prop** |
+| `deferredProps` | non-empty **and** this is a full visit |
+| `rescuedProps` | non-empty **and** this is a partial reload |
+| `sharedProps` | non-empty and `exposeSharedPropKeys` is not `false` |
+| `onceProps` | non-empty — `{ key: { prop, expiresAt } }`, `expiresAt` in epoch **milliseconds**, `null` when it never expires |
+| `flash` | non-empty |
+
+## Control responses
+
+| Trigger | Response |
+| --- | --- |
+| version mismatch (GET only) | `409`, empty body, `X-Inertia-Location: <url>`, `X-Inertia-Version: <current>`, **no** `X-Inertia` header |
+| `location(url)` | `409` + `X-Inertia-Location` — an external or hard visit |
+| `redirect(url)` to a fragment | `409` + `X-Inertia-Redirect` (non-prefetch); an ordinary redirect otherwise |
+| `redirect()` after `PUT`/`PATCH`/`DELETE` | `303`, never `302` — a 302 makes the browser replay the write |
+| `redirect(url, { preserveFragment: true })` | adds `X-Inertia-Preserve-Fragment: true` |
+
+The HTTP trigger runs a safety net on top: a `302` leaving the trigger on a
+non-GET request that carried `X-Inertia: true` is rewritten to `303`, so a
+middleware short-circuit or a rate limiter cannot leak a replayable redirect.
+
+```ts src/control.ts
+import { location, redirect } from "@blokjs/inertia";
+
+export const external = location("https://billing.example.com/portal");
+export const bounce = redirect("/orders", { method: "PUT" });
+```
+
+## Prefetch
+
+A request carrying `Purpose: prefetch` is served like any other visit, with two
+differences: a fragment redirect is **not** promoted to a 409 (the client is not
+navigating yet), and SSR is skipped. Once props the client already holds ride
+along normally, so a prefetched page arrives complete.
+
+## The shell
+
+The default shell carries `<title data-inertia>` (v3 renamed the attribute from
+`inertia`) and two markers:
+
+| Marker | Replaced with |
+| --- | --- |
+| `<!--blok:head-->` | the `head` input — server-rendered `<Head>` tags |
+| `<!--blok:app-->` | `<div id="app"></div>` plus the boot script |
+
+`rootId` renames the root element and the script's `data-page` value. `viewData`
+fills `{{key}}` placeholders and is **never** sent to the client. A custom
+`shell` must contain `<!--blok:app-->`. See [title and meta](/d/spa/title-and-meta).
+
+The page JSON is escaped for a `<script>` context — every `/` as `\/`, `<`
+escaped, and the two JS line terminators — with **no** HTML-entity encoding,
+because a browser does not decode entities inside a script element.
+`JSON.parse(el.textContent)` round-trips it exactly.
+
+<Warning>
+Browsers store the page object in `history.state`, and Firefox hard-fails above
+16 MiB — which surfaces as a Back button that simply does nothing. A page object
+over **8 MiB** logs one warning per process and still ships. Move the bulk
+behind [`defer()`](/d/spa/deferred-props) / `optional()`, or
+[paginate](/d/spa/infinite-scroll) it.
+</Warning>
+
+## Writing the serializer step by hand
+
+`definePage().render()` is the authoring surface, but the node is an ordinary
+node and a JSON workflow can call it directly:
+
+```json
+{
+  "id": "render",
+  "use": "@blokjs/inertia",
+  "inputs": {
+    "component": "Users/Index",
+    "props": { "users": { "$ref": { "step": "list-users", "path": ["users"] } } },
+    "version": "v1"
+  }
+}
+```
+
+`headers`, `method` and `url` default to the live request, so a hand-written
+step only needs `component` + `props`. A hand-written step must also wire the
+flash itself — see [flash data](/d/spa/flash-data#without-the-page-step).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    The resolution table, header by header.
+  </Card>
+  <Card title="Assets and versioning" icon="package" href="/d/spa/assets-and-versioning">
+    Where `version` comes from, and what the 409 does.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Partial reloads
+
+Source: /d/spa/partial-reloads
+
+Which prop nodes the runner actually runs, per request — only, except, always and optional.
+
+Counterpart: [Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads).
+
+A partial reload is a visit that asks for a subset of a page's props. On Blok
+that is not a filter over a computed response: the `page` control step decides
+which prop **nodes run at all**, so a prop the client did not ask for costs
+nothing.
+
+```ts src/partial.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, definePage, optional } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "u-1" }),
+});
+
+const listUsers = defineNode({
+  name: "list-users",
+  description: "All users.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "u-1" }],
+});
+
+const loadFilters = defineNode({
+  name: "load-filters",
+  description: "Filter chips.",
+  input: z.object({}),
+  output: z.object({ statuses: z.array(z.string()) }),
+  execute: () => ({ statuses: ["open"] }),
+});
+
+export const UsersIndex = definePage("Users/Index", {
+  auth: always(currentUser),       // every visit, every filter
+  users: listUsers,                // regular
+  filters: optional(loadFilters),  // only when named
+});
+
+export default workflow(
+  "users-index",
+  { version: "1.0.0", trigger: http.get("/users") },
+  (req) => {
+    UsersIndex.render(req, "page", "/users", {});
+  },
+);
+```
+
+The client asks with the stock API — nothing Blok-specific:
+
+```ts client/src/reload.ts
+import { router } from "@inertiajs/core";
+
+router.reload({ only: ["users"] });
+router.reload({ except: ["users"] });
+```
+
+## Resolution table
+
+| Visit | Runs | Does not run |
+| --- | --- | --- |
+| Full visit (no `X-Inertia-Partial-Component`, or one naming a different component) | `regular`, `always`, `merge`, `scroll`, and `once` unless the client still holds it | `optional`, `defer` |
+| Partial reload with `X-Inertia-Partial-Data` | the named props (a dot path selects by its **root** segment) plus `always` — naming a `once` prop always resolves it | everything else |
+| Partial reload without `X-Inertia-Partial-Data` | `regular`, `merge`, `scroll`, and `once` unless the client holds it, minus any `X-Inertia-Partial-Except`; `always` is exempt | `optional`, `defer` |
+
+Two rules worth spelling out:
+
+- **`always` beats both filters.** An `only` that does not name it still resolves
+  it; an `except` that does name it still resolves it. Use it for the props a
+  layout cannot render without (`auth`, feature flags).
+- **The partial component must match.** If `X-Inertia-Partial-Component` names a
+  different component, the request is a full visit — which is what makes a
+  redirect to another page safe.
+
+`errors` and every `always` path also survive the filters in the **serializer**,
+so a validation error can never be filtered out of a partial response.
+
+## Dot paths
+
+`only: ["user.name"]` selects the prop by its root segment (`user`), resolves
+that node, and the serializer narrows the value to the named path. The same
+notation drives `except`.
+
+## Testing it
+
+`runPage` performs a **real second run** with the partial-reload headers, so a
+test can assert that a node did not execute:
+
+```ts src/partial.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import usersIndex from "./partial";
+
+it("does not resolve optional props on a full visit", async () => {
+  const page = await runPage(usersIndex);
+  page.assert().component("Users/Index").has("users").missing("filters").etc();
+
+  const reloaded = await page.reloadOnly("filters");
+  expect(reloaded.props.filters).toBeDefined();
+  expect(reloaded.run.step("page.users")?.executed).toBe(false);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Deferred props" icon="clock" href="/d/spa/deferred-props">
+    Props announced on the first visit, fetched right after.
+  </Card>
+  <Card title="Once props" icon="database" href="/d/spa/once-props">
+    Props the client keeps, so the node never runs again.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Deferred props
+
+Source: /d/spa/deferred-props
+
+Announce the expensive props on the first visit, let the client fetch them immediately after — with groups and rescue.
+
+Counterpart: [Deferred props](https://inertiajs.com/docs/v3/data-props/deferred-props).
+Laravel writes `Inertia::defer(fn () => …)`; Blok wraps the prop's **node**.
+
+```ts src/deferred.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { defer, definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "A slow aggregate query.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+const recentActivity = defineNode({
+  name: "recent-activity",
+  description: "Recent activity, also slow.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "a-1" }],
+});
+
+export const Dashboard = definePage("Dashboard", {
+  stats: defer(heavyStats, { group: "dashboard" }),
+  activity: defer(recentActivity, { group: "dashboard", rescue: true }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", {});
+  },
+);
+```
+
+The first visit carries **no** `stats`/`activity` value and instead announces:
+
+```json
+{ "deferredProps": { "dashboard": ["stats", "activity"] } }
+```
+
+The client then issues one partial reload per group. On the client side nothing
+changes from the Inertia docs — `<Deferred data="stats" fallback={…}>` (React),
+`<Deferred>` (Vue), `{#await}`-style usage in Svelte.
+
+| Option | Effect |
+| --- | --- |
+| `group` | props sharing a group are fetched in **one** follow-up request. Without it, each prop gets its own group (its key). |
+| `rescue` | a throw omits the prop and lists it in `rescuedProps` instead of failing the run — it is logged, and the page still renders. |
+
+<Note>
+`deferredProps` is emitted on **full visits only**, and `rescuedProps` on
+**partial reloads only** — that asymmetry is the protocol's, not Blok's.
+</Note>
+
+## Deferred *and* merged
+
+`defer()` decides **when** a prop resolves; `merge()` decides what the client
+does with it. They compose, innermost resolution mode winning:
+
+```ts src/deferred-merge.ts
+import { defineNode } from "@blokjs/core";
+import { defer, merge } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadResults = defineNode({
+  name: "load-results",
+  description: "Search results.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.string()) }),
+  execute: () => ({ data: ["a"] }),
+});
+
+export const results = defer(merge(loadResults, { deep: true }), { group: "search" });
+```
+
+A full visit announces it in `deferredProps` and carries **no** `scrollProps` or
+merge labels; the follow-up partial carries both.
+
+## Testing
+
+```ts src/deferred.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import dashboard from "./deferred";
+
+it("announces the group and resolves it on the follow-up", async () => {
+  const page = await runPage(dashboard);
+  expect(page.deferredProps).toEqual({ dashboard: ["stats", "activity"] });
+  expect(page.run.step("page.stats")?.executed).toBe(false);
+
+  await page.loadDeferredProps("dashboard", (p) => p.has("stats").has("activity").etc());
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Merging props" icon="layers" href="/d/spa/merging-props">
+    Append, prepend, deep-merge and match-on.
+  </Card>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    What a follow-up request actually asks for.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Merging props
+
+Source: /d/spa/merging-props
+
+Append, prepend, deep-merge and match-on — the labels that tell the client to grow a prop instead of replacing it.
+
+Counterpart: [Merging props](https://inertiajs.com/docs/v3/data-props/merging-props).
+Laravel writes `Inertia::merge()` / `->deepMerge()` / `->matchOn()`; Blok wraps
+the node with `merge()`.
+
+`merge()` never changes **when** a prop resolves — only what the client does
+with the value. The labels ride **partial reloads only**: a full visit replaces
+props wholesale, so it carries none of `mergeProps`, `prependProps`,
+`deepMergeProps` or `matchPropsOn`.
+
+```ts src/merging.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, merge } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadUsers = defineNode({
+  name: "load-users",
+  description: "One page of users.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.object({ id: z.string() })) }),
+  execute: () => ({ data: [{ id: "u-1" }] }),
+});
+
+export const appended = merge(loadUsers);                              // mergeProps: ["users"]
+export const prepended = merge(loadUsers, { prepend: true });          // prependProps: ["users"]
+export const nested = merge(loadUsers, { append: "data" });            // mergeProps: ["users.data"]
+export const matched = merge(loadUsers, { append: "data", matchOn: "id" });
+export const deep = merge(loadUsers, { deep: true, matchOn: "data.id" });
+export const both = merge(loadUsers, { append: "data", prepend: "announcements" });
+export const perPath = merge(loadUsers, { append: { "users.data": "id", messages: "uuid" } });
+
+export const UsersFeed = definePage("Users/Feed", { users: nested });
+
+export default workflow(
+  "users-feed",
+  { version: "1.0.0", trigger: http.get("/users") },
+  (req) => {
+    UsersFeed.render(req, "page", "/users", {});
+  },
+);
+```
+
+| Option | Type | Effect |
+| --- | --- | --- |
+| `append` | `true` \| `"data"` \| `string[]` \| `Record<string, string>` | what the client appends to. Default: the whole prop |
+| `prepend` | same | what the client prepends to |
+| `deep` | `boolean \| string` | deep-merge the whole prop, or one sub-path |
+| `matchOn` | `string` | item field used to match and **replace** rows instead of appending |
+
+A `matchPropsOn` entry is `"<mergePath>.<field>"` — the client splits on the
+**last** dot, matches the head against the merge path, and replaces items whose
+field matches. The map form (`append: { "users.data": "id" }`) gives each path
+its own field; `matchOn` applies one field to every path the prop labels.
+
+## Resetting
+
+`X-Inertia-Reset: users` still **resolves** the prop — the client wants a fresh
+copy — but returns it without labels, so it replaces rather than merges. The
+stock client sends it for you:
+
+```ts client/src/reset.ts
+import { router } from "@inertiajs/core";
+
+router.reload({ only: ["users"], reset: ["users"] });
+```
+
+Client-side prop helpers (`router.replaceProp`, `appendToProp`,
+`prependToProp`) need nothing from the server.
+
+## Testing
+
+```ts src/merging.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import feed from "./merging";
+
+it("labels the merge path on a partial reload only", async () => {
+  const full = await runPage(feed);
+  expect(full.mergeProps).toEqual([]);
+
+  const partial = await full.reloadOnly("users");
+  expect(partial.mergeProps).toEqual(["users.data"]);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Infinite scroll" icon="infinity" href="/d/spa/infinite-scroll">
+    `merge()` with a cursor, plus the paginate helpers.
+  </Card>
+  <Card title="Once props" icon="database" href="/d/spa/once-props">
+    Values the client keeps between visits.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Once props
+
+Source: /d/spa/once-props
+
+Values the client remembers, so the prop's node never runs again — with keys, expiry and the sign-out pattern.
+
+Counterpart: [Once props](https://inertiajs.com/docs/v3/data-props/once-props).
+Laravel writes `Inertia::once(fn () => …)->until(…)->as(…)`; Blok wraps the node
+with `once()`.
+
+`once()` is the one mode that changes **resolution**: as soon as the client
+holds the value it sends the cache key in `X-Inertia-Except-Once-Props`, and the
+prop's node is **not run at all** — only its `onceProps` entry comes back, or
+the client would drop its cached copy.
+
+```ts src/once.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadPlans = defineNode({
+  name: "load-plans",
+  description: "Pricing plans — they rarely change.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), price: z.number() })),
+  execute: () => [{ id: "pro", price: 20 }],
+});
+
+export const Pricing = definePage("Pricing", {
+  plans: once(loadPlans, { until: "1h" }),
+});
+
+export default workflow(
+  "pricing",
+  { version: "1.0.0", trigger: http.get("/pricing") },
+  (req) => {
+    Pricing.render(req, "page", "/pricing", {});
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `as: "roles"` | the cache key, so two pages can share one remembered value under different prop names. Defaults to the prop key. |
+| `until` | `"1h"` / `"500ms"` (a duration from now), a number of **seconds**, or an absolute date (`Date`, or anything `Date.parse` accepts). Emitted as `expiresAt` in epoch milliseconds; a deadline already in the past resolves again despite the header. |
+| `fresh: true` | resolve and resend even when the client says it still holds the value. |
+
+<Note>
+`fresh` is a boolean, not a callback: prop metadata is workflow **config**,
+JSON-cloned at boot, so a function would silently vanish. Decide per request
+from the client (`router.reload({ only: ["plans"] })` always resolves) or from
+inside the prop's own node.
+</Note>
+
+Explicit always wins: naming a once prop in `only` resolves it whatever the
+header says. Prefetch requests carry the remembered entries like any other
+request, so a prefetched page arrives with its once props already filled in.
+
+## Sign-out: overwrite, do not forget
+
+The documented auth pattern is to remember the user while signed in and
+**overwrite** the remembered copy with `null` on sign-out — a plain prop of the
+same key replaces whatever the client cached.
+
+```ts src/auth-once.ts
+import { defineNode } from "@blokjs/core";
+import { definePage, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user, or null.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }).nullable(),
+  execute: () => ({ id: "u-1" }),
+});
+
+export const Layout = definePage("App/Layout", { auth: once(currentUser, { as: "auth" }) });
+```
+
+## Shared once props
+
+The [shared-data registry](/d/spa/shared-data) has the same mode:
+
+```ts src/shared-once.ts
+import { shareOnce } from "@blokjs/inertia";
+
+shareOnce("countries", async () => [{ code: "PT" }], { until: "1d" });
+```
+
+## Composing
+
+`once(merge(node, { append: "data" }))` is remembered **and** mergeable — the
+metadata modes contribute labels without taking the resolution slot.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Shared data" icon="share-2" href="/d/spa/shared-data">
+    Values every page gets, resolved lazily per request.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    `onceProps`, `expiresAt`, and the header that suppresses a node.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Infinite scroll
+
+Source: /d/spa/infinite-scroll
+
+scroll() props, the cursor metadata the client needs, and the paginate / cursorPaginate helpers.
+
+Counterpart: [Infinite scroll](https://inertiajs.com/docs/v3/data-props/infinite-scroll).
+Laravel writes `Inertia::scroll($users->paginate())`; Blok wraps the node with
+`scroll()` and ships two pure pagination helpers.
+
+`scroll()` is [`merge()`](/d/spa/merging-props) with a cursor. The prop resolves
+like a regular one; the client's `<InfiniteScroll data="posts">` grows the item
+array and replaces the cursors around it.
+
+```ts src/feed.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, paginate, paginatedSchema, scroll } from "@blokjs/inertia";
+import { z } from "zod";
+
+const Post = z.object({ id: z.string(), title: z.string() });
+
+const listPosts = defineNode({
+  name: "list-posts",
+  description: "One page of posts.",
+  input: z.object({ page: z.string().optional() }),
+  output: paginatedSchema(Post),
+  execute: (_ctx, input) => {
+    const rows = [{ id: "p-1", title: "Hello" }];
+    return paginate(rows, { page: Number(input.page ?? 1), perPage: 10 });
+  },
+});
+
+export const Feed = definePage("Feed/Index", { posts: scroll(listPosts) });
+
+export default workflow(
+  "feed",
+  { version: "1.0.0", trigger: http.get("/feed") },
+  (req) => {
+    Feed.render(req, "page", "/feed", { posts: { page: req.query.page } });
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `wrapper` | the sub-path holding the items — the one the client **grows**. Default `"data"`; `""` grows the whole prop. Only this path is labelled, so the cursors beside it are replaced. |
+| `pageName` | the query parameter the client bumps. Overrides the resolved metadata's own — two scroll props on one page need distinct names (`?users=2&orders=3`). |
+| `metadata` | `(output) => ScrollMetadata`, for an output that does not already carry the four cursor fields. |
+
+<Warning>
+The `scrollProps` entry is read from the **resolved output**, not from the
+declaration, so every response re-emits a fresh cursor. An output that satisfies
+neither `ScrollMetadata` (`pageName`, `previousPage`, `nextPage`, `currentPage`)
+nor a `metadata` resolver **fails the request** — a feed that can never load the
+next page is worse than a loud error.
+</Warning>
+
+## The pagination helpers
+
+Pure functions; they hold no database opinion.
+
+```ts src/paginate.ts
+import { cursorPaginate, paginate } from "@blokjs/inertia";
+
+const rows = [{ id: "1" }, { id: "2" }, { id: "3" }];
+
+export const sliced = paginate(rows, { page: 1, perPage: 2 });          // rows = the WHOLE collection
+export const trusted = paginate(rows, { page: 1, perPage: 2, total: 9 }); // rows = already one page
+export const cursored = cursorPaginate(rows, { cursor: "abc", next: "def", prev: null });
+```
+
+`paginatedSchema(item)` and `cursorPaginatedSchema(item)` are their Zod forms,
+for a node's `output`.
+
+## What goes on the wire
+
+| Request | Response |
+| --- | --- |
+| full visit | `props.posts`, `scrollProps.posts`, **no** merge label |
+| partial + `X-Inertia-Infinite-Scroll-Merge-Intent: append` | `mergeProps: ["posts.data"]` |
+| …`: prepend` | `prependProps: ["posts.data"]` |
+| partial + `X-Inertia-Reset: posts` | `scrollProps.posts.reset = true`, no label |
+| `defer(scroll(…))`, full visit | `deferredProps`, **no** `scrollProps`; both arrive on the deferred partial |
+
+For a scroll prop, naming the prop (`posts`) or its wrapper path (`posts.data`)
+in `X-Inertia-Reset` means the same thing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Merging props" icon="layers" href="/d/spa/merging-props">
+    The label semantics `scroll()` builds on.
+  </Card>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    Where `scroll()` sits among the seven modes.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Shared data
+
+Source: /d/spa/shared-data
+
+share() and shareOnce() — values every page gets, resolved lazily, announced to the client for instant visits.
+
+Counterpart: [Shared data](https://inertiajs.com/docs/v3/data-props/shared-data).
+Laravel shares from `HandleInertiaRequests::share()`; Blok has a registry you
+fill once at boot, and — for values a **prop** needs — the `inertia.shared`
+middleware.
+
+```ts src/bootstrap.ts
+import { share, shareOnce } from "@blokjs/inertia";
+
+share("appName", "Blok");                                    // static
+share("auth", (req: unknown) => ({ user: userFrom(req) })); // LAZY: per request
+share("flags", () => ({ beta: true }), { always: true });    // survives every partial filter
+shareOnce("countries", async () => [{ code: "PT" }], { until: "1d" });
+
+function userFrom(_req: unknown): { email: string } | null {
+  return { email: "ada@example.com" };
+}
+```
+
+Import that module once, before the workflows.
+
+Shared values are merged **under** the page's own props — a page prop of the
+same name wins, and the shared value is then never resolved at all — and their
+top-level keys ride the page object as `sharedProps`, so
+[instant visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) can
+carry them to the next page before the server answers. `exposeSharedPropKeys:
+false` on a page hides the key list; the values still ship.
+
+## Selection
+
+Shared keys follow the same table as declared props:
+
+| Request | `regular` | `always: true` | `shareOnce` |
+| --- | --- | --- | --- |
+| full visit | resolved | resolved | resolved unless `X-Inertia-Except-Once-Props` names it |
+| partial with `only` | only when named | resolved | only when named |
+| partial without `only` | resolved | resolved | not resolved |
+| `except` names it | not resolved | resolved | not resolved |
+
+A lazy value is called with `ctx.request`, **at most once per request**, and
+only when the key is actually selected — so `share("auth", expensive)` costs
+nothing on a partial reload that asked for something else.
+
+A prop resolver that needs another shared value reads it from the same
+per-request cache:
+
+```ts src/read-shared.ts
+import { getShared } from "@blokjs/inertia";
+
+export async function tenantOf(ctx: unknown): Promise<{ id: string }> {
+  return await getShared<{ id: string }>("tenant", { id: "public" }, ctx);
+}
+```
+
+<Warning>
+**Namespace your shared data.** `share("auth", { user })`, not
+`share("user", …)`: keys are top-level props and a page prop of the same name
+silently wins. A key containing a dot is rejected for that reason.
+</Warning>
+
+## Registry or middleware?
+
+Both exist, and they answer different questions.
+
+| | `share()` registry | `inertia.shared` middleware |
+| --- | --- | --- |
+| Resolved by | the serializer, on every response | two real steps, before the workflow |
+| Reaches | the **client**, as a prop | `ctx.state`, so a prop's **inputs** can read it |
+| Read with | `usePage().props.auth` | `shared(currentUser, "auth")` |
+| Also does | — | verifies and clears the [flash cookie](/d/spa/flash-data) |
+
+Use the middleware when a prop needs the value; use the registry when the page
+does. Registry values reach a `page` step, a hand-written `step("render", …)`
+and [`inertia.page()`](/d/spa/routing) alike — including
+[error pages](/d/spa/error-handling), which render outside the middleware chain.
+
+## Typing shared props on the client
+
+Shared props are part of `PageProps` through Inertia's own config interface:
+
+```ts client/src/inertia.d.ts
+import "@inertiajs/core";
+
+declare module "@inertiajs/core" {
+  interface InertiaConfig {
+    sharedPageProps: { auth: { user: { email: string } | null }; appName: string };
+  }
+}
+```
+
+`blokctl gen app-types` writes that block for you — see [`gen app-types`](/d/cli/gen).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    `inertia.shared`, `inertia.auth`, reserved step ids.
+  </Card>
+  <Card title="Flash data" icon="bell" href="/d/spa/flash-data">
+    The signed one-shot cookie that replaces the session.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Flash data
+
+Source: /d/spa/flash-data
+
+Blok has no session — flash, errors and error bags ride a signed, one-shot cookie.
+
+Counterpart: [Flash data](https://inertiajs.com/docs/v3/data-props/flash-data).
+Laravel's flash lives in the session. **Blok has no session store**, so flash is
+a signed one-shot cookie: written by `redirectBack()`, read and cleared by the
+`inertia.shared` middleware, folded into the page object by the `page` step.
+
+<Warning>
+`BLOK_FLASH_SECRET` is **required** for anything that touches the cookie —
+HMAC-SHA256, `HttpOnly; SameSite=Lax; Path=/`. There is no default: an unsigned
+flash cookie is a forgeable one. A tampered or wrong-secret cookie reads back as
+"no flash", never as an error.
+</Warning>
+
+## The round trip
+
+1. A write fails validation → `redirectBack(ctx.request, { errors, flash })`
+   signs `{ errors, bag, flash, preserveFragment, clearHistory }` into the
+   cookie and answers `303`.
+2. The browser follows the redirect. The `inertia.shared` middleware's `flash`
+   step **verifies and clears** it into `ctx.state.flash`, and produces the
+   `Max-Age=0` `Set-Cookie` that makes "one-shot" mean something.
+3. The `page` control step reads that slot itself and feeds the serializer:
+   `errors`, the error bag, page `flash`, `preserveFragment`, `clearHistory`,
+   and the clearing cookie. **There is nothing to wire.**
+
+Anything you pass through `render()`'s options wins — `errors` and `flash`
+**merge**, with your keys on top of the middleware's.
+
+```ts src/flash-write.ts
+import { flash, redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders/new" }, method: "POST" };
+
+export const saved = flash("toast", { type: "success", message: "Order created." })
+  .redirectBack(request, { fallback: "/orders" });
+```
+
+On the client it is an ordinary prop:
+
+```tsx client/src/Toast.tsx
+import { usePage } from "@inertiajs/react";
+
+export function Toast() {
+  const flash = usePage().props.flash as { toast?: { message: string } } | undefined;
+  return flash?.toast ? <p>{flash.toast.message}</p> : null;
+}
+```
+
+The page object's `flash` field is emitted only when non-empty.
+
+## Without the `page` step
+
+A hand-written serializer step wires the same fields itself. `inertia.shared`'s
+`flash` step exposes `{ errors, bag, flash, preserveFragment, clearHistory,
+cookie, present }`, and `cookie` must go through as `cookies` — the response
+that **consumed** the flash is the one that expires it:
+
+```json
+{ "id": "render", "use": "@blokjs/inertia", "inputs": {
+  "component": "Orders/Index",
+  "props":    { "auth": { "$ref": { "step": "auth", "path": [] } } },
+  "errors":   { "$ref": { "step": "flash", "path": ["errors"] } },
+  "errorBag": { "$ref": { "step": "flash", "path": ["bag"] } },
+  "flash":    { "$ref": { "step": "flash", "path": ["flash"] } },
+  "clearHistory": { "$ref": { "step": "flash", "path": ["clearHistory"] } },
+  "cookies":  [ { "$ref": { "step": "flash", "path": ["cookie"] } } ]
+}}
+```
+
+## The `@blokjs/flash` node
+
+The cookie itself is an ordinary helper node, usable outside Inertia:
+
+| Input | Meaning |
+| --- | --- |
+| `op` | `"read"` or `"write"` |
+| `cookieHeader` | the raw `Cookie` header (read) |
+| `errors`, `bag`, `flash`, `preserveFragment`, `clearHistory`, `value` | the payload (write) |
+| `name`, `secret`, `maxAge`, `path`, `sameSite`, `secure` | cookie attributes — `maxAge` defaults to 120 seconds |
+
+Output: `{ cookie, present, errors, bag?, flash, preserveFragment, clearHistory?, value? }`.
+`clearHistory` is `true` or absent, never `false`, so a read can never cancel a
+mark set elsewhere in the same request.
+
+## Surviving a version conflict
+
+A `409` asset-version conflict throws the render away and makes the client
+re-visit — which would lose a flash the request had already consumed. The
+serializer **re-signs** the pending flash into a fresh cookie on that path. It
+degrades on purpose: without `BLOK_FLASH_SECRET` the 409 still happens, the
+toast is dropped, and one warning per process names the fix.
+
+## Testing
+
+```ts src/workflow.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const reject = defineNode({
+  name: "reject-order",
+  description: "Bounce back with one error.",
+  input: z.object({ sku: z.string().optional() }),
+  output: z.unknown(),
+  execute: (ctx) =>
+    redirectBack(ctx.request, { errors: { sku: "Required." }, fallback: "/orders/new" }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  () => {
+    step("reject", reject, {});
+  },
+);
+```
+
+```ts src/flash.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { it } from "vitest";
+import createOrder from "./workflow";
+
+it("bounces back with a toast", async () => {
+  const page = await runPage(createOrder, { method: "POST", input: { sku: "" } });
+  page.assertRedirect("/orders/new").status(303).assertFlash("errors.sku", "Required.");
+});
+```
+
+`assertFlash` verifies the **signed** cookie, so it needs `BLOK_FLASH_SECRET`
+(or the `flashSecret` option) set in the test environment.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Where those errors come from.
+  </Card>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    The chain that reads the cookie.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Validation
+
+Source: /d/spa/validation
+
+@blokjs/validate, error bags, withAllErrors, and Precognition live validation that stops before the write.
+
+Counterpart: [Validation](https://inertiajs.com/docs/v3/the-basics/validation).
+Laravel throws a `ValidationException` and the framework turns it into a
+redirect-with-errors. Blok's validation step **returns its verdict** — a form
+failure is data, not an exception.
+
+## `@blokjs/validate`
+
+```ts src/validate.ts
+import { branch, defineNode, eq, http, step, workflow } from "@blokjs/core";
+import { ValidateNode } from "@blokjs/helpers";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const OrderSchema = z.object({
+  sku: z.string().min(1, "Required."),
+  qty: z.number().min(1, "Too few."),
+});
+
+const createOrder = defineNode({
+  name: "create-order",
+  description: "Persist the order.",
+  input: z.object({ order: z.unknown() }),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "o-1" }),
+});
+
+const bounceBack = defineNode({
+  name: "bounce-back",
+  description: "Redirect back with the errors.",
+  input: z.object({ errors: z.record(z.unknown()) }),
+  output: z.unknown(),
+  execute: (ctx, input) => redirectBack(ctx.request, { errors: input.errors }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  (req) => {
+    const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+    branch("route", eq(checked.ok, true), {
+      then: () => {
+        step("create", createOrder, { order: checked.data });
+      },
+      else: () => {
+        step("reject", bounceBack, { errors: checked.errors });
+      },
+    });
+  },
+);
+```
+
+`{ ok, data, errors }` out. `errors` is keyed by **dot path** — `user.name`,
+`items.0.name` — which is exactly what Inertia's client expects, so nothing has
+to hand-map a `ZodError`. One message per key by default; `withAllErrors: true`
+gives every message as a `string[]`, matching the adapter option of the same
+name. `schema` takes a Zod schema **value** in TypeScript or a plain JSON Schema
+object in a JSON workflow; both produce identical keys.
+
+## Error bags
+
+A page with two forms keeps their errors apart by naming a bag. The bag defaults
+to the request's `X-Inertia-Error-Bag`, and it rides the **signed cookie** across
+the bounce-back — the follow-up GET does not carry the header, so the header
+alone could never survive the redirect.
+
+```ts src/bag.ts
+import { redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders" }, method: "POST" };
+
+export const bounced = redirectBack(request, {
+  errors: { sku: "Required." },
+  bag: "createOrder",
+});
+```
+
+On the client: `useForm({ … }, { errorBag: "createOrder" })`, unchanged from the
+Inertia docs.
+
+## `withAllErrors`
+
+| Where | What it does |
+| --- | --- |
+| `@blokjs/validate` input | `errors[field]` becomes `string[]` |
+| the serializer's `withAllErrors` input | ships every message per field |
+| `blokctl gen app-types --with-all-errors` | types `errors` values as `string[]` |
+
+Set all three together, or the generated types will disagree with the wire.
+
+## Precognition
+
+Inertia's live validation sends the real form to the real endpoint with
+`Precognition: true` and asks only "would this validate?". Mark the validation
+step and the runner does the rest — note the `{ precognition: true }` fourth
+argument in the workflow above.
+
+On a request carrying the marker header, the runner **stops after the marked
+step** and answers from its `{ ok, errors }`:
+
+| Outcome | Response |
+| --- | --- |
+| no errors in the asked-about fields | `204` + `Precognition: true`, `Precognition-Success: true`, empty body |
+| errors | `422 { "errors": { … } }` + `Precognition: true` |
+| any request on a route with a marked step | `Vary: Precognition` |
+
+`Precognition-Validate-Only: sku,user.name` narrows the reported errors to those
+fields (a parent path also covers its children). **No step after the marked one
+runs** — that is the entire point: a keystroke must not charge a card. A request
+without the header runs the workflow end to end, and a workflow with no marked
+step is never dry-run by accident, so one workflow serves both the live
+validation and the real submit.
+
+The mechanism is the **runner's**, not the HTTP trigger's: a worker or cron run
+carries no such header and is unaffected, and any transport that understands a
+response envelope gets the 204/422 for free.
+
+```ts src/precognition.test.ts
+import { runPrecognition } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import ordersCreate from "./validate";
+
+it("never reaches the write on a dry run", async () => {
+  const dry = await runPrecognition(ordersCreate, { body: { sku: "" }, fields: ["sku"] });
+
+  expect(dry.status).toBe(422);
+  expect(dry.errors.sku).toBe("Required.");
+  expect(dry.run.step("create")?.executed).toBe(false);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    The bounce-back and the 303 rule.
+  </Card>
+  <Card title="File uploads" icon="upload" href="/d/spa/file-uploads">
+    Validating a multipart submit.
+  </Card>
+</CardGroup>
+
+
+---
+
+# File uploads
+
+Source: /d/spa/file-uploads
+
+Multipart bodies, ctx.request.files, method spoofing, and the size caps that keep a big upload off the heap.
+
+Counterpart: [File uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads).
+
+On the client nothing is special: `useForm` promotes the request to
+`multipart/form-data` as soon as a value is a `File`, and reports progress.
+
+```tsx client/src/pages/Avatar.tsx
+import { useForm } from "@inertiajs/react";
+
+export default function Avatar() {
+  const form = useForm<{ avatar: File | null }>({ avatar: null });
+  return (
+    <input
+      type="file"
+      onChange={(event) => {
+        form.setData("avatar", event.target.files?.[0] ?? null);
+        form.post("/profile/avatar");
+      }}
+    />
+  );
+}
+```
+
+## What the server sees
+
+The HTTP trigger parses multipart into the request envelope:
+
+| Slot | Contents |
+| --- | --- |
+| `ctx.request.body` | the non-file fields, with bracket keys expanded — `user[name]` becomes `body.user.name`, `tags[0]` an array entry |
+| `ctx.request.files` | file parts by field name, nested the same way: `docs[0]` / `docs[1]` is a `File[]` at `files.docs` |
+| `ctx.request.method` | the **effective** method (see spoofing below) |
+| `ctx.request.originalMethod` | the method actually on the wire |
+
+Parts larger than the spool threshold are streamed to a temp file instead of
+being held in memory; `instanceof File` still holds, so a node reads them the
+same way either way.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BLOK_MAX_UPLOAD_BYTES` | 32 MiB | whole-body cap; over it the request fails before anything is buffered |
+| `BLOK_UPLOAD_SPOOL_BYTES` | 1 MiB | per-file threshold above which a part is spooled to disk |
+| `BLOK_METHOD_SPOOFING` | on | set to `0` to disable `_method` entirely |
+
+Bracket-key expansion guards against prototype pollution: `__proto__`,
+`constructor` and `prototype` segments are rejected rather than assigned.
+
+## Method spoofing
+
+Browsers cannot submit a `PUT`/`PATCH`/`DELETE` multipart form, so Inertia
+documents the `_method` workaround. Blok honours it with three limits:
+
+- only a **POST** may spoof,
+- only into `PUT`, `PATCH` or `DELETE` (case-insensitive),
+- the `_method` field is **removed** from the body, so a workflow never sees the
+  transport artefact.
+
+```ts client/src/spoof.ts
+import { router } from "@inertiajs/core";
+
+router.post("/profile/avatar", { _method: "put", avatar: new File([], "a.png") });
+```
+
+The [CSRF middleware](/d/spa/csrf) treats a spoofed POST as the write it really
+is, and the webhook trigger disables spoofing entirely — a webhook body is
+provider-controlled data, not a browser form.
+
+## Validating an upload
+
+```ts src/upload.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { z } from "zod";
+
+const storeAvatar = defineNode({
+  name: "store-avatar",
+  description: "Persist one uploaded avatar.",
+  input: z.object({ avatar: z.unknown() }),
+  output: z.object({ stored: z.boolean(), bytes: z.number() }),
+  execute: (_ctx, input) => {
+    const file = input.avatar;
+    if (!(file instanceof File)) throw new Error("avatar is required");
+    if (file.size > 2_000_000) throw new Error("avatar is too large");
+    return { stored: true, bytes: file.size };
+  },
+});
+
+export default workflow(
+  "avatar-upload",
+  { version: "1.0.0", trigger: http.post("/profile/avatar") },
+  () => {
+    step("store", storeAvatar, {});
+  },
+);
+```
+
+<Note>
+`files` is not part of the typed entry handle (`req.body`, `req.headers`,
+`req.query`, `req.params`), so a node that needs the file reads
+`ctx.request.files` inside `execute` — which is also where the `File` object
+has to be consumed anyway. Spooled temp files are cleaned up after the request.
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Returning errors for a failed upload.
+  </Card>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    The 303 a spoofed PUT must answer with.
+  </Card>
+</CardGroup>
+
+
+---
+
+# CSRF protection
+
+Source: /d/spa/csrf
+
+The XSRF-TOKEN double submit, why the stock client needs zero configuration, and rotating on a session boundary.
+
+Counterpart: [CSRF protection](https://inertiajs.com/docs/v3/security/csrf-protection).
+Laravel ships `VerifyCsrfToken`; Blok ships the `inertia.csrf` middleware over
+the `@blokjs/csrf` node.
+
+```ts src/Workflows.ts
+import { createCsrfMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+
+export default {
+  "inertia.csrf": await createCsrfMiddleware({ except: ["webhooks/*"] }),
+};
+
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.csrf"]);
+```
+
+One ephemeral step (`csrf`) that does three things:
+
+1. **Issues** a random 32-byte base64url `XSRF-TOKEN` cookie when the request
+   arrives without one — `Path=/; SameSite=Lax`, `Secure` on HTTPS, and
+   deliberately **not** `HttpOnly`: the client has to read it.
+2. **Verifies** `POST`/`PUT`/`PATCH`/`DELETE` by comparing the `X-XSRF-TOKEN`
+   header (or the legacy `_token` body field) against that cookie, in constant
+   time. A [`_method`-spoofed](/d/spa/file-uploads#method-spoofing) POST is still
+   a write.
+3. **Rejects** a mismatch with `303` back to the `Referer`, carrying
+   `{ message: "The page expired, please try again." }` in the signed flash
+   cookie — so the next page renders a toast instead of the client's error
+   modal. `onMismatch: "419"` returns `419 { error, code: "csrf_token_mismatch" }`
+   instead, for API-style routes.
+
+<Note>
+**The stock client needs zero configuration.** `@inertiajs/core`'s own HTTP
+client reads `XSRF-TOKEN` off `document.cookie` and sets `X-XSRF-TOKEN` on every
+request — which is why those two names are the defaults here.
+</Note>
+
+## Options
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `cookieName` / `headerName` | `XSRF-TOKEN` / `X-XSRF-TOKEN` | rename both halves of the double submit |
+| `field` | `_token` | body field accepted instead of the header |
+| `except` | `[]` | path globs skipped entirely, e.g. `["webhooks/*"]` (`*` matches across `/`) |
+| `apiExempt` | `false` | `true` exempts requests with no `X-Inertia` header |
+| `onMismatch` | `"redirect"` | `"419"` for a raw status instead of the bounce-back |
+| `fallback` | `"/"` | redirect target when the request carried no `Referer` |
+| `message` | `"The page expired, please try again."` | flash / error message |
+| `path`, `sameSite`, `maxAge`, `secure` | `/`, `Lax`, session, auto | cookie attributes |
+| `shareToken` | `true` | registers the `csrfToken` shared prop |
+
+## Plain HTML forms
+
+A `<form>` that never goes through Inertia has no XHR to attach a header to, so
+the token is also a [shared prop](/d/spa/shared-data):
+
+```tsx client/src/PlainForm.tsx
+import { usePage } from "@inertiajs/react";
+
+export function PlainForm() {
+  const csrfToken = usePage().props.csrfToken as string;
+  return (
+    <form method="post" action="/orders">
+      <input type="hidden" name="_token" value={csrfToken} />
+      <button type="submit">Save</button>
+    </form>
+  );
+}
+```
+
+## Rotate on login and logout
+
+A session boundary must not keep the pre-authentication token:
+
+```ts src/logout.ts
+import { defineNode } from "@blokjs/core";
+import { logoutResponse, rotateCsrf } from "@blokjs/inertia";
+import { z } from "zod";
+
+export const logout = defineNode({
+  name: "logout",
+  description: "Rotate the CSRF token and clear the client's history.",
+  input: z.object({}),
+  output: z.unknown(),
+  execute: (ctx) => {
+    rotateCsrf(ctx);                       // new cookie on THIS response
+    return logoutResponse(ctx, { redirectTo: "/login" });
+  },
+});
+```
+
+## How the cookie reaches the response
+
+Middleware runs **before** the page workflow, so there is no response to attach
+a `Set-Cookie` to yet — and the answer may not come from the serializer at all
+(a redirect, an error page, `@blokjs/respond`). The node therefore installs a
+one-time accessor over `ctx.response`: whatever the workflow finally assigns
+there gets the pending `Set-Cookie` appended, once, on its way out. A rejection
+never reaches `ctx.response`, so the thrown error carries the cookie itself. A
+response that is not an envelope (a bare JSON object) has nowhere to put a
+cookie and is left alone; every Inertia page response is an envelope.
+
+`BLOK_FLASH_SECRET` signs the bounce-back message. Without it the redirect still
+happens — it just lands without the toast, rather than turning a missing
+environment variable into a wedged form.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="History encryption" icon="lock" href="/d/spa/history-encryption">
+    The other half of a safe logout.
+  </Card>
+  <Card title="Authorization" icon="key" href="/d/spa/authorization">
+    `can()` props and server-side `authorize()`.
+  </Card>
+</CardGroup>
+
+
+---
+
+# History encryption
+
+Source: /d/spa/history-encryption
+
+Encrypt what the browser keeps in history.state, and clear it on logout — page, route group or whole app.
+
+Counterpart: [History encryption](https://inertiajs.com/docs/v3/security/history-encryption).
+
+The client can encrypt what it stores in `history.state`, so pressing Back after
+a logout cannot reveal the previous page. Three ways to ask for it, in falling
+precedence:
+
+| Scope | How |
+| --- | --- |
+| one page | the serializer's `encryptHistory` input — `render(…, { encryptHistory: true })`, or `false` to opt out |
+| one route group | the `inertia.encryptHistory` middleware |
+| the whole app | `configureHistory({ encrypt: true })` |
+
+```ts src/history.ts
+import { configureHistory, encryptHistoryMiddleware } from "@blokjs/inertia";
+
+configureHistory({ encrypt: true });                       // app-wide default
+
+export default {
+  "inertia.encryptHistory": encryptHistoryMiddleware(),    // a route-group opt-in
+};
+// trigger: http.get("/secret", { middleware: ["inertia.encryptHistory"] })
+```
+
+The middleware marks the live `ctx`, which it shares with the workflow it
+guards, so every page serialized in that request carries the flag. The page
+object never carries `encryptHistory: false` — an opt-out simply omits the field.
+
+<Warning>
+**HTTPS (or `localhost`) is required.** Encryption uses `window.crypto.subtle`,
+which browsers expose only in a secure context. Over plain HTTP the client logs
+*"Encryption is not supported in this environment. SSL is required."* and stores
+the page **unencrypted** — the flag silently buys you nothing.
+</Warning>
+
+## Logout must clear it
+
+Logging out has to **clear** the history, or the encrypted pages behind the Back
+button stay readable with the key still in `sessionStorage`.
+
+```ts src/logout.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { logoutNode, logoutResponse, rotateCsrf } from "@blokjs/inertia";
+import { z } from "zod";
+
+// As a step, when nothing else needs to happen:
+export const simple = workflow(
+  "logout",
+  { version: "1.0.0", trigger: http.post("/logout") },
+  () => {
+    step("logout", logoutNode, { redirectTo: "/login" });
+  },
+);
+
+// Or inside your own node, when it does:
+export const logout = defineNode({
+  name: "app-logout",
+  description: "Drop the session, rotate CSRF, clear history.",
+  input: z.object({}),
+  output: z.unknown(),
+  execute: (ctx) => {
+    rotateCsrf(ctx);
+    return logoutResponse(ctx, { redirectTo: "/login" });
+  },
+});
+```
+
+`logoutResponse()` returns a **303** (never a 302: a 302 makes the browser
+re-issue the logout write) and marks the request so the next page object carries
+`clearHistory: true`. The client then drops its history key and IV, and the
+entries behind Back can no longer be decrypted.
+
+The mark is request-scoped, so a page rendered **in the same request** picks it
+up directly. The normal case — a redirect — is covered by the
+[signed flash cookie](/d/spa/flash-data): `logoutResponse` persists the mark,
+`inertia.shared` reads it back on the next request, and the page the user lands
+on carries `clearHistory: true` **once**. Without `BLOK_FLASH_SECRET`, logout
+keeps the request-scoped-only behaviour instead of failing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="CSRF" icon="shield" href="/d/spa/csrf">
+    Rotating the token on the same boundary.
+  </Card>
+  <Card title="Starter kit" icon="package-open" href="/d/spa/starter-kit">
+    Sessions and auth pages, landing with #1018.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Authorization
+
+Source: /d/spa/authorization
+
+can() builds the prop, authorize() enforces it — Inertia has no authorization protocol, only a convention.
+
+Counterpart: [Authorization](https://inertiajs.com/docs/v3/security/authorization).
+Inertia has no authorization protocol; the documented convention is to ship
+decisions as props and enforce them on the server. Blok gives you both halves.
+
+```ts src/authorization.ts
+import { defineNode } from "@blokjs/core";
+import { authorize, can } from "@blokjs/inertia";
+import { z } from "zod";
+
+interface Post {
+  id: string;
+  authorId: string;
+}
+
+export const listPosts = defineNode({
+  name: "list-posts",
+  description: "Posts with their per-row permissions.",
+  input: z.object({ userId: z.string(), isAdmin: z.boolean() }),
+  output: z.object({
+    can: z.object({ create: z.boolean() }),
+    posts: z.array(z.object({ id: z.string(), can: z.record(z.boolean()) })),
+  }),
+  execute: (_ctx, input) => {
+    const posts: Post[] = [{ id: "p-1", authorId: "u-1" }];
+    return {
+      can: can({ create: input.isAdmin }),
+      posts: posts.map((post) => ({
+        id: post.id,
+        can: can({ edit: () => post.authorId === input.userId }),
+      })),
+    };
+  },
+});
+
+export const editPost = defineNode({
+  name: "edit-post",
+  description: "Edit one post, if allowed.",
+  input: z.object({ userId: z.string(), authorId: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+  execute: (_ctx, input) => {
+    authorize("edit", input.authorId === input.userId);   // throws 403 unless allowed
+    return { ok: true };
+  },
+});
+```
+
+| Helper | What it does |
+| --- | --- |
+| `can(rules)` | turns `{ edit: boolean \| (() => boolean) }` into a plain object of booleans — the `can` prop the client reads |
+| `authorize(ability, allowed)` | throws a `403` with body `{ error: "forbidden", ability }` unless `allowed` |
+| `authorizeNode` | the same check as a step: `step("guard", authorizeNode, { ability: "edit", allowed: false })` |
+
+The thrown 403 is the same shape `@blokjs/throw` produces, so the HTTP trigger
+writes it to the wire unchanged — and in production it renders as an
+[Inertia error page](/d/spa/error-handling) rather than a JSON body.
+
+<Warning>
+A `can` prop is **display state**, never a security boundary: it tells the UI
+whether to draw the button. The write path has to call `authorize()` (or its
+node) regardless of what the client believes.
+</Warning>
+
+On the client:
+
+```tsx client/src/pages/Posts.tsx
+interface Props {
+  can: { create: boolean };
+  posts: { id: string; can: Record<string, boolean> }[];
+}
+
+export default function Posts({ can, posts }: Props) {
+  return (
+    <>
+      {can.create && <button type="button">New post</button>}
+      <ul>
+        {posts.map((post) => (
+          <li key={post.id}>{post.can.edit ? "editable" : "read only"}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+## Guarding a whole route
+
+Authentication is the [`inertia.auth`](/d/spa/middleware) middleware: when
+`auth.id` is missing it redirects to `/login` instead of returning a bare 401,
+because an Inertia visit can follow a redirect but has nothing to render from a
+401.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Error handling" icon="triangle-alert" href="/d/spa/error-handling">
+    Rendering that 403 as a page.
+  </Card>
+  <Card title="History encryption" icon="lock" href="/d/spa/history-encryption">
+    Keeping an authorized page out of the Back button.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Error handling
+
+Source: /d/spa/error-handling
+
+The client's error modal in development, real Inertia error pages in production, and handleExceptionsUsing.
+
+Counterpart: [Error handling](https://inertiajs.com/docs/v3/advanced/error-handling).
+
+**In development nothing changes.** The HTTP trigger's JSON diagnostics are a
+non-Inertia response, and the stock client shows them in its error modal — the
+documented dev experience, stack trace and all.
+
+**In production** (`NODE_ENV=production`, or `BLOK_INERTIA_ERROR_PAGES=1`
+anywhere) a failing request is rendered as an **Inertia page response carrying
+the real status**. The client's own `isHttpException()` path fires
+`inertia:httpException` and swaps the page in, so a 404 renders in place, the
+URL updates, and Back works. `BLOK_INERTIA_ERROR_PAGES=0` opts a production
+deploy back out.
+
+```ts src/errors.ts
+import { configureErrorPages, handleExceptionsUsing, render } from "@blokjs/inertia";
+
+configureErrorPages({
+  pages: { 404: "Errors/NotFound", 503: "Errors/Maintenance", default: "Errors/Error" },
+  statuses: [403, 404, 500, 503],   // the default set
+  viewData: { title: "Acme" },      // the same shell knobs a normal page has
+});
+
+handleExceptionsUsing(({ status }) => {
+  if (status === 503) return render("Errors/Maintenance", { until: "10:00" });
+  if (status === 404) return null;   // this one keeps the trigger's own 404
+  return render("Errors/Error", { status });
+});
+```
+
+| Behaviour | Detail |
+| --- | --- |
+| props | `{ status, message }`, where `message` is the status's standard reason phrase — **never** the thrown error's message and never a stack |
+| shared data | `share()` / `shareOnce()` **are** resolved, so a layout reading `auth` still renders |
+| middleware | has **not** run (errors happen outside the page workflow) — anything the error page needs must come from the shared registry |
+| negotiation | `X-Inertia` requests get the JSON page object, a browser navigation gets the HTML shell, and a plain API client keeps the trigger's own JSON body |
+| unmatched routes | go through the same path: a browser or Inertia visit gets the 404 page, everything else the JSON 404 |
+| `pages` vs `statuses` | a status named in `pages` renders even when it is not in `statuses`; every other status is gated by `statuses` and mapped through `default` |
+
+<Warning>
+A production error body is exactly where a driver message or a connection string
+leaks. That is why `message` is the reason phrase and nothing else — put the
+real detail in your logs.
+</Warning>
+
+## `handleExceptionsUsing()`
+
+The hook sees **every** status, not just the configured set, so it can add pages
+the default map does not carry. Returning `null` (or `undefined`) falls through
+to the response the trigger would have sent anyway — the per-status opt-out.
+
+The HTTP trigger reaches all of this through one exported function,
+`renderErrorPage(request, status, error)`, loaded with an optional dynamic
+import: a project without `@blokjs/inertia` installed boots and errors exactly
+as before.
+
+## The components
+
+`Errors/*` page components ship with the SPA templates
+([#999](https://github.com/well-prado/blok/issues/999)). Until those land, point
+`pages` at components your own client provides — a component the client cannot
+resolve is a client-side error, not a server one. `examples/inertia-react` has a
+minimal `Errors/Error` page to copy.
+
+```tsx client/src/pages/Errors/Error.tsx
+interface Props {
+  status: number;
+  message: string;
+}
+
+export default function ErrorPage({ status, message }: Props) {
+  return (
+    <main>
+      <h1>{status}</h1>
+      <p>{message}</p>
+    </main>
+  );
+}
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Authorization" icon="key" href="/d/spa/authorization">
+    Where most 403s come from.
+  </Card>
+  <Card title="Title and meta" icon="type" href="/d/spa/title-and-meta">
+    The shell an error page renders into.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Routing
+
+Source: /d/spa/routing
+
+Typed routes on the client, controller-less pages, and the two adapter-wide overrides for URLs and component names.
+
+Counterpart: [Routing](https://inertiajs.com/docs/v3/the-basics/routing).
+Laravel has Ziggy and Wayfinder; Blok generates the same shape from the
+workflows themselves.
+
+## Typed routes on the client
+
+The types describe the call signature; the URL patterns arrive at runtime. Both
+are generated by `blokctl gen app-types`, or written by hand once:
+
+```ts client/src/routes.ts
+import { registerRoutes, route } from "@blokjs/inertia-client";
+
+// `blok-pages.d.ts` writes this half for you.
+declare module "@blokjs/inertia-client" {
+  interface Routes {
+    "orders.index": { method: "get"; component: "Orders/Index" };
+    "orders.show": { params: { id: string }; method: "get"; component: "Orders/Show" };
+  }
+}
+
+registerRoutes({
+  "orders.index": { url: "/orders", method: "get", component: "Orders/Index" },
+  "orders.show": { url: "/orders/:id", method: "get", component: "Orders/Show" },
+});
+
+export const index = route("orders.index").url;              // "/orders"
+export const show = route("orders.show", { id: "1" });       // a UrlMethodPair
+export const instant = route("orders.show", { id: "1" }).withComponent("Orders/Show");
+export const asString = `${route("orders.show", { id: "1" })}`; // "/orders/1"
+```
+
+`route()` returns a Wayfinder-shaped object — an Inertia `UrlMethodPair` — so it
+goes straight into `href`, `action` and `router.visit()`, and the client infers
+the method from it. Params the pattern does not consume become query-string
+entries. A placeholder with no value **throws**, naming the parameter:
+`/orders/undefined` is the failure this exists to prevent.
+
+Route names are the **workflow** names, methods are lowercased, and `component`
+appears only when the workflow renders a page.
+
+## A route with no controller
+
+Laravel's `Route::inertia()`:
+
+```ts src/Workflows.ts
+import { inertia } from "@blokjs/inertia";
+
+export default {
+  about: await inertia.page("/about", "About", { team: "Blok" }),
+};
+```
+
+One generated workflow, one step, no workflow file. A fourth argument takes
+`{ name, middleware, inputs }` for the workflow name, a middleware chain, or
+extra serializer inputs (`version`, `viewData`, `shell`, …). Shared data,
+`resolveUrlUsing` and `transformComponentUsing` all apply to it, because they
+live in the serializer.
+
+## Adapter-wide overrides
+
+```ts src/url-overrides.ts
+import { resolveUrlUsing, transformComponentUsing } from "@blokjs/inertia";
+
+resolveUrlUsing((req: unknown) => new URL(String((req as { url?: string }).url), "http://x").pathname);
+transformComponentUsing((name: string) => name.toLowerCase());
+```
+
+Both are set once at boot. The URL resolver **wins over a page's own `url`** —
+every page passes one (it is a required `render()` argument), so an override
+that lost to it would never apply. The component transform runs before the name
+is emitted and before `ensurePagesExist` checks it.
+
+<Warning>
+A component transform is **not** seen by the `page` control step, which compares
+`X-Inertia-Partial-Component` against the untransformed name. The wire output
+stays correct (the serializer narrows), but the step resolves the full prop set
+on such a partial, and an `optional`/`defer` prop asked for by name will not
+resolve. Prefer naming components the way the client spells them.
+</Warning>
+
+## Fail the boot, not the route
+
+```ts src/ensure.ts
+import { ensurePagesExist } from "@blokjs/inertia";
+
+await ensurePagesExist();   // on unless NODE_ENV=production
+```
+
+Checks every `definePage()` component — and every `inertia.page()` one — against
+the `pages.json` the Blok Vite plugin writes into its `outDir`, and throws
+naming the missing components plus a `Fix:` line. The manifest is looked up at
+`$BLOK_STATIC_DIR/pages.json` (override with `{ manifest }` / `{ dir }`); when it
+is absent the check **warns and skips**, so booting the server before the client
+has ever been built still works.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="gen app-types" icon="wand-sparkles" href="/d/cli/gen">
+    What generates `blok-routes.ts` and `blok-pages.d.ts`.
+  </Card>
+  <Card title="Title and meta" icon="type" href="/d/spa/title-and-meta">
+    The document around the page.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Title and meta
+
+Source: /d/spa/title-and-meta
+
+The HTML shell, its two markers, viewData, and the server-side fallbacks behind the client's Head component.
+
+Counterpart: [Title & meta](https://inertiajs.com/docs/v3/the-basics/title-and-meta).
+Laravel edits `app.blade.php`; Blok has no Blade, so the document lives in the
+serializer's **shell**.
+
+On the client, `<Head>` is stock Inertia and needs nothing from Blok:
+
+```tsx client/src/pages/Orders/Index.tsx
+import { Head } from "@inertiajs/react";
+
+export default function Index() {
+  return (
+    <>
+      <Head title="Orders" />
+      <h1>Orders</h1>
+    </>
+  );
+}
+```
+
+## The shell
+
+The default shell carries `<title data-inertia>` (v3 renamed the attribute from
+`inertia`) and two markers:
+
+| Marker | Replaced with |
+| --- | --- |
+| `<!--blok:head-->` | the `head` input — server-rendered `<Head>` tags, plus whatever [SSR](/d/spa/ssr) produced |
+| `<!--blok:app-->` | `<div id="app"></div>` plus the boot script |
+
+```ts src/shell.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "o-1" }],
+});
+
+const OrdersIndex = definePage("Orders/Index", { orders: listOrders });
+
+const SHELL = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title data-inertia>{{title}}</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+    <!--blok:head-->
+  </head>
+  <body class="{{bodyClass}}">
+    <!--blok:app-->
+  </body>
+</html>`;
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders") },
+  (req) => {
+    OrdersIndex.render(req, "page", "/orders", {}, {
+      shell: SHELL,
+      head: '<meta name="description" content="Your orders" />',
+      viewData: { title: "Acme", bodyClass: "bg-white" },
+      rootId: "app",
+    });
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `shell` | the whole document template. **Must** contain `<!--blok:app-->` |
+| `head` | markup injected at `<!--blok:head-->` — the server-side fallback for crawlers and for the first paint |
+| `viewData` | fills `{{key}}` placeholders. **Never** sent to the client — this is where a value that must not reach the browser goes |
+| `rootId` | renames the root element and the boot script's `data-page` value |
+
+<Note>
+The `<Head>` component only takes effect once the client has booted. A title or
+meta tag that must be in the **initial HTML** — for a crawler, a link unfurler,
+or a `#:~:text=` fragment — has to come from `head` / `shell`, or from
+[SSR](/d/spa/ssr).
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="SSR" icon="server" href="/d/spa/ssr">
+    Rendering the markup, and its head tags, on the server.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    How the page object is escaped into the shell.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Client features
+
+Source: /d/spa/client-features
+
+Links, manual visits, polling, prefetching, layouts, scroll, progress, transitions — behaviour that is entirely the stock client's.
+
+Everything on this page works on Blok with **nothing to configure on the
+server**. It is listed here so nobody has to wonder whether Blok supports it:
+these features live entirely in the stock `@inertiajs/*` client, and Blok speaks
+the protocol they are built on.
+
+| Feature | Inertia docs | Anything on Blok? |
+| --- | --- | --- |
+| Links (`<Link>`) | [Links](https://inertiajs.com/docs/v3/the-basics/links) | no |
+| Manual visits (`router.visit`) | [Manual visits](https://inertiajs.com/docs/v3/the-basics/manual-visits) | no |
+| HTTP requests (`router.post`, …) | [HTTP requests](https://inertiajs.com/docs/v3/the-basics/http-requests) | no |
+| Optimistic updates | [Optimistic updates](https://inertiajs.com/docs/v3/the-basics/optimistic-updates) | no |
+| Layouts / persistent layouts | [Layouts](https://inertiajs.com/docs/v3/the-basics/layouts) | no |
+| View transitions | [View transitions](https://inertiajs.com/docs/v3/the-basics/view-transitions) | no |
+| Polling | [Polling](https://inertiajs.com/docs/v3/data-props/polling) | no — it is a partial reload on a timer |
+| Prefetching | [Prefetching](https://inertiajs.com/docs/v3/data-props/prefetching) | the server honours `Purpose: prefetch` for you |
+| Load when visible (`<WhenVisible>`) | [Load when visible](https://inertiajs.com/docs/v3/data-props/load-when-visible) | pairs with [`defer()`](/d/spa/deferred-props) |
+| Remembering state (`useRemember`) | [Remembering state](https://inertiajs.com/docs/v3/data-props/remembering-state) | no — browser history state only |
+| Scroll management (`preserveScroll`) | [Scroll management](https://inertiajs.com/docs/v3/advanced/scroll-management) | no |
+| Progress indicators | [Progress indicators](https://inertiajs.com/docs/v3/advanced/progress-indicators) | no |
+| Events (`inertia:*`) | [Events](https://inertiajs.com/docs/v3/advanced/events) | no |
+| Code splitting | [Code splitting](https://inertiajs.com/docs/v3/advanced/code-splitting) | `blokInertia()` passes Vite's `lazy` page option through |
+| Instant visits | [Instant visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) | the page object's `sharedProps` list comes from [`share()`](/d/spa/shared-data) |
+
+```tsx client/src/pages/Orders/Index.tsx
+import { Link, router, usePoll } from "@inertiajs/react";
+
+export default function Index() {
+  usePoll(5_000, { only: ["orders"] });     // a partial reload on a timer
+  return (
+    <>
+      <Link href="/orders/1" prefetch preserveScroll>
+        Order 1
+      </Link>
+      <button type="button" onClick={() => router.reload({ only: ["orders"] })}>
+        Refresh
+      </button>
+    </>
+  );
+}
+```
+
+Two client behaviours do touch the server, and they have their own pages:
+
+- a **prefetch** request carries `Purpose: prefetch`, which keeps a fragment
+  redirect from becoming a 409 and skips SSR — see
+  [the protocol](/d/spa/the-protocol#prefetch);
+- `<InfiniteScroll>` needs cursor metadata, which is what
+  [`scroll()`](/d/spa/infinite-scroll) emits.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    What `only` / `except` actually cost on the server.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    Everything the client sends, and what it means.
+  </Card>
+</CardGroup>
+
+
+---
+
+# DevTools
+
+Source: /d/spa/devtools
+
+The Inertia DevTools protocol server — landing with #1017.
+
+Counterpart: [DevTools](https://inertiajs.com/docs/v3/advanced/devtools).
+
+<Warning>
+**Not shipped yet.** The protocol-server recorder lands with
+[#1017](https://github.com/well-prado/blok/issues/1017). This page describes
+what is already true today and will be filled in when that PR merges.
+</Warning>
+
+What exists now:
+
+- The HTTP trigger's CORS configuration already allows and exposes the DevTools
+  headers (`X-Inertia-Devtools-Request`, `X-Inertia-Devtools-Session`), so a
+  [standalone](/d/spa/assets-and-versioning#standalone-mode-and-cors) SPA will
+  not have to change its CORS setup when DevTools arrives.
+- `getPageRegistry()` already returns every page declared in the process —
+  component name, per-prop mode metadata, Zod output schema and the declaring
+  `file:line`. That registry is what the DevTools recorder reports from, and
+  what [`blokctl gen app-types`](/d/cli/gen) reads today.
+- The client-side DevTools browser extension works against any Inertia v3
+  server, including Blok, for everything it can see from the page object alone.
+
+```ts src/registry.ts
+import { getPageRegistry } from "@blokjs/inertia";
+
+export function pageSummary(): { component: string; props: string[] }[] {
+  return [...getPageRegistry().values()].map((entry) => ({
+    component: entry.component,
+    props: Object.keys(entry.props),
+  }));
+}
+```
+
+Until #1017 lands, the supported way to inspect what a page workflow actually
+did is [`runPage()`](/d/fundamentals/testing#recipe-4--an-inertia-page-workflow),
+which reports every step, every resolved prop and the whole page object.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask-conical" href="/d/fundamentals/testing#recipe-4--an-inertia-page-workflow">
+    What to use in the meantime.
+  </Card>
+  <Card title="AI" icon="bot" href="/d/spa/ai">
+    The machine-readable surface, landing with #1019.
+  </Card>
+</CardGroup>
+
+
+---
+
+# Starter kit
+
+Source: /d/spa/starter-kit
+
+Sessions, users and the auth pages — landing with #1018 and the SPA scaffolds in #999.
+
+Counterpart: [Authentication](https://inertiajs.com/docs/v3/security/authentication)
+(Laravel's Breeze / starter kits).
+
+<Warning>
+**Not shipped yet.** `@blokjs/session` and `@blokjs/auth`, and the auth pages
+that go with them, land with
+[#1018](https://github.com/well-prado/blok/issues/1018); the
+`blokctl create spa --kit auth` wiring waits for
+[#999](https://github.com/well-prado/blok/issues/999). The decided shape, so
+nothing built now has to be undone:
+
+- **no ORM** — a `UserStore` interface, a SQLite implementation by default, a
+  Postgres example, and Drizzle documented rather than depended on;
+- the server modules can land before the scaffolds; the CLI flag cannot.
+</Warning>
+
+## What you can build today
+
+Every piece the kit will assemble already exists:
+
+| Concern | Today |
+| --- | --- |
+| who is signed in | your own `currentUser` node + [`inertia.shared`](/d/spa/middleware) |
+| guarding routes | [`inertia.auth`](/d/spa/middleware) — a 302 to `/login`, not a bare 401 |
+| sign-in form | an ordinary [form workflow](/d/spa/forms-and-redirects) with [validation](/d/spa/validation) |
+| sign-out | [`logoutNode` / `logoutResponse()`](/d/spa/history-encryption#logout-must-clear-it) — 303, `clearHistory`, and [`rotateCsrf()`](/d/spa/csrf#rotate-on-login-and-logout) |
+| permissions | [`can()` / `authorize()`](/d/spa/authorization) |
+| remembering the user | [`once()` / `shareOnce()`](/d/spa/once-props#sign-out-overwrite-do-not-forget) |
+| error pages | [`configureErrorPages()`](/d/spa/error-handling) |
+
+What the kit adds is the **session store** — the one thing Blok deliberately
+does not have today (flash rides a [signed cookie](/d/spa/flash-data), not a
+session) — plus the pages and the wiring, in one install.
+
+```ts src/auth.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+/** Until #1018: your own node, reading whatever session mechanism you already have. */
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "Resolve the signed-in user from the request cookies.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string().optional(), email: z.string().optional() }),
+  execute: (_ctx, input) => {
+    const cookie = input.headers?.cookie ?? "";
+    return cookie.includes("session=") ? { id: "u-1", email: "ada@example.com" } : {};
+  },
+});
+```
+
+`inertia.auth` gates on `auth.id` being absent, which is why the guest case
+returns `{}` rather than throwing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    The chain the kit will register for you.
+  </Card>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    The by-hand setup, today.
+  </Card>
+</CardGroup>
+
+
+---
+
+# AI-friendliness
+
+Source: /d/spa/ai
+
+Everything an agent needs to build a Blok SPA correctly — llms.txt, the MCP page tools, the authoring block, and blokctl inertia doctor.
+
+Counterpart: [TypeScript](https://inertiajs.com/docs/v3/advanced/typescript) — the
+same goal from the other end: make the contract machine-readable.
+
+Because a page's contract is declared **once, outside the workflow callback**,
+and every prop is a node with a Zod schema, "what does this page send the
+client?" is answerable **statically** — no request, no running server. Everything
+on this page follows from that one design decision.
+
+## The four surfaces
+
+| Surface | What it answers |
+| --- | --- |
+| `docs/llms.txt`, `docs/llms-full.txt` | the whole SPA section as plain text, in one read |
+| `AGENTS.md` / `CLAUDE.md`, `.claude/skills/blok-inertia.md` | the rules an agent must follow when it writes the code |
+| MCP tools (`inertia.pages.list`, `inertia.page.get`, `inertia.routes.list`) | this app's live pages, props and routes |
+| `blokctl inertia doctor` | whether this app is wired correctly, and the exact fix when it is not |
+
+Plus the two that were always there: `blokctl gen app-types` (the same contract
+as TypeScript — `blok-pages.d.ts`, `blok-routes.ts`) and `getPageRegistry()`
+itself.
+
+## llms.txt
+
+`docs/llms.txt` is the [llmstxt.org](https://llmstxt.org) index of the SPA
+section — one line per page, title and description. `docs/llms-full.txt` is the
+same pages' full prose concatenated, for an agent that would rather read once
+than crawl 27 files.
+
+Both are **generated** from the MDX, never hand-written:
+
+```bash
+bun run docs:llms
+```
+
+The docs gate regenerates and diffs them, so a doc edit without a regenerate
+fails CI rather than quietly shipping a stale copy.
+
+## The MCP tools
+
+If the app already exposes workflows over
+[MCP](/d/triggers/mcp), it also exposes three read-only page tools — no wiring,
+no extra workflow:
+
+| Tool | Returns |
+| --- | --- |
+| `inertia.pages.list` | every page: component, each prop's mode / group / rescue, whether it has a schema, the declaring `file:line`, plus the shared-prop keys |
+| `inertia.page.get(component)` | one page's props **as a JSON Schema**, built from each prop node's Zod output schema |
+| `inertia.routes.list` | every HTTP route and the page component it renders |
+
+They read in-process state; they run no node, no step and no workflow, and they
+are annotated `readOnlyHint`.
+
+<Warning>
+**Dev-only by default.** A page registry is a map of the app's internals. The
+tools are served when `NODE_ENV` is not `production`; to serve them in
+production set `BLOK_INERTIA_MCP=1` (and `BLOK_INERTIA_MCP=0` turns them off in
+development).
+</Warning>
+
+Statically — in a test, a script, or a build step — the same data is one call
+away:
+
+```ts src/introspect.ts
+import { getPageRegistry } from "@blokjs/inertia";
+
+export function describePages(): string[] {
+  return [...getPageRegistry().values()].map((page) => {
+    const props = Object.entries(page.props)
+      .map(([key, prop]) => `${key}:${prop.mode}`)
+      .join(", ");
+    return `${page.component} { ${props} }`;
+  });
+}
+```
+
+## blokctl inertia doctor
+
+Six classes of misconfiguration that all present as "it just doesn't work":
+
+```bash
+blokctl inertia doctor
+```
+
+| Check | Fails when |
+| --- | --- |
+| shell markers | a custom `shell` is missing `<!--blok:app-->` or `<!--blok:head-->` |
+| `ensurePagesExist` | a declared component has no file in the client's pages directory |
+| secrets | `BLOK_FLASH_SECRET` is unset (or `BLOK_SESSION_SECRET`, once `@blokjs/session` is installed) |
+| `ASSET_VERSION` | neither the variable nor `<staticDir>/.blok-asset-version` exists |
+| `inertia.csrf` | `src/Workflows.ts` does not register the middleware |
+| SSR | SSR is configured but the server does not answer `/health` |
+
+Every failing check prints a line starting with `Fix:`, and the command exits
+non-zero — so it is usable as a deploy gate, not only as a hint.
+
+## Error messages name their fix
+
+Every `throw` in `@blokjs/inertia` and `@blokjs/inertia-client` ends with a
+`Fix:` clause, and a repo test enforces it:
+
+```text
+[blok] @blokjs/inertia: 1 page component(s) declared server-side do not exist in client/src/pages:
+  - Orders/Idnex (declared at src/workflows/orders.ts:12)
+Fix: create the missing file(s) under client/src/pages, or correct the component
+name passed to definePage()/inertia.page().
+```
+
+## Rules an agent must follow
+
+The same ones a human follows — they are in `AGENTS.md`, `CLAUDE.md` and
+`.claude/skills/blok-inertia.md`:
+
+- author pages with `definePage()` + `render()`; never hand-roll the page object;
+- never write `ctx.state` or `ctx.vars` from inside a node — return output and
+  let the runner persist it;
+- no `js/` expression strings in new workflows; use handles and the typed
+  branch operators;
+- keep Zod schemas on every node, so codegen and the client stay typed;
+- `auth` and `flash` are reserved step ids in a page workflow.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    The contract those tools read.
+  </Card>
+  <Card title="DevTools" icon="bug" href="/d/spa/devtools">
+    The runtime half, landing with #1017.
+  </Card>
+</CardGroup>

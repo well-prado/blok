@@ -198,14 +198,18 @@ function makeRoute(url: string, method: Method, component: string | undefined): 
 export function route<N extends RouteName>(name: N, ...args: RouteArgs<N>): BlokRoute {
 	const entry = routes.get(name);
 	if (entry === undefined) {
-		throw new Error(`route("${name}") is not registered. Call registerRoutes() with the generated route table first.`);
+		throw new Error(
+			`route("${name}") is not registered. Fix: import the generated blok-routes.ts (blokctl gen app-types) once at boot, or call registerRoutes() yourself.`,
+		);
 	}
 	const params = (args[0] ?? {}) as Record<string, unknown>;
 	const used = new Set<string>();
 	const path = entry.url.replace(PARAM, (_match, key: string) => {
 		const value = params[key];
 		if (value === undefined || value === null || value === "") {
-			throw new Error(`route("${name}") is missing the required parameter "${key}".`);
+			throw new Error(
+				`route("${name}") is missing the required parameter "${key}". Fix: route("${name}", { ${key}: value }).`,
+			);
 		}
 		used.add(key);
 		return encodeURIComponent(String(value));

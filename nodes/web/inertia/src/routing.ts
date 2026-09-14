@@ -184,10 +184,14 @@ export function inertiaPage(
 	opts: InertiaRouteOptions = {},
 ) {
 	if (typeof path !== "string" || !path.startsWith("/")) {
-		throw new Error(`inertia.page() requires a route path starting with "/", got ${JSON.stringify(path)}.`);
+		throw new Error(
+			`inertia.page() requires a route path starting with "/", got ${JSON.stringify(path)}. Fix: inertia.page("/about", "About").`,
+		);
 	}
 	if (typeof component !== "string" || component.length === 0) {
-		throw new Error(`inertia.page("${path}") requires a non-empty component name.`);
+		throw new Error(
+			`inertia.page("${path}") requires a non-empty component name. Fix: inertia.page("${path}", "About").`,
+		);
 	}
 	routeComponents.add(component);
 	return workflow(

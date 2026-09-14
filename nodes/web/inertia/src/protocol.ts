@@ -152,7 +152,9 @@ export interface RenderShellOptions {
 export function renderShell(page: PageObject, opts: RenderShellOptions = {}): string {
 	const shell = opts.shell ?? DEFAULT_SHELL;
 	if (!shell.includes(APP_MARKER)) {
-		throw new Error(`Inertia shell is missing the ${APP_MARKER} marker — the app root cannot be placed.`);
+		throw new Error(
+			`Inertia shell is missing the ${APP_MARKER} marker — the app root cannot be placed. Fix: add ${APP_MARKER} to the shell template where the app should mount.`,
+		);
 	}
 	const rootId = opts.rootId ?? "app";
 	const boot =
