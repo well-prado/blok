@@ -90,6 +90,47 @@ describe("docs/d/spa — links", () => {
 			.filter((route) => !nav.includes(`"${route}"`));
 		expect(missing).toEqual([]);
 	});
+
+	/**
+	 * The docs site is Mintlify: it has no local `build` command — the routes ARE
+	 * the `docs.json` page entries, resolved against the files on disk. So this
+	 * is the buildability check: the manifest parses, every route it lists has a
+	 * page, and the `/d/spa/` routes are among them.
+	 */
+	it("docs.json resolves to real pages, including every /d/spa/ route", () => {
+		interface NavGroup {
+			group?: string;
+			pages?: (string | NavGroup)[];
+			tabs?: NavGroup[];
+			groups?: NavGroup[];
+		}
+		const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "docs/docs.json"), "utf8")) as {
+			navigation: NavGroup;
+		};
+
+		const routes: string[] = [];
+		const walkNav = (node: string | NavGroup): void => {
+			if (typeof node === "string") {
+				routes.push(node);
+				return;
+			}
+			for (const child of [...(node.tabs ?? []), ...(node.groups ?? []), ...(node.pages ?? [])]) walkNav(child);
+		};
+		walkNav(manifest.navigation);
+
+		const missing = routes.filter((route) => {
+			if (/^https?:/.test(route)) return false;
+			// Mintlify resolves `a/b` to `a/b.mdx`, `a/b.md`, or `a/b/index.mdx`.
+			return !["mdx", "md"]
+				.flatMap((ext) => [join(REPO_ROOT, "docs", `${route}.${ext}`), join(REPO_ROOT, "docs", route, `index.${ext}`)])
+				.some((candidate) => existsSync(candidate));
+		});
+		expect(missing).toEqual([]);
+
+		const spaRoutes = routes.filter((route) => route.startsWith("d/spa/"));
+		expect(spaRoutes.length).toBeGreaterThanOrEqual(25);
+		expect(spaRoutes).toContain("d/spa/index");
+	});
 });
 
 describe("docs/d/spa — Inertia v3 coverage", () => {
