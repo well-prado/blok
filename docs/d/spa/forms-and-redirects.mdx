@@ -77,6 +77,24 @@ export default workflow(
 );
 ```
 
+<Note>
+`req.body` is `unknown` on the entry handle — an HTTP body is whatever the
+client sent. Feeding it to a validation step needs no cast; **reading a field
+off it** does:
+
+```ts src/body-cast.ts
+import type { Handle } from "@blokjs/core";
+
+declare const req: { body: Handle<unknown> };
+
+const body = req.body as Handle<{ sku: string; qty: number }>;
+export const sku = body.sku;
+```
+
+The Zod schema on the validation step is what actually enforces the shape; the
+cast only names it for the reads.
+</Note>
+
 ## The 303 rule
 
 A redirect answering a `PUT`, `PATCH` or `DELETE` must be a **303**, never a
