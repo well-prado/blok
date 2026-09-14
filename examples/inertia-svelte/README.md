@@ -35,9 +35,10 @@ bun run dev                                                            # termina
 ```
 
 `@sveltejs/vite-plugin-svelte` is **not** installed in this monorepo (the
-lockfile rule: no new hoists for an example), so `bun run build` / `bun run dev`
-need an install of this example's own `devDependencies` first. `bun run e2e` —
-the part CI runs — needs neither.
+lockfile rule: no new hoists for an example), so `bun run build`, `bun run dev`
+and `bun run typecheck` (the Vite config imports the plugin) need an install of
+this example's own `devDependencies` first. `bun run e2e` — the part CI runs —
+needs neither.
 
 ## `bun run e2e` is a placeholder, on purpose
 

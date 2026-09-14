@@ -6,7 +6,7 @@
  * goes through the same workflow, header-free.
  */
 
-import { http, branch, eq, step, workflow } from "@blokjs/core";
+import { type Handle, branch, eq, http, step, workflow } from "@blokjs/core";
 import { ValidateNode } from "@blokjs/helpers";
 import { definePage } from "@blokjs/inertia";
 import { z } from "zod";
@@ -31,10 +31,13 @@ export default workflow(
 	"orders-create",
 	{ version: "1.0.0", trigger: http.post("/orders", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+		// An HTTP body is `unknown` on the entry handle — the schema above is what
+		// actually validates it, so this cast only names the shape for the reads.
+		const body = req.body as Handle<z.infer<typeof OrderSchema>>;
+		const checked = step("check", ValidateNode, { schema: OrderSchema, data: body }, { precognition: true });
 		branch("route", eq(checked.ok, true), {
 			then: () => {
-				step("create", createOrder, { sku: req.body.sku, total: req.body.total });
+				step("create", createOrder, { sku: body.sku, total: body.total });
 			},
 			else: () => {
 				step("reject", rejectOrder, { errors: checked.errors });
