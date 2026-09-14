@@ -1372,8 +1372,15 @@ export interface PagePropSpec {
 export interface PageStepOptions {
 	/** Client-side page component name, e.g. `"Orders/Index"`. */
 	component: string;
-	/** Page URL written into the page object. Defaults to the request URL. */
-	url?: string | Handle<string>;
+	/**
+	 * Page URL written into the page object — what Inertia pushes into history.
+	 * Defaults to the request URL.
+	 *
+	 * `StructuralTpl` is accepted so a PARAMETERISED route can spell its own URL
+	 * (`tpl`/orders/${req.params.id}``); lowerRefs compiles it to the same `js/`
+	 * template a handle lowers to.
+	 */
+	url?: string | Handle<string> | StructuralTpl;
 	/** Prop key -> the node that resolves it. */
 	props: Record<string, PagePropSpec>;
 	/** Serializer node ref. Defaults to `"@blokjs/inertia"`. */

@@ -3,7 +3,7 @@
  * turns into the frontend's typed `route("orders.show", { id })`.
  */
 
-import { http, workflow } from "@blokjs/core";
+import { http, tpl, workflow } from "@blokjs/core";
 import { always, definePage, shared } from "@blokjs/inertia";
 import { currentUser, listOrders, showOrder } from "../nodes.js";
 
@@ -37,6 +37,15 @@ export default workflow(
 	"orders.show",
 	{ version: "1.0.0", trigger: http.get("/orders/:id", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		OrdersShow.render(req, "page", "/orders", { order: { id: req.params.id } }, { viewData: { title: "Order" } });
+		// The page object's `url` is what Inertia pushes into history. Rendering
+		// this page as "/orders" would snap the address bar back to the index the
+		// moment an order is clicked, and a reload would land on the wrong page.
+		OrdersShow.render(
+			req,
+			"page",
+			tpl`/orders/${req.params.id}`,
+			{ order: { id: req.params.id } },
+			{ viewData: { title: "Order" } },
+		);
 	},
 );

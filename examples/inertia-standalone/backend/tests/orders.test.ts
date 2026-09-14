@@ -16,6 +16,19 @@ describe("standalone backend", () => {
 		expect(page.props.order).toMatchObject({ id: "o-2" });
 	});
 
+	/**
+	 * The page object's `url` is what Inertia pushes into history. Rendering the
+	 * show page as "/orders" put the index's URL in the address bar the moment an
+	 * order was clicked, and a reload landed on the index (#1054 review, B1).
+	 */
+	it("renders the show page at the REQUEST url, not the index url", async () => {
+		const page = await runPage(ordersShow, { middleware: AUTH, params: { id: "o-1" } });
+		expect(page.url).toBe("/orders/o-1");
+
+		const other = await runPage(ordersShow, { middleware: AUTH, params: { id: "o-2" } });
+		expect(other.url).toBe("/orders/o-2");
+	});
+
 	it("answers a stale asset version with a 409", async () => {
 		const page = await runPage(ordersIndex, { middleware: AUTH, clientVersion: "stale" });
 		expect(page.status).toBe(409);
