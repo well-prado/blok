@@ -1,0 +1,43 @@
+# Blok — SPA (Inertia)
+
+> Generated from docs/d/spa/**.mdx by `bun run docs:llms` — do not edit by hand.
+
+Blok is a modular workflow platform. Its SPA layer speaks the Inertia v3
+protocol against the stock `@inertiajs/react | vue3 | svelte` client: a page
+is a workflow, a prop is a step (in any runtime), and the page contract is
+declared once with `definePage()` outside the workflow callback so the
+frontend can `import type` it.
+
+## Docs
+
+- [SPA (Inertia)](/d/spa/index): Build a React, Vue or Svelte SPA on Blok — a page is a workflow, a prop is a step, navigation is the Inertia v3 protocol.
+- [Getting started](/d/spa/getting-started): Wire a Vite SPA to a Blok server by hand, render the first page, and run the two-terminal dev loop.
+- [Pages and props](/d/spa/pages-and-props): definePage, the seven prop modes, cross-runtime props, and the two ways the client gets its types.
+- [Forms and redirects](/d/spa/forms-and-redirects): useForm on the client, redirectBack on the server, the 303 rule, and where errors come from.
+- [Middleware](/d/spa/middleware): There is no HandleInertiaRequests — inertia.shared, inertia.auth and inertia.csrf are ordinary Blok middleware workflows.
+- [Assets and versioning](/d/spa/assets-and-versioning): The blokInertia() Vite plugin, ASSET_VERSION, the 409 reload, static serving, and CORS for standalone mode.
+- [Server-side rendering](/d/spa/ssr): The SSR wire contract, the entry file per framework, blokctl inertia start-ssr, and what happens when rendering fails.
+- [The protocol](/d/spa/the-protocol): Every request header the adapter reads, every page-object field it emits, and every control response.
+- [Partial reloads](/d/spa/partial-reloads): Which prop nodes the runner actually runs, per request — only, except, always and optional.
+- [Deferred props](/d/spa/deferred-props): Announce the expensive props on the first visit, let the client fetch them immediately after — with groups and rescue.
+- [Merging props](/d/spa/merging-props): Append, prepend, deep-merge and match-on — the labels that tell the client to grow a prop instead of replacing it.
+- [Once props](/d/spa/once-props): Values the client remembers, so the prop's node never runs again — with keys, expiry and the sign-out pattern.
+- [Infinite scroll](/d/spa/infinite-scroll): scroll() props, the cursor metadata the client needs, and the paginate / cursorPaginate helpers.
+- [Shared data](/d/spa/shared-data): share() and shareOnce() — values every page gets, resolved lazily, announced to the client for instant visits.
+- [Flash data](/d/spa/flash-data): Blok has no session — flash, errors and error bags ride a signed, one-shot cookie.
+- [Validation](/d/spa/validation): @blokjs/validate, error bags, withAllErrors, and Precognition live validation that stops before the write.
+- [File uploads](/d/spa/file-uploads): Multipart bodies, ctx.request.files, method spoofing, and the size caps that keep a big upload off the heap.
+- [CSRF protection](/d/spa/csrf): The XSRF-TOKEN double submit, why the stock client needs zero configuration, and rotating on a session boundary.
+- [History encryption](/d/spa/history-encryption): Encrypt what the browser keeps in history.state, and clear it on logout — page, route group or whole app.
+- [Authorization](/d/spa/authorization): can() builds the prop, authorize() enforces it — Inertia has no authorization protocol, only a convention.
+- [Error handling](/d/spa/error-handling): The client's error modal in development, real Inertia error pages in production, and handleExceptionsUsing.
+- [Routing](/d/spa/routing): Typed routes on the client, controller-less pages, and the two adapter-wide overrides for URLs and component names.
+- [Title and meta](/d/spa/title-and-meta): The HTML shell, its two markers, viewData, and the server-side fallbacks behind the client's Head component.
+- [Client features](/d/spa/client-features): Links, manual visits, polling, prefetching, layouts, scroll, progress, transitions — behaviour that is entirely the stock client's.
+- [DevTools](/d/spa/devtools): The Inertia DevTools protocol server — landing with #1017.
+- [Starter kit](/d/spa/starter-kit): Sessions, users and the auth pages — landing with #1018 and the SPA scaffolds in #999.
+- [AI-friendliness](/d/spa/ai): Everything an agent needs to build a Blok SPA correctly — llms.txt, the MCP page tools, the authoring block, and blokctl inertia doctor.
+
+## Optional
+
+- [Full text of every page above](/llms-full.txt): the same pages concatenated, for a single read.
