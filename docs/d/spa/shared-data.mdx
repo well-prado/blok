@@ -1,0 +1,107 @@
+---
+title: Shared data
+description: share() and shareOnce() — values every page gets, resolved lazily, announced to the client for instant visits.
+icon: "share-2"
+---
+
+Counterpart: [Shared data](https://inertiajs.com/docs/v3/data-props/shared-data).
+Laravel shares from `HandleInertiaRequests::share()`; Blok has a registry you
+fill once at boot, and — for values a **prop** needs — the `inertia.shared`
+middleware.
+
+```ts src/bootstrap.ts
+import { share, shareOnce } from "@blokjs/inertia";
+
+share("appName", "Blok");                                    // static
+share("auth", (req: unknown) => ({ user: userFrom(req) })); // LAZY: per request
+share("flags", () => ({ beta: true }), { always: true });    // survives every partial filter
+shareOnce("countries", async () => [{ code: "PT" }], { until: "1d" });
+
+function userFrom(_req: unknown): { email: string } | null {
+  return { email: "ada@example.com" };
+}
+```
+
+Import that module once, before the workflows.
+
+Shared values are merged **under** the page's own props — a page prop of the
+same name wins, and the shared value is then never resolved at all — and their
+top-level keys ride the page object as `sharedProps`, so
+[instant visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) can
+carry them to the next page before the server answers. `exposeSharedPropKeys:
+false` on a page hides the key list; the values still ship.
+
+## Selection
+
+Shared keys follow the same table as declared props:
+
+| Request | `regular` | `always: true` | `shareOnce` |
+| --- | --- | --- | --- |
+| full visit | resolved | resolved | resolved unless `X-Inertia-Except-Once-Props` names it |
+| partial with `only` | only when named | resolved | only when named |
+| partial without `only` | resolved | resolved | not resolved |
+| `except` names it | not resolved | resolved | not resolved |
+
+A lazy value is called with `ctx.request`, **at most once per request**, and
+only when the key is actually selected — so `share("auth", expensive)` costs
+nothing on a partial reload that asked for something else.
+
+A prop resolver that needs another shared value reads it from the same
+per-request cache:
+
+```ts src/read-shared.ts
+import { getShared } from "@blokjs/inertia";
+
+export async function tenantOf(ctx: unknown): Promise<{ id: string }> {
+  return await getShared<{ id: string }>("tenant", { id: "public" }, ctx);
+}
+```
+
+<Warning>
+**Namespace your shared data.** `share("auth", { user })`, not
+`share("user", …)`: keys are top-level props and a page prop of the same name
+silently wins. A key containing a dot is rejected for that reason.
+</Warning>
+
+## Registry or middleware?
+
+Both exist, and they answer different questions.
+
+| | `share()` registry | `inertia.shared` middleware |
+| --- | --- | --- |
+| Resolved by | the serializer, on every response | two real steps, before the workflow |
+| Reaches | the **client**, as a prop | `ctx.state`, so a prop's **inputs** can read it |
+| Read with | `usePage().props.auth` | `shared(currentUser, "auth")` |
+| Also does | — | verifies and clears the [flash cookie](/d/spa/flash-data) |
+
+Use the middleware when a prop needs the value; use the registry when the page
+does. Registry values reach a `page` step, a hand-written `step("render", …)`
+and [`inertia.page()`](/d/spa/routing) alike — including
+[error pages](/d/spa/error-handling), which render outside the middleware chain.
+
+## Typing shared props on the client
+
+Shared props are part of `PageProps` through Inertia's own config interface:
+
+```ts client/src/inertia.d.ts
+import "@inertiajs/core";
+
+declare module "@inertiajs/core" {
+  interface InertiaConfig {
+    sharedPageProps: { auth: { user: { email: string } | null }; appName: string };
+  }
+}
+```
+
+`blokctl gen app-types` writes that block for you — see [`gen app-types`](/d/cli/gen).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    `inertia.shared`, `inertia.auth`, reserved step ids.
+  </Card>
+  <Card title="Flash data" icon="bell" href="/d/spa/flash-data">
+    The signed one-shot cookie that replaces the session.
+  </Card>
+</CardGroup>

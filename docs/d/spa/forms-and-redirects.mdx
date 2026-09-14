@@ -1,0 +1,151 @@
+---
+title: Forms and redirects
+description: useForm on the client, redirectBack on the server, the 303 rule, and where errors come from.
+icon: "send"
+---
+
+Counterparts: [Forms](https://inertiajs.com/docs/v3/the-basics/forms) and
+[Redirects](https://inertiajs.com/docs/v3/the-basics/redirects).
+
+The client half is stock Inertia — `useForm`, `<Form>`, `router.post()`. The
+server half is one workflow that validates, writes, and **redirects back**.
+
+```tsx client/src/pages/Orders/Create.tsx
+import { useForm } from "@inertiajs/react";
+
+export default function Create() {
+  const form = useForm({ sku: "", qty: 1 });
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        form.post("/orders");
+      }}
+    >
+      <input value={form.data.sku} onChange={(e) => form.setData("sku", e.target.value)} />
+      {form.errors.sku && <span>{form.errors.sku}</span>}
+      <button type="submit" disabled={form.processing}>
+        Save
+      </button>
+    </form>
+  );
+}
+```
+
+```ts src/workflows/orders-create.ts
+import { branch, defineNode, eq, http, step, workflow } from "@blokjs/core";
+import { ValidateNode } from "@blokjs/helpers";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const OrderSchema = z.object({
+  sku: z.string().min(1, "Required."),
+  qty: z.number().min(1, "Too few."),
+});
+
+const createOrder = defineNode({
+  name: "create-order",
+  description: "Persist an order and bounce back with a toast.",
+  input: z.object({ order: z.unknown() }),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "o-1" }),
+});
+
+const bounceBack = defineNode({
+  name: "bounce-back",
+  description: "Redirect back with the validation errors.",
+  input: z.object({ errors: z.record(z.unknown()) }),
+  output: z.unknown(),
+  execute: (ctx, input) =>
+    redirectBack(ctx.request, { errors: input.errors, fallback: "/orders/new" }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  (req) => {
+    const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body });
+    branch("route", eq(checked.ok, true), {
+      then: () => {
+        step("create", createOrder, { order: checked.data });
+      },
+      else: () => {
+        step("reject", bounceBack, { errors: checked.errors });
+      },
+    });
+  },
+);
+```
+
+## The 303 rule
+
+A redirect answering a `PUT`, `PATCH` or `DELETE` must be a **303**, never a
+302: a 302 makes the browser replay the write against the redirect target.
+`redirectBack()` and `redirect()` apply the rule from the request method, and
+the HTTP trigger runs a safety net — a `302` leaving the trigger on a non-GET
+Inertia request is rewritten to `303`, so a middleware short-circuit or a rate
+limiter cannot leak a replayable redirect.
+
+## `redirectBack()` and `flash()`
+
+```ts src/redirects.ts
+import { back, flash, redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders/new" }, method: "POST" };
+
+export const withErrors = redirectBack(request, {
+  errors: { sku: "Required." },
+  bag: "createOrder",
+  fallback: "/orders",
+});
+
+export const withToast = flash("toast", { type: "success" }).redirectBack(request);
+export const alias = back(request, { fallback: "/" });
+```
+
+| Option | Effect |
+| --- | --- |
+| `errors` | validation errors, persisted in the signed cookie |
+| `bag` | error-bag name — defaults to the request's `X-Inertia-Error-Bag` |
+| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form) |
+| `fallback` | where to go when the request carried no `Referer` |
+| `preserveFragment` | keep the URL fragment across the bounce |
+| `clearHistory` | ask the client to drop its encrypted history |
+
+Everything it persists rides the **signed one-shot cookie**, because Blok has no
+session — see [flash data](/d/spa/flash-data). `BLOK_FLASH_SECRET` is required.
+
+## Where `errors` comes from
+
+`props.errors` is always present (`{}` when there are none). Three sources, in
+this order:
+
+1. the `errors` option on `render()`,
+2. the flash cookie the `inertia.shared` middleware read back after a bounce,
+3. nothing — `{}`.
+
+`withAllErrors: true` ships **every** message per field (`string[]`) instead of
+the first (`string`); pass the same flag to `blokctl gen app-types` so the
+generated types agree. Error bags nest the object one level deeper, which is
+what lets two forms on one page keep their errors apart.
+
+## Redirecting elsewhere
+
+```ts src/elsewhere.ts
+import { location, redirect } from "@blokjs/inertia";
+
+export const toBilling = location("https://billing.example.com");   // 409 + X-Inertia-Location
+export const toOrders = redirect("/orders", { method: "PUT" });      // 303
+export const toSection = redirect("/orders#new");                    // 409 + X-Inertia-Redirect
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Error bags, `withAllErrors`, and Precognition live validation.
+  </Card>
+  <Card title="File uploads" icon="upload" href="/d/spa/file-uploads">
+    Multipart, `_method` spoofing, and the size caps.
+  </Card>
+</CardGroup>

@@ -1,0 +1,95 @@
+---
+title: Error handling
+description: The client's error modal in development, real Inertia error pages in production, and handleExceptionsUsing.
+icon: "triangle-alert"
+---
+
+Counterpart: [Error handling](https://inertiajs.com/docs/v3/advanced/error-handling).
+
+**In development nothing changes.** The HTTP trigger's JSON diagnostics are a
+non-Inertia response, and the stock client shows them in its error modal — the
+documented dev experience, stack trace and all.
+
+**In production** (`NODE_ENV=production`, or `BLOK_INERTIA_ERROR_PAGES=1`
+anywhere) a failing request is rendered as an **Inertia page response carrying
+the real status**. The client's own `isHttpException()` path fires
+`inertia:httpException` and swaps the page in, so a 404 renders in place, the
+URL updates, and Back works. `BLOK_INERTIA_ERROR_PAGES=0` opts a production
+deploy back out.
+
+```ts src/errors.ts
+import { configureErrorPages, handleExceptionsUsing, render } from "@blokjs/inertia";
+
+configureErrorPages({
+  pages: { 404: "Errors/NotFound", 503: "Errors/Maintenance", default: "Errors/Error" },
+  statuses: [403, 404, 500, 503],   // the default set
+  viewData: { title: "Acme" },      // the same shell knobs a normal page has
+});
+
+handleExceptionsUsing(({ status }) => {
+  if (status === 503) return render("Errors/Maintenance", { until: "10:00" });
+  if (status === 404) return null;   // this one keeps the trigger's own 404
+  return render("Errors/Error", { status });
+});
+```
+
+| Behaviour | Detail |
+| --- | --- |
+| props | `{ status, message }`, where `message` is the status's standard reason phrase — **never** the thrown error's message and never a stack |
+| shared data | `share()` / `shareOnce()` **are** resolved, so a layout reading `auth` still renders |
+| middleware | has **not** run (errors happen outside the page workflow) — anything the error page needs must come from the shared registry |
+| negotiation | `X-Inertia` requests get the JSON page object, a browser navigation gets the HTML shell, and a plain API client keeps the trigger's own JSON body |
+| unmatched routes | go through the same path: a browser or Inertia visit gets the 404 page, everything else the JSON 404 |
+| `pages` vs `statuses` | a status named in `pages` renders even when it is not in `statuses`; every other status is gated by `statuses` and mapped through `default` |
+
+<Warning>
+A production error body is exactly where a driver message or a connection string
+leaks. That is why `message` is the reason phrase and nothing else — put the
+real detail in your logs.
+</Warning>
+
+## `handleExceptionsUsing()`
+
+The hook sees **every** status, not just the configured set, so it can add pages
+the default map does not carry. Returning `null` (or `undefined`) falls through
+to the response the trigger would have sent anyway — the per-status opt-out.
+
+The HTTP trigger reaches all of this through one exported function,
+`renderErrorPage(request, status, error)`, loaded with an optional dynamic
+import: a project without `@blokjs/inertia` installed boots and errors exactly
+as before.
+
+## The components
+
+`Errors/*` page components ship with the SPA templates
+([#999](https://github.com/well-prado/blok/issues/999)). Until those land, point
+`pages` at components your own client provides — a component the client cannot
+resolve is a client-side error, not a server one. `examples/inertia-react` has a
+minimal `Errors/Error` page to copy.
+
+```tsx client/src/pages/Errors/Error.tsx
+interface Props {
+  status: number;
+  message: string;
+}
+
+export default function ErrorPage({ status, message }: Props) {
+  return (
+    <main>
+      <h1>{status}</h1>
+      <p>{message}</p>
+    </main>
+  );
+}
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Authorization" icon="key" href="/d/spa/authorization">
+    Where most 403s come from.
+  </Card>
+  <Card title="Title and meta" icon="type" href="/d/spa/title-and-meta">
+    The shell an error page renders into.
+  </Card>
+</CardGroup>

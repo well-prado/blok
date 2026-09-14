@@ -1,0 +1,117 @@
+---
+title: Server-side rendering
+description: The SSR wire contract, the entry file per framework, blokctl inertia start-ssr, and what happens when rendering fails.
+icon: "server"
+---
+
+Counterpart: [Server-side rendering](https://inertiajs.com/docs/v3/advanced/server-side-rendering).
+Laravel runs `php artisan inertia:start-ssr`; Blok runs
+`blokctl inertia start-ssr`, and speaks the same wire contract.
+
+An initial, non-prefetch visit POSTs the page object to the SSR server and
+injects the returned `head` and `body` into the [shell](/d/spa/title-and-meta).
+Inertia visits (`X-Inertia: true`) are never server-rendered — there is no HTML
+to produce.
+
+## The entry file
+
+The SSR entry is ordinary Inertia; `@inertiajs/vite` builds it and
+`blokInertia()` records where it is.
+
+```tsx client/src/ssr.tsx
+import { createInertiaApp } from "@inertiajs/react";
+import createServer from "@inertiajs/react/server";
+import ReactDOMServer from "react-dom/server";
+
+createServer((page) =>
+  createInertiaApp({
+    page,
+    render: ReactDOMServer.renderToString,
+    resolve: (name: string) => import(`./pages/${name}.tsx`),
+    setup: ({ App, props }) => <App {...props} />,
+  }),
+);
+```
+
+Vue uses `@inertiajs/vue3/server` with `createSSRApp` + `renderToString`, Svelte
+`@inertiajs/svelte/server` — unchanged from the Inertia docs.
+
+```ts client/vite.config.ssr.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [blokInertia({ ssr: { entry: "src/ssr.tsx" } })],
+});
+```
+
+## Running it
+
+```bash
+vite build && vite build --ssr           # client + ssr bundles
+blokctl inertia start-ssr                # foreground; --port, --host, --runtime, --cluster
+blokctl inertia check-ssr                # prints OK, or exits 1
+blokctl inertia stop-ssr                 # POSTs /shutdown
+```
+
+| Flag | Default |
+| --- | --- |
+| `--runtime` | `BLOK_INERTIA_SSR_RUNTIME`, else `node` (`bun`, or an absolute path) |
+| `--port` | `13714` |
+| `--host` | `127.0.0.1` |
+| `--cluster` | off — Inertia's clustered SSR server |
+
+`start-ssr` runs in the foreground with the child's stdio inherited, so a
+process manager supervises it the way it would any other server.
+
+The bundle is discovered from `BLOK_INERTIA_SSR_BUNDLE`, else the first of
+`client/dist-ssr/ssr.{js,mjs}`, `client/dist/server/ssr.{js,mjs}`,
+`bootstrap/ssr/ssr.{js,mjs}`.
+
+## Configuring the server half
+
+```ts src/ssr-config.ts
+import { configureSsr, disableSsr, withoutSsr } from "@blokjs/inertia";
+
+configureSsr({ bundle: "client/dist-ssr/ssr.mjs", timeoutMs: 2_000, withoutSsr: ["admin/*"] });
+withoutSsr(["admin/*", "dashboard"]);
+disableSsr(() => process.env.NODE_ENV === "test");
+```
+
+| Where the endpoint comes from | Order |
+| --- | --- |
+| the page's own `ssr: { url }` input | first |
+| `BLOK_SSR_URL` (empty string turns SSR **off**) | then |
+| `<BLOK_STATIC_DIR ?? client/dist>/.blok-ssr-url`, written by the Vite plugin | then |
+| `http://127.0.0.1:13714/render` | last |
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `BLOK_INERTIA_SSR_ENABLED` | on | `0`/`false`/`off`/`no` disables SSR |
+| `BLOK_INERTIA_SSR_ENSURE_BUNDLE_EXISTS` | on | skip rendering when no bundle is on disk |
+| `BLOK_INERTIA_SSR_THROW_ON_ERROR` | off | fail the request instead of falling back |
+| `BLOK_INERTIA_SSR_TIMEOUT_MS` | `2000` | per-render timeout |
+
+## When it fails
+
+A failed render emits an `SsrRenderFailed` event (`ctx.publish`, plus any
+`onSsrRenderFailed()` listener), logs **once per asset version and component**,
+and **falls back to the client-rendered shell** — a broken SSR bundle degrades
+to a working SPA, not to a 500. `configureSsr({ throwOnError: true })` makes
+tests fail loudly instead.
+
+<Note>
+Text-fragment links (`#:~:text=`) require SSR, because the browser needs the
+target text present in the initial HTML.
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Assets and versioning" icon="package" href="/d/spa/assets-and-versioning">
+    The handoff directory SSR reads from.
+  </Card>
+  <Card title="Title and meta" icon="type" href="/d/spa/title-and-meta">
+    Where the rendered head tags land.
+  </Card>
+</CardGroup>

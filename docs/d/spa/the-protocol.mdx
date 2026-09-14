@@ -1,0 +1,148 @@
+---
+title: The protocol
+description: Every request header the adapter reads, every page-object field it emits, and every control response.
+icon: "network"
+---
+
+Counterpart: [The protocol](https://inertiajs.com/docs/v3/core-concepts/the-protocol).
+Blok implements Inertia **v3** exactly; this page is the field-by-field
+reference for `@blokjs/inertia`, the serializer node every page response passes
+through.
+
+The node takes a component name, already-resolved props and the request headers,
+and returns a response envelope the HTTP trigger emits verbatim:
+
+| Request | Response |
+| --- | --- |
+| no `X-Inertia` header | `200 text/html` — the shell, with the page object in `<script type="application/json" data-page="app">` |
+| `X-Inertia: true` | `200 application/json` — the bare page object |
+
+Both carry `Vary: X-Inertia`: one URL, two answers.
+
+## Request headers
+
+| Header | Effect |
+| --- | --- |
+| `X-Inertia` | `true` selects the JSON page object over the HTML shell. |
+| `X-Inertia-Version` | On a **GET**, a value different from the server's `version` produces the 409 conflict. Never on another method — a replayed write would lose its body. |
+| `X-Inertia-Partial-Component` | Must equal the page's component, otherwise the request is treated as a full visit. |
+| `X-Inertia-Partial-Data` | Comma-separated prop paths (dot notation) to keep. |
+| `X-Inertia-Partial-Except` | Comma-separated prop paths to drop, applied **after** `Partial-Data`. |
+| `X-Inertia-Reset` | Prop paths returned unmerged — stripped from `mergeProps` / `prependProps` / `deepMergeProps` (and from the `matchPropsOn` entries addressing them), with `scrollProps[<prop>].reset = true`. |
+| `X-Inertia-Error-Bag` | Nests `props.errors` under that bag name. |
+| `X-Inertia-Except-Once-Props` | Cache keys the client still holds; those prop **nodes do not run**, though their `onceProps` entry is always echoed back. |
+| `X-Inertia-Infinite-Scroll-Merge-Intent` | `append` / `prepend` — moves scroll props between `mergeProps` and `prependProps`. |
+| `Purpose: prefetch` | A fragment redirect stays an ordinary redirect instead of becoming a 409, and SSR is skipped. |
+| `Precognition` / `Precognition-Validate-Only` | Dry-run [validation](/d/spa/validation). |
+| `X-XSRF-TOKEN` | The [CSRF](/d/spa/csrf) double-submit header. |
+
+`errors` and every path in `alwaysProps` survive both partial-reload filters.
+
+## Page-object fields
+
+Always emitted: `component`, `props` (with `errors`, `{}` when there are none),
+`url`, `version` (`""` when untracked). Everything else is **omitted** when it
+does not apply — never `false`, never `[]`, never `{}`.
+
+| Field | Emitted when |
+| --- | --- |
+| `encryptHistory` | the input is `true`, or the request/adapter default says so |
+| `clearHistory` | the input is `true`, or the request was marked by `logoutResponse()` |
+| `preserveFragment` | the input is `true` |
+| `mergeProps` | this is a partial reload, non-empty after reset filtering |
+| `prependProps` | this is a partial reload, non-empty after reset filtering |
+| `deepMergeProps` | this is a partial reload, non-empty after reset filtering |
+| `matchPropsOn` | this is a partial reload, non-empty (`"<propPath>.<keyField>"` entries) |
+| `scrollProps` | non-empty — `{ <propKey>: { pageName, previousPage, nextPage, currentPage, reset } }`, keyed by the **prop** |
+| `deferredProps` | non-empty **and** this is a full visit |
+| `rescuedProps` | non-empty **and** this is a partial reload |
+| `sharedProps` | non-empty and `exposeSharedPropKeys` is not `false` |
+| `onceProps` | non-empty — `{ key: { prop, expiresAt } }`, `expiresAt` in epoch **milliseconds**, `null` when it never expires |
+| `flash` | non-empty |
+
+## Control responses
+
+| Trigger | Response |
+| --- | --- |
+| version mismatch (GET only) | `409`, empty body, `X-Inertia-Location: <url>`, `X-Inertia-Version: <current>`, **no** `X-Inertia` header |
+| `location(url)` | `409` + `X-Inertia-Location` — an external or hard visit |
+| `redirect(url)` to a fragment | `409` + `X-Inertia-Redirect` (non-prefetch); an ordinary redirect otherwise |
+| `redirect()` after `PUT`/`PATCH`/`DELETE` | `303`, never `302` — a 302 makes the browser replay the write |
+| `redirect(url, { preserveFragment: true })` | adds `X-Inertia-Preserve-Fragment: true` |
+
+The HTTP trigger runs a safety net on top: a `302` leaving the trigger on a
+non-GET request that carried `X-Inertia: true` is rewritten to `303`, so a
+middleware short-circuit or a rate limiter cannot leak a replayable redirect.
+
+```ts src/control.ts
+import { location, redirect } from "@blokjs/inertia";
+
+export const external = location("https://billing.example.com/portal");
+export const bounce = redirect("/orders", { method: "PUT" });
+```
+
+## Prefetch
+
+A request carrying `Purpose: prefetch` is served like any other visit, with two
+differences: a fragment redirect is **not** promoted to a 409 (the client is not
+navigating yet), and SSR is skipped. Once props the client already holds ride
+along normally, so a prefetched page arrives complete.
+
+## The shell
+
+The default shell carries `<title data-inertia>` (v3 renamed the attribute from
+`inertia`) and two markers:
+
+| Marker | Replaced with |
+| --- | --- |
+| `<!--blok:head-->` | the `head` input — server-rendered `<Head>` tags |
+| `<!--blok:app-->` | `<div id="app"></div>` plus the boot script |
+
+`rootId` renames the root element and the script's `data-page` value. `viewData`
+fills `{{key}}` placeholders and is **never** sent to the client. A custom
+`shell` must contain `<!--blok:app-->`. See [title and meta](/d/spa/title-and-meta).
+
+The page JSON is escaped for a `<script>` context — every `/` as `\/`, `<`
+escaped, and the two JS line terminators — with **no** HTML-entity encoding,
+because a browser does not decode entities inside a script element.
+`JSON.parse(el.textContent)` round-trips it exactly.
+
+<Warning>
+Browsers store the page object in `history.state`, and Firefox hard-fails above
+16 MiB — which surfaces as a Back button that simply does nothing. A page object
+over **8 MiB** logs one warning per process and still ships. Move the bulk
+behind [`defer()`](/d/spa/deferred-props) / `optional()`, or
+[paginate](/d/spa/infinite-scroll) it.
+</Warning>
+
+## Writing the serializer step by hand
+
+`definePage().render()` is the authoring surface, but the node is an ordinary
+node and a JSON workflow can call it directly:
+
+```json
+{
+  "id": "render",
+  "use": "@blokjs/inertia",
+  "inputs": {
+    "component": "Users/Index",
+    "props": { "users": { "$ref": { "step": "list-users", "path": ["users"] } } },
+    "version": "v1"
+  }
+}
+```
+
+`headers`, `method` and `url` default to the live request, so a hand-written
+step only needs `component` + `props`. A hand-written step must also wire the
+flash itself — see [flash data](/d/spa/flash-data#without-the-page-step).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    The resolution table, header by header.
+  </Card>
+  <Card title="Assets and versioning" icon="package" href="/d/spa/assets-and-versioning">
+    Where `version` comes from, and what the 409 does.
+  </Card>
+</CardGroup>

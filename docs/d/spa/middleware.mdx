@@ -1,0 +1,146 @@
+---
+title: Middleware
+description: There is no HandleInertiaRequests — inertia.shared, inertia.auth and inertia.csrf are ordinary Blok middleware workflows.
+icon: "git-branch"
+---
+
+Counterpart: [Authentication](https://inertiajs.com/docs/v3/security/authentication)
+(Laravel's `HandleInertiaRequests` middleware class). Blok has no adapter-specific
+middleware system: these are [ordinary middleware workflows](/d/reference/middleware),
+registered by name, running on the parent `ctx` before the page workflow.
+
+```ts src/Workflows.ts
+import { defineNode } from "@blokjs/core";
+import { createAuthMiddleware, createCsrfMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "Who is signed in, from the request headers.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string().optional(), email: z.string().optional() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
+  "inertia.csrf": await createCsrfMiddleware({ except: ["webhooks/*"] }),
+};
+
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared", "inertia.csrf"]);
+```
+
+Per route: `trigger: http.get("/orders", { middleware: ["inertia.auth"] })`.
+
+| Workflow | Steps | What it does |
+| --- | --- | --- |
+| `inertia.shared` | `auth`, `flash` | runs your `currentUser` node into `ctx.state.auth`, then verifies and clears the signed [flash cookie](/d/spa/flash-data) into `ctx.state.flash` |
+| `inertia.auth` | `inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect` | when `auth.id` is missing, throws `302 Location: /login` — an Inertia visit follows a redirect, but has nothing to render from a bare 401 |
+| `inertia.csrf` | `csrf` (ephemeral) | issues and verifies the [`XSRF-TOKEN` double submit](/d/spa/csrf) |
+| `inertia.encryptHistory` | `history` | marks the request so every page in it encrypts its [history entry](/d/spa/history-encryption) |
+
+<Warning>
+**Reserved step ids: `auth` and `flash`.** Step ids are one flat namespace per
+run, and middleware shares the page workflow's `ctx` — so a page step called
+`auth` overwrites the signed-in user. `inertia.auth`'s own ids are prefixed
+(`inertiaGuest`, `inertiaAuthGate`, `inertiaAuthRedirect`) for the same reason.
+</Warning>
+
+## Reading what the middleware left
+
+`shared()` is the typed read of a state slot this workflow did not declare:
+
+```ts src/read-auth.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, shared } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "Who is signed in.",
+  input: z.object({}),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders for one user.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "o-1" }],
+});
+
+const OrdersPage = definePage("Orders/Index", { orders: listOrders });
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders", { middleware: ["inertia.shared", "inertia.auth"] }) },
+  (req) => {
+    OrdersPage.render(req, "page", "/orders", {
+      orders: { userId: shared(currentUser, "auth").id },
+    });
+  },
+);
+```
+
+`shared(node, stepId)` is `makeHandle` with the node supplying the type — no
+runtime magic, just a typed reference to `ctx.state[stepId]`.
+
+## With the `page` step there is nothing to wire
+
+The `page` control step reads the `flash` slot itself and folds it into the
+serializer's inputs: `errors`, the error bag, page flash, `preserveFragment`,
+`clearHistory`, and the clearing `Set-Cookie`. Anything passed through
+`render()`'s options wins, and `errors` / `flash` **merge** with your keys on
+top.
+
+A hand-written serializer step wires those fields itself — see
+[flash data](/d/spa/flash-data#without-the-page-step).
+
+## Writing your own
+
+An Inertia middleware is just a middleware. Anything that belongs on every page
+(a tenant lookup, a locale, a feature-flag snapshot) can be either:
+
+- a **middleware step**, when a prop's *inputs* need the value
+  (`shared(node, "tenant")`), or
+- a [shared-data registry](/d/spa/shared-data) entry, when the *page* needs it
+  (`share("tenant", …)`).
+
+```ts src/tenant-middleware.ts
+import { defineNode, step, workflow } from "@blokjs/core";
+import { z } from "zod";
+
+const resolveTenant = defineNode({
+  name: "resolve-tenant",
+  description: "Tenant for this request.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "acme" }),
+});
+
+export const tenantMiddleware = workflow(
+  "app.tenant",
+  { version: "1.0.0", middleware: true },
+  () => {
+    step("tenant", resolveTenant, {});
+  },
+);
+```
+
+Register it under a name, add it to the global chain or a route's list, and read
+it with `shared(resolveTenant, "tenant")`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Shared data" icon="share-2" href="/d/spa/shared-data">
+    The registry half of the same story.
+  </Card>
+  <Card title="CSRF" icon="shield" href="/d/spa/csrf">
+    `inertia.csrf`, and why the stock client needs no configuration.
+  </Card>
+</CardGroup>

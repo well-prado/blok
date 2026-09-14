@@ -1,0 +1,146 @@
+---
+title: Validation
+description: "@blokjs/validate, error bags, withAllErrors, and Precognition live validation that stops before the write."
+icon: "check"
+---
+
+Counterpart: [Validation](https://inertiajs.com/docs/v3/the-basics/validation).
+Laravel throws a `ValidationException` and the framework turns it into a
+redirect-with-errors. Blok's validation step **returns its verdict** — a form
+failure is data, not an exception.
+
+## `@blokjs/validate`
+
+```ts src/validate.ts
+import { branch, defineNode, eq, http, step, workflow } from "@blokjs/core";
+import { ValidateNode } from "@blokjs/helpers";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const OrderSchema = z.object({
+  sku: z.string().min(1, "Required."),
+  qty: z.number().min(1, "Too few."),
+});
+
+const createOrder = defineNode({
+  name: "create-order",
+  description: "Persist the order.",
+  input: z.object({ order: z.unknown() }),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "o-1" }),
+});
+
+const bounceBack = defineNode({
+  name: "bounce-back",
+  description: "Redirect back with the errors.",
+  input: z.object({ errors: z.record(z.unknown()) }),
+  output: z.unknown(),
+  execute: (ctx, input) => redirectBack(ctx.request, { errors: input.errors }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  (req) => {
+    const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
+    branch("route", eq(checked.ok, true), {
+      then: () => {
+        step("create", createOrder, { order: checked.data });
+      },
+      else: () => {
+        step("reject", bounceBack, { errors: checked.errors });
+      },
+    });
+  },
+);
+```
+
+`{ ok, data, errors }` out. `errors` is keyed by **dot path** — `user.name`,
+`items.0.name` — which is exactly what Inertia's client expects, so nothing has
+to hand-map a `ZodError`. One message per key by default; `withAllErrors: true`
+gives every message as a `string[]`, matching the adapter option of the same
+name. `schema` takes a Zod schema **value** in TypeScript or a plain JSON Schema
+object in a JSON workflow; both produce identical keys.
+
+## Error bags
+
+A page with two forms keeps their errors apart by naming a bag. The bag defaults
+to the request's `X-Inertia-Error-Bag`, and it rides the **signed cookie** across
+the bounce-back — the follow-up GET does not carry the header, so the header
+alone could never survive the redirect.
+
+```ts src/bag.ts
+import { redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders" }, method: "POST" };
+
+export const bounced = redirectBack(request, {
+  errors: { sku: "Required." },
+  bag: "createOrder",
+});
+```
+
+On the client: `useForm({ … }, { errorBag: "createOrder" })`, unchanged from the
+Inertia docs.
+
+## `withAllErrors`
+
+| Where | What it does |
+| --- | --- |
+| `@blokjs/validate` input | `errors[field]` becomes `string[]` |
+| the serializer's `withAllErrors` input | ships every message per field |
+| `blokctl gen app-types --with-all-errors` | types `errors` values as `string[]` |
+
+Set all three together, or the generated types will disagree with the wire.
+
+## Precognition
+
+Inertia's live validation sends the real form to the real endpoint with
+`Precognition: true` and asks only "would this validate?". Mark the validation
+step and the runner does the rest — note the `{ precognition: true }` fourth
+argument in the workflow above.
+
+On a request carrying the marker header, the runner **stops after the marked
+step** and answers from its `{ ok, errors }`:
+
+| Outcome | Response |
+| --- | --- |
+| no errors in the asked-about fields | `204` + `Precognition: true`, `Precognition-Success: true`, empty body |
+| errors | `422 { "errors": { … } }` + `Precognition: true` |
+| any request on a route with a marked step | `Vary: Precognition` |
+
+`Precognition-Validate-Only: sku,user.name` narrows the reported errors to those
+fields (a parent path also covers its children). **No step after the marked one
+runs** — that is the entire point: a keystroke must not charge a card. A request
+without the header runs the workflow end to end, and a workflow with no marked
+step is never dry-run by accident, so one workflow serves both the live
+validation and the real submit.
+
+The mechanism is the **runner's**, not the HTTP trigger's: a worker or cron run
+carries no such header and is unaffected, and any transport that understands a
+response envelope gets the 204/422 for free.
+
+```ts src/precognition.test.ts
+import { runPrecognition } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import ordersCreate from "./validate";
+
+it("never reaches the write on a dry run", async () => {
+  const dry = await runPrecognition(ordersCreate, { body: { sku: "" }, fields: ["sku"] });
+
+  expect(dry.status).toBe(422);
+  expect(dry.errors.sku).toBe("Required.");
+  expect(dry.run.step("create")?.executed).toBe(false);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    The bounce-back and the 303 rule.
+  </Card>
+  <Card title="File uploads" icon="upload" href="/d/spa/file-uploads">
+    Validating a multipart submit.
+  </Card>
+</CardGroup>

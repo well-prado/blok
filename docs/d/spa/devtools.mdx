@@ -1,0 +1,52 @@
+---
+title: DevTools
+description: The Inertia DevTools protocol server — landing with #1017.
+icon: "bug"
+---
+
+Counterpart: [DevTools](https://inertiajs.com/docs/v3/advanced/devtools).
+
+<Warning>
+**Not shipped yet.** The protocol-server recorder lands with
+[#1017](https://github.com/well-prado/blok/issues/1017). This page describes
+what is already true today and will be filled in when that PR merges.
+</Warning>
+
+What exists now:
+
+- The HTTP trigger's CORS configuration already allows and exposes the DevTools
+  headers (`X-Inertia-Devtools-Request`, `X-Inertia-Devtools-Session`), so a
+  [standalone](/d/spa/assets-and-versioning#standalone-mode-and-cors) SPA will
+  not have to change its CORS setup when DevTools arrives.
+- `getPageRegistry()` already returns every page declared in the process —
+  component name, per-prop mode metadata, Zod output schema and the declaring
+  `file:line`. That registry is what the DevTools recorder reports from, and
+  what [`blokctl gen app-types`](/d/cli/gen) reads today.
+- The client-side DevTools browser extension works against any Inertia v3
+  server, including Blok, for everything it can see from the page object alone.
+
+```ts src/registry.ts
+import { getPageRegistry } from "@blokjs/inertia";
+
+export function pageSummary(): { component: string; props: string[] }[] {
+  return [...getPageRegistry().values()].map((entry) => ({
+    component: entry.component,
+    props: Object.keys(entry.props),
+  }));
+}
+```
+
+Until #1017 lands, the supported way to inspect what a page workflow actually
+did is [`runPage()`](/d/fundamentals/testing#recipe-4--an-inertia-page-workflow),
+which reports every step, every resolved prop and the whole page object.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask-conical" href="/d/fundamentals/testing#recipe-4--an-inertia-page-workflow">
+    What to use in the meantime.
+  </Card>
+  <Card title="AI" icon="bot" href="/d/spa/ai">
+    The machine-readable surface, landing with #1019.
+  </Card>
+</CardGroup>

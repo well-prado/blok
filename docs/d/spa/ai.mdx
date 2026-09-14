@@ -1,0 +1,63 @@
+---
+title: AI-friendliness
+description: What an agent can already read about a Blok SPA, and what lands with #1019.
+icon: "bot"
+---
+
+Counterpart: [TypeScript](https://inertiajs.com/docs/v3/advanced/typescript) — the
+same goal from the other end: make the contract machine-readable.
+
+<Warning>
+**Partly shipped.** The `llms.txt` surface, the MCP page tools and
+`blokctl inertia doctor` land with
+[#1019](https://github.com/well-prado/blok/issues/1019). Everything below the
+fold exists today.
+</Warning>
+
+## The contract an agent can read now
+
+| Source | What it answers |
+| --- | --- |
+| `getPageRegistry()` | every page: component, per-prop mode, Zod output schema, declaring `file:line` |
+| `blokctl gen app-types` | the same thing as TypeScript — `blok-pages.d.ts`, `blok-routes.ts` |
+| `definePage()` itself | the contract lives in one place, outside the workflow callback, which is exactly what makes it extractable |
+| `AGENTS.md` / `CLAUDE.md` | the authoring rules an agent must follow in this repo, including the SPA block |
+
+Because a prop is a node with a Zod schema, "what does this page send the
+client?" is answerable **statically** — no request, no running server:
+
+```ts src/introspect.ts
+import { getPageRegistry } from "@blokjs/inertia";
+
+export function describePages(): string[] {
+  return [...getPageRegistry().values()].map((page) => {
+    const props = Object.entries(page.props)
+      .map(([key, prop]) => `${key}:${prop.mode}`)
+      .join(", ");
+    return `${page.component} { ${props} }`;
+  });
+}
+```
+
+## Rules an agent must follow
+
+The same ones a human follows — they are in `AGENTS.md` and `CLAUDE.md`:
+
+- author pages with `definePage()` + `render()`; never hand-roll the page object;
+- never write `ctx.state` or `ctx.vars` from inside a node — return output and
+  let the runner persist it;
+- no `js/` expression strings in new workflows; use handles and the typed
+  branch operators;
+- keep Zod schemas on every node, so codegen and the client stay typed;
+- `auth` and `flash` are reserved step ids in a page workflow.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    The contract those tools read.
+  </Card>
+  <Card title="DevTools" icon="bug" href="/d/spa/devtools">
+    The runtime half, landing with #1017.
+  </Card>
+</CardGroup>

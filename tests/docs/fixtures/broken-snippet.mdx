@@ -1,0 +1,27 @@
+---
+title: Deliberately broken sample
+---
+
+This fixture is **not** published documentation. It exists so the snippet gate
+can prove it fails: if this page ever compiles, the check is not checking
+anything.
+
+```ts src/broken.ts
+import { defineNode } from "@blokjs/core";
+import { definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "o-1" }],
+});
+
+// A page's props must be NODES, not strings — this must not compile.
+export const Broken = definePage("Broken", { orders: "list-orders" });
+
+// …and `listOrders` is unused on purpose, to keep the error above the only one.
+export const unused = listOrders;
+```

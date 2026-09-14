@@ -1,0 +1,117 @@
+---
+title: File uploads
+description: Multipart bodies, ctx.request.files, method spoofing, and the size caps that keep a big upload off the heap.
+icon: "upload"
+---
+
+Counterpart: [File uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads).
+
+On the client nothing is special: `useForm` promotes the request to
+`multipart/form-data` as soon as a value is a `File`, and reports progress.
+
+```tsx client/src/pages/Avatar.tsx
+import { useForm } from "@inertiajs/react";
+
+export default function Avatar() {
+  const form = useForm<{ avatar: File | null }>({ avatar: null });
+  return (
+    <input
+      type="file"
+      onChange={(event) => {
+        form.setData("avatar", event.target.files?.[0] ?? null);
+        form.post("/profile/avatar");
+      }}
+    />
+  );
+}
+```
+
+## What the server sees
+
+The HTTP trigger parses multipart into the request envelope:
+
+| Slot | Contents |
+| --- | --- |
+| `ctx.request.body` | the non-file fields, with bracket keys expanded — `user[name]` becomes `body.user.name`, `tags[0]` an array entry |
+| `ctx.request.files` | file parts by field name, nested the same way: `docs[0]` / `docs[1]` is a `File[]` at `files.docs` |
+| `ctx.request.method` | the **effective** method (see spoofing below) |
+| `ctx.request.originalMethod` | the method actually on the wire |
+
+Parts larger than the spool threshold are streamed to a temp file instead of
+being held in memory; `instanceof File` still holds, so a node reads them the
+same way either way.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BLOK_MAX_UPLOAD_BYTES` | 32 MiB | whole-body cap; over it the request fails before anything is buffered |
+| `BLOK_UPLOAD_SPOOL_BYTES` | 1 MiB | per-file threshold above which a part is spooled to disk |
+| `BLOK_METHOD_SPOOFING` | on | set to `0` to disable `_method` entirely |
+
+Bracket-key expansion guards against prototype pollution: `__proto__`,
+`constructor` and `prototype` segments are rejected rather than assigned.
+
+## Method spoofing
+
+Browsers cannot submit a `PUT`/`PATCH`/`DELETE` multipart form, so Inertia
+documents the `_method` workaround. Blok honours it with three limits:
+
+- only a **POST** may spoof,
+- only into `PUT`, `PATCH` or `DELETE` (case-insensitive),
+- the `_method` field is **removed** from the body, so a workflow never sees the
+  transport artefact.
+
+```ts client/src/spoof.ts
+import { router } from "@inertiajs/core";
+
+router.post("/profile/avatar", { _method: "put", avatar: new File([], "a.png") });
+```
+
+The [CSRF middleware](/d/spa/csrf) treats a spoofed POST as the write it really
+is, and the webhook trigger disables spoofing entirely — a webhook body is
+provider-controlled data, not a browser form.
+
+## Validating an upload
+
+```ts src/upload.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { z } from "zod";
+
+const storeAvatar = defineNode({
+  name: "store-avatar",
+  description: "Persist one uploaded avatar.",
+  input: z.object({ avatar: z.unknown() }),
+  output: z.object({ stored: z.boolean(), bytes: z.number() }),
+  execute: (_ctx, input) => {
+    const file = input.avatar;
+    if (!(file instanceof File)) throw new Error("avatar is required");
+    if (file.size > 2_000_000) throw new Error("avatar is too large");
+    return { stored: true, bytes: file.size };
+  },
+});
+
+export default workflow(
+  "avatar-upload",
+  { version: "1.0.0", trigger: http.post("/profile/avatar") },
+  () => {
+    step("store", storeAvatar, {});
+  },
+);
+```
+
+<Note>
+`files` is not part of the typed entry handle (`req.body`, `req.headers`,
+`req.query`, `req.params`), so a node that needs the file reads
+`ctx.request.files` inside `execute` — which is also where the `File` object
+has to be consumed anyway. Spooled temp files are cleaned up after the request.
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Returning errors for a failed upload.
+  </Card>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    The 303 a spoofed PUT must answer with.
+  </Card>
+</CardGroup>

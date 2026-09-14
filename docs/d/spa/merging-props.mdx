@@ -1,0 +1,100 @@
+---
+title: Merging props
+description: Append, prepend, deep-merge and match-on — the labels that tell the client to grow a prop instead of replacing it.
+icon: "layers"
+---
+
+Counterpart: [Merging props](https://inertiajs.com/docs/v3/data-props/merging-props).
+Laravel writes `Inertia::merge()` / `->deepMerge()` / `->matchOn()`; Blok wraps
+the node with `merge()`.
+
+`merge()` never changes **when** a prop resolves — only what the client does
+with the value. The labels ride **partial reloads only**: a full visit replaces
+props wholesale, so it carries none of `mergeProps`, `prependProps`,
+`deepMergeProps` or `matchPropsOn`.
+
+```ts src/merging.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, merge } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadUsers = defineNode({
+  name: "load-users",
+  description: "One page of users.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.object({ id: z.string() })) }),
+  execute: () => ({ data: [{ id: "u-1" }] }),
+});
+
+export const appended = merge(loadUsers);                              // mergeProps: ["users"]
+export const prepended = merge(loadUsers, { prepend: true });          // prependProps: ["users"]
+export const nested = merge(loadUsers, { append: "data" });            // mergeProps: ["users.data"]
+export const matched = merge(loadUsers, { append: "data", matchOn: "id" });
+export const deep = merge(loadUsers, { deep: true, matchOn: "data.id" });
+export const both = merge(loadUsers, { append: "data", prepend: "announcements" });
+export const perPath = merge(loadUsers, { append: { "users.data": "id", messages: "uuid" } });
+
+export const UsersFeed = definePage("Users/Feed", { users: nested });
+
+export default workflow(
+  "users-feed",
+  { version: "1.0.0", trigger: http.get("/users") },
+  (req) => {
+    UsersFeed.render(req, "page", "/users", {});
+  },
+);
+```
+
+| Option | Type | Effect |
+| --- | --- | --- |
+| `append` | `true` \| `"data"` \| `string[]` \| `Record<string, string>` | what the client appends to. Default: the whole prop |
+| `prepend` | same | what the client prepends to |
+| `deep` | `boolean \| string` | deep-merge the whole prop, or one sub-path |
+| `matchOn` | `string` | item field used to match and **replace** rows instead of appending |
+
+A `matchPropsOn` entry is `"<mergePath>.<field>"` — the client splits on the
+**last** dot, matches the head against the merge path, and replaces items whose
+field matches. The map form (`append: { "users.data": "id" }`) gives each path
+its own field; `matchOn` applies one field to every path the prop labels.
+
+## Resetting
+
+`X-Inertia-Reset: users` still **resolves** the prop — the client wants a fresh
+copy — but returns it without labels, so it replaces rather than merges. The
+stock client sends it for you:
+
+```ts client/src/reset.ts
+import { router } from "@inertiajs/core";
+
+router.reload({ only: ["users"], reset: ["users"] });
+```
+
+Client-side prop helpers (`router.replaceProp`, `appendToProp`,
+`prependToProp`) need nothing from the server.
+
+## Testing
+
+```ts src/merging.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import feed from "./merging";
+
+it("labels the merge path on a partial reload only", async () => {
+  const full = await runPage(feed);
+  expect(full.mergeProps).toEqual([]);
+
+  const partial = await full.reloadOnly("users");
+  expect(partial.mergeProps).toEqual(["users.data"]);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Infinite scroll" icon="infinity" href="/d/spa/infinite-scroll">
+    `merge()` with a cursor, plus the paginate helpers.
+  </Card>
+  <Card title="Once props" icon="database" href="/d/spa/once-props">
+    Values the client keeps between visits.
+  </Card>
+</CardGroup>

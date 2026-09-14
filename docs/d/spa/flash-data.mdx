@@ -1,0 +1,146 @@
+---
+title: Flash data
+description: Blok has no session — flash, errors and error bags ride a signed, one-shot cookie.
+icon: "bell"
+---
+
+Counterpart: [Flash data](https://inertiajs.com/docs/v3/data-props/flash-data).
+Laravel's flash lives in the session. **Blok has no session store**, so flash is
+a signed one-shot cookie: written by `redirectBack()`, read and cleared by the
+`inertia.shared` middleware, folded into the page object by the `page` step.
+
+<Warning>
+`BLOK_FLASH_SECRET` is **required** for anything that touches the cookie —
+HMAC-SHA256, `HttpOnly; SameSite=Lax; Path=/`. There is no default: an unsigned
+flash cookie is a forgeable one. A tampered or wrong-secret cookie reads back as
+"no flash", never as an error.
+</Warning>
+
+## The round trip
+
+1. A write fails validation → `redirectBack(ctx.request, { errors, flash })`
+   signs `{ errors, bag, flash, preserveFragment, clearHistory }` into the
+   cookie and answers `303`.
+2. The browser follows the redirect. The `inertia.shared` middleware's `flash`
+   step **verifies and clears** it into `ctx.state.flash`, and produces the
+   `Max-Age=0` `Set-Cookie` that makes "one-shot" mean something.
+3. The `page` control step reads that slot itself and feeds the serializer:
+   `errors`, the error bag, page `flash`, `preserveFragment`, `clearHistory`,
+   and the clearing cookie. **There is nothing to wire.**
+
+Anything you pass through `render()`'s options wins — `errors` and `flash`
+**merge**, with your keys on top of the middleware's.
+
+```ts src/flash-write.ts
+import { flash, redirectBack } from "@blokjs/inertia";
+
+const request = { headers: { referer: "/orders/new" }, method: "POST" };
+
+export const saved = flash("toast", { type: "success", message: "Order created." })
+  .redirectBack(request, { fallback: "/orders" });
+```
+
+On the client it is an ordinary prop:
+
+```tsx client/src/Toast.tsx
+import { usePage } from "@inertiajs/react";
+
+export function Toast() {
+  const flash = usePage().props.flash as { toast?: { message: string } } | undefined;
+  return flash?.toast ? <p>{flash.toast.message}</p> : null;
+}
+```
+
+The page object's `flash` field is emitted only when non-empty.
+
+## Without the `page` step
+
+A hand-written serializer step wires the same fields itself. `inertia.shared`'s
+`flash` step exposes `{ errors, bag, flash, preserveFragment, clearHistory,
+cookie, present }`, and `cookie` must go through as `cookies` — the response
+that **consumed** the flash is the one that expires it:
+
+```json
+{ "id": "render", "use": "@blokjs/inertia", "inputs": {
+  "component": "Orders/Index",
+  "props":    { "auth": { "$ref": { "step": "auth", "path": [] } } },
+  "errors":   { "$ref": { "step": "flash", "path": ["errors"] } },
+  "errorBag": { "$ref": { "step": "flash", "path": ["bag"] } },
+  "flash":    { "$ref": { "step": "flash", "path": ["flash"] } },
+  "clearHistory": { "$ref": { "step": "flash", "path": ["clearHistory"] } },
+  "cookies":  [ { "$ref": { "step": "flash", "path": ["cookie"] } } ]
+}}
+```
+
+## The `@blokjs/flash` node
+
+The cookie itself is an ordinary helper node, usable outside Inertia:
+
+| Input | Meaning |
+| --- | --- |
+| `op` | `"read"` or `"write"` |
+| `cookieHeader` | the raw `Cookie` header (read) |
+| `errors`, `bag`, `flash`, `preserveFragment`, `clearHistory`, `value` | the payload (write) |
+| `name`, `secret`, `maxAge`, `path`, `sameSite`, `secure` | cookie attributes — `maxAge` defaults to 120 seconds |
+
+Output: `{ cookie, present, errors, bag?, flash, preserveFragment, clearHistory?, value? }`.
+`clearHistory` is `true` or absent, never `false`, so a read can never cancel a
+mark set elsewhere in the same request.
+
+## Surviving a version conflict
+
+A `409` asset-version conflict throws the render away and makes the client
+re-visit — which would lose a flash the request had already consumed. The
+serializer **re-signs** the pending flash into a fresh cookie on that path. It
+degrades on purpose: without `BLOK_FLASH_SECRET` the 409 still happens, the
+toast is dropped, and one warning per process names the fix.
+
+## Testing
+
+```ts src/workflow.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { redirectBack } from "@blokjs/inertia";
+import { z } from "zod";
+
+const reject = defineNode({
+  name: "reject-order",
+  description: "Bounce back with one error.",
+  input: z.object({ sku: z.string().optional() }),
+  output: z.unknown(),
+  execute: (ctx) =>
+    redirectBack(ctx.request, { errors: { sku: "Required." }, fallback: "/orders/new" }),
+});
+
+export default workflow(
+  "orders-create",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  () => {
+    step("reject", reject, {});
+  },
+);
+```
+
+```ts src/flash.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { it } from "vitest";
+import createOrder from "./workflow";
+
+it("bounces back with a toast", async () => {
+  const page = await runPage(createOrder, { method: "POST", input: { sku: "" } });
+  page.assertRedirect("/orders/new").status(303).assertFlash("errors.sku", "Required.");
+});
+```
+
+`assertFlash` verifies the **signed** cookie, so it needs `BLOK_FLASH_SECRET`
+(or the `flashSecret` option) set in the test environment.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Validation" icon="check" href="/d/spa/validation">
+    Where those errors come from.
+  </Card>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    The chain that reads the cookie.
+  </Card>
+</CardGroup>

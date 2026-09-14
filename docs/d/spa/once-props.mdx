@@ -1,0 +1,105 @@
+---
+title: Once props
+description: Values the client remembers, so the prop's node never runs again — with keys, expiry and the sign-out pattern.
+icon: "database"
+---
+
+Counterpart: [Once props](https://inertiajs.com/docs/v3/data-props/once-props).
+Laravel writes `Inertia::once(fn () => …)->until(…)->as(…)`; Blok wraps the node
+with `once()`.
+
+`once()` is the one mode that changes **resolution**: as soon as the client
+holds the value it sends the cache key in `X-Inertia-Except-Once-Props`, and the
+prop's node is **not run at all** — only its `onceProps` entry comes back, or
+the client would drop its cached copy.
+
+```ts src/once.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadPlans = defineNode({
+  name: "load-plans",
+  description: "Pricing plans — they rarely change.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), price: z.number() })),
+  execute: () => [{ id: "pro", price: 20 }],
+});
+
+export const Pricing = definePage("Pricing", {
+  plans: once(loadPlans, { until: "1h" }),
+});
+
+export default workflow(
+  "pricing",
+  { version: "1.0.0", trigger: http.get("/pricing") },
+  (req) => {
+    Pricing.render(req, "page", "/pricing", {});
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `as: "roles"` | the cache key, so two pages can share one remembered value under different prop names. Defaults to the prop key. |
+| `until` | `"1h"` / `"500ms"` (a duration from now), a number of **seconds**, or an absolute date (`Date`, or anything `Date.parse` accepts). Emitted as `expiresAt` in epoch milliseconds; a deadline already in the past resolves again despite the header. |
+| `fresh: true` | resolve and resend even when the client says it still holds the value. |
+
+<Note>
+`fresh` is a boolean, not a callback: prop metadata is workflow **config**,
+JSON-cloned at boot, so a function would silently vanish. Decide per request
+from the client (`router.reload({ only: ["plans"] })` always resolves) or from
+inside the prop's own node.
+</Note>
+
+Explicit always wins: naming a once prop in `only` resolves it whatever the
+header says. Prefetch requests carry the remembered entries like any other
+request, so a prefetched page arrives with its once props already filled in.
+
+## Sign-out: overwrite, do not forget
+
+The documented auth pattern is to remember the user while signed in and
+**overwrite** the remembered copy with `null` on sign-out — a plain prop of the
+same key replaces whatever the client cached.
+
+```ts src/auth-once.ts
+import { defineNode } from "@blokjs/core";
+import { definePage, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user, or null.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }).nullable(),
+  execute: () => ({ id: "u-1" }),
+});
+
+export const Layout = definePage("App/Layout", { auth: once(currentUser, { as: "auth" }) });
+```
+
+## Shared once props
+
+The [shared-data registry](/d/spa/shared-data) has the same mode:
+
+```ts src/shared-once.ts
+import { shareOnce } from "@blokjs/inertia";
+
+shareOnce("countries", async () => [{ code: "PT" }], { until: "1d" });
+```
+
+## Composing
+
+`once(merge(node, { append: "data" }))` is remembered **and** mergeable — the
+metadata modes contribute labels without taking the resolution slot.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Shared data" icon="share-2" href="/d/spa/shared-data">
+    Values every page gets, resolved lazily per request.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    `onceProps`, `expiresAt`, and the header that suppresses a node.
+  </Card>
+</CardGroup>

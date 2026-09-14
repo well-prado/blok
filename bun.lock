@@ -585,6 +585,15 @@
         "typescript": "^5.8.3",
       },
     },
+    "tests/docs": {
+      "name": "@blokjs/docs-tests",
+      "version": "2.3.0",
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "triggers/cron": {
       "name": "@blokjs/trigger-cron",
       "version": "2.3.0",
@@ -1176,6 +1185,8 @@
     "@blokjs/core": ["@blokjs/core@workspace:core/core"],
 
     "@blokjs/desktop": ["@blokjs/desktop@workspace:apps/desktop"],
+
+    "@blokjs/docs-tests": ["@blokjs/docs-tests@workspace:tests/docs"],
 
     "@blokjs/helper": ["@blokjs/helper@workspace:core/workflow-helper"],
 

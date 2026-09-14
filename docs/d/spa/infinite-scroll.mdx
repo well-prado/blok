@@ -1,0 +1,97 @@
+---
+title: Infinite scroll
+description: scroll() props, the cursor metadata the client needs, and the paginate / cursorPaginate helpers.
+icon: "infinity"
+---
+
+Counterpart: [Infinite scroll](https://inertiajs.com/docs/v3/data-props/infinite-scroll).
+Laravel writes `Inertia::scroll($users->paginate())`; Blok wraps the node with
+`scroll()` and ships two pure pagination helpers.
+
+`scroll()` is [`merge()`](/d/spa/merging-props) with a cursor. The prop resolves
+like a regular one; the client's `<InfiniteScroll data="posts">` grows the item
+array and replaces the cursors around it.
+
+```ts src/feed.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage, paginate, paginatedSchema, scroll } from "@blokjs/inertia";
+import { z } from "zod";
+
+const Post = z.object({ id: z.string(), title: z.string() });
+
+const listPosts = defineNode({
+  name: "list-posts",
+  description: "One page of posts.",
+  input: z.object({ page: z.string().optional() }),
+  output: paginatedSchema(Post),
+  execute: (_ctx, input) => {
+    const rows = [{ id: "p-1", title: "Hello" }];
+    return paginate(rows, { page: Number(input.page ?? 1), perPage: 10 });
+  },
+});
+
+export const Feed = definePage("Feed/Index", { posts: scroll(listPosts) });
+
+export default workflow(
+  "feed",
+  { version: "1.0.0", trigger: http.get("/feed") },
+  (req) => {
+    Feed.render(req, "page", "/feed", { posts: { page: req.query.page } });
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `wrapper` | the sub-path holding the items — the one the client **grows**. Default `"data"`; `""` grows the whole prop. Only this path is labelled, so the cursors beside it are replaced. |
+| `pageName` | the query parameter the client bumps. Overrides the resolved metadata's own — two scroll props on one page need distinct names (`?users=2&orders=3`). |
+| `metadata` | `(output) => ScrollMetadata`, for an output that does not already carry the four cursor fields. |
+
+<Warning>
+The `scrollProps` entry is read from the **resolved output**, not from the
+declaration, so every response re-emits a fresh cursor. An output that satisfies
+neither `ScrollMetadata` (`pageName`, `previousPage`, `nextPage`, `currentPage`)
+nor a `metadata` resolver **fails the request** — a feed that can never load the
+next page is worse than a loud error.
+</Warning>
+
+## The pagination helpers
+
+Pure functions; they hold no database opinion.
+
+```ts src/paginate.ts
+import { cursorPaginate, paginate } from "@blokjs/inertia";
+
+const rows = [{ id: "1" }, { id: "2" }, { id: "3" }];
+
+export const sliced = paginate(rows, { page: 1, perPage: 2 });          // rows = the WHOLE collection
+export const trusted = paginate(rows, { page: 1, perPage: 2, total: 9 }); // rows = already one page
+export const cursored = cursorPaginate(rows, { cursor: "abc", next: "def", prev: null });
+```
+
+`paginatedSchema(item)` and `cursorPaginatedSchema(item)` are their Zod forms,
+for a node's `output`.
+
+## What goes on the wire
+
+| Request | Response |
+| --- | --- |
+| full visit | `props.posts`, `scrollProps.posts`, **no** merge label |
+| partial + `X-Inertia-Infinite-Scroll-Merge-Intent: append` | `mergeProps: ["posts.data"]` |
+| …`: prepend` | `prependProps: ["posts.data"]` |
+| partial + `X-Inertia-Reset: posts` | `scrollProps.posts.reset = true`, no label |
+| `defer(scroll(…))`, full visit | `deferredProps`, **no** `scrollProps`; both arrive on the deferred partial |
+
+For a scroll prop, naming the prop (`posts`) or its wrapper path (`posts.data`)
+in `X-Inertia-Reset` means the same thing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Merging props" icon="layers" href="/d/spa/merging-props">
+    The label semantics `scroll()` builds on.
+  </Card>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    Where `scroll()` sits among the seven modes.
+  </Card>
+</CardGroup>
