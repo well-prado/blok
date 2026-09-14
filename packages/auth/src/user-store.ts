@@ -216,12 +216,15 @@ export class SqliteUserStore implements UserStore {
 	}
 
 	async consumeResetToken(tokenHash: string): Promise<{ userId: string } | undefined> {
+		// ONE statement, not SELECT-then-DELETE: `DELETE … RETURNING` (SQLite
+		// 3.35+, which both `bun:sqlite` and `better-sqlite3` bundle) makes
+		// single-use ATOMIC. A separate read would let two workers sharing the
+		// file both see the row before either removed it, and both reset the
+		// password. The expiry is checked after the delete on purpose — a token
+		// that was presented is spent, valid or not.
 		const found = this.db
-			.prepare("SELECT user_id, expires_at FROM blok_password_resets WHERE token_hash = ?")
+			.prepare("DELETE FROM blok_password_resets WHERE token_hash = ? RETURNING user_id, expires_at")
 			.get(tokenHash);
-		// Delete unconditionally, before the expiry check — a token that was
-		// presented is spent, valid or not.
-		this.db.prepare("DELETE FROM blok_password_resets WHERE token_hash = ?").run(tokenHash);
 		if (!found || Number(found.expires_at) <= Date.now()) return undefined;
 		return { userId: String(found.user_id) };
 	}
