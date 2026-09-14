@@ -71,7 +71,8 @@ debug an empty registry.
 To create the venv ahead of time, or after changing the interpreter:
 
 ```bash
-bun run setup:python          # python3 -m venv … && pip install -r …
+bun run setup:python          # the same venv + install the server does on boot
+BLOK_PYTHON=/opt/homebrew/bin/python3.12 bun run setup:python
 ```
 
 Knobs: `BLOK_PYTHON=/path/to/python3` picks the interpreter,
