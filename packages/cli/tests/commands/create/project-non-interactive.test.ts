@@ -100,6 +100,8 @@ describe("create project (non-interactive)", () => {
 		SCAFFOLD_TIMEOUT,
 	);
 
+	// #1030: runs in its own vitest project after every sibling file (see
+	// vitest.config.ts), so nothing writes into packages/cli while bun copies it.
 	it(
 		"should accept package-manager flag in non-interactive mode",
 		async () => {

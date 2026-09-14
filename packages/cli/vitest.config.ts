@@ -1,4 +1,6 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
+
+const bunScaffold = "tests/commands/create/project-non-interactive.test.ts";
 
 export default defineConfig({
 	test: {
@@ -14,5 +16,21 @@ export default defineConfig({
 		// One Bun install cache per worker: concurrent scaffold installs of the
 		// same `file:` dependency race on the shared global cache (see setup file).
 		setupFiles: ["./tests/setup/isolate-bun-cache.ts"],
+		projects: [
+			{
+				extends: true,
+				test: { name: "cli", exclude: [...configDefaults.exclude, bunScaffold] },
+			},
+			{
+				extends: true,
+				test: {
+					name: "bun-scaffold",
+					include: [bunScaffold],
+					fileParallelism: false,
+					// Wait for sibling workers to stop mutating the file: source (#1030).
+					sequence: { groupOrder: 1 },
+				},
+			},
+		],
 	},
 });
