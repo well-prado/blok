@@ -60,6 +60,7 @@ describe("@blokjs/helpers", () => {
 		it("exports every helper at its canonical ref", () => {
 			expect(Object.keys(HELPER_NODES).sort()).toEqual([
 				"@blokjs/audit-log",
+				"@blokjs/csrf",
 				"@blokjs/ctx-publish",
 				"@blokjs/ctx-publish-many",
 				"@blokjs/expr",

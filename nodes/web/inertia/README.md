@@ -775,6 +775,89 @@ as before.
 > Until then, point `pages` at components your own client provides; a component
 > the client cannot resolve is a client-side error, not a server one.
 
+## CSRF protection (#1012)
+
+```ts
+// src/Workflows.ts
+import { createCsrfMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.csrf": await createCsrfMiddleware({ except: ["webhooks/*"] }),
+  // …your page workflows
+};
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared", "inertia.csrf"]);
+// per route: trigger: http.post("/orders", { middleware: ["inertia.csrf"] })
+```
+
+One step (`csrf`, ephemeral), running the `@blokjs/csrf` node:
+
+1. **Issues** a random 32-byte base64url `XSRF-TOKEN` cookie when the request
+   arrives without one — `Path=/; SameSite=Lax`, `Secure` on HTTPS, and
+   deliberately **not** `HttpOnly`: the client has to read it.
+2. **Verifies** POST/PUT/PATCH/DELETE by comparing the `X-XSRF-TOKEN` header
+   (or the legacy `_token` body field) against that cookie, in constant time
+   (`timingSafeEqual`). A `_method`-spoofed POST (#1016) is still a write.
+3. **Rejects** a mismatch with `303` back to the `Referer`, carrying
+   `{ message: "The page expired, please try again." }` in the signed flash
+   cookie — so `inertia.shared` reads it back on the next request and the page
+   renders a toast instead of the client's error modal. `onMismatch: "419"`
+   returns `419 { error, code: "csrf_token_mismatch" }` instead, for API-style
+   routes.
+
+**The stock client needs zero configuration**: `@inertiajs/core`'s own
+`XhrHttpClient` reads `XSRF-TOKEN` off `document.cookie` and sets
+`X-XSRF-TOKEN` on every request, which is why those two names are the defaults
+here.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `cookieName` / `headerName` | `XSRF-TOKEN` / `X-XSRF-TOKEN` | rename both halves of the double submit |
+| `field` | `_token` | body field accepted instead of the header |
+| `except` | `[]` | path globs skipped entirely, e.g. `["webhooks/*"]` (`*` matches across `/`, Laravel's `Str::is`) |
+| `apiExempt` | `false` | `true` exempts requests with no `X-Inertia` header |
+| `onMismatch` | `"redirect"` | `"419"` for a raw status instead of the bounce-back |
+| `fallback` | `"/"` | redirect target when the request carried no `Referer` |
+| `message` | `"The page expired, please try again."` | flash / error message |
+| `path`, `sameSite`, `maxAge`, `secure` | `/`, `Lax`, session, auto | cookie attributes |
+| `shareToken` | `true` | registers the `csrfToken` shared prop |
+
+**`usePage().props.csrfToken`** is the shared prop the middleware registers, for
+a plain HTML `<form>` that never goes through Inertia:
+`<input type="hidden" name="_token" :value="csrfToken">`. Inertia visits need
+none of it.
+
+**Rotate on login and logout** — a session boundary must not keep the
+pre-authentication token:
+
+```ts
+import { logoutResponse, rotateCsrf } from "@blokjs/inertia";
+
+async execute(ctx) {
+  rotateCsrf(ctx);           // new cookie on THIS response; the old token stops verifying
+  return logoutResponse(ctx);
+}
+```
+
+### How the cookie reaches the response
+
+Middleware runs **before** the page workflow, so there is no response to attach
+a `Set-Cookie` to yet — and the answer may not come from this node at all (a
+redirect, an error page, `@blokjs/respond`). `issueCsrfCookie()`
+(`@blokjs/shared`) therefore installs a one-time accessor over `ctx.response`:
+whatever the workflow finally assigns there gets the pending `Set-Cookie`
+appended, once, on its way out. A rejection never reaches `ctx.response`, so
+the thrown `GlobalError` carries the same cookie itself. The mark is a plain
+field on `ctx` — the pattern `markHistory()` (#1013) already uses — never
+`ctx.state`. A response that is not a `RespondEnvelope` (a bare JSON object)
+has nowhere to put a cookie and is left alone; every Inertia page response is
+an envelope.
+
+`BLOK_FLASH_SECRET` is what signs the bounce-back's message. Without it the
+redirect still happens — it just lands without the toast, rather than turning a
+missing env var into a wedged form.
+
 ## Exports
 
 ```ts
@@ -833,6 +916,11 @@ import InertiaNode, {
   normalizeErrors,
   createSharedMiddleware,
   createAuthMiddleware,
+  // CSRF (#1012)
+  createCsrfMiddleware,      // the `inertia.csrf` middleware workflow
+  rotateCsrf,                // new token on login/logout
+  CSRF_COOKIE,               // "XSRF-TOKEN"
+  CSRF_HEADER,               // "X-XSRF-TOKEN"
 } from "@blokjs/inertia";
 import type { PageProps } from "@blokjs/inertia";
 ```
@@ -840,13 +928,16 @@ import type { PageProps } from "@blokjs/inertia";
 Registered in `HELPER_NODES` when the package is installed — the adapter as
 `@blokjs/inertia`, and the three named nodes as `@blokjs/inertia.authorize`,
 `@blokjs/inertia.logout` and `@blokjs/inertia.history` — so JSON workflows
-reach all of them without any extra wiring. In TypeScript, pass the node object
+reach all of them without any extra wiring. `@blokjs/csrf` (#1012) ships in
+`@blokjs/helpers` itself, so it is always registered. In TypeScript, pass the node object
 to `step()` instead.
 
 ## Not this node's job
 
 Merge/once RESOLUTION semantics (#1009), infinite-scroll paging (#1010), SSR
-(#1001) and the client package. `definePage` (#995), the `page` control step
+(#1001) and the client package. The CSRF token node itself (`@blokjs/csrf`,
+#1012) lives in `@blokjs/helpers` — the double submit is plain HTTP, and only
+the middleware around it is Inertia-shaped. `definePage` (#995), the `page` control step
 (#1008), the middleware pack (#996) and the shared-data registry (#1015) ship
 here, but they are the AUTHORING, CONTROL and REQUEST layers — the node itself
 still only serializes (the registry is resolved during that serialization,
