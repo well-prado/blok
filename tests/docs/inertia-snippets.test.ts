@@ -194,14 +194,18 @@ describe("examples/inertia-* — authoring rules", () => {
 	 * which are deliberately not hoisted here (adding them re-hoists `vite`), so
 	 * their configs cannot resolve and their full typecheck belongs to #1003.
 	 */
-	it.each(["examples/inertia-react", "examples/inertia-standalone"])("%s typechecks", (dir) => {
-		const tsc = spawnSync("bunx", ["tsc", "--noEmit"], {
-			cwd: join(REPO_ROOT, dir),
-			encoding: "utf8",
-		});
-		expect(`${tsc.stdout ?? ""}${tsc.stderr ?? ""}`.trim()).toBe("");
-		expect(tsc.status).toBe(0);
-	}, 180_000);
+	it.each(["examples/inertia-react", "examples/inertia-standalone"])(
+		"%s typechecks",
+		(dir) => {
+			const tsc = spawnSync("bunx", ["tsc", "--noEmit"], {
+				cwd: join(REPO_ROOT, dir),
+				encoding: "utf8",
+			});
+			expect(`${tsc.stdout ?? ""}${tsc.stderr ?? ""}`.trim()).toBe("");
+			expect(tsc.status).toBe(0);
+		},
+		180_000,
+	);
 
 	it("no example source uses a js/ expression string or reads ctx.state", () => {
 		const offenders: string[] = [];
