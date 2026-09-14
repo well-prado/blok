@@ -9,7 +9,10 @@
 		"core/*",
 		"nodes/**/**",
 		"triggers/*",
-		"templates/**/**",
+		"templates/node",
+		"templates/node-function",
+		"templates/node-ui",
+		"templates/ts-template",
 		"packages/*",
 		"apps/*",
 		"tests/docs"

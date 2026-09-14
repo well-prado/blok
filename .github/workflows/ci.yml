@@ -215,15 +215,7 @@ jobs:
       # the same file under Bun, where `hono/bun`'s `Bun.file` implementation
       # is the one serving. Different code — only running it twice proves both.
       - name: HTTP trigger static assets under Bun
-        run: |
-          set -x
-          bun --version
-          ls -l triggers/http/package.json triggers/http/__tests__/unit/HttpTrigger.staticAssets.test.ts
-          df -h . | tail -2
-          bun run --filter @blokjs/trigger-http test:bun || {
-            echo "--- --filter failed; retrying directly in the package ---"
-            cd triggers/http && bun test __tests__/unit/HttpTrigger.staticAssets.test.ts
-          }
+        run: bun run --filter @blokjs/trigger-http test:bun
 
       - name: Run integration tests
         env:
