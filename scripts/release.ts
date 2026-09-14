@@ -100,6 +100,11 @@ export const PUBLISHABLE: readonly Publishable[] = [
 	// @blokjs/core, so it lists after it. `@blokjs/helpers` registers it as an
 	// OPTIONAL peer, which imposes no publish ordering of its own.
 	{ dir: "nodes/web/inertia", name: "@blokjs/inertia" },
+	// Auth starter kit (#1018). `@blokjs/session` consumes core + shared;
+	// `@blokjs/auth` consumes both of those plus `@blokjs/inertia` (redirectBack,
+	// logoutResponse, rotateCsrf, definePage), so it lists after all three.
+	{ dir: "packages/session", name: "@blokjs/session" },
+	{ dir: "packages/auth", name: "@blokjs/auth" },
 	// Persistent JavaScript execution worker (ADR 0016) — consumes runner +
 	// shared, and every scaffolded project declares it, so it must be on npm
 	// before `blokctl` ships a scaffold that depends on it.

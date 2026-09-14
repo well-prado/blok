@@ -319,6 +319,25 @@
         "vitest": "^4.0.18",
       },
     },
+    "packages/auth": {
+      "name": "@blokjs/auth",
+      "version": "2.3.0",
+      "dependencies": {
+        "@blokjs/core": "^2.3.0",
+        "@blokjs/inertia": "^2.3.0",
+        "@blokjs/session": "^2.3.0",
+        "@blokjs/shared": "^2.3.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.15.21",
+        "better-sqlite3": "^12.6.2",
+        "rimraf": "^6.1.2",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "packages/capabilities": {
       "name": "@blokjs/capabilities",
       "version": "2.3.0",
@@ -505,6 +524,31 @@
         "typescript": "^5.8.3",
         "vitest": "^4.0.18",
       },
+    },
+    "packages/session": {
+      "name": "@blokjs/session",
+      "version": "2.3.0",
+      "dependencies": {
+        "@blokjs/core": "^2.3.0",
+        "@blokjs/shared": "^2.3.0",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.15.21",
+        "better-sqlite3": "^12.6.2",
+        "rimraf": "^6.1.2",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+      "peerDependencies": {
+        "better-sqlite3": "^11.0.0",
+        "ioredis": "^5.9.2",
+      },
+      "optionalPeers": [
+        "better-sqlite3",
+        "ioredis",
+      ],
     },
     "packages/syntax": {
       "name": "@blokjs/syntax",
@@ -1161,6 +1205,8 @@
 
     "@blokjs/api-call": ["@blokjs/api-call@workspace:nodes/web/api-call@1.0.0"],
 
+    "@blokjs/auth": ["@blokjs/auth@workspace:packages/auth"],
+
     "@blokjs/browser": ["@blokjs/browser@workspace:nodes/web/browser@1.0.0"],
 
     "@blokjs/capabilities": ["@blokjs/capabilities@workspace:packages/capabilities"],
@@ -1194,6 +1240,8 @@
     "@blokjs/runner": ["@blokjs/runner@workspace:core/runner"],
 
     "@blokjs/runtime-worker": ["@blokjs/runtime-worker@workspace:packages/js-runtime-worker"],
+
+    "@blokjs/session": ["@blokjs/session@workspace:packages/session"],
 
     "@blokjs/shared": ["@blokjs/shared@workspace:core/shared"],
 
