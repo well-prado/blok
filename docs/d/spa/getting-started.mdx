@@ -21,9 +21,13 @@ five steps below by hand — they are exactly what the scaffold will write.
 When #999 lands this whole page collapses into:
 
 ```bash
-blokctl create project my-app --spa react   # pending #999
-blokctl add spa --framework vue             # pending #999 — add a SPA to an existing project
+blokctl create spa my-app --framework react   # pending #999 — a new SPA project
+blokctl add spa --framework vue               # pending #999 — a SPA in an existing project
+blokctl add spa --kit auth                    # pending #999 + #1018 — with the auth starter kit
 ```
+
+The exact flags land with the command; what is fixed is the shape of what it
+writes, which is the five steps below.
 
 ## 1. Install
 
