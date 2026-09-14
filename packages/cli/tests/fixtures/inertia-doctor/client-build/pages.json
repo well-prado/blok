@@ -1,0 +1,4 @@
+{
+	"root": "client/src/pages",
+	"pages": ["Dashboard"]
+}

@@ -28,9 +28,21 @@ function healthyEnv(overrides: Record<string, string | undefined> = {}): NodeJS.
 		NODE_ENV: "development",
 		BLOK_FLASH_SECRET: "test-flash-secret",
 		BLOK_SESSION_SECRET: "test-session-secret",
-		BLOK_STATIC_DIR: join(HEALTHY, "client/dist"),
+		BLOK_STATIC_DIR: join(HEALTHY, "client-build"),
 		...overrides,
 	} as NodeJS.ProcessEnv;
+}
+
+/**
+ * The fixtures' client build directory is `client-build`, NOT `client/dist`:
+ * the repo's .gitignore swallows `dist` (and `out`) at any depth, so a fixture
+ * under either name is present locally and absent in CI — which is exactly how
+ * this bit once. This guard makes that mistake loud instead of subtle.
+ */
+function assertFixtureCommitted(dir: string): void {
+	for (const file of ["package.json", "src/workflows/dashboard.ts", "client-build/pages.json"]) {
+		if (!existsSync(join(dir, file))) throw new Error(`fixture file missing (git-ignored?): ${join(dir, file)}`);
+	}
 }
 
 function find(checks: DoctorCheck[], name: string): DoctorCheck {
@@ -40,6 +52,14 @@ function find(checks: DoctorCheck[], name: string): DoctorCheck {
 }
 
 describe("inertia doctor — the healthy fixture", () => {
+	it("ships both fixtures — every file tracked, none git-ignored", () => {
+		assertFixtureCommitted(HEALTHY);
+		assertFixtureCommitted(BROKEN);
+		expect(existsSync(join(HEALTHY, "client-build/.blok-asset-version"))).toBe(true);
+		// The broken fixture deliberately has NO asset version.
+		expect(existsSync(join(BROKEN, "client-build/.blok-asset-version"))).toBe(false);
+	});
+
 	it("passes every check", async () => {
 		const checks = await inertiaDoctor({ cwd: HEALTHY, env: healthyEnv() });
 		expect(checks.filter((check) => check.status === "fail")).toEqual([]);
@@ -67,7 +87,7 @@ describe("inertia doctor — the healthy fixture", () => {
 		// The broken fixture does not depend on @blokjs/session.
 		const without = await inertiaDoctor({
 			cwd: BROKEN,
-			env: healthyEnv({ BLOK_STATIC_DIR: join(BROKEN, "client/dist") }),
+			env: healthyEnv({ BLOK_STATIC_DIR: join(BROKEN, "client-build") }),
 		});
 		expect(find(without, "BLOK_SESSION_SECRET").status).toBe("skip");
 	}, 60_000);
@@ -87,7 +107,7 @@ describe("inertia doctor — the broken fixture", () => {
 	it("catches the missing component, the shell marker, the CSRF middleware and the asset version", async () => {
 		const checks = await inertiaDoctor({
 			cwd: BROKEN,
-			env: healthyEnv({ BLOK_STATIC_DIR: join(BROKEN, "client/dist") }),
+			env: healthyEnv({ BLOK_STATIC_DIR: join(BROKEN, "client-build") }),
 		});
 
 		const failures = checks.filter((check) => check.status === "fail");
