@@ -336,12 +336,15 @@ const loadPlans = defineNode({
 	},
 });
 
+// `until` on purpose: the client keeps a remembered entry only while
+// `expiresAt > Date.now()`, so an entry that is not a NUMBER of milliseconds
+// loses that comparison and the client stops sending the header entirely.
 const FeedPage = definePage("Feed/Index", {
 	feed: merge(loadFeed, { append: "data", matchOn: "id" }),
-	plans: once(loadPlans),
+	plans: once(loadPlans, { until: "1h" }),
 });
 
-const BillingPage = definePage("Billing/Index", { plans: once(loadPlans) });
+const BillingPage = definePage("Billing/Index", { plans: once(loadPlans, { until: "1h" }) });
 
 function feedWorkflow() {
 	return workflow("jsdom-feed-page", { version: "1.0.0", trigger: http.get("/feed") }, (req) => {
@@ -393,7 +396,8 @@ describe("13 (#1009) — the client appends, resets, and stops asking for a once
 		document.documentElement.innerHTML = html;
 		const initialPage = getInitialPageFromDOM("app") as Page;
 		expect(initialPage.props.feed).toEqual({ data: [{ id: 1 }] });
-		expect(initialPage.onceProps?.plans).toEqual({ prop: "plans", expiresAt: null });
+		expect(initialPage.onceProps?.plans?.prop).toBe("plans");
+		expect(initialPage.onceProps?.plans?.expiresAt).toBeGreaterThan(Date.now());
 		expect(planRuns).toBe(1);
 
 		// `router.reload()` reloads `window.location.href`, so the document has to
