@@ -30,6 +30,7 @@
 import { type Handle, type InputOf, type OutputOf, type Refable, makeHandle, page } from "@blokjs/core";
 import type { RespondEnvelope } from "@blokjs/shared";
 import type { z } from "zod";
+import type { ScrollMetadata } from "./paginate.js";
 
 // =============================================================================
 // Prop-mode wrappers
@@ -85,15 +86,33 @@ export interface OnceOptions {
 	fresh?: boolean;
 }
 
-/** Options for {@link scroll} — infinite-scroll paging (#1010). */
-export interface ScrollOptions {
-	/** Sub-path holding the page's items, e.g. `"data"`. */
+/**
+ * Options for {@link scroll} — infinite-scroll paging (#1010).
+ *
+ * `T` is the prop node's output type, so a `metadata` resolver is typed
+ * against it. It defaults to `never` (not `unknown`) because that is what makes
+ * a resolver for a CONCRETE output assignable to the erased
+ * `ScrollOptions` the registry stores.
+ */
+export interface ScrollOptions<T = never> {
+	/**
+	 * Sub-path holding the page's items — the one the client GROWS. Default
+	 * `"data"` (what {@link paginate} returns them under); `""` grows the whole
+	 * prop.
+	 */
 	wrapper?: string;
-	/** Query-string parameter the client bumps. Default `"page"`. */
+	/**
+	 * Query-string parameter the client bumps. Overrides the resolved
+	 * metadata's own `pageName`; two scroll props on one page need distinct
+	 * names so their cursors do not collide (`?users=2&orders=3`).
+	 */
 	pageName?: string;
-	previousPage?: number | string | null;
-	nextPage?: number | string | null;
-	currentPage?: number | string | null;
+	/**
+	 * Map an arbitrary node output onto {@link ScrollMetadata}. Omit it when the
+	 * output already carries the four fields — which is what `paginate()` /
+	 * `cursorPaginate()` are for.
+	 */
+	metadata?: (output: T) => ScrollMetadata;
 }
 
 const PROP_BRAND = Symbol.for("blok.inertia.propMode");
@@ -176,7 +195,7 @@ export function once<V extends PropValue>(
 /** Resolves like a regular prop; the client grows it as the user scrolls (#1010). */
 export function scroll<V extends PropValue>(
 	node: V,
-	options: ScrollOptions = {},
+	options: ScrollOptions<OutputOf<Unwrap<V>>> = {},
 ): ModeProp<Unwrap<V>, Fold<InnerMode<V>, "scroll">> {
 	return wrap("scroll", node, { ...options }) as ModeProp<Unwrap<V>, Fold<InnerMode<V>, "scroll">>;
 }

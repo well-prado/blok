@@ -120,18 +120,26 @@ export function buildPage(input: BuildPageInput): PageObject {
 	// Reset paths come back unmerged for the same reason: the client asked for a
 	// fresh copy, so it replaces them wholesale.
 	const reset = headerList(headers["x-inertia-reset"]);
-	let mergeProps = partial ? strip(input.mergeProps, reset) : [];
-	let prependProps = partial ? strip(input.prependProps, reset) : [];
-	const deepMergeProps = partial ? strip(input.deepMergeProps, reset) : [];
 	const scrollProps = applyReset(input.scrollProps, reset);
+	// A scroll prop is keyed by the PROP (`posts`) but labelled on its wrapper
+	// path (`posts.data`), so resetting it has to reach both. `reset: ["posts"]`
+	// and `reset: ["posts.data"]` therefore mean the same thing for a scroll
+	// prop — which is what the client sends, depending on whether the caller
+	// spelled the prop or the array inside it.
+	const resetScroll = scrollResetKeys(scrollProps);
+	let mergeProps = partial ? strip(input.mergeProps, reset, resetScroll) : [];
+	let prependProps = partial ? strip(input.prependProps, reset, resetScroll) : [];
+	const deepMergeProps = partial ? strip(input.deepMergeProps, reset, resetScroll) : [];
 
 	// Infinite scroll tells us which end the client is growing, which decides
 	// whether a scroll prop merges as an append or a prepend.
 	const intent = headers["x-inertia-infinite-scroll-merge-intent"];
 	if (intent === "prepend" || intent === "append") {
-		const scrollPaths = Object.keys(scrollProps ?? {});
+		const scrollPaths = new Set(Object.keys(scrollProps ?? {}));
 		const [from, to] = intent === "prepend" ? [mergeProps, prependProps] : [prependProps, mergeProps];
-		const moved = from.filter((path) => scrollPaths.includes(path));
+		// A label belongs to a scroll prop when it IS the entry's key or lives
+		// under it — `scrollProps.posts` owns the `posts.data` label it emitted.
+		const moved = from.filter((path) => scrollPaths.has(path) || scrollPaths.has(root(path)));
 		if (moved.length > 0) {
 			const kept = from.filter((path) => !moved.includes(path));
 			const grown = [...to, ...moved.filter((path) => !to.includes(path))];
@@ -194,8 +202,27 @@ function normalizeOnceProps(
 	return out;
 }
 
-function strip(list: string[] | undefined, reset: readonly string[]): string[] {
-	return (list ?? []).filter((path) => !reset.includes(path));
+/** `posts.data` -> `posts`; a path with no dot is its own root. */
+function root(path: string): string {
+	const dot = path.indexOf(".");
+	return dot === -1 ? path : path.slice(0, dot);
+}
+
+/**
+ * Drop the merge labels this reset cancels: the exact paths named, plus
+ * everything under a scroll prop the reset flagged.
+ */
+function strip(list: string[] | undefined, reset: readonly string[], resetScroll: ReadonlySet<string>): string[] {
+	return (list ?? []).filter((path) => !reset.includes(path) && !resetScroll.has(path) && !resetScroll.has(root(path)));
+}
+
+/**
+ * Does `entry` name this scroll prop? A scroll prop is addressed by its key
+ * (`posts`), and the merge label it emits sits one level in (`posts.data`) —
+ * either spelling in `X-Inertia-Reset` means the same prop.
+ */
+function resets(key: string, reset: readonly string[]): boolean {
+	return reset.some((entry) => entry === key || root(entry) === key || root(key) === entry);
 }
 
 function applyReset(
@@ -206,7 +233,16 @@ function applyReset(
 	if (reset.length === 0) return { ...scrollProps };
 	const out: Record<string, ScrollProp> = {};
 	for (const [path, value] of Object.entries(scrollProps)) {
-		out[path] = reset.includes(path) ? { ...value, reset: true } : value;
+		out[path] = resets(path, reset) ? { ...value, reset: true } : value;
+	}
+	return out;
+}
+
+/** The scroll prop keys this response flagged `reset` — their labels come off. */
+function scrollResetKeys(scrollProps: Record<string, ScrollProp> | undefined): ReadonlySet<string> {
+	const out = new Set<string>();
+	for (const [key, value] of Object.entries(scrollProps ?? {})) {
+		if (value.reset === true) out.add(key);
 	}
 	return out;
 }

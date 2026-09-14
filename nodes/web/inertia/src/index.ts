@@ -57,6 +57,21 @@ export {
 	shared,
 } from "./define-page.js";
 export { withProps } from "./define-page.js";
+// --- pagination envelopes for `scroll()` props (#1010) -----------------------
+export {
+	cursorPaginate,
+	cursorPaginatedSchema,
+	paginate,
+	paginatedSchema,
+	scrollMetadataSchema,
+} from "./paginate.js";
+export type {
+	CursorPaginateOptions,
+	CursorPaginated,
+	PaginateOptions,
+	Paginated,
+	ScrollMetadata,
+} from "./paginate.js";
 // --- shared data + routing (#1015) -------------------------------------------
 export { _resetShared, getShared, share, shareOnce, sharedKeys } from "./shared.js";
 export type { ShareOnceOptions, ShareOptions, SharedMode, SharedNode, SharedResolver } from "./shared.js";

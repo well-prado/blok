@@ -1345,12 +1345,21 @@ export interface PagePropSpec {
 	};
 	/** Once-prop cache (#1009). `until`: a duration, SECONDS, or an absolute date. */
 	once?: { as?: string; until?: string | number | Date; fresh?: boolean };
+	/**
+	 * Infinite scroll (#1010). `wrapper` (default `"data"`) is the sub-path the
+	 * client grows; `pageName` (default `"page"`) the query parameter it bumps.
+	 * The cursors come from the prop's RESOLVED output — either it satisfies
+	 * `ScrollMetadata` (what `paginate()` returns) or `metadata` maps it.
+	 */
 	scroll?: {
 		wrapper?: string;
 		pageName?: string;
-		previousPage?: number | string | null;
-		nextPage?: number | string | null;
-		currentPage?: number | string | null;
+		metadata?: (output: never) => {
+			pageName: string;
+			previousPage: number | string | null;
+			nextPage: number | string | null;
+			currentPage: number | string | null;
+		};
 	};
 	/** Per-prop reliability knobs — they apply to THIS prop only, not the page. */
 	retry?: unknown;

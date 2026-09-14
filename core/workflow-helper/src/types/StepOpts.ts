@@ -1158,15 +1158,30 @@ export const V2PagePropSchema = z
 			.describe("Once-prop cache metadata (#1009). Emitted as the page object's `onceProps` entry."),
 		scroll: z
 			.object({
-				wrapper: z.string().optional(),
-				pageName: z.string().optional(),
-				previousPage: z.union([z.number(), z.string(), z.null()]).optional(),
-				nextPage: z.union([z.number(), z.string(), z.null()]).optional(),
-				currentPage: z.union([z.number(), z.string(), z.null()]).optional(),
+				wrapper: z
+					.string()
+					.optional()
+					.describe("Sub-path holding the item array the client grows. Default 'data'; '' grows the whole prop."),
+				pageName: z
+					.string()
+					.optional()
+					.describe(
+						"Query parameter the client bumps. Default 'page'; two scroll props on one page need distinct names.",
+					),
+				metadata: z
+					.custom<(output: never) => unknown>((value) => typeof value === "function")
+					.optional()
+					.describe(
+						"TS-only resolver mapping an arbitrary prop output onto ScrollMetadata. JSON workflows cannot " +
+							"carry a function — return through `paginate()` / `cursorPaginate()` instead.",
+					),
 			})
 			.strict()
 			.optional()
-			.describe("Infinite-scroll paging metadata (#1010). Emitted as the page object's `scrollProps` entry."),
+			.describe(
+				"Infinite-scroll paging declaration (#1010). The cursors themselves come from the prop's RESOLVED " +
+					"output and are emitted as the page object's `scrollProps[<propKey>]` entry.",
+			),
 		idempotencyKey: ResolvedKeySchema.optional().describe(
 			"Per-prop idempotency cache key — same contract as a step's.",
 		),

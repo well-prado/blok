@@ -71,13 +71,23 @@ export interface PageOnceMeta {
 	fresh?: boolean;
 }
 
-/** Infinite-scroll paging metadata (#1010). */
+/** Infinite-scroll paging DECLARATION (#1010) — how to read the prop, not what it said. */
 export interface PageScrollMeta {
+	/** Sub-path holding the item array the client grows. Default `"data"`. */
 	wrapper?: string;
+	/** Query-string parameter the client bumps. Overrides the resolved metadata's own. */
 	pageName?: string;
-	previousPage?: number | string | null;
-	nextPage?: number | string | null;
-	currentPage?: number | string | null;
+	/** Maps an arbitrary prop output onto the cursor fields. TS authoring only — JSON cannot carry a function. */
+	metadata?: (output: never) => unknown;
+}
+
+/** One emitted `scrollProps` entry — exactly the five fields the client reads. */
+export interface PageScrollProp {
+	pageName: string;
+	previousPage: number | string | null;
+	nextPage: number | string | null;
+	currentPage: number | string | null;
+	reset: boolean;
 }
 
 /** One declared prop: its key, the step that resolves it, and its mode. */
@@ -325,7 +335,47 @@ interface PageMetadata {
 	deepMergeProps?: string[];
 	matchPropsOn?: string[];
 	onceProps?: Record<string, { prop: string; expiresAt: number | null }>;
-	scrollProps?: Record<string, PageScrollMeta & { pageName: string }>;
+	scrollProps?: Record<string, PageScrollProp>;
+}
+
+/** The four cursor fields, off whatever the prop (or its resolver) produced. */
+const CURSOR_FIELDS = ["pageName", "previousPage", "nextPage", "currentPage"] as const;
+
+function cursor(source: Record<string, unknown>, field: "previousPage" | "nextPage" | "currentPage") {
+	const value = source[field];
+	return typeof value === "number" || typeof value === "string" ? value : null;
+}
+
+/**
+ * A scroll prop's `scrollProps` entry, read from the RESOLVED output (#1010).
+ *
+ * The cursors describe the page that was just produced, so they cannot be
+ * static declaration data: every scroll response re-emits a fresh set. Either
+ * the output already satisfies the contract (what `paginate()` /
+ * `cursorPaginate()` return) or `metadata` maps an arbitrary shape onto it.
+ *
+ * A `pageName` declared on the mode wins over the output's own — it is how two
+ * scroll props on one page are given non-colliding query parameters.
+ */
+function scrollProp(key: string, meta: PageScrollMeta, output: unknown): PageScrollProp {
+	const resolver = meta.metadata;
+	const raw = typeof resolver === "function" ? (resolver as (value: unknown) => unknown)(output) : output;
+	if (!isRecord(raw) || !CURSOR_FIELDS.some((field) => Object.hasOwn(raw, field))) {
+		throw new Error(
+			`[blok] page prop "${key}" is declared \`scroll()\` but its output carries none of ${CURSOR_FIELDS.join(
+				", ",
+			)}. Return through \`paginate()\` / \`cursorPaginate()\` from @blokjs/inertia, or give the mode a \`metadata\` resolver.`,
+		);
+	}
+	return {
+		pageName: meta.pageName ?? (typeof raw.pageName === "string" ? raw.pageName : "page"),
+		previousPage: cursor(raw, "previousPage"),
+		nextPage: cursor(raw, "nextPage"),
+		currentPage: cursor(raw, "currentPage"),
+		// The wire always carries the flag; the SERIALIZER flips it when the
+		// client's `X-Inertia-Reset` names this prop, same as it strips the label.
+		reset: false,
+	};
 }
 
 export class PageNode extends RunnerNode {
@@ -541,7 +591,7 @@ function buildMetadata(
 	const deepMergeProps: string[] = [];
 	const matchPropsOn: string[] = [];
 	const onceProps: Record<string, { prop: string; expiresAt: number | null }> = {};
-	const scrollProps: Record<string, PageScrollMeta & { pageName: string }> = {};
+	const scrollProps: Record<string, PageScrollProp> = {};
 
 	for (const prop of props) {
 		if (prop.mode === "always") alwaysProps.push(prop.key);
@@ -585,10 +635,14 @@ function buildMetadata(
 		if (onceMeta) {
 			onceProps[onceMeta.as ?? prop.key] = { prop: prop.key, expiresAt: onceExpiry(onceMeta.until) };
 		}
+		// The entry is keyed by the PROP, which is what `<InfiniteScroll data="posts">`
+		// looks up (`page.scrollProps[propName]` in @inertiajs/core). The merge
+		// label goes on the WRAPPER path instead: the client grows the item array
+		// and replaces the cursors around it.
 		if (scrollMeta && present) {
-			const s = scrollMeta;
-			const path = s.wrapper ? `${prop.key}.${s.wrapper}` : prop.key;
-			scrollProps[path] = { ...s, pageName: s.pageName ?? "page" };
+			const wrapper = scrollMeta.wrapper ?? "data";
+			const path = wrapper ? `${prop.key}.${wrapper}` : prop.key;
+			scrollProps[prop.key] = scrollProp(prop.key, scrollMeta, resolved[prop.key]);
 			if (!mergeProps.includes(path)) mergeProps.push(path);
 		}
 	}

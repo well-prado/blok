@@ -41,7 +41,7 @@ hand-written workflow only needs `component` + `props`.
 | `X-Inertia-Partial-Component` | Must equal `component`, otherwise the request is treated as a full visit. |
 | `X-Inertia-Partial-Data` | Comma-separated prop paths (dot notation) to keep. |
 | `X-Inertia-Partial-Except` | Comma-separated prop paths to drop, applied after `Partial-Data`. |
-| `X-Inertia-Reset` | Prop paths returned unmerged: stripped from `mergeProps`/`prependProps`/`deepMergeProps` (and from the `matchPropsOn` entries that address them), with `scrollProps[path].reset = true`. |
+| `X-Inertia-Reset` | Prop paths returned unmerged: stripped from `mergeProps`/`prependProps`/`deepMergeProps` (and from the `matchPropsOn` entries that address them), with `scrollProps[<prop>].reset = true`. For a scroll prop, naming the prop (`posts`) or its wrapper path (`posts.data`) means the same thing. |
 | `X-Inertia-Error-Bag` | Nests `props.errors` under that bag name. |
 | `X-Inertia-Except-Once-Props` | Once-prop cache keys the client still holds, so the resolver **skips those prop nodes entirely** (#1009). The `onceProps` **entry is always echoed**, or the client would drop its cached copy. A value resolved anyway — `fresh`, an elapsed `until`, or an explicit `only` — ships alongside its entry. |
 | `X-Inertia-Infinite-Scroll-Merge-Intent` | `prepend` / `append` — moves scroll props between `mergeProps` and `prependProps`. |
@@ -64,7 +64,7 @@ does not apply — never `false`, never `[]`, never `{}`.
 | `prependProps` | this is a **partial reload**, non-empty after reset filtering |
 | `deepMergeProps` | this is a **partial reload**, non-empty after reset filtering |
 | `matchPropsOn` | this is a **partial reload**, non-empty (`"<propPath>.<keyField>"` entries) |
-| `scrollProps` | non-empty (`{ path: { pageName, previousPage, nextPage, currentPage, reset } }`) |
+| `scrollProps` | non-empty (`{ <propKey>: { pageName, previousPage, nextPage, currentPage, reset } }` — keyed by the PROP, which is what `<InfiniteScroll data="posts">` looks up) |
 | `deferredProps` | non-empty **and** this is a full visit |
 | `rescuedProps` | non-empty **and** this is a partial reload |
 | `sharedProps` | non-empty and `exposeSharedPropKeys` is not `false` |
@@ -211,7 +211,7 @@ export const OrdersIndex = definePage("Orders/Index", {
   stats:   defer(heavyStats, { group: "dashboard", rescue: true }),
   feed:    merge(loadFeed, { append: "data", matchOn: "id" }),   // #1009
   plans:   once(loadPlans, { until: "1h" }),                     // #1009
-  posts:   scroll(paginatePosts, { wrapper: "data" }),           // #1010
+  posts:   scroll(listPosts),                                    // #1010
 });
 
 export default workflow("Orders page", { version: "1.0.0", trigger: http.get("/orders") }, (req) => {
@@ -283,7 +283,7 @@ The same step in a JSON workflow:
       "feed":    { "use": "load-feed", "mode": "merge", "merge": { "append": "data", "matchOn": "id" } },
       "plans":   { "use": "load-plans", "mode": "once", "once": { "until": "1h", "as": "plans" } },
       "results": { "use": "load-results", "mode": "defer", "group": "dashboard", "merge": { "deep": true } },
-      "posts":   { "use": "paginate-posts", "mode": "scroll", "scroll": { "wrapper": "data" } }
+      "posts":   { "use": "list-posts", "mode": "scroll", "scroll": { "pageName": "page" } }
     },
     "inputs": { "version": "v1" }
   }
@@ -364,6 +364,62 @@ once(merge(loadActivity, { append: "data" }))                      // remembered
 
 The innermost resolution mode wins the mode slot (`defer` above); `merge` and
 `scroll` only contribute metadata, so every bag survives the composition.
+
+### Infinite scroll (#1010)
+
+`scroll()` is `merge()` with a cursor. The prop resolves like a regular one; the
+client (`<InfiniteScroll data="posts">`) grows the item array and replaces the
+cursors around it.
+
+```ts
+import { definePage, paginate, paginatedSchema, scroll } from "@blokjs/inertia";
+
+const listPosts = defineNode({
+  name: "list-posts",
+  description: "one page of posts",
+  input: z.object({ page: z.union([z.number(), z.string()]).optional() }),
+  output: paginatedSchema(PostSchema),
+  async execute(_ctx, input) {
+    const { rows, total } = await db.posts(input.page ?? 1, 10);
+    return paginate(rows, { page: input.page ?? 1, perPage: 10, total });
+  },
+});
+
+export const Feed = definePage("Feed/Index", { posts: scroll(listPosts) });
+// …render(req, "page", "/feed", { posts: { page: req.query.page } })
+```
+
+| Option | Effect |
+| --- | --- |
+| `wrapper` | the sub-path holding the items — the one the client GROWS. Default `"data"`; `""` grows the whole prop. Only this path is labelled, so the cursors beside it are replaced. |
+| `pageName` | the query parameter the client bumps. Overrides the resolved metadata's own; two scroll props on one page need distinct names (`?users=2&orders=3`). |
+| `metadata` | `(output) => ScrollMetadata` — for an output that does not already carry the four cursor fields. |
+
+The `scrollProps` entry is read from the **resolved output**, not from the
+declaration, so every scroll response re-emits a fresh cursor. The output must
+satisfy `ScrollMetadata` (`pageName`, `previousPage`, `nextPage`, `currentPage`)
+or supply a `metadata` resolver — a scroll prop whose output carries none of
+them fails the request rather than shipping a feed that can never load.
+
+`paginate()` and `cursorPaginate()` are pure helpers that shape that envelope;
+they hold no database opinion.
+
+```ts
+paginate(rows, { page, perPage })              // rows is the WHOLE collection — sliced here
+paginate(rows, { page, perPage, total })       // rows is already the page — trusted as-is
+cursorPaginate(rows, { cursor, next, prev })   // opaque cursors, pageName defaults to "cursor"
+```
+
+`paginatedSchema(item)` / `cursorPaginatedSchema(item)` are their Zod forms for a
+node's `output`.
+
+| Request | Response |
+| --- | --- |
+| full visit | `props.posts`, `scrollProps.posts`, **no** merge label |
+| partial + `X-Inertia-Infinite-Scroll-Merge-Intent: append` | `mergeProps: ["posts.data"]` |
+| …`: prepend` | `prependProps: ["posts.data"]` |
+| partial + `X-Inertia-Reset: posts` | `scrollProps.posts.reset = true`, no label |
+| `defer(scroll(…))`, full visit | `deferredProps`, **no** `scrollProps`; both on the deferred partial |
 
 Internally the step lowers to one inner step per prop, named `<pageId>.<key>`,
 plus the serializer at `<pageId>.$render`. Studio tags those inner steps
