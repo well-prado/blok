@@ -1,30 +1,70 @@
 ---
 title: AI-friendliness
-description: What an agent can already read about a Blok SPA, and what lands with #1019.
+description: Everything an agent needs to build a Blok SPA correctly — llms.txt, the MCP page tools, the authoring block, and blokctl inertia doctor.
 icon: "bot"
 ---
 
 Counterpart: [TypeScript](https://inertiajs.com/docs/v3/advanced/typescript) — the
 same goal from the other end: make the contract machine-readable.
 
+Because a page's contract is declared **once, outside the workflow callback**,
+and every prop is a node with a Zod schema, "what does this page send the
+client?" is answerable **statically** — no request, no running server. Everything
+on this page follows from that one design decision.
+
+## The four surfaces
+
+| Surface | What it answers |
+| --- | --- |
+| `docs/llms.txt`, `docs/llms-full.txt` | the whole SPA section as plain text, in one read |
+| `AGENTS.md` / `CLAUDE.md`, `.claude/skills/blok-inertia.md` | the rules an agent must follow when it writes the code |
+| MCP tools (`inertia.pages.list`, `inertia.page.get`, `inertia.routes.list`) | this app's live pages, props and routes |
+| `blokctl inertia doctor` | whether this app is wired correctly, and the exact fix when it is not |
+
+Plus the two that were always there: `blokctl gen app-types` (the same contract
+as TypeScript — `blok-pages.d.ts`, `blok-routes.ts`) and `getPageRegistry()`
+itself.
+
+## llms.txt
+
+`docs/llms.txt` is the [llmstxt.org](https://llmstxt.org) index of the SPA
+section — one line per page, title and description. `docs/llms-full.txt` is the
+same pages' full prose concatenated, for an agent that would rather read once
+than crawl 27 files.
+
+Both are **generated** from the MDX, never hand-written:
+
+```bash
+bun run docs:llms
+```
+
+The docs gate regenerates and diffs them, so a doc edit without a regenerate
+fails CI rather than quietly shipping a stale copy.
+
+## The MCP tools
+
+If the app already exposes workflows over
+[MCP](/d/triggers/mcp), it also exposes three read-only page tools — no wiring,
+no extra workflow:
+
+| Tool | Returns |
+| --- | --- |
+| `inertia.pages.list` | every page: component, each prop's mode / group / rescue, whether it has a schema, the declaring `file:line`, plus the shared-prop keys |
+| `inertia.page.get(component)` | one page's props **as a JSON Schema**, built from each prop node's Zod output schema |
+| `inertia.routes.list` | every HTTP route and the page component it renders |
+
+They read in-process state; they run no node, no step and no workflow, and they
+are annotated `readOnlyHint`.
+
 <Warning>
-**Partly shipped.** The `llms.txt` surface, the MCP page tools and
-`blokctl inertia doctor` land with
-[#1019](https://github.com/well-prado/blok/issues/1019). Everything below the
-fold exists today.
+**Dev-only by default.** A page registry is a map of the app's internals. The
+tools are served when `NODE_ENV` is not `production`; to serve them in
+production set `BLOK_INERTIA_MCP=1` (and `BLOK_INERTIA_MCP=0` turns them off in
+development).
 </Warning>
 
-## The contract an agent can read now
-
-| Source | What it answers |
-| --- | --- |
-| `getPageRegistry()` | every page: component, per-prop mode, Zod output schema, declaring `file:line` |
-| `blokctl gen app-types` | the same thing as TypeScript — `blok-pages.d.ts`, `blok-routes.ts` |
-| `definePage()` itself | the contract lives in one place, outside the workflow callback, which is exactly what makes it extractable |
-| `AGENTS.md` / `CLAUDE.md` | the authoring rules an agent must follow in this repo, including the SPA block |
-
-Because a prop is a node with a Zod schema, "what does this page send the
-client?" is answerable **statically** — no request, no running server:
+Statically — in a test, a script, or a build step — the same data is one call
+away:
 
 ```ts src/introspect.ts
 import { getPageRegistry } from "@blokjs/inertia";
@@ -39,9 +79,42 @@ export function describePages(): string[] {
 }
 ```
 
+## blokctl inertia doctor
+
+Six classes of misconfiguration that all present as "it just doesn't work":
+
+```bash
+blokctl inertia doctor
+```
+
+| Check | Fails when |
+| --- | --- |
+| shell markers | a custom `shell` is missing `<!--blok:app-->` or `<!--blok:head-->` |
+| `ensurePagesExist` | a declared component has no file in the client's pages directory |
+| secrets | `BLOK_FLASH_SECRET` is unset (or `BLOK_SESSION_SECRET`, once `@blokjs/session` is installed) |
+| `ASSET_VERSION` | neither the variable nor `<staticDir>/.blok-asset-version` exists |
+| `inertia.csrf` | `src/Workflows.ts` does not register the middleware |
+| SSR | SSR is configured but the server does not answer `/health` |
+
+Every failing check prints a line starting with `Fix:`, and the command exits
+non-zero — so it is usable as a deploy gate, not only as a hint.
+
+## Error messages name their fix
+
+Every `throw` in `@blokjs/inertia` and `@blokjs/inertia-client` ends with a
+`Fix:` clause, and a repo test enforces it:
+
+```text
+[blok] @blokjs/inertia: 1 page component(s) declared server-side do not exist in client/src/pages:
+  - Orders/Idnex (declared at src/workflows/orders.ts:12)
+Fix: create the missing file(s) under client/src/pages, or correct the component
+name passed to definePage()/inertia.page().
+```
+
 ## Rules an agent must follow
 
-The same ones a human follows — they are in `AGENTS.md` and `CLAUDE.md`:
+The same ones a human follows — they are in `AGENTS.md`, `CLAUDE.md` and
+`.claude/skills/blok-inertia.md`:
 
 - author pages with `definePage()` + `render()`; never hand-roll the page object;
 - never write `ctx.state` or `ctx.vars` from inside a node — return output and

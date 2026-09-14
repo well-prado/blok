@@ -138,6 +138,13 @@ export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") 
   `inertia.auth`, `inertia.csrf`. **`auth` and `flash` are reserved step ids.**
 - No session store: flash rides a signed cookie; `BLOK_FLASH_SECRET` required.
 - Test with `runPage()` / `runPrecognition()`; never hand-roll the page object.
+- Deployment modes: in-project (`client/dist` served via `BLOK_STATIC_DIR`) or
+  standalone (separate origin + `BLOK_CORS_ORIGIN`).
+- Commands: `blokctl gen app-types`, `blokctl add spa` (`create spa` for a new
+  project), `blokctl inertia start-ssr`, `blokctl inertia doctor`.
+- Agent surface: `docs/llms.txt` / `docs/llms-full.txt`, and the read-only MCP
+  tools `inertia.pages.list` / `inertia.page.get` / `inertia.routes.list`
+  (dev-only unless `BLOK_INERTIA_MCP=1`).
 
 See `docs/d/spa/` and `examples/inertia-{react,vue,svelte,standalone}`.
 

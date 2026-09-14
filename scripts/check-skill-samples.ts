@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Typecheck every TypeScript sample in `.claude/skills/blok-framework.md`
- * against the REAL `@blokjs/core` surface (issue #708).
+ * Typecheck every TypeScript sample in the AI-facing skills docs
+ * (`.claude/skills/blok-framework.md`, `.claude/skills/blok-inertia.md`)
+ * against the REAL package surfaces (issues #708, #1019).
  *
  * That doc is the AI-facing authoring guide: whatever it shows, agents emit at
  * scale. Eyeballing a sample proves nothing — a sample that names a deleted
@@ -43,7 +44,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DOC = join(ROOT, ".claude/skills/blok-framework.md");
+/**
+ * Every AI-facing skills doc. Each gets its OWN output directory, so two docs
+ * may both name `nodes.ts` and their samples never collide (#1019 added
+ * blok-inertia.md).
+ */
+const DOCS = [".claude/skills/blok-framework.md", ".claude/skills/blok-inertia.md"];
 // Lives under node_modules so (a) it is already git-ignored and biome-ignored,
 // and (b) Node/tsc resolve `@blokjs/*` by walking up to `<root>/node_modules`.
 const OUT = join(ROOT, "node_modules/.cache/blok-skill-samples");
@@ -66,24 +72,31 @@ function extract(markdown: string): { name: string; code: string }[] {
 	return out;
 }
 
-if (!existsSync(DOC)) {
-	console.error(`✗ ${DOC} not found.`);
-	process.exit(1);
+for (const doc of DOCS) {
+	if (!existsSync(join(ROOT, doc))) {
+		console.error(`✗ ${doc} not found.`);
+		process.exit(1);
+	}
 }
 if (!existsSync(join(ROOT, "node_modules/@blokjs/core/dist/index.d.ts"))) {
 	console.error("✗ @blokjs/core is not built — run `bun run build` first (it also appends the Node-ESM fixup).");
 	process.exit(1);
 }
 
-const samples = extract(readFileSync(DOC, "utf8"));
-if (samples.length === 0) {
-	console.error("✗ No TypeScript samples found in the skills doc — the extractor or the doc's fences changed.");
-	process.exit(1);
-}
-
+let total = 0;
 rmSync(OUT, { recursive: true, force: true });
+for (const doc of DOCS) {
+	const samples = extract(readFileSync(join(ROOT, doc), "utf8"));
+	if (samples.length === 0) {
+		console.error(`✗ No TypeScript samples found in ${doc} — the extractor or the doc's fences changed.`);
+		process.exit(1);
+	}
+	const dir = join(OUT, doc.split("/").pop()?.replace(/\.md$/, "") ?? doc);
+	mkdirSync(dir, { recursive: true });
+	for (const { name, code } of samples) writeFileSync(join(dir, name), code);
+	total += samples.length;
+}
 mkdirSync(OUT, { recursive: true });
-for (const { name, code } of samples) writeFileSync(join(OUT, name), code);
 writeFileSync(
 	join(OUT, "tsconfig.json"),
 	`${JSON.stringify(
@@ -105,7 +118,7 @@ writeFileSync(
 				// concern, and this check only answers the latter.
 				noUnusedLocals: false,
 			},
-			include: ["*.ts"],
+			include: ["**/*.ts"],
 		},
 		null,
 		2,
@@ -117,10 +130,8 @@ const output = `${tsc.stdout ?? ""}${tsc.stderr ?? ""}`.trim();
 if (tsc.status !== 0) {
 	console.error(output);
 	console.error(`\n✗ Skill-doc samples do not compile. Generated modules are in ${OUT}.`);
-	console.error("  Fix the sample in .claude/skills/blok-framework.md — an agent will copy it verbatim.");
+	console.error(`  Fix the sample in ${DOCS.join(" / ")} — an agent will copy it verbatim.`);
 	process.exit(1);
 }
 
-console.log(
-	`✓ ${samples.length} TypeScript sample(s) in .claude/skills/blok-framework.md compile against @blokjs/core.`,
-);
+console.log(`✓ ${total} TypeScript sample(s) in ${DOCS.join(", ")} compile against the real packages.`);
