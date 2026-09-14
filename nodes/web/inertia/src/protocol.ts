@@ -138,6 +138,8 @@ export interface RenderShellOptions {
 	head?: string;
 	/** Template-only values — `{{key}}` in the shell. NEVER sent to the client. */
 	viewData?: Record<string, unknown>;
+	/** Pre-rendered app markup. Omit for the normal client-rendered root + page script. */
+	body?: string;
 }
 
 /**
@@ -154,8 +156,9 @@ export function renderShell(page: PageObject, opts: RenderShellOptions = {}): st
 	}
 	const rootId = opts.rootId ?? "app";
 	const boot =
+		opts.body ??
 		`<div id="${escapeHtml(rootId)}"></div>` +
-		`<script type="application/json" data-page="${escapeHtml(rootId)}">${serializePage(page)}</script>`;
+			`<script type="application/json" data-page="${escapeHtml(rootId)}">${serializePage(page)}</script>`;
 
 	let html = shell;
 	for (const [key, value] of Object.entries(opts.viewData ?? {})) {

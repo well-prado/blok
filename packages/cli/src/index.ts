@@ -38,6 +38,7 @@ import "./commands/profile/index.js";
 import "./commands/cost/index.js";
 import "./commands/trace/index.js";
 import "./commands/watch/index.js";
+import "./commands/inertia/index.js";
 import { Command } from "commander";
 
 const version = await getPackageVersion();
