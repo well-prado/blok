@@ -1,0 +1,51 @@
+{
+	"name": "@blokjs/auth",
+	"version": "2.3.0",
+	"files": ["dist"],
+	"description": "Blok's auth starter kit — scrypt password hashing, login/register/logout/reset nodes, login throttling, and a UserStore interface with a SQLite default. No ORM.",
+	"type": "module",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"author": "Deskree Technologies Inc.",
+	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./examples": {
+			"types": "./dist/examples/index.d.ts",
+			"default": "./dist/examples/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "rimraf ./dist && tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"keywords": ["blok", "auth", "login", "password", "inertia", "starter-kit"],
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.13",
+		"@types/node": "^22.15.21",
+		"better-sqlite3": "^12.6.2",
+		"rimraf": "^6.1.2",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/inertia": "^2.3.0",
+		"@blokjs/session": "^2.3.0",
+		"@blokjs/shared": "^2.3.0",
+		"zod": "^3.24.2"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}

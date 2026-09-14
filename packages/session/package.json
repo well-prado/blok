@@ -1,0 +1,50 @@
+{
+	"name": "@blokjs/session",
+	"version": "2.3.0",
+	"files": ["dist"],
+	"description": "Signed, HttpOnly server-side sessions for Blok — pluggable store (memory / sqlite / redis), session.get/set/forget/regenerate nodes, and the inertia.session middleware.",
+	"type": "module",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"author": "Deskree Technologies Inc.",
+	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "rimraf ./dist && tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"keywords": ["blok", "session", "cookie", "sqlite", "redis"],
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.13",
+		"@types/node": "^22.15.21",
+		"better-sqlite3": "^12.6.2",
+		"rimraf": "^6.1.2",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/shared": "^2.3.0",
+		"zod": "^3.24.2"
+	},
+	"peerDependencies": {
+		"better-sqlite3": "^11.0.0",
+		"ioredis": "^5.9.2"
+	},
+	"peerDependenciesMeta": {
+		"better-sqlite3": {
+			"optional": true
+		},
+		"ioredis": {
+			"optional": true
+		}
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}
