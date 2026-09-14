@@ -1,0 +1,30 @@
+{
+	"name": "blok-example-inertia-svelte",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Blok + Inertia v3 + Svelte 5, in-project mode.",
+	"scripts": {
+		"dev": "vite --config client/vite.config.ts client",
+		"build": "vite build --config client/vite.config.ts client",
+		"e2e": "vitest run tests",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/inertia": "^2.3.0",
+		"@blokjs/inertia-client": "^2.3.0",
+		"@blokjs/runner": "^2.3.0",
+		"@inertiajs/svelte": "^3.7.1",
+		"svelte": "^5.0.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@inertiajs/vite": "^3.7.1",
+		"@sveltejs/vite-plugin-svelte": "^6.0.0",
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0",
+		"vitest": "^4.0.18"
+	}
+}

@@ -1,0 +1,101 @@
+---
+title: Title and meta
+description: The HTML shell, its two markers, viewData, and the server-side fallbacks behind the client's Head component.
+icon: "type"
+---
+
+Counterpart: [Title & meta](https://inertiajs.com/docs/v3/the-basics/title-and-meta).
+Laravel edits `app.blade.php`; Blok has no Blade, so the document lives in the
+serializer's **shell**.
+
+On the client, `<Head>` is stock Inertia and needs nothing from Blok:
+
+```tsx client/src/pages/Orders/Index.tsx
+import { Head } from "@inertiajs/react";
+
+export default function Index() {
+  return (
+    <>
+      <Head title="Orders" />
+      <h1>Orders</h1>
+    </>
+  );
+}
+```
+
+## The shell
+
+The default shell carries `<title data-inertia>` (v3 renamed the attribute from
+`inertia`) and two markers:
+
+| Marker | Replaced with |
+| --- | --- |
+| `<!--blok:head-->` | the `head` input — server-rendered `<Head>` tags, plus whatever [SSR](/d/spa/ssr) produced |
+| `<!--blok:app-->` | `<div id="app"></div>` plus the boot script |
+
+```ts src/shell.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "o-1" }],
+});
+
+const OrdersIndex = definePage("Orders/Index", { orders: listOrders });
+
+const SHELL = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title data-inertia>{{title}}</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+    <!--blok:head-->
+  </head>
+  <body class="{{bodyClass}}">
+    <!--blok:app-->
+  </body>
+</html>`;
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders") },
+  (req) => {
+    OrdersIndex.render(req, "page", "/orders", {}, {
+      shell: SHELL,
+      head: '<meta name="description" content="Your orders" />',
+      viewData: { title: "Acme", bodyClass: "bg-white" },
+      rootId: "app",
+    });
+  },
+);
+```
+
+| Option | Effect |
+| --- | --- |
+| `shell` | the whole document template. **Must** contain `<!--blok:app-->` |
+| `head` | markup injected at `<!--blok:head-->` — the server-side fallback for crawlers and for the first paint |
+| `viewData` | fills `{{key}}` placeholders. **Never** sent to the client — this is where a value that must not reach the browser goes |
+| `rootId` | renames the root element and the boot script's `data-page` value |
+
+<Note>
+The `<Head>` component only takes effect once the client has booted. A title or
+meta tag that must be in the **initial HTML** — for a crawler, a link unfurler,
+or a `#:~:text=` fragment — has to come from `head` / `shell`, or from
+[SSR](/d/spa/ssr).
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="SSR" icon="server" href="/d/spa/ssr">
+    Rendering the markup, and its head tags, on the server.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    How the page object is escaped into the shell.
+  </Card>
+</CardGroup>

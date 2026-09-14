@@ -117,6 +117,49 @@
 						]
 					},
 					{
+						"group": "SPA (Inertia)",
+						"pages": [
+							"d/spa/index",
+							"d/spa/getting-started",
+							"d/spa/pages-and-props",
+							"d/spa/forms-and-redirects",
+							"d/spa/middleware",
+							"d/spa/assets-and-versioning",
+							"d/spa/ssr",
+							"d/spa/the-protocol",
+							{
+								"group": "Data and props",
+								"pages": [
+									"d/spa/partial-reloads",
+									"d/spa/deferred-props",
+									"d/spa/merging-props",
+									"d/spa/once-props",
+									"d/spa/infinite-scroll",
+									"d/spa/shared-data",
+									"d/spa/flash-data"
+								]
+							},
+							{
+								"group": "Security",
+								"pages": [
+									"d/spa/validation",
+									"d/spa/file-uploads",
+									"d/spa/csrf",
+									"d/spa/history-encryption",
+									"d/spa/authorization",
+									"d/spa/error-handling"
+								]
+							},
+							"d/spa/routing",
+							"d/spa/title-and-meta",
+							"d/spa/client-features",
+							"d/spa/devtools",
+							"d/spa/starter-kit",
+							"d/spa/ai",
+							"d/migration/react-node-to-inertia"
+						]
+					},
+					{
 						"group": "Studio",
 						"pages": ["d/studio/index"]
 					},

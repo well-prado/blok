@@ -1,0 +1,107 @@
+---
+title: Authorization
+description: can() builds the prop, authorize() enforces it — Inertia has no authorization protocol, only a convention.
+icon: "key"
+---
+
+Counterpart: [Authorization](https://inertiajs.com/docs/v3/security/authorization).
+Inertia has no authorization protocol; the documented convention is to ship
+decisions as props and enforce them on the server. Blok gives you both halves.
+
+```ts src/authorization.ts
+import { defineNode } from "@blokjs/core";
+import { authorize, can } from "@blokjs/inertia";
+import { z } from "zod";
+
+interface Post {
+  id: string;
+  authorId: string;
+}
+
+export const listPosts = defineNode({
+  name: "list-posts",
+  description: "Posts with their per-row permissions.",
+  input: z.object({ userId: z.string(), isAdmin: z.boolean() }),
+  output: z.object({
+    can: z.object({ create: z.boolean() }),
+    posts: z.array(z.object({ id: z.string(), can: z.record(z.boolean()) })),
+  }),
+  execute: (_ctx, input) => {
+    const posts: Post[] = [{ id: "p-1", authorId: "u-1" }];
+    return {
+      can: can({ create: input.isAdmin }),
+      posts: posts.map((post) => ({
+        id: post.id,
+        can: can({ edit: () => post.authorId === input.userId }),
+      })),
+    };
+  },
+});
+
+export const editPost = defineNode({
+  name: "edit-post",
+  description: "Edit one post, if allowed.",
+  input: z.object({ userId: z.string(), authorId: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+  execute: (_ctx, input) => {
+    authorize("edit", input.authorId === input.userId);   // throws 403 unless allowed
+    return { ok: true };
+  },
+});
+```
+
+| Helper | What it does |
+| --- | --- |
+| `can(rules)` | turns `{ edit: boolean \| (() => boolean) }` into a plain object of booleans — the `can` prop the client reads |
+| `authorize(ability, allowed)` | throws a `403` with body `{ error: "forbidden", ability }` unless `allowed` |
+| `authorizeNode` | the same check as a step: `step("guard", authorizeNode, { ability: "edit", allowed: false })` |
+
+The thrown 403 is the same shape `@blokjs/throw` produces, so the HTTP trigger
+writes it to the wire unchanged — and in production it renders as an
+[Inertia error page](/d/spa/error-handling) rather than a JSON body.
+
+<Warning>
+A `can` prop is **display state**, never a security boundary: it tells the UI
+whether to draw the button. The write path has to call `authorize()` (or its
+node) regardless of what the client believes.
+</Warning>
+
+On the client:
+
+```tsx client/src/pages/Posts.tsx
+interface Props {
+  can: { create: boolean };
+  posts: { id: string; can: Record<string, boolean> }[];
+}
+
+export default function Posts({ can, posts }: Props) {
+  return (
+    <>
+      {can.create && <button type="button">New post</button>}
+      <ul>
+        {posts.map((post) => (
+          <li key={post.id}>{post.can.edit ? "editable" : "read only"}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+## Guarding a whole route
+
+Authentication is the [`inertia.auth`](/d/spa/middleware) middleware: when
+`auth.id` is missing it redirects to `/login` instead of returning a bare 401,
+because an Inertia visit can follow a redirect but has nothing to render from a
+401.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Error handling" icon="triangle-alert" href="/d/spa/error-handling">
+    Rendering that 403 as a page.
+  </Card>
+  <Card title="History encryption" icon="lock" href="/d/spa/history-encryption">
+    Keeping an authorized page out of the Back button.
+  </Card>
+</CardGroup>

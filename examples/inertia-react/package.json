@@ -1,0 +1,33 @@
+{
+	"name": "blok-example-inertia-react",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Blok + Inertia v3 + React, in-project mode, with a runtime.python3 prop.",
+	"scripts": {
+		"dev": "vite --config client/vite.config.ts client",
+		"build": "vite build --config client/vite.config.ts client",
+		"e2e": "vitest run tests",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/helpers": "^2.3.0",
+		"@blokjs/inertia": "^2.3.0",
+		"@blokjs/inertia-client": "^2.3.0",
+		"@blokjs/runner": "^2.3.0",
+		"@inertiajs/react": "^3.7.1",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@inertiajs/vite": "^3.7.1",
+		"@types/node": "^22.15.21",
+		"@types/react": "^19.2.10",
+		"@vitejs/plugin-react": "^4.7.0",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0",
+		"vitest": "^4.0.18"
+	}
+}

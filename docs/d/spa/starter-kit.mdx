@@ -1,0 +1,70 @@
+---
+title: Starter kit
+description: Sessions, users and the auth pages — landing with #1018 and the SPA scaffolds in #999.
+icon: "package-open"
+---
+
+Counterpart: [Authentication](https://inertiajs.com/docs/v3/security/authentication)
+(Laravel's Breeze / starter kits).
+
+<Warning>
+**Not shipped yet.** `@blokjs/session` and `@blokjs/auth`, and the auth pages
+that go with them, land with
+[#1018](https://github.com/well-prado/blok/issues/1018); the
+`blokctl create spa --kit auth` wiring waits for
+[#999](https://github.com/well-prado/blok/issues/999). The decided shape, so
+nothing built now has to be undone:
+
+- **no ORM** — a `UserStore` interface, a SQLite implementation by default, a
+  Postgres example, and Drizzle documented rather than depended on;
+- the server modules can land before the scaffolds; the CLI flag cannot.
+</Warning>
+
+## What you can build today
+
+Every piece the kit will assemble already exists:
+
+| Concern | Today |
+| --- | --- |
+| who is signed in | your own `currentUser` node + [`inertia.shared`](/d/spa/middleware) |
+| guarding routes | [`inertia.auth`](/d/spa/middleware) — a 302 to `/login`, not a bare 401 |
+| sign-in form | an ordinary [form workflow](/d/spa/forms-and-redirects) with [validation](/d/spa/validation) |
+| sign-out | [`logoutNode` / `logoutResponse()`](/d/spa/history-encryption#logout-must-clear-it) — 303, `clearHistory`, and [`rotateCsrf()`](/d/spa/csrf#rotate-on-login-and-logout) |
+| permissions | [`can()` / `authorize()`](/d/spa/authorization) |
+| remembering the user | [`once()` / `shareOnce()`](/d/spa/once-props#sign-out-overwrite-do-not-forget) |
+| error pages | [`configureErrorPages()`](/d/spa/error-handling) |
+
+What the kit adds is the **session store** — the one thing Blok deliberately
+does not have today (flash rides a [signed cookie](/d/spa/flash-data), not a
+session) — plus the pages and the wiring, in one install.
+
+```ts src/auth.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+/** Until #1018: your own node, reading whatever session mechanism you already have. */
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "Resolve the signed-in user from the request cookies.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string().optional(), email: z.string().optional() }),
+  execute: (_ctx, input) => {
+    const cookie = input.headers?.cookie ?? "";
+    return cookie.includes("session=") ? { id: "u-1", email: "ada@example.com" } : {};
+  },
+});
+```
+
+`inertia.auth` gates on `auth.id` being absent, which is why the guest case
+returns `{}` rather than throwing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
+    The chain the kit will register for you.
+  </Card>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    The by-hand setup, today.
+  </Card>
+</CardGroup>

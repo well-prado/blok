@@ -1,0 +1,65 @@
+---
+title: Client features
+description: Links, manual visits, polling, prefetching, layouts, scroll, progress, transitions — behaviour that is entirely the stock client's.
+icon: "mouse-pointer-click"
+---
+
+Everything on this page works on Blok with **nothing to configure on the
+server**. It is listed here so nobody has to wonder whether Blok supports it:
+these features live entirely in the stock `@inertiajs/*` client, and Blok speaks
+the protocol they are built on.
+
+| Feature | Inertia docs | Anything on Blok? |
+| --- | --- | --- |
+| Links (`<Link>`) | [Links](https://inertiajs.com/docs/v3/the-basics/links) | no |
+| Manual visits (`router.visit`) | [Manual visits](https://inertiajs.com/docs/v3/the-basics/manual-visits) | no |
+| HTTP requests (`router.post`, …) | [HTTP requests](https://inertiajs.com/docs/v3/the-basics/http-requests) | no |
+| Optimistic updates | [Optimistic updates](https://inertiajs.com/docs/v3/the-basics/optimistic-updates) | no |
+| Layouts / persistent layouts | [Layouts](https://inertiajs.com/docs/v3/the-basics/layouts) | no |
+| View transitions | [View transitions](https://inertiajs.com/docs/v3/the-basics/view-transitions) | no |
+| Polling | [Polling](https://inertiajs.com/docs/v3/data-props/polling) | no — it is a partial reload on a timer |
+| Prefetching | [Prefetching](https://inertiajs.com/docs/v3/data-props/prefetching) | the server honours `Purpose: prefetch` for you |
+| Load when visible (`<WhenVisible>`) | [Load when visible](https://inertiajs.com/docs/v3/data-props/load-when-visible) | pairs with [`defer()`](/d/spa/deferred-props) |
+| Remembering state (`useRemember`) | [Remembering state](https://inertiajs.com/docs/v3/data-props/remembering-state) | no — browser history state only |
+| Scroll management (`preserveScroll`) | [Scroll management](https://inertiajs.com/docs/v3/advanced/scroll-management) | no |
+| Progress indicators | [Progress indicators](https://inertiajs.com/docs/v3/advanced/progress-indicators) | no |
+| Events (`inertia:*`) | [Events](https://inertiajs.com/docs/v3/advanced/events) | no |
+| Code splitting | [Code splitting](https://inertiajs.com/docs/v3/advanced/code-splitting) | `blokInertia()` passes Vite's `lazy` page option through |
+| Instant visits | [Instant visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) | the page object's `sharedProps` list comes from [`share()`](/d/spa/shared-data) |
+
+```tsx client/src/pages/Orders/Index.tsx
+import { Link, router, usePoll } from "@inertiajs/react";
+
+export default function Index() {
+  usePoll(5_000, { only: ["orders"] });     // a partial reload on a timer
+  return (
+    <>
+      <Link href="/orders/1" prefetch preserveScroll>
+        Order 1
+      </Link>
+      <button type="button" onClick={() => router.reload({ only: ["orders"] })}>
+        Refresh
+      </button>
+    </>
+  );
+}
+```
+
+Two client behaviours do touch the server, and they have their own pages:
+
+- a **prefetch** request carries `Purpose: prefetch`, which keeps a fragment
+  redirect from becoming a 409 and skips SSR — see
+  [the protocol](/d/spa/the-protocol#prefetch);
+- `<InfiniteScroll>` needs cursor metadata, which is what
+  [`scroll()`](/d/spa/infinite-scroll) emits.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    What `only` / `except` actually cost on the server.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    Everything the client sends, and what it means.
+  </Card>
+</CardGroup>

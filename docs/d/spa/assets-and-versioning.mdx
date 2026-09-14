@@ -1,0 +1,120 @@
+---
+title: Assets and versioning
+description: The blokInertia() Vite plugin, ASSET_VERSION, the 409 reload, static serving, and CORS for standalone mode.
+icon: "package"
+---
+
+Counterpart: [Asset versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning).
+Laravel computes a version in `HandleInertiaRequests::version()`; Blok reads one
+the Vite plugin wrote.
+
+## The Vite plugin
+
+```ts client/vite.config.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    blokInertia({
+      pages: { path: "src/pages", extension: [".tsx"] },
+      proxy: { target: "http://localhost:4000" },
+      ssr: { entry: "src/ssr.tsx" },
+    }),
+  ],
+});
+```
+
+`blokInertia()` **wraps** `@inertiajs/vite`: page resolution, lazy pages, the
+SSR transform and the HMR-backed dev SSR endpoint are all upstream behaviour,
+and every `@inertiajs/vite` option is passed through. On top it writes four
+things into the Vite `outDir` (`dist/` by default) — the handoff directory the
+Blok server reads:
+
+| File / value | What it is |
+| --- | --- |
+| `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`. The server reads it into `ASSET_VERSION` and sends it as `X-Inertia-Version`. `"dev"` while the dev server runs |
+| `import.meta.env.BLOK_ASSET_VERSION` | the same value, inlined into the bundle |
+| `dist/pages.json` | `{ root, pages }` — the page components found on disk, for [`ensurePagesExist()`](/d/spa/routing#fail-the-boot-not-the-route) |
+| `dist/.blok-ssr-url` + `import.meta.env.BLOK_SSR_URL` | where the server POSTs a page to be [rendered](/d/spa/ssr) |
+
+`build.manifest` is forced on — the asset version is a hash of that manifest, so
+turning it off is an error.
+
+## The 409 reload
+
+When the client's `X-Inertia-Version` differs from the server's, a **GET**
+answers `409` with `X-Inertia-Location: <url>` and the current version, and the
+client does a hard visit — the new HTML pulls the new assets. It is never done
+on another method: a replayed write would lose its body.
+
+A pending [flash](/d/spa/flash-data) is re-signed onto that 409, so a toast
+survives the forced reload.
+
+<Note>
+In dev the plugin's proxy attaches `X-Inertia-Version: dev` to every proxied
+request, so a dev visit can never 409 on a version mismatch mid-edit.
+</Note>
+
+## Serving the build
+
+| Variable | Effect |
+| --- | --- |
+| `BLOK_STATIC_DIR` | mounts the directory: `/assets/*` with `Cache-Control: public, max-age=31536000, immutable`, plus `favicon.ico` and `robots.txt` uncached. A miss under `/assets/*` is a hard `404`, never a fall-through to a workflow |
+| `ASSET_VERSION` | read from `<staticDir>/.blok-asset-version` when `BLOK_STATIC_DIR` is set and the variable is not already set. An explicit value always wins |
+
+```bash
+BLOK_STATIC_DIR=client/dist blokctl dev
+```
+
+With neither set, nothing static is mounted and `version` is `""` — "untracked",
+which disables version checking entirely.
+
+## Standalone mode and CORS
+
+With the proxy off (`proxy: false`) the SPA is served from its own origin and
+talks to Blok cross-origin. Blok must then send CORS headers that cover
+Inertia's protocol headers — a missing `Access-Control-Expose-Headers` entry is
+invisible in the network tab but makes redirects and version mismatches
+unreadable to the client.
+
+```bash
+BLOK_CORS_ORIGIN=https://app.example.com
+```
+
+Setting it turns on the CORS middleware with `credentials: true` and the full
+Inertia / Precognition / DevTools header lists:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: X-Inertia, X-Inertia-Version, X-Inertia-Partial-Data,
+  X-Inertia-Partial-Component, X-Inertia-Partial-Except, X-Inertia-Reset,
+  X-Inertia-Error-Bag, X-Inertia-Devtools-Request, X-Inertia-Devtools-Session,
+  Precognition, Precognition-Validate-Only, X-XSRF-TOKEN
+Access-Control-Expose-Headers: X-Inertia, X-Inertia-Location, X-Inertia-Redirect,
+  X-Inertia-Version, Precognition, Precognition-Success
+```
+
+<Warning>
+`Access-Control-Allow-Origin` must name the SPA origin explicitly. A value
+containing `*` turns credentials **off** — and Inertia sends the session cookie
+on every visit, so a wildcard origin silently logs everybody out.
+</Warning>
+
+In standalone mode the initial page comes from a JSON fetch rather than a
+`data-page` attribute, through `createInertiaApp`'s `page` option, and the types
+travel with `blokctl gen app-types --pages-only --out ../my-spa/src`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="SSR" icon="server" href="/d/spa/ssr">
+    The other consumer of the Vite handoff directory.
+  </Card>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    The dev loop these variables belong to.
+  </Card>
+</CardGroup>

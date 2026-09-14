@@ -1,0 +1,244 @@
+---
+title: Getting started
+description: Wire a Vite SPA to a Blok server by hand, render the first page, and run the two-terminal dev loop.
+icon: "play"
+---
+
+Counterpart: [Server-side setup](https://inertiajs.com/docs/v3/installation/server-side-setup)
+and [client-side setup](https://inertiajs.com/docs/v3/installation/client-side-setup)
+in the Inertia docs. Everything they say about `createInertiaApp` still holds —
+only the server half is Blok's.
+
+<Warning>
+**The scaffold is not shipped yet.** `blokctl create spa` / `blokctl add spa`
+land with [#999](https://github.com/well-prado/blok/issues/999), once
+`@blokjs/inertia` and `@blokjs/inertia-client` are published. Until then, do the
+five steps below by hand — they are exactly what the scaffold will write.
+</Warning>
+
+## 0. The one-liner, later
+
+When #999 lands this whole page collapses into:
+
+```bash
+blokctl create spa my-app --framework react   # pending #999 — a new SPA project
+blokctl add spa --framework vue               # pending #999 — a SPA in an existing project
+blokctl add spa --kit auth                    # pending #999 + #1018 — with the auth starter kit
+```
+
+The exact flags land with the command; what is fixed is the shape of what it
+writes, which is the five steps below.
+
+## 1. Install
+
+<CodeGroup>
+```bash React
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/react @inertiajs/vite react react-dom
+npm i -D vite @vitejs/plugin-react
+```
+
+```bash Vue
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/vue3 @inertiajs/vite vue
+npm i -D vite @vitejs/plugin-vue
+```
+
+```bash Svelte
+npm i @blokjs/inertia @blokjs/inertia-client @inertiajs/svelte @inertiajs/vite svelte
+npm i -D vite @sveltejs/vite-plugin-svelte
+```
+</CodeGroup>
+
+Node 20.19+ is required (Vite's own floor). `@blokjs/inertia` registers its
+nodes through `@blokjs/helpers` the moment it is installed — there is nothing to
+wire into the node registry.
+
+## 2. The client
+
+The SPA lives in `client/` (in-project mode: Blok serves the built assets from
+one origin).
+
+```ts client/vite.config.ts
+import { blokInertia } from "@blokjs/inertia-client/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [react(), blokInertia({ pages: { path: "src/pages" } })],
+});
+```
+
+`blokInertia()` wraps `@inertiajs/vite`, so page resolution, lazy pages and the
+SSR transform are upstream behaviour. On top it writes the four files the Blok
+server reads — see [assets and versioning](/d/spa/assets-and-versioning).
+
+```tsx client/src/main.tsx
+import { createInertiaApp } from "@inertiajs/react";
+import { createRoot } from "react-dom/client";
+
+void createInertiaApp({
+  resolve: (name: string) => import(`./pages/${name}.tsx`),
+  setup({ el, App, props }) {
+    createRoot(el).render(<App {...props} />);
+  },
+});
+```
+
+```tsx client/src/pages/Dashboard.tsx
+interface Props {
+  auth: { email: string };
+  orders: { id: string; total: number }[];
+}
+
+export default function Dashboard({ auth, orders }: Props) {
+  return (
+    <main>
+      <h1>{auth.email}</h1>
+      <ul>
+        {orders.map((order) => (
+          <li key={order.id}>{order.total}</li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+```
+
+## 3. The page workflow
+
+A page is a workflow. The contract is declared **outside** the callback so the
+frontend can `import type` it.
+
+```ts src/workflows/dashboard.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, definePage, shared } from "@blokjs/inertia";
+import { z } from "zod";
+
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user, from the request headers.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "This user's orders.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: (_ctx, input) => [{ id: `o-${input.userId}`, total: 120 }],
+});
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),
+  orders: listOrders,
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", {
+      auth: {},
+      orders: { userId: shared(currentUser, "auth").id },
+    });
+  },
+);
+```
+
+<Note>
+`render(req, id, url, inputs, options?)` takes **node inputs per prop**, not
+values: the runner decides per request which prop nodes actually run. `shared()`
+is the typed read of a state slot the middleware filled in.
+</Note>
+
+## 4. Register the middleware
+
+`inertia.shared` is an ordinary Blok middleware workflow. It fills `auth` and
+reads the signed flash cookie; the `page` step folds the flash into the response
+by itself.
+
+```ts src/Workflows.ts
+import { createAuthMiddleware, createSharedMiddleware } from "@blokjs/inertia";
+import { WorkflowRegistry } from "@blokjs/runner";
+import dashboard, { currentUser } from "./workflows/dashboard";
+
+export default {
+  "inertia.shared": await createSharedMiddleware({ currentUser }),
+  "inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
+  dashboard,
+};
+
+WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.shared"]);
+```
+
+Guard a route with `trigger: http.get("/orders", { middleware: ["inertia.auth"] })`.
+Details in [middleware](/d/spa/middleware).
+
+## 5. Environment
+
+| Variable | Why |
+| --- | --- |
+| `BLOK_FLASH_SECRET` | **required** — signs the one-shot flash cookie (there is no session store) |
+| `BLOK_STATIC_DIR` | `client/dist` — makes Blok serve the built SPA and read `ASSET_VERSION` |
+| `BLOK_CORS_ORIGIN` | standalone mode only: the SPA's origin |
+
+```bash
+BLOK_FLASH_SECRET="$(openssl rand -hex 32)"
+BLOK_STATIC_DIR=client/dist
+```
+
+## The dev loop
+
+Two terminals, one origin in the browser:
+
+```bash
+# terminal 1 — the Blok server
+blokctl dev
+
+# terminal 2 — Vite, which proxies everything it does not own to Blok
+cd client && npx vite
+```
+
+Open the **Vite** URL. Requests that are not Vite-owned are proxied to
+`BLOK_URL` (default `http://localhost:4000`) with `X-Inertia-Version: dev`
+attached, so a dev visit can never 409 on a stale asset version.
+
+For production: `vite build`, then start Blok with `BLOK_STATIC_DIR=client/dist`.
+Blok serves `/assets/*` immutable and answers every other path from a workflow.
+
+## Typing the client
+
+Two paths, both real:
+
+- **monorepo** — `import type { Dashboard }` and read
+  `PageProps<typeof Dashboard>`;
+- **separate repo** — `blokctl gen app-types --pages-only --out ../my-spa/src`
+  writes `blok-pages.d.ts` and `blok-routes.ts`.
+
+Both are spelled out in [pages and props](/d/spa/pages-and-props#typing-the-client)
+and in the [`gen app-types`](/d/cli/gen) reference.
+
+## Examples
+
+Four runnable examples live in the repository:
+
+| Example | What it shows |
+| --- | --- |
+| `examples/inertia-react` | in-project mode, a `runtime.python3` prop, defer/merge/once/scroll, a form with validation |
+| `examples/inertia-vue` | the same server, a Vue 3 client |
+| `examples/inertia-svelte` | the same server, a Svelte 5 client |
+| `examples/inertia-standalone` | `backend/` + `frontend/` on two origins, CORS and `gen app-types --out` |
+
+Each has a README, and `bun run e2e` runs its `runPage` suite.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    Prop modes, cross-runtime props, typed props on the client.
+  </Card>
+  <Card title="Forms and redirects" icon="send" href="/d/spa/forms-and-redirects">
+    `useForm`, the 303 rule, errors and flash.
+  </Card>
+</CardGroup>

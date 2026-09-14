@@ -109,6 +109,38 @@ deterministic non-agent implementation and valid capability manifest.
   as `idempotencyKey`, `retry`, and `maxDuration`.
 - `ephemeral: true` means no state slot; do not read the returned handle.
 
+## SPA / Inertia
+
+Blok speaks Inertia **v3** against the stock `@inertiajs/react | vue3 | svelte`
+client. A page is a workflow, a prop is a step. Declare the contract ONCE with
+`definePage()`, outside the workflow callback, so the frontend can
+`import type` it.
+
+```ts
+import { always, defer, definePage, shared } from "@blokjs/inertia";
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),
+  orders: listOrders,
+  stats: defer(heavyStats, { group: "dashboard" }),
+});
+
+export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") }, (req) => {
+  Dashboard.render(req, "page", "/", { orders: { userId: shared(currentUser, "auth").id } });
+});
+```
+
+- `render(req, id, url, inputs, opts?)` takes node INPUTS per prop and emits one
+  `page` control step; props resolve in parallel as `<id>.<key>`, so one prop
+  can never read another's output.
+- Modes: `always`, `optional`, `defer`, `merge`, `once`, `scroll`.
+- Middleware is the existing system, registered by name: `inertia.shared`,
+  `inertia.auth`, `inertia.csrf`. **`auth` and `flash` are reserved step ids.**
+- No session store: flash rides a signed cookie; `BLOK_FLASH_SECRET` required.
+- Test with `runPage()` / `runPrecognition()`; never hand-roll the page object.
+
+See `docs/d/spa/` and `examples/inertia-{react,vue,svelte,standalone}`.
+
 ## Testing
 
 `runNode` / `runWorkflow` from `@blokjs/core/testing` — no server, no Docker, no

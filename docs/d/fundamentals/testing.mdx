@@ -236,9 +236,47 @@ page.assertRedirect("/orders")
 `assertFlash` verifies the signed flash cookie on the response, so it needs the
 signing secret: `BLOK_FLASH_SECRET`, or `flashSecret` on the `runPage` options.
 
+### Partial-reload metadata
+
+Everything the page object carries about props it did **not** send is on the
+result, so a merge or scroll contract can be asserted without parsing JSON:
+
+```ts
+page.deferredProps;  // { dashboard: ["stats"] } — full visits only
+page.rescued;        // props whose resolution failed under `rescue: true`
+page.mergeProps;     // ["feed.data"] — partial reloads only
+page.prependProps;
+page.deepMergeProps;
+page.matchPropsOn;   // ["feed.data.id"]
+page.onceProps;      // { plans: { prop: "plans", expiresAt: 1_800_000_000_000 } }
+page.scrollProps;    // { posts: { pageName: "page", nextPage: 2, … } }
+```
+
+### Precognition
+
+`runPrecognition()` drives a workflow the way Inertia's live validation does:
+`Precognition: true` (plus `Precognition-Validate-Only` when `fields` is given)
+on a POST, and the `204` / `422` the runner answers from the step marked
+`{ precognition: true }`.
+
+```ts
+import { runPrecognition } from "@blokjs/core/testing";
+
+const dry = await runPrecognition(createOrder, { body: { sku: "" }, fields: ["sku"] });
+
+dry.status;                       // 422 (204 when the asked-about fields are clean)
+dry.errors;                       // { sku: "Required." }
+dry.headers.Precognition;         // "true"
+dry.run.step("create")?.executed; // false — the assertion that matters
+```
+
+The assertion that matters most about a dry run is the one about the steps it
+did **not** reach: a keystroke must not charge a card.
+
 <Note>
-`runPrecognition()` is declared but throws — the precognition request pipeline
-lands with [#1011](https://github.com/well-prado/blok/issues/1011).
+The whole SPA side of this — prop modes, the protocol, error bags — is
+documented under [SPA (Inertia)](/d/spa/index); see
+[validation](/d/spa/validation) for the workflow these two harnesses test.
 </Note>
 
 ## What a run tells you

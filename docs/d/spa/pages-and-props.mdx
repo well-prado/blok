@@ -1,0 +1,313 @@
+---
+title: Pages and props
+description: definePage, the seven prop modes, cross-runtime props, and the two ways the client gets its types.
+icon: "box"
+---
+
+Counterpart: [Pages](https://inertiajs.com/docs/v3/the-basics/pages) and
+[Responses](https://inertiajs.com/docs/v3/the-basics/responses).
+
+A page is declared **once**, outside the workflow callback. That placement is
+the whole point: a contract declared inside the callback cannot leak its
+inferred type to module scope, so the frontend would have nothing to import.
+
+```ts src/pages/orders.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, defer, definePage, merge, once, optional, scroll } from "@blokjs/inertia";
+import { z } from "zod";
+
+export const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({ headers: z.record(z.string()).optional() }),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Orders for one user.",
+  input: z.object({ userId: z.string() }),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: (_ctx, input) => [{ id: `o-${input.userId}`, total: 120 }],
+});
+
+const loadFilters = defineNode({
+  name: "load-filters",
+  description: "Filter chips — only when the client asks.",
+  input: z.object({}),
+  output: z.object({ statuses: z.array(z.string()) }),
+  execute: () => ({ statuses: ["open", "paid"] }),
+});
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "Expensive aggregates.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+const loadFeed = defineNode({
+  name: "load-feed",
+  description: "Activity feed page.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.object({ id: z.string() })) }),
+  execute: () => ({ data: [{ id: "a-1" }] }),
+});
+
+const loadPlans = defineNode({
+  name: "load-plans",
+  description: "Pricing plans — rarely change.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), price: z.number() })),
+  execute: () => [{ id: "pro", price: 20 }],
+});
+
+const listPosts = defineNode({
+  name: "list-posts",
+  description: "One page of posts.",
+  input: z.object({ page: z.union([z.number(), z.string()]).optional() }),
+  output: z.object({
+    data: z.array(z.object({ id: z.string() })),
+    pageName: z.string(),
+    currentPage: z.number(),
+    nextPage: z.number().nullable(),
+    previousPage: z.number().nullable(),
+  }),
+  execute: () => ({
+    data: [{ id: "p-1" }],
+    pageName: "page",
+    currentPage: 1,
+    nextPage: 2,
+    previousPage: null,
+  }),
+});
+
+export const OrdersIndex = definePage("Orders/Index", {
+  auth: always(currentUser),      // ignores every only/except filter
+  orders: listOrders,             // regular
+  filters: optional(loadFilters), // only when asked for by name
+  stats: defer(heavyStats, { group: "dashboard", rescue: true }),
+  feed: merge(loadFeed, { append: "data", matchOn: "id" }),
+  plans: once(loadPlans, { until: "1h" }),
+  posts: scroll(listPosts),
+});
+
+export default workflow(
+  "orders",
+  { version: "1.0.0", trigger: http.get("/orders") },
+  (req) => {
+    OrdersIndex.render(
+      req,
+      "page",
+      "/orders",
+      { orders: { userId: "u-1" }, posts: { page: req.query.page } },
+      { version: "v1" },
+    );
+  },
+);
+```
+
+## `render()`
+
+```text
+render(req, id, url, inputs, options?) -> Handle<RespondEnvelope>
+```
+
+| Argument | What it is |
+| --- | --- |
+| `req` | the trigger entry handle (the workflow callback's argument) |
+| `id` | the step id. Prop steps become `<id>.<propKey>`, the serializer `<id>.$render` |
+| `url` | the page-object `url` — a literal or a handle |
+| `inputs` | **node inputs per prop**, handles allowed. A prop whose node needs no input may be omitted |
+| `options` | page-level knobs: `version`, `errors`, `flash`, `viewData`, `shell`, `head`, `rootId`, `encryptHistory`, `clearHistory`, `preserveFragment`, `exposeSharedPropKeys` |
+
+It emits exactly one `page` control step. The runner lowers it to one inner step
+per selected prop plus the serializer, resolves the selected props **in
+parallel**, and persists each to `ctx.state["<id>.<key>"]`.
+
+<Warning>
+Because props run concurrently, **one prop can never read another's output**.
+Read the request, or a middleware step's output through `shared()`.
+</Warning>
+
+## The seven modes
+
+| Mode | Full visit | Partial reload | Notes |
+| --- | --- | --- | --- |
+| regular | resolved | when named, or when nothing is named | the default |
+| `always(node)` | resolved | always | exempt from `only` **and** `except` |
+| `optional(node)` | never | only when named | [partial reloads](/d/spa/partial-reloads) |
+| `defer(node, opts)` | announced, not resolved | on the follow-up request | [deferred props](/d/spa/deferred-props) |
+| `merge(node, opts)` | resolved | resolved + labelled | [merging props](/d/spa/merging-props) |
+| `once(node, opts)` | resolved unless the client holds it | same | [once props](/d/spa/once-props) |
+| `scroll(node, opts)` | resolved with cursors | resolved with cursors | [infinite scroll](/d/spa/infinite-scroll) |
+
+`merge` and `scroll` describe what the **client** does with a value, so they
+never take the resolution slot. Wrappers compose, and the innermost resolution
+mode wins:
+
+```ts src/compose.ts
+import { defineNode } from "@blokjs/core";
+import { defer, merge, once } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadResults = defineNode({
+  name: "load-results",
+  description: "Search results.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.string()) }),
+  execute: () => ({ data: ["a"] }),
+});
+
+export const deferredAndMergeable = defer(merge(loadResults, { deep: true }), { group: "dashboard" });
+export const rememberedAndMergeable = once(merge(loadResults, { append: "data" }));
+```
+
+### Per-prop reliability
+
+A prop is a step, so the step knobs apply per prop in the JSON form
+(`retry`, `idempotencyKey`, `idempotencyKeyTTL`, `maxDuration`):
+
+```json
+{
+  "id": "page",
+  "page": {
+    "component": "Orders/Index",
+    "props": {
+      "stats": { "use": "heavy-stats", "mode": "defer", "group": "dashboard", "rescue": true, "maxDuration": 5000 }
+    }
+  }
+}
+```
+
+A prop declared `rescue: true` that throws is omitted from `props`, listed in
+`rescuedProps`, and logged — the run still succeeds. Without `rescue`, a throw
+fails the workflow like any other step.
+
+## Cross-runtime props
+
+A prop is a node reference, so a prop can live in any runtime Blok speaks. Declare
+the sidecar node with `runtimeNode<In, Out>(name, kind)` and use it like any other:
+
+```ts src/python-prop.ts
+import { http, runtimeNode, workflow } from "@blokjs/core";
+import { defer, definePage } from "@blokjs/inertia";
+
+const stats = runtimeNode<{ since: string }, { revenue: number; orders: number }>(
+  "dashboard-stats",
+  "runtime.python3",
+);
+
+export const Dashboard = definePage("Dashboard", {
+  stats: defer(stats, { group: "dashboard" }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", { stats: { since: "2026-01-01" } });
+  },
+);
+```
+
+The Python node is ordinary Blok — `runtimes/python3/nodes/dashboard_stats/node.py`
+with a `@node("dashboard-stats", …)` function. Nothing about Inertia reaches it:
+it gets inputs, it returns output, the runner persists the result and the
+serializer ships it. `examples/inertia-react` has the full version.
+
+<Note>
+A `runtimeNode()` stub carries no Zod schema, so `blokctl gen app-types` types
+that prop `unknown` and warns. Give the stub explicit `In`/`Out` type
+parameters — that is what `PageProps` reads in the monorepo path.
+</Note>
+
+## Typing the client
+
+### Path A — one repository
+
+```tsx client/src/pages/Orders/Index.tsx
+import type { PageProps } from "@blokjs/inertia";
+import type { OrdersIndex } from "../../../../src/pages/orders";
+
+export default function Index({ orders, stats }: PageProps<typeof OrdersIndex>) {
+  return (
+    <ul>
+      {orders.map((order) => (
+        <li key={order.id}>
+          {order.total} {stats?.revenue}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`optional` and `defer` keys are `T | undefined` — the client only receives them
+on the visit that asked. Every other mode is present. `errors` is always there.
+
+### Path B — separate repositories
+
+```bash
+blokctl gen app-types --pages-only --out ../my-spa/src
+```
+
+writes `blok-pages.d.ts` (augments `Pages`, `Routes` and Inertia's own
+`InertiaConfig`) and `blok-routes.ts` (a `registerRoutes()` call). The client
+then reads `PageProps<"Orders/Index">` from `@blokjs/inertia-client` with no
+import from the server at all. Full reference: [`gen app-types`](/d/cli/gen).
+
+## Reusable prop bundles
+
+```ts src/bundles.ts
+import { defineNode } from "@blokjs/core";
+import { always, definePage, withProps } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "u-1" }),
+});
+
+const loadNav = defineNode({
+  name: "load-nav",
+  description: "Navigation items.",
+  input: z.object({}),
+  output: z.array(z.string()),
+  execute: () => ["orders"],
+});
+
+const loadStats = defineNode({
+  name: "load-stats",
+  description: "Home statistics.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 1 }),
+});
+
+const dashboard = withProps({ auth: always(currentUser), nav: loadNav });
+
+export const Home = definePage("Home", { ...dashboard, stats: loadStats });
+```
+
+`definePage()` throws if a component name is declared twice — the component name
+is the page's identity, for `PageProps`, for codegen and for the registry.
+`getPageRegistry()` returns every page declared in the process (component,
+per-prop mode metadata, Zod output schema, source `file:line`), which is what
+`blokctl gen` and [DevTools](/d/spa/devtools) read.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    Which props resolve, and when.
+  </Card>
+  <Card title="Testing" icon="flask-conical" href="/d/fundamentals/testing#recipe-4--an-inertia-page-workflow">
+    `runPage()` — assert the page object without a server.
+  </Card>
+</CardGroup>

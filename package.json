@@ -11,7 +11,8 @@
 		"triggers/*",
 		"templates/**/**",
 		"packages/*",
-		"apps/*"
+		"apps/*",
+		"tests/docs"
 	],
 	"trustedDependencies": [
 		"@biomejs/biome",

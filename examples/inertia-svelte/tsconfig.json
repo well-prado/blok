@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "es2022",
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+		"lib": ["es2023", "dom", "dom.iterable"],
+		"types": ["node"],
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": false
+	},
+	"include": [
+		"src/**/*.ts",
+		"client/**/*.ts",
+		"client/**/*.tsx",
+		"tests/**/*.ts"
+	]
+}

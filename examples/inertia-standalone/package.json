@@ -1,0 +1,33 @@
+{
+	"name": "blok-example-inertia-standalone",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Blok + Inertia v3 across two origins: a Blok backend and a separately deployed Vite SPA.",
+	"scripts": {
+		"dev:frontend": "vite --config frontend/vite.config.ts frontend",
+		"build": "vite build --config frontend/vite.config.ts frontend",
+		"e2e": "vitest run backend/tests",
+		"gen": "blokctl gen app-types --pages-only --dir backend/src/workflows --out frontend/src",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/inertia": "^2.3.0",
+		"@blokjs/inertia-client": "^2.3.0",
+		"@blokjs/runner": "^2.3.0",
+		"@inertiajs/react": "^3.7.1",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@inertiajs/vite": "^3.7.1",
+		"@types/node": "^22.15.21",
+		"@types/react": "^19.2.10",
+		"@vitejs/plugin-react": "^4.7.0",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0",
+		"vitest": "^4.0.18"
+	}
+}

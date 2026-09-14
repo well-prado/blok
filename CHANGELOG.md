@@ -8,7 +8,45 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **`@blokjs/inertia` — the Inertia v3 SPA layer** (#993). A page is a workflow,
+  a prop is a step, navigation is the Inertia protocol, and the client stays the
+  stock `@inertiajs/react | vue3 | svelte`. The package ships the serializer
+  node, `definePage()` and the `page` control step, the middleware pack
+  (`inertia.shared`, `inertia.auth`, `inertia.csrf`, `inertia.encryptHistory`),
+  shared data (`share()` / `shareOnce()`), routing (`inertia.page()`,
+  `resolveUrlUsing`, `ensurePagesExist`), validation and Precognition,
+  production error pages, history encryption and authorization, infinite-scroll
+  pagination helpers, and the SSR bridge.
+
+- **`@blokjs/inertia-client`** (#997). Typed `Pages` / `Routes` augmentation
+  targets, `PageProps<K>` / `PagePropsOf<T>`, a Wayfinder-shaped `route()`, and
+  the `blokInertia()` Vite plugin that wraps `@inertiajs/vite` and writes the
+  asset version, `pages.json` and the SSR URL into the Vite `outDir`.
+
+- **`@blokjs/flash`, `@blokjs/validate`, `@blokjs/csrf`** in `@blokjs/helpers`
+  (#996, #1011, #1012). The signed one-shot flash cookie, the validation step
+  that returns `{ ok, data, errors }` with dot-path keys instead of throwing,
+  and the `XSRF-TOKEN` double submit.
+
+- **`runPage()` and `runPrecognition()`** in `@blokjs/core/testing` (#1002,
+  #1011). Drive a page workflow the way an Inertia client would — real partial
+  reloads, real deferred follow-ups, fluent page assertions, and the 204/422 of
+  a Precognition dry run.
+
+- **Docs: [SPA (Inertia)](docs/d/spa/index.mdx)** (#1004) — one page per Inertia
+  v3 concept, a Laravel comparison table with a row per v3 doc page, the
+  `@blokjs/react` migration note, and four runnable examples under
+  `examples/inertia-{react,vue,svelte,standalone}`. Every code sample in the
+  section is extracted and typechecked against the real packages in CI.
+
+### Deprecated
+
+- **`@blokjs/react`** is deprecated in favour of `@blokjs/inertia` (#1004). It
+  still works and is still published; it embeds a copy of `ctx` into the HTML it
+  serves, which the Inertia layer replaces with declared props. See
+  [the migration note](docs/d/migration/react-node-to-inertia.mdx).
 
 ## [2.1.0] — 2026-08-10
 

@@ -1,0 +1,128 @@
+---
+title: "@blokjs/react → Inertia"
+sidebarTitle: "@blokjs/react → Inertia"
+description: The old server-rendered React node is deprecated in favour of the Inertia SPA layer. What changes, and the three-step move.
+icon: "arrow-right"
+---
+
+<Warning>
+**`@blokjs/react` is deprecated in favour of [`@blokjs/inertia`](/d/spa/index).**
+It still works and is still published — nothing is being removed in this
+release — but new UI work should use the SPA layer, and the node will not gain
+features.
+</Warning>
+
+## What `@blokjs/react` was
+
+One node that renders an HTML document around a **pre-compiled React bundle**:
+
+```json
+{
+  "id": "ui",
+  "use": "@blokjs/react",
+  "inputs": {
+    "react_app": "./app/index.merged.min.js",
+    "index_html": "index.html",
+    "title": "Dashboard"
+  }
+}
+```
+
+It reads the bundle off disk, wraps it in `<script type="text/babel">`, renders
+an EJS template, and — this is the part that matters — **embeds a copy of `ctx`
+into the page** as a base64 blob the browser script reads back.
+
+## What changes
+
+| | `@blokjs/react` | `@blokjs/inertia` |
+| --- | --- | --- |
+| What the browser gets | your whole bundle, plus a base64 `ctx` | a page object: `component`, `props`, `url`, `version` |
+| What the client sees | `ctx.request`, `ctx.response`, `ctx.config`, inputs | **props only** — exactly what the page declared |
+| Build | a hand-made "merged min" bundle, Babel-in-the-browser | Vite, with hashed assets and [versioning](/d/spa/assets-and-versioning) |
+| Navigation | full page loads | the [Inertia protocol](/d/spa/the-protocol): partial reloads, deferred props, prefetching |
+| Framework | React only | React, Vue 3 or Svelte, stock adapters |
+| Types | none | [`PageProps`](/d/spa/pages-and-props#typing-the-client), generated or imported |
+| Errors / flash | your own | [signed flash cookie](/d/spa/flash-data), [error pages](/d/spa/error-handling) |
+
+<Warning>
+**The `ctx` embedding is the reason to move.** `@blokjs/react` serialises the
+request (headers, cookies, query, body) and the node's inputs into the HTML it
+sends. Anything in that context — a session cookie, an internal header, a
+config value — ships to the browser. Inertia sends the props a page **declared**,
+and nothing else.
+</Warning>
+
+## The three-step move
+
+### 1. Declare the page
+
+Whatever the old bundle read out of the embedded `ctx` becomes a **prop**, and
+each prop is a node:
+
+```ts src/workflows/dashboard.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadDashboard = defineNode({
+  name: "load-dashboard",
+  description: "What the old bundle used to dig out of the embedded ctx.",
+  input: z.object({ userId: z.string() }),
+  output: z.object({ revenue: z.number(), userId: z.string() }),
+  execute: (_ctx, input) => ({ revenue: 42_000, userId: input.userId }),
+});
+
+export const Dashboard = definePage("Dashboard", { dashboard: loadDashboard });
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", { dashboard: { userId: "u-1" } });
+  },
+);
+```
+
+### 2. Move the component into a Vite app
+
+The old `react_app` bundle becomes a normal page component under
+`client/src/pages/`, built by Vite with the
+[`blokInertia()`](/d/spa/assets-and-versioning) plugin. Where the component used
+to read the embedded context, it now takes props:
+
+```tsx client/src/pages/Dashboard.tsx
+interface Props {
+  dashboard: { revenue: number; userId: string };
+}
+
+export default function Dashboard({ dashboard }: Props) {
+  return <h1>{dashboard.revenue}</h1>;
+}
+```
+
+### 3. Swap the step, then delete the bundle
+
+Replace the `@blokjs/react` step with the page workflow above, set
+`BLOK_STATIC_DIR=client/dist` so Blok serves the built assets, and delete the
+hand-built `index.merged.min.js` and its `index.html`. Any value the old
+template injected through `ctx` that must stay server-side goes into
+[`viewData`](/d/spa/title-and-meta) — which is never sent to the client.
+
+## Things with no equivalent, on purpose
+
+- **`ctx` in the browser.** Pass what the page needs as props.
+- **Babel in the browser.** Vite compiles ahead of time; that is also where the
+  asset version comes from.
+- **`index_html` as a node input.** The document is the serializer's
+  [shell](/d/spa/title-and-meta), with `{{placeholders}}` filled from `viewData`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    The by-hand setup, end to end.
+  </Card>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    Prop modes, and how the client gets its types.
+  </Card>
+</CardGroup>

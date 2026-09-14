@@ -1,0 +1,122 @@
+---
+title: Partial reloads
+description: Which prop nodes the runner actually runs, per request — only, except, always and optional.
+icon: "filter"
+---
+
+Counterpart: [Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads).
+
+A partial reload is a visit that asks for a subset of a page's props. On Blok
+that is not a filter over a computed response: the `page` control step decides
+which prop **nodes run at all**, so a prop the client did not ask for costs
+nothing.
+
+```ts src/partial.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, definePage, optional } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string() }),
+  execute: () => ({ id: "u-1" }),
+});
+
+const listUsers = defineNode({
+  name: "list-users",
+  description: "All users.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "u-1" }],
+});
+
+const loadFilters = defineNode({
+  name: "load-filters",
+  description: "Filter chips.",
+  input: z.object({}),
+  output: z.object({ statuses: z.array(z.string()) }),
+  execute: () => ({ statuses: ["open"] }),
+});
+
+export const UsersIndex = definePage("Users/Index", {
+  auth: always(currentUser),       // every visit, every filter
+  users: listUsers,                // regular
+  filters: optional(loadFilters),  // only when named
+});
+
+export default workflow(
+  "users-index",
+  { version: "1.0.0", trigger: http.get("/users") },
+  (req) => {
+    UsersIndex.render(req, "page", "/users", {});
+  },
+);
+```
+
+The client asks with the stock API — nothing Blok-specific:
+
+```ts client/src/reload.ts
+import { router } from "@inertiajs/core";
+
+router.reload({ only: ["users"] });
+router.reload({ except: ["users"] });
+```
+
+## Resolution table
+
+| Visit | Runs | Does not run |
+| --- | --- | --- |
+| Full visit (no `X-Inertia-Partial-Component`, or one naming a different component) | `regular`, `always`, `merge`, `scroll`, and `once` unless the client still holds it | `optional`, `defer` |
+| Partial reload with `X-Inertia-Partial-Data` | the named props (a dot path selects by its **root** segment) plus `always` — naming a `once` prop always resolves it | everything else |
+| Partial reload without `X-Inertia-Partial-Data` | `regular`, `merge`, `scroll`, and `once` unless the client holds it, minus any `X-Inertia-Partial-Except`; `always` is exempt | `optional`, `defer` |
+
+Two rules worth spelling out:
+
+- **`always` beats both filters.** An `only` that does not name it still resolves
+  it; an `except` that does name it still resolves it. Use it for the props a
+  layout cannot render without (`auth`, feature flags).
+- **The partial component must match.** If `X-Inertia-Partial-Component` names a
+  different component, the request is a full visit — which is what makes a
+  redirect to another page safe.
+
+`errors` and every `always` path also survive the filters in the **serializer**,
+so a validation error can never be filtered out of a partial response.
+
+## Dot paths
+
+`only: ["user.name"]` selects the prop by its root segment (`user`), resolves
+that node, and the serializer narrows the value to the named path. The same
+notation drives `except`.
+
+## Testing it
+
+`runPage` performs a **real second run** with the partial-reload headers, so a
+test can assert that a node did not execute:
+
+```ts src/partial.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import usersIndex from "./partial";
+
+it("does not resolve optional props on a full visit", async () => {
+  const page = await runPage(usersIndex);
+  page.assert().component("Users/Index").has("users").missing("filters").etc();
+
+  const reloaded = await page.reloadOnly("filters");
+  expect(reloaded.props.filters).toBeDefined();
+  expect(reloaded.run.step("page.users")?.executed).toBe(false);
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Deferred props" icon="clock" href="/d/spa/deferred-props">
+    Props announced on the first visit, fetched right after.
+  </Card>
+  <Card title="Once props" icon="database" href="/d/spa/once-props">
+    Props the client keeps, so the node never runs again.
+  </Card>
+</CardGroup>

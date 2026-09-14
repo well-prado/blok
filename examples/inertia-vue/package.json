@@ -1,0 +1,31 @@
+{
+	"name": "blok-example-inertia-vue",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Blok + Inertia v3 + Vue 3, in-project mode.",
+	"scripts": {
+		"dev": "vite --config client/vite.config.ts client",
+		"build": "vite build --config client/vite.config.ts client",
+		"e2e": "vitest run tests",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@blokjs/core": "^2.3.0",
+		"@blokjs/inertia": "^2.3.0",
+		"@blokjs/inertia-client": "^2.3.0",
+		"@blokjs/runner": "^2.3.0",
+		"@inertiajs/vue3": "^3.7.1",
+		"vue": "^3.5.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@inertiajs/vite": "^3.7.1",
+		"@types/node": "^22.15.21",
+		"@vitejs/plugin-vue": "^6.0.0",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0",
+		"vitest": "^4.0.18",
+		"vue-tsc": "^3.1.0"
+	}
+}

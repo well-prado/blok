@@ -1,0 +1,94 @@
+---
+title: History encryption
+description: Encrypt what the browser keeps in history.state, and clear it on logout — page, route group or whole app.
+icon: "lock"
+---
+
+Counterpart: [History encryption](https://inertiajs.com/docs/v3/security/history-encryption).
+
+The client can encrypt what it stores in `history.state`, so pressing Back after
+a logout cannot reveal the previous page. Three ways to ask for it, in falling
+precedence:
+
+| Scope | How |
+| --- | --- |
+| one page | the serializer's `encryptHistory` input — `render(…, { encryptHistory: true })`, or `false` to opt out |
+| one route group | the `inertia.encryptHistory` middleware |
+| the whole app | `configureHistory({ encrypt: true })` |
+
+```ts src/history.ts
+import { configureHistory, encryptHistoryMiddleware } from "@blokjs/inertia";
+
+configureHistory({ encrypt: true });                       // app-wide default
+
+export default {
+  "inertia.encryptHistory": encryptHistoryMiddleware(),    // a route-group opt-in
+};
+// trigger: http.get("/secret", { middleware: ["inertia.encryptHistory"] })
+```
+
+The middleware marks the live `ctx`, which it shares with the workflow it
+guards, so every page serialized in that request carries the flag. The page
+object never carries `encryptHistory: false` — an opt-out simply omits the field.
+
+<Warning>
+**HTTPS (or `localhost`) is required.** Encryption uses `window.crypto.subtle`,
+which browsers expose only in a secure context. Over plain HTTP the client logs
+*"Encryption is not supported in this environment. SSL is required."* and stores
+the page **unencrypted** — the flag silently buys you nothing.
+</Warning>
+
+## Logout must clear it
+
+Logging out has to **clear** the history, or the encrypted pages behind the Back
+button stay readable with the key still in `sessionStorage`.
+
+```ts src/logout.ts
+import { defineNode, http, step, workflow } from "@blokjs/core";
+import { logoutNode, logoutResponse, rotateCsrf } from "@blokjs/inertia";
+import { z } from "zod";
+
+// As a step, when nothing else needs to happen:
+export const simple = workflow(
+  "logout",
+  { version: "1.0.0", trigger: http.post("/logout") },
+  () => {
+    step("logout", logoutNode, { redirectTo: "/login" });
+  },
+);
+
+// Or inside your own node, when it does:
+export const logout = defineNode({
+  name: "app-logout",
+  description: "Drop the session, rotate CSRF, clear history.",
+  input: z.object({}),
+  output: z.unknown(),
+  execute: (ctx) => {
+    rotateCsrf(ctx);
+    return logoutResponse(ctx, { redirectTo: "/login" });
+  },
+});
+```
+
+`logoutResponse()` returns a **303** (never a 302: a 302 makes the browser
+re-issue the logout write) and marks the request so the next page object carries
+`clearHistory: true`. The client then drops its history key and IV, and the
+entries behind Back can no longer be decrypted.
+
+The mark is request-scoped, so a page rendered **in the same request** picks it
+up directly. The normal case — a redirect — is covered by the
+[signed flash cookie](/d/spa/flash-data): `logoutResponse` persists the mark,
+`inertia.shared` reads it back on the next request, and the page the user lands
+on carries `clearHistory: true` **once**. Without `BLOK_FLASH_SECRET`, logout
+keeps the request-scoped-only behaviour instead of failing.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="CSRF" icon="shield" href="/d/spa/csrf">
+    Rotating the token on the same boundary.
+  </Card>
+  <Card title="Starter kit" icon="package-open" href="/d/spa/starter-kit">
+    Sessions and auth pages, landing with #1018.
+  </Card>
+</CardGroup>

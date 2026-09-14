@@ -1,0 +1,114 @@
+---
+title: Deferred props
+description: Announce the expensive props on the first visit, let the client fetch them immediately after — with groups and rescue.
+icon: "clock"
+---
+
+Counterpart: [Deferred props](https://inertiajs.com/docs/v3/data-props/deferred-props).
+Laravel writes `Inertia::defer(fn () => …)`; Blok wraps the prop's **node**.
+
+```ts src/deferred.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { defer, definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "A slow aggregate query.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+const recentActivity = defineNode({
+  name: "recent-activity",
+  description: "Recent activity, also slow.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string() })),
+  execute: () => [{ id: "a-1" }],
+});
+
+export const Dashboard = definePage("Dashboard", {
+  stats: defer(heavyStats, { group: "dashboard" }),
+  activity: defer(recentActivity, { group: "dashboard", rescue: true }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", {});
+  },
+);
+```
+
+The first visit carries **no** `stats`/`activity` value and instead announces:
+
+```json
+{ "deferredProps": { "dashboard": ["stats", "activity"] } }
+```
+
+The client then issues one partial reload per group. On the client side nothing
+changes from the Inertia docs — `<Deferred data="stats" fallback={…}>` (React),
+`<Deferred>` (Vue), `{#await}`-style usage in Svelte.
+
+| Option | Effect |
+| --- | --- |
+| `group` | props sharing a group are fetched in **one** follow-up request. Without it, each prop gets its own group (its key). |
+| `rescue` | a throw omits the prop and lists it in `rescuedProps` instead of failing the run — it is logged, and the page still renders. |
+
+<Note>
+`deferredProps` is emitted on **full visits only**, and `rescuedProps` on
+**partial reloads only** — that asymmetry is the protocol's, not Blok's.
+</Note>
+
+## Deferred *and* merged
+
+`defer()` decides **when** a prop resolves; `merge()` decides what the client
+does with it. They compose, innermost resolution mode winning:
+
+```ts src/deferred-merge.ts
+import { defineNode } from "@blokjs/core";
+import { defer, merge } from "@blokjs/inertia";
+import { z } from "zod";
+
+const loadResults = defineNode({
+  name: "load-results",
+  description: "Search results.",
+  input: z.object({}),
+  output: z.object({ data: z.array(z.string()) }),
+  execute: () => ({ data: ["a"] }),
+});
+
+export const results = defer(merge(loadResults, { deep: true }), { group: "search" });
+```
+
+A full visit announces it in `deferredProps` and carries **no** `scrollProps` or
+merge labels; the follow-up partial carries both.
+
+## Testing
+
+```ts src/deferred.test.ts
+import { runPage } from "@blokjs/core/testing";
+import { expect, it } from "vitest";
+import dashboard from "./deferred";
+
+it("announces the group and resolves it on the follow-up", async () => {
+  const page = await runPage(dashboard);
+  expect(page.deferredProps).toEqual({ dashboard: ["stats", "activity"] });
+  expect(page.run.step("page.stats")?.executed).toBe(false);
+
+  await page.loadDeferredProps("dashboard", (p) => p.has("stats").has("activity").etc());
+});
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Merging props" icon="layers" href="/d/spa/merging-props">
+    Append, prepend, deep-merge and match-on.
+  </Card>
+  <Card title="Partial reloads" icon="filter" href="/d/spa/partial-reloads">
+    What a follow-up request actually asks for.
+  </Card>
+</CardGroup>

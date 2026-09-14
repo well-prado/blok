@@ -1,0 +1,232 @@
+---
+title: SPA (Inertia)
+description: Build a React, Vue or Svelte SPA on Blok — a page is a workflow, a prop is a step, navigation is the Inertia v3 protocol.
+icon: "layout-dashboard"
+---
+
+Blok speaks [Inertia.js **v3**](https://inertiajs.com/docs/v3/core-concepts/how-it-works).
+You keep the stock `@inertiajs/react | vue3 | svelte` client — nothing is forked,
+nothing is wrapped — and the server half is ordinary Blok:
+
+- **a page is a workflow**, declared with `definePage()` and rendered by one
+  `page` control step;
+- **a prop is a step**, so any prop can run in any runtime (a Python node
+  computing `stats` next to a TypeScript node listing `orders`);
+- **navigation is the protocol**: the same URL answers an HTML shell on the
+  first load and a JSON page object on an Inertia visit.
+
+```ts src/workflows/dashboard.ts
+import { defineNode, http, workflow } from "@blokjs/core";
+import { always, defer, definePage } from "@blokjs/inertia";
+import { z } from "zod";
+
+const currentUser = defineNode({
+  name: "current-user",
+  description: "The signed-in user.",
+  input: z.object({}),
+  output: z.object({ id: z.string(), email: z.string() }),
+  execute: () => ({ id: "u-1", email: "ada@example.com" }),
+});
+
+const listOrders = defineNode({
+  name: "list-orders",
+  description: "Recent orders.",
+  input: z.object({}),
+  output: z.array(z.object({ id: z.string(), total: z.number() })),
+  execute: () => [{ id: "o-1", total: 120 }],
+});
+
+const heavyStats = defineNode({
+  name: "heavy-stats",
+  description: "Expensive dashboard aggregates.",
+  input: z.object({}),
+  output: z.object({ revenue: z.number() }),
+  execute: () => ({ revenue: 42_000 }),
+});
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),
+  orders: listOrders,
+  stats: defer(heavyStats, { group: "dashboard" }),
+});
+
+export default workflow(
+  "dashboard",
+  { version: "1.0.0", trigger: http.get("/dashboard") },
+  (req) => {
+    Dashboard.render(req, "page", "/dashboard", { auth: {}, orders: {}, stats: {} });
+  },
+);
+```
+
+<Card title="Start here" icon="rocket" href="/d/spa/getting-started">
+  Wire a Vite SPA to a Blok server and render your first page.
+</Card>
+
+## The protocol in one table
+
+Everything the adapter reads and writes. The full field-by-field reference is
+[The protocol](/d/spa/the-protocol).
+
+| Direction | Name | Meaning |
+| --- | --- | --- |
+| → request | `X-Inertia: true` | answer with the JSON page object instead of the HTML shell |
+| → request | `X-Inertia-Version` | the asset version the client holds; a mismatch on a **GET** forces a hard reload |
+| → request | `X-Inertia-Partial-Component` | must equal the page's component, or the visit counts as a full one |
+| → request | `X-Inertia-Partial-Data` / `-Partial-Except` | which props to resolve ([partial reloads](/d/spa/partial-reloads)) |
+| → request | `X-Inertia-Reset` | return these merge props unmerged ([merging props](/d/spa/merging-props)) |
+| → request | `X-Inertia-Except-Once-Props` | cache keys the client still holds ([once props](/d/spa/once-props)) |
+| → request | `X-Inertia-Error-Bag` | nest `props.errors` under a bag name ([validation](/d/spa/validation)) |
+| → request | `X-Inertia-Infinite-Scroll-Merge-Intent` | `append` / `prepend` ([infinite scroll](/d/spa/infinite-scroll)) |
+| → request | `Precognition: true` | dry-run the validation step only ([validation](/d/spa/validation)) |
+| ← response | `200 text/html` | first load: the shell with the page object in `<script type="application/json" data-page="app">` |
+| ← response | `200 application/json` + `X-Inertia: true` | an Inertia visit: the bare page object |
+| ← response | `Vary: X-Inertia` | the same URL serves both |
+| ← response | `303` | after a `PUT`/`PATCH`/`DELETE` redirect, never `302` |
+| ← response | `409` + `X-Inertia-Location` | asset-version mismatch, or an external `location()` |
+| ← response | `409` + `X-Inertia-Redirect` | a redirect to a URL fragment |
+
+## Two deployment modes
+
+<Tabs>
+  <Tab title="In-project">
+    The SPA lives in `client/` inside the Blok project. Vite builds into
+    `client/dist`, the Blok HTTP trigger serves it (`BLOK_STATIC_DIR`), and one
+    origin answers everything. In dev, the Vite dev server proxies to Blok, so
+    there is still one origin in the browser.
+  </Tab>
+  <Tab title="Standalone">
+    The SPA is its own deployable (a CDN, `:5173`, another host) and talks to
+    Blok cross-origin. Blok sends CORS (`BLOK_CORS_ORIGIN`) that must **expose**
+    the Inertia response headers, and the types travel through
+    `blokctl gen app-types --out ../my-spa/src`.
+  </Tab>
+</Tabs>
+
+Both are first-class; see [assets and versioning](/d/spa/assets-and-versioning)
+for the wiring of each.
+
+## Page = workflow, prop = step
+
+`definePage()` declares the contract once, outside the workflow callback, so the
+type is importable by the frontend and readable by codegen. `render()` emits
+exactly **one** `page` control step, and the runner lowers it to one inner step
+per prop (`<pageId>.<key>`) plus the serializer (`<pageId>.$render`).
+
+That means props are ordinary steps: they run **in parallel**, each with its own
+`retry`, `idempotencyKey` and `maxDuration`, each persisted to
+`ctx.state["<pageId>.<key>"]`, and each free to be a node in another language.
+Because they are concurrent, one prop can never read another's output — read the
+request, or a middleware's output through [`shared()`](/d/spa/middleware).
+
+| Mode | Full visit | Partial reload | Wrapper |
+| --- | --- | --- | --- |
+| regular | resolved | when named, or when nothing is named | — |
+| `always` | resolved | always, exempt from `only`/`except` | `always(node)` |
+| `optional` | never | only when named | `optional(node)` |
+| `defer` | never (announced) | only when named / by group | `defer(node, { group, rescue })` |
+| `merge` | resolved | resolved; labels ride partials only | `merge(node, { append, prepend, deep, matchOn })` |
+| `once` | resolved unless the client holds it | same | `once(node, { as, until, fresh })` |
+| `scroll` | resolved | resolved, with cursors | `scroll(node, { wrapper, pageName, metadata })` |
+
+## What differs from Laravel
+
+The adapter targets feature parity with
+[`inertia-laravel`](https://github.com/inertiajs/inertia-laravel) **v3.3.4**
+(released 2026-09-11), which is the version every row below was checked against.
+Three things are deliberately different:
+
+1. **No session store.** Laravel's flash rides the session; Blok has no session,
+   so flash and error bags ride a **signed one-shot cookie**
+   (`BLOK_FLASH_SECRET` is required). See [flash data](/d/spa/flash-data).
+2. **Middleware is Blok's middleware.** There is no `HandleInertiaRequests`
+   class. `inertia.shared`, `inertia.auth` and `inertia.csrf` are ordinary
+   middleware **workflows** registered by name. See [middleware](/d/spa/middleware).
+3. **Props are steps, not closures.** A prop is a node reference plus its
+   inputs, resolved by the runner — which is why a prop can be Python, Go or
+   Rust, and why per-prop retries exist at all.
+
+### Every v3 doc page, and its Blok equivalent
+
+<Note>
+One row per page of [the Inertia v3 documentation](https://inertiajs.com/docs/llms.txt).
+"Client only" means the behaviour lives entirely in the stock client and Blok
+has nothing to configure — see [client features](/d/spa/client-features).
+</Note>
+
+| Inertia v3 page | Laravel (`inertia-laravel` v3.3.4) | Blok |
+| --- | --- | --- |
+| [Introduction](https://inertiajs.com/docs/v3/getting-started/index) | `inertia-laravel` | [`@blokjs/inertia`](/d/spa/index) |
+| [Demo Application](https://inertiajs.com/docs/v3/getting-started/demo-application) | Ping CRM | [`examples/inertia-react`](/d/spa/getting-started#examples) |
+| [Upgrade Guide for v3.0](https://inertiajs.com/docs/v3/getting-started/upgrade-guide) | v2 → v3 upgrade | Blok ships v3 only; the v1 node's move is [migration](/d/migration/react-node-to-inertia) |
+| [Server-Side Setup](https://inertiajs.com/docs/v3/installation/server-side-setup) | `inertia:middleware`, `app.blade.php` | [getting started](/d/spa/getting-started) — `definePage()`, no root view |
+| [Client-Side Setup](https://inertiajs.com/docs/v3/installation/client-side-setup) | `createInertiaApp` | identical; plus `blokInertia()` ([assets](/d/spa/assets-and-versioning)) |
+| [Who Is Inertia.js For?](https://inertiajs.com/docs/v3/core-concepts/who-is-it-for) | — | unchanged |
+| [How It Works](https://inertiajs.com/docs/v3/core-concepts/how-it-works) | — | [page = workflow, prop = step](/d/spa/index#page--workflow-prop--step) |
+| [The Protocol](https://inertiajs.com/docs/v3/core-concepts/the-protocol) | adapter internals | [the protocol](/d/spa/the-protocol) |
+| [Pages](https://inertiajs.com/docs/v3/the-basics/pages) | `Inertia::render()` | [`definePage()` + `render()`](/d/spa/pages-and-props) |
+| [Responses](https://inertiajs.com/docs/v3/the-basics/responses) | `Inertia::render`, `Inertia::location` | the `page` step; [`location()`](/d/spa/the-protocol#control-responses) |
+| [Redirects](https://inertiajs.com/docs/v3/the-basics/redirects) | `back()`, `redirect()`, 303 rule | [`redirectBack()` / `back()`](/d/spa/forms-and-redirects) |
+| [Routing](https://inertiajs.com/docs/v3/the-basics/routing) | `Route::inertia()`, Ziggy/Wayfinder | [`inertia.page()`, `route()`](/d/spa/routing) |
+| [Title & Meta](https://inertiajs.com/docs/v3/the-basics/title-and-meta) | `@inertiaHead`, `rootView` | [`head` / `shell` / `viewData`](/d/spa/title-and-meta) |
+| [Links](https://inertiajs.com/docs/v3/the-basics/links) | client only | [client only](/d/spa/client-features) |
+| [Manual Visits](https://inertiajs.com/docs/v3/the-basics/manual-visits) | client only | [client only](/d/spa/client-features) |
+| [Instant Visits](https://inertiajs.com/docs/v3/the-basics/instant-visits) | `sharedProps` on the page object | [`share()` announces its keys](/d/spa/shared-data) |
+| [Forms](https://inertiajs.com/docs/v3/the-basics/forms) | `useForm`, `$request->validate()` | [forms and redirects](/d/spa/forms-and-redirects) |
+| [HTTP Requests](https://inertiajs.com/docs/v3/the-basics/http-requests) | client only | [client only](/d/spa/client-features) |
+| [Optimistic Updates](https://inertiajs.com/docs/v3/the-basics/optimistic-updates) | client only | [client only](/d/spa/client-features) |
+| [File Uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads) | `_method` spoofing, `UploadedFile` | [`ctx.request.files`, `_method`](/d/spa/file-uploads) |
+| [Validation](https://inertiajs.com/docs/v3/the-basics/validation) | `withErrors`, error bags, Precognition | [`@blokjs/validate`, bags, Precognition](/d/spa/validation) |
+| [Layouts](https://inertiajs.com/docs/v3/the-basics/layouts) | client only | [client only](/d/spa/client-features) |
+| [View Transitions](https://inertiajs.com/docs/v3/the-basics/view-transitions) | client only | [client only](/d/spa/client-features) |
+| [Shared Data](https://inertiajs.com/docs/v3/data-props/shared-data) | `HandleInertiaRequests::share`, `Inertia::share` | [`share()` / `inertia.shared`](/d/spa/shared-data) |
+| [Flash Data](https://inertiajs.com/docs/v3/data-props/flash-data) | session flash | [signed one-shot cookie](/d/spa/flash-data) |
+| [Partial Reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads) | `Inertia::optional`, `Inertia::always` | [`optional()` / `always()`](/d/spa/partial-reloads) |
+| [Deferred Props](https://inertiajs.com/docs/v3/data-props/deferred-props) | `Inertia::defer()` | [`defer()`](/d/spa/deferred-props) |
+| [Merging Props](https://inertiajs.com/docs/v3/data-props/merging-props) | `Inertia::merge()`, `->deepMerge()`, `->matchOn()` | [`merge()`](/d/spa/merging-props) |
+| [Once Props](https://inertiajs.com/docs/v3/data-props/once-props) | `Inertia::once()`, `shareOnce()` | [`once()` / `shareOnce()`](/d/spa/once-props) |
+| [Polling](https://inertiajs.com/docs/v3/data-props/polling) | client only | [client only](/d/spa/client-features) |
+| [Prefetching](https://inertiajs.com/docs/v3/data-props/prefetching) | `Purpose: prefetch` handling | [honoured by the serializer](/d/spa/the-protocol#prefetch) |
+| [Load When Visible](https://inertiajs.com/docs/v3/data-props/load-when-visible) | `WhenVisible` + deferred props | [`defer()` + client only](/d/spa/deferred-props) |
+| [Infinite Scroll](https://inertiajs.com/docs/v3/data-props/infinite-scroll) | `Inertia::scroll()` | [`scroll()`, `paginate()`](/d/spa/infinite-scroll) |
+| [Remembering State](https://inertiajs.com/docs/v3/data-props/remembering-state) | client only | [client only](/d/spa/client-features) |
+| [Authentication](https://inertiajs.com/docs/v3/security/authentication) | Breeze / starter kits | [`inertia.auth`, starter kit](/d/spa/starter-kit) |
+| [Authorization](https://inertiajs.com/docs/v3/security/authorization) | Gates and Policies, `can` prop | [`can()` / `authorize()`](/d/spa/authorization) |
+| [CSRF Protection](https://inertiajs.com/docs/v3/security/csrf-protection) | `VerifyCsrfToken` middleware | [`inertia.csrf`](/d/spa/csrf) |
+| [History Encryption](https://inertiajs.com/docs/v3/security/history-encryption) | `Inertia::encryptHistory()`, `clearHistory()` | [`encryptHistory()`, `logoutResponse()`](/d/spa/history-encryption) |
+| [Asset Versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning) | `HandleInertiaRequests::version()` | [`ASSET_VERSION` from the Vite plugin](/d/spa/assets-and-versioning) |
+| [Code Splitting](https://inertiajs.com/docs/v3/advanced/code-splitting) | Vite `lazy` page resolution | identical — [`blokInertia()` passes it through](/d/spa/assets-and-versioning) |
+| [DevTools](https://inertiajs.com/docs/v3/advanced/devtools) | devtools protocol server | [devtools](/d/spa/devtools) |
+| [Error Handling](https://inertiajs.com/docs/v3/advanced/error-handling) | `bootstrap/app.php` `respond()` | [`configureErrorPages()`](/d/spa/error-handling) |
+| [Events](https://inertiajs.com/docs/v3/advanced/events) | client only | [client only](/d/spa/client-features) |
+| [Progress Indicators](https://inertiajs.com/docs/v3/advanced/progress-indicators) | client only | [client only](/d/spa/client-features) |
+| [Scroll Management](https://inertiajs.com/docs/v3/advanced/scroll-management) | client only | [client only](/d/spa/client-features) |
+| [Server-Side Rendering (SSR)](https://inertiajs.com/docs/v3/advanced/server-side-rendering) | `php artisan inertia:start-ssr` | [`blokctl inertia start-ssr`](/d/spa/ssr) |
+| [Testing](https://inertiajs.com/docs/v3/advanced/testing) | `AssertableInertia` | [`runPage()`](/d/fundamentals/testing#recipe-4--an-inertia-page-workflow) |
+| [TypeScript](https://inertiajs.com/docs/v3/advanced/typescript) | hand-written `types/index.d.ts` | [`PageProps`, `blokctl gen app-types`](/d/spa/pages-and-props#typing-the-client) |
+
+## Packages
+
+| Package | What it is |
+| --- | --- |
+| `@blokjs/inertia` | the serializer node, `definePage()`, the middleware pack, shared data, routing, errors, SSR |
+| `@blokjs/inertia-client` | typed `Pages`/`Routes`, `route()`, and the `blokInertia()` Vite plugin |
+| `@blokjs/helpers` | the `@blokjs/flash`, `@blokjs/validate`, `@blokjs/csrf` and `@blokjs/throw` nodes |
+| `@inertiajs/react` · `vue3` · `svelte` | the **stock** client, unforked |
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
+    From an empty project to a rendered page.
+  </Card>
+  <Card title="Pages and props" icon="box" href="/d/spa/pages-and-props">
+    `definePage`, prop modes, cross-runtime props, typing the client.
+  </Card>
+  <Card title="The protocol" icon="network" href="/d/spa/the-protocol">
+    Every header, every page-object field, every status code.
+  </Card>
+  <Card title="Migrating from @blokjs/react" icon="arrow-right" href="/d/migration/react-node-to-inertia">
+    The old server-rendered React node, and the three-step move.
+  </Card>
+</CardGroup>
