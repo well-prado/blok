@@ -14,9 +14,14 @@ import { z } from "zod";
 import { flashCookie, normalizeErrors } from "./flash.js";
 import { buildPage, isInertiaRequest } from "./page.js";
 import { type PageObject, location, normalizeHeaders, redirect, renderShell, versionConflict } from "./protocol.js";
+// #1015 — the adapter-wide url / component overrides, and the shared-data
+// registry. The serializer is where shared values are RESOLVED: it is the one
+// place every Inertia response passes through.
+import { resolveUrl, transformComponent } from "./routing.js";
 // #1013 — the request mark left by the `inertia.encryptHistory` middleware and
 // by `logoutResponse()`, plus the adapter-wide `history.encrypt` default.
 import { resolveClearHistory, resolveEncryptHistory } from "./security/history.js";
+import { resolveSharedProps } from "./shared.js";
 
 export {
 	APP_MARKER,
@@ -51,6 +56,19 @@ export {
 	scroll,
 	shared,
 } from "./define-page.js";
+export { withProps } from "./define-page.js";
+// --- shared data + routing (#1015) -------------------------------------------
+export { _resetShared, getShared, share, shareOnce, sharedKeys } from "./shared.js";
+export type { ShareOnceOptions, ShareOptions, SharedMode, SharedNode, SharedResolver } from "./shared.js";
+export {
+	_resetRoutes,
+	ensurePagesExist,
+	inertia,
+	inertiaPage,
+	resolveUrlUsing,
+	transformComponentUsing,
+} from "./routing.js";
+export type { ComponentTransform, EnsurePagesExistOptions, InertiaRouteOptions, UrlResolver } from "./routing.js";
 export type {
 	DeferOptions,
 	MergeOptions,
@@ -174,6 +192,43 @@ function requestField(ctx: unknown, field: "headers" | "method" | "url"): unknow
 	return request?.[field];
 }
 
+/** Both lists, in order, without duplicates. `undefined` when neither has anything. */
+function union(a: string[] | undefined, b: string[]): string[] | undefined {
+	if (b.length === 0) return a;
+	return [...new Set([...(a ?? []), ...b])];
+}
+
+/**
+ * The page object rides the browser's history state, and browsers cap it —
+ * Firefox hard-fails at 16 MiB, which surfaces client-side as a navigation that
+ * simply does not happen. Warn ONCE per process well below that, and still send
+ * the response: the page works, the Back button eventually will not.
+ *
+ * ponytail: this measures by serializing the page a second time (the JSON path
+ * hands the object to the trigger, which stringifies it again). One extra pass
+ * on a render is cheap next to a silent history failure; the upgrade path is to
+ * measure the emitted body in the response emitter and report back.
+ */
+const HISTORY_WARN_BYTES = 8 * 1024 * 1024;
+let warnedOversized = false;
+
+function warnOversizedPage(ctx: unknown, page: PageObject): void {
+	if (warnedOversized) return;
+	const bytes = JSON.stringify(page).length;
+	if (bytes <= HISTORY_WARN_BYTES) return;
+	warnedOversized = true;
+	const logger = (ctx as { logger?: { logLevel?: (level: string, message: string) => void } } | undefined)?.logger;
+	const size = (bytes / 1024 / 1024).toFixed(1);
+	const message = `[blok] @blokjs/inertia: page "${page.component}" is ${size} MiB — browsers store the page object in history state and Firefox hard-fails above 16 MiB. Fix: move the bulk behind defer()/optional() props, or paginate it. (Warned once per process.)`;
+	if (typeof logger?.logLevel === "function") logger.logLevel("warn", message);
+	else console.warn(message);
+}
+
+/** Test-only: re-arm the once-per-process history-size warning. */
+export function _resetOversizedWarning(): void {
+	warnedOversized = false;
+}
+
 /** `http://host/users?page=2` -> `/users?page=2`; anything unparseable is kept. */
 function toRelativeUrl(raw: string): string {
 	try {
@@ -199,7 +254,11 @@ export default defineNode({
 		const method = String(input.method ?? requestField(ctx, "method") ?? "GET").toUpperCase();
 		const prefetch = headers.purpose === "prefetch";
 		const rawUrl = input.url ?? (requestField(ctx, "url") as string | undefined) ?? "/";
-		const url = toRelativeUrl(rawUrl);
+		// #1015 — `resolveUrlUsing()` describes how the WHOLE APP spells URLs, so
+		// it wins over the per-page `url`: every real page passes one (it is a
+		// required `render()` argument), and an override nothing can reach would
+		// be no override at all.
+		const url = resolveUrl((ctx as { request?: unknown } | undefined)?.request) ?? toRelativeUrl(rawUrl);
 		const version = input.version ?? "";
 
 		// --- control responses come before any page work ---
@@ -212,6 +271,11 @@ export default defineNode({
 		if (!input.component) {
 			throw new Error("@blokjs/inertia: `component` is required unless `redirect` or `location` is set.");
 		}
+		// #1015 — the server-side component rename, applied BEFORE anything else
+		// reads the name: the client echoes the transformed name back in
+		// `X-Inertia-Partial-Component`, so the partial-reload check has to
+		// compare against it too.
+		const component = transformComponent(input.component);
 
 		// Asset-version mismatch: only ever on a GET (a non-GET would lose the
 		// body if the client replayed it as a fresh visit).
@@ -232,9 +296,15 @@ export default defineNode({
 			return reflash ? { ...conflict, cookies: [reflash] } : conflict;
 		}
 
+		// #1015 — shared data. Resolved here, merged UNDER the page's own props
+		// (the page wins on a key collision), and its top-level keys announced as
+		// `sharedProps` so an instant visit can carry them to the next page.
+		const pageProps = (input.props as Record<string, unknown> | undefined) ?? {};
+		const sharedData = await resolveSharedProps(ctx, headers, component, pageProps);
+
 		const page: PageObject = buildPage({
-			component: input.component,
-			props: (input.props as Record<string, unknown> | undefined) ?? {},
+			component,
+			props: { ...sharedData.values, ...pageProps },
 			url,
 			version,
 			errors: normalizeErrors(input.errors as Record<string, unknown> | undefined, {
@@ -249,17 +319,19 @@ export default defineNode({
 			scrollProps: input.scrollProps,
 			deferredProps: input.deferredProps,
 			rescuedProps: input.rescuedProps,
-			sharedProps: input.sharedProps,
-			onceProps: input.onceProps,
+			sharedProps: union(input.sharedProps, sharedData.keys),
+			onceProps: { ...input.onceProps, ...sharedData.onceProps },
 			flash: input.flash as Record<string, unknown> | undefined,
 			// #1013 — input wins (an explicit `false` opts out), then the request
 			// mark, then the adapter default.
 			encryptHistory: resolveEncryptHistory(ctx, input.encryptHistory),
 			clearHistory: resolveClearHistory(ctx, input.clearHistory),
 			preserveFragment: input.preserveFragment,
-			alwaysProps: input.alwaysProps,
+			alwaysProps: union(input.alwaysProps, sharedData.alwaysKeys),
 			exposeSharedPropKeys: input.exposeSharedPropKeys,
 		});
+
+		warnOversizedPage(ctx, page);
 
 		// The response that CONSUMED a flash is the response that expires it: the
 		// `flash` middleware step hands its clearing `Set-Cookie` here (#996).

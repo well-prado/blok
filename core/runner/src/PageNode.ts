@@ -328,9 +328,13 @@ export class PageNode extends RunnerNode {
 			headers: request.headers ?? {},
 			method: request.method ?? "GET",
 			...metadata,
-			// #1015 seam — the shared-prop registry does not exist yet. It rides
-			// these SAME serializer inputs when it lands.
-			sharedProps: [],
+			// #1015 — the shared-prop registry lives in `@blokjs/inertia` and is
+			// resolved by the SERIALIZER: the runner cannot import that package (the
+			// dependency runs the other way), and the serializer is the one place
+			// EVERY Inertia response passes through, `page` step or not. So nothing
+			// is injected here — an author's own `sharedProps` input rides
+			// `explicitInputs` above, and the serializer unions the registry's keys
+			// into it.
 			// #996 — the flash bag `inertia.shared` left at `ctx.state.flash`:
 			// validation errors, page flash, the error bag, preserveFragment,
 			// clearHistory and the cookie that expires it. Absent middleware (or a
