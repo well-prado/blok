@@ -11,8 +11,15 @@ which is exactly what you want for a query that takes a second.
 
 from __future__ import annotations
 
+import logging
+
 from blok import Context, node
 from pydantic import BaseModel
+
+# The Python SDK's `Context` carries no logger (the TypeScript `ctx.logger` has
+# no Python counterpart — #1064). `blok.node` is the name the SDK's own examples
+# use; the runner forwards it as a LogLine when BLOK_STREAM_LOGS=true.
+log = logging.getLogger("blok.node")
 
 
 class DashboardStatsInput(BaseModel):
@@ -27,5 +34,5 @@ class DashboardStatsOutput(BaseModel):
 @node("dashboard-stats", "Aggregate revenue and order count since a date")
 def dashboard_stats(ctx: Context, input: DashboardStatsInput) -> DashboardStatsOutput:
     # A real implementation would query a warehouse here.
-    ctx.logger.info("aggregating dashboard stats since %s", input.since)
+    log.info("aggregating dashboard stats since %s", input.since)
     return DashboardStatsOutput(revenue=42000.0, orders=128)

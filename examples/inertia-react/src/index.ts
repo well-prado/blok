@@ -10,6 +10,11 @@
  * identical: `listen()` auto-discovers `src/workflows/*.ts`, mounts
  * `BLOK_STATIC_DIR`, and publishes `ASSET_VERSION`.
  *
+ * It also starts the `runtime.python3` sidecar (what `blokctl dev` does from
+ * `.blok/config.json`), so the Dashboard's Python prop resolves for real. No
+ * python3 → a warning and a rescued prop, never a failed boot.
+ * `BLOK_SKIP_PYTHON_SIDECAR=1` opts out.
+ *
  * ```bash
  * bun run build                                    # the Vite client
  * BLOK_FLASH_SECRET=dev-secret BLOK_STATIC_DIR=client/dist bun run src/index.ts
@@ -20,6 +25,12 @@ import type { NodeBase } from "@blokjs/shared";
 import HttpTrigger from "@blokjs/trigger-http/dist/runner/HttpTrigger.js";
 import workflows from "./Workflows.js";
 import * as nodes from "./nodes.js";
+import { startPythonSidecar } from "./python-sidecar.js";
+
+// The cross-runtime half of the stack: one Python node, same lifetime as the
+// server. Started before `listen()` so it is up by the time the first visit's
+// deferred follow-up asks for `stats`.
+if (process.env.BLOK_SKIP_PYTHON_SIDECAR !== "1") startPythonSidecar();
 
 const trigger = new HttpTrigger();
 const registry = trigger.getNodeMap();
