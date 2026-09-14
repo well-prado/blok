@@ -36,12 +36,18 @@ export default workflow(
 	"dashboard",
 	{ version: "1.0.0", trigger: http.get("/", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		Dashboard.render(req, "page", "/", {
-			orders: { userId: shared(currentUser, "auth").id },
-			stats: { since: "2026-01-01" },
-			notifications: { page: req.query.page },
-			posts: { page: req.query.page },
-			activity: { cursor: req.query.activity },
-		});
+		Dashboard.render(
+			req,
+			"page",
+			"/",
+			{
+				orders: { userId: shared(currentUser, "auth").id },
+				stats: { since: "2026-01-01" },
+				notifications: { page: req.query.page },
+				posts: { page: req.query.page },
+				activity: { cursor: req.query.activity },
+			},
+			{ viewData: { title: "Dashboard" } },
+		);
 	},
 );

@@ -335,7 +335,16 @@ export interface PageDef<P extends PageShape> {
 	render(
 		req: Handle<unknown>,
 		id: string,
-		url: string | Handle<string>,
+		/**
+		 * The page object's `url` — what Inertia pushes into history.
+		 *
+		 * `{ $tpl }` is the shape `tpl\`/orders/${req.params.id}\`` returns
+		 * (`@blokjs/core` keeps `StructuralTpl` private), and it is what a
+		 * PARAMETERISED route needs: without it a `/things/:id` page can only be
+		 * rendered at a constant URL, which puts the wrong entry in history. The
+		 * runner lowers it exactly like a handle.
+		 */
+		url: string | Handle<string> | { $tpl: unknown[] },
 		inputs: RenderInputs<P>,
 		opts?: RenderOptions,
 	): Handle<RespondEnvelope>;

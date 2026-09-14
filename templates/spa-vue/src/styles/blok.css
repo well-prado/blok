@@ -1,0 +1,989 @@
+/*
+ * blok.css — the Blok SPA design system.
+ *
+ * One stylesheet, plain custom properties, no build step and no CSS framework.
+ * The SAME BYTES ship in every `blokctl` SPA template and every Inertia
+ * example (a test in `tests/docs/spa-design.test.ts` fails if they drift), so
+ * a scaffolded app, an example and the docs all read as one product.
+ *
+ * Theming is two-layered on purpose: `prefers-color-scheme` picks the theme
+ * for a visitor who never touches the toggle, and `[data-theme]` on <html>
+ * (set by `theme.ts`) overrides it in BOTH directions.
+ *
+ * Neutrals are Studio's graphite ramp and the accent is the brand green
+ * (`apps/studio/src/app.css`). `--blok-accent` is a FILL — green text on a
+ * light surface needs `--blok-accent-ink`, which is darkened to clear WCAG AA.
+ */
+
+:root {
+	color-scheme: light;
+
+	/* Surfaces */
+	--blok-bg: #f4f4f5;
+	--blok-surface: #ffffff;
+	--blok-surface-2: #fafafa;
+	--blok-hover: #f4f4f5;
+
+	/* Lines */
+	--blok-line: #e4e4e7;
+	--blok-line-strong: #d4d4d8;
+
+	/* Ink */
+	--blok-text-strong: #18181b;
+	--blok-text: #27272a;
+	--blok-muted: #52525b;
+
+	/* Brand */
+	--blok-accent: #2bcd71;
+	--blok-accent-hover: #22a85b;
+	--blok-on-accent: #00231b;
+	/* The green button's rim. The brand green is only 1.90:1 against the page,
+	   and WCAG 1.4.11 wants 3:1 for a control's boundary — this is 3.29:1. */
+	--blok-accent-border: #1e9a54;
+	/* Green as TEXT: the brand green is 2.08:1 on white, this is 5.41:1. */
+	--blok-accent-ink: #127a3f;
+	--blok-accent-wash: #eafaf1;
+
+	/* Status */
+	--blok-danger: #dc2626;
+	--blok-danger-wash: #fef2f2;
+	/* 5.00:1 on the page: a focus ring is a UI component, 3:1 is the floor. */
+	--blok-focus: #158043;
+
+	/* Scale */
+	--blok-space-1: 0.25rem;
+	--blok-space-2: 0.5rem;
+	--blok-space-3: 0.75rem;
+	--blok-space-4: 1rem;
+	--blok-space-5: 1.5rem;
+	--blok-space-6: 2rem;
+	--blok-space-7: 3rem;
+	--blok-radius-sm: 6px;
+	--blok-radius: 10px;
+	--blok-radius-lg: 16px;
+	--blok-shadow: 0 1px 2px rgb(9 9 11 / 0.04), 0 1px 3px rgb(9 9 11 / 0.06);
+	--blok-shadow-lg: 0 10px 30px rgb(9 9 11 / 0.08);
+	--blok-width: 72rem;
+
+	--blok-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, sans-serif;
+	--blok-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+		"Liberation Mono", monospace;
+}
+
+/* The visitor who never touches the toggle. `:not([data-theme="light"])` is
+   what lets an explicit LIGHT choice win on a dark-preferring machine. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		color-scheme: dark;
+		--blok-bg: #0b0b0d;
+		--blok-surface: #111113;
+		--blok-surface-2: #18181b;
+		--blok-hover: #1f1f23;
+		--blok-line: #27272a;
+		--blok-line-strong: #3f3f46;
+		--blok-text-strong: #f4f4f5;
+		--blok-text: #e4e4e7;
+		--blok-muted: #a1a1aa;
+		--blok-accent: #2bcd71;
+		--blok-accent-hover: #4dd98a;
+		--blok-on-accent: #00231b;
+		--blok-accent-border: #2bcd71;
+		--blok-accent-ink: #7ee2a8;
+		--blok-accent-wash: #0f2a1d;
+		--blok-danger: #f87171;
+		--blok-danger-wash: #2a1416;
+		--blok-focus: #4dd98a;
+		--blok-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+		--blok-shadow-lg: 0 10px 30px rgb(0 0 0 / 0.55);
+	}
+}
+
+/* The explicit choice, in both directions. */
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--blok-bg: #0b0b0d;
+	--blok-surface: #111113;
+	--blok-surface-2: #18181b;
+	--blok-hover: #1f1f23;
+	--blok-line: #27272a;
+	--blok-line-strong: #3f3f46;
+	--blok-text-strong: #f4f4f5;
+	--blok-text: #e4e4e7;
+	--blok-muted: #a1a1aa;
+	--blok-accent: #2bcd71;
+	--blok-accent-hover: #4dd98a;
+	--blok-on-accent: #00231b;
+	--blok-accent-border: #2bcd71;
+	--blok-accent-ink: #7ee2a8;
+	--blok-accent-wash: #0f2a1d;
+	--blok-danger: #f87171;
+	--blok-danger-wash: #2a1416;
+	--blok-focus: #4dd98a;
+	--blok-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+	--blok-shadow-lg: 0 10px 30px rgb(0 0 0 / 0.55);
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--blok-bg);
+	color: var(--blok-text);
+	font-family: var(--blok-font);
+	font-size: 1rem;
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+	color: var(--blok-text-strong);
+	line-height: 1.25;
+	margin: 0;
+}
+
+p {
+	margin: 0;
+}
+
+a {
+	color: var(--blok-accent-ink);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+:focus-visible {
+	outline: 2px solid var(--blok-focus);
+	outline-offset: 2px;
+	border-radius: var(--blok-radius-sm);
+}
+
+code,
+pre {
+	font-family: var(--blok-mono);
+	font-size: 0.8125rem;
+}
+
+/* ── shell ────────────────────────────────────────────────────────────────── */
+
+.blok-shell {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+.blok-container {
+	width: 100%;
+	max-width: var(--blok-width);
+	margin: 0 auto;
+	padding: 0 var(--blok-space-5);
+}
+
+.blok-header {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	background: color-mix(in srgb, var(--blok-surface) 88%, transparent);
+	backdrop-filter: saturate(180%) blur(12px);
+	border-bottom: 1px solid var(--blok-line);
+}
+
+.blok-header__inner {
+	display: flex;
+	align-items: center;
+	gap: var(--blok-space-5);
+	min-height: 60px;
+}
+
+.blok-brand {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--blok-space-2);
+	color: var(--blok-text-strong);
+	flex: none;
+}
+
+.blok-brand:hover {
+	text-decoration: none;
+}
+
+.blok-brand svg {
+	display: block;
+}
+
+.blok-nav {
+	display: flex;
+	align-items: center;
+	gap: var(--blok-space-1);
+}
+
+.blok-nav a {
+	display: inline-block;
+	padding: var(--blok-space-2) var(--blok-space-3);
+	border-radius: var(--blok-radius-sm);
+	color: var(--blok-muted);
+	font-size: 0.875rem;
+	font-weight: 500;
+}
+
+.blok-nav a:hover {
+	background: var(--blok-hover);
+	color: var(--blok-text-strong);
+	text-decoration: none;
+}
+
+.blok-nav a[aria-current="page"] {
+	color: var(--blok-text-strong);
+	background: var(--blok-hover);
+}
+
+.blok-header__end {
+	display: flex;
+	align-items: center;
+	gap: var(--blok-space-3);
+	margin-left: auto;
+}
+
+.blok-user {
+	display: none;
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+	white-space: nowrap;
+}
+
+/*
+ * The theme toggle shows the theme it switches TO, and it does that in CSS
+ * alone — no component state, so the same markup works in React, Vue and
+ * Svelte, and the icon is right on the very first paint (before any store is
+ * read). The `:not([data-theme="light"])` guard is what keeps an explicit
+ * light choice showing the moon on a dark-preferring machine.
+ */
+.blok-theme-toggle .blok-icon--sun {
+	display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .blok-theme-toggle .blok-icon--sun {
+		display: block;
+	}
+
+	:root:not([data-theme="light"]) .blok-theme-toggle .blok-icon--moon {
+		display: none;
+	}
+}
+
+:root[data-theme="dark"] .blok-theme-toggle .blok-icon--sun {
+	display: block;
+}
+
+:root[data-theme="dark"] .blok-theme-toggle .blok-icon--moon {
+	display: none;
+}
+
+.blok-main {
+	flex: 1;
+	padding: var(--blok-space-7) 0 var(--blok-space-7);
+}
+
+.blok-footer {
+	border-top: 1px solid var(--blok-line);
+	padding: var(--blok-space-5) 0;
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+}
+
+.blok-footer__inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--blok-space-2) var(--blok-space-3);
+}
+
+.blok-footer a {
+	color: var(--blok-muted);
+}
+
+.blok-footer a:hover {
+	color: var(--blok-text-strong);
+}
+
+/* Mobile nav — a native <details>, so there is no JavaScript to ship. */
+.blok-menu {
+	display: none;
+	position: relative;
+}
+
+.blok-menu > summary {
+	list-style: none;
+	cursor: pointer;
+}
+
+.blok-menu > summary::-webkit-details-marker {
+	display: none;
+}
+
+.blok-menu[open] > .blok-menu__panel {
+	display: block;
+}
+
+.blok-menu__panel {
+	display: none;
+	position: absolute;
+	right: 0;
+	top: calc(100% + var(--blok-space-2));
+	min-width: 12rem;
+	padding: var(--blok-space-2);
+	background: var(--blok-surface);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius);
+	box-shadow: var(--blok-shadow-lg);
+}
+
+.blok-menu__panel a {
+	display: block;
+}
+
+/* The panel wraps a `.blok-nav`, which is a flex ROW in the header bar. In a
+   dropdown the links stack. */
+.blok-menu__panel .blok-nav {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+/* `.blok-user` is hidden below 48rem, so the compact panel is where the
+   signed-in identity lives at phone width instead of disappearing. */
+.blok-menu__user {
+	padding: var(--blok-space-2) var(--blok-space-3);
+	margin-bottom: var(--blok-space-2);
+	border-bottom: 1px solid var(--blok-line);
+	color: var(--blok-muted);
+	font-size: 0.8125rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ── controls ─────────────────────────────────────────────────────────────── */
+
+.blok-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--blok-space-2);
+	padding: 0.5rem 0.875rem;
+	border: 1px solid var(--blok-line-strong);
+	border-radius: var(--blok-radius-sm);
+	background: var(--blok-surface);
+	color: var(--blok-text-strong);
+	font: inherit;
+	font-size: 0.875rem;
+	font-weight: 500;
+	line-height: 1.4;
+	cursor: pointer;
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.blok-btn:hover {
+	background: var(--blok-hover);
+	text-decoration: none;
+}
+
+.blok-btn[disabled],
+.blok-btn[aria-disabled="true"] {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.blok-btn--primary {
+	background: var(--blok-accent);
+	border-color: var(--blok-accent-border);
+	color: var(--blok-on-accent);
+}
+
+.blok-btn--primary:hover {
+	background: var(--blok-accent-hover);
+	border-color: var(--blok-accent-hover);
+}
+
+.blok-btn--ghost {
+	background: transparent;
+	border-color: transparent;
+	color: var(--blok-muted);
+}
+
+.blok-btn--ghost:hover {
+	background: var(--blok-hover);
+	color: var(--blok-text-strong);
+}
+
+.blok-btn--icon {
+	padding: 0.4rem;
+	width: 2rem;
+	height: 2rem;
+}
+
+/* ── page furniture ───────────────────────────────────────────────────────── */
+
+.blok-page-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: var(--blok-space-4);
+	margin-bottom: var(--blok-space-6);
+}
+
+.blok-eyebrow {
+	margin: 0 0 var(--blok-space-1);
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--blok-accent-ink);
+}
+
+.blok-page-header h1 {
+	font-size: 1.75rem;
+	letter-spacing: -0.02em;
+}
+
+.blok-page-header__end {
+	margin-left: auto;
+}
+
+.blok-lede {
+	margin-top: var(--blok-space-2);
+	color: var(--blok-muted);
+}
+
+.blok-card {
+	background: var(--blok-surface);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius);
+	box-shadow: var(--blok-shadow);
+}
+
+.blok-card__header {
+	display: flex;
+	align-items: center;
+	gap: var(--blok-space-3);
+	padding: var(--blok-space-4) var(--blok-space-5);
+	border-bottom: 1px solid var(--blok-line);
+}
+
+.blok-card__header h2 {
+	font-size: 0.9375rem;
+}
+
+.blok-card__body {
+	padding: var(--blok-space-5);
+}
+
+.blok-card + .blok-card {
+	margin-top: var(--blok-space-5);
+}
+
+.blok-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.125rem 0.5rem;
+	border-radius: 999px;
+	background: var(--blok-accent-wash);
+	color: var(--blok-accent-ink);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.blok-muted {
+	color: var(--blok-muted);
+}
+
+/* Visible to a screen reader, not to the eye — for a column header that would
+   be visual noise but still has to be announced. */
+.blok-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* ── stat tiles ───────────────────────────────────────────────────────────── */
+
+.blok-stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+	gap: var(--blok-space-4);
+	margin-bottom: var(--blok-space-6);
+}
+
+.blok-stat {
+	padding: var(--blok-space-4) var(--blok-space-5);
+	background: var(--blok-surface);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius);
+	box-shadow: var(--blok-shadow);
+}
+
+.blok-stat__label {
+	margin: 0;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--blok-muted);
+}
+
+.blok-stat__value {
+	margin: var(--blok-space-2) 0 0;
+	font-size: 1.75rem;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	color: var(--blok-text-strong);
+	font-variant-numeric: tabular-nums;
+}
+
+.blok-stat__delta {
+	margin: var(--blok-space-1) 0 0;
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.blok-stat__delta--up {
+	color: var(--blok-accent-ink);
+}
+
+/* ── table ────────────────────────────────────────────────────────────────── */
+
+.blok-table-wrap {
+	max-height: 22rem;
+	overflow: auto;
+}
+
+.blok-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.875rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.blok-table thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--blok-surface-2);
+	border-bottom: 1px solid var(--blok-line);
+	padding: var(--blok-space-3) var(--blok-space-5);
+	text-align: left;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--blok-muted);
+	white-space: nowrap;
+}
+
+.blok-table td {
+	padding: var(--blok-space-3) var(--blok-space-5);
+	border-bottom: 1px solid var(--blok-line);
+	color: var(--blok-text);
+}
+
+.blok-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.blok-table tbody tr:hover td {
+	background: var(--blok-hover);
+}
+
+.blok-table .blok-num {
+	text-align: right;
+}
+
+.blok-table .blok-actions {
+	text-align: right;
+	white-space: nowrap;
+}
+
+.blok-table td code {
+	color: var(--blok-text-strong);
+}
+
+/* ── forms ────────────────────────────────────────────────────────────────── */
+
+.blok-form {
+	display: grid;
+	gap: var(--blok-space-5);
+	max-width: 32rem;
+}
+
+.blok-field {
+	display: grid;
+	gap: var(--blok-space-2);
+}
+
+.blok-label {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--blok-text-strong);
+}
+
+.blok-input {
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--blok-line-strong);
+	border-radius: var(--blok-radius-sm);
+	background: var(--blok-surface);
+	color: var(--blok-text-strong);
+	font: inherit;
+	font-size: 0.9375rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.blok-input::placeholder {
+	color: var(--blok-muted);
+}
+
+.blok-input[aria-invalid="true"] {
+	border-color: var(--blok-danger);
+	background: var(--blok-danger-wash);
+}
+
+.blok-hint {
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+}
+
+.blok-error {
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--blok-danger);
+}
+
+.blok-form__actions {
+	display: flex;
+	align-items: center;
+	gap: var(--blok-space-3);
+}
+
+.blok-form__status {
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+	display: inline-flex;
+	align-items: center;
+	gap: var(--blok-space-2);
+}
+
+.blok-form__status--valid {
+	color: var(--blok-accent-ink);
+}
+
+/* ── loading ──────────────────────────────────────────────────────────────── */
+
+.blok-spinner {
+	width: 0.875rem;
+	height: 0.875rem;
+	border: 2px solid currentcolor;
+	border-right-color: transparent;
+	border-radius: 50%;
+	animation: blok-spin 700ms linear infinite;
+	flex: none;
+}
+
+@keyframes blok-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.blok-skeleton {
+	height: 0.875rem;
+	border-radius: var(--blok-radius-sm);
+	background: linear-gradient(
+		90deg,
+		var(--blok-hover),
+		var(--blok-line),
+		var(--blok-hover)
+	);
+	background-size: 200% 100%;
+	animation: blok-shimmer 1.4s ease-in-out infinite;
+}
+
+.blok-skeleton + .blok-skeleton {
+	margin-top: var(--blok-space-3);
+}
+
+.blok-skeleton--wide {
+	width: 60%;
+}
+
+@keyframes blok-shimmer {
+	to {
+		background-position: -200% 0;
+	}
+}
+
+.blok-end-of-list {
+	padding: var(--blok-space-4);
+	text-align: center;
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+	}
+}
+
+/* ── feed ─────────────────────────────────────────────────────────────────── */
+
+.blok-feed {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.blok-feed li {
+	display: flex;
+	align-items: baseline;
+	gap: var(--blok-space-3);
+	padding: var(--blok-space-3) var(--blok-space-5);
+	border-bottom: 1px solid var(--blok-line);
+	font-size: 0.875rem;
+}
+
+.blok-feed li:last-child {
+	border-bottom: 0;
+}
+
+.blok-feed__meta {
+	margin-left: auto;
+	color: var(--blok-muted);
+	font-size: 0.75rem;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* ── welcome / hero ───────────────────────────────────────────────────────── */
+
+.blok-hero {
+	padding: var(--blok-space-7) 0 var(--blok-space-6);
+	text-align: center;
+}
+
+.blok-hero__mark {
+	display: inline-block;
+	margin-bottom: var(--blok-space-5);
+}
+
+.blok-hero h1 {
+	font-size: clamp(2rem, 5vw, 2.75rem);
+	letter-spacing: -0.03em;
+}
+
+.blok-hero p {
+	max-width: 42rem;
+	margin: var(--blok-space-4) auto 0;
+	color: var(--blok-muted);
+	font-size: 1.0625rem;
+}
+
+.blok-hero__actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--blok-space-3);
+	margin-top: var(--blok-space-6);
+}
+
+.blok-features {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+	gap: var(--blok-space-4);
+	margin: var(--blok-space-6) 0;
+}
+
+.blok-feature {
+	display: flex;
+	flex-direction: column;
+	padding: var(--blok-space-5);
+	background: var(--blok-surface);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius);
+	box-shadow: var(--blok-shadow);
+}
+
+.blok-feature h2 {
+	font-size: 0.9375rem;
+}
+
+.blok-feature p {
+	margin-top: var(--blok-space-2);
+	color: var(--blok-muted);
+	font-size: 0.875rem;
+}
+
+.blok-code {
+	margin: var(--blok-space-4) 0 0;
+	padding: var(--blok-space-3) var(--blok-space-4);
+	background: var(--blok-surface-2);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius-sm);
+	color: var(--blok-text);
+	/* The samples are written to fit a third of 72rem; a longer line scrolls
+	   here rather than widening the page. */
+	overflow-x: auto;
+	font-size: 0.6875rem;
+	line-height: 1.7;
+	tab-size: 2;
+}
+
+.blok-code code {
+	font-size: inherit;
+}
+
+.blok-checklist {
+	list-style: none;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+	gap: var(--blok-space-2) var(--blok-space-5);
+	margin: 0;
+	padding: 0;
+	font-size: 0.875rem;
+}
+
+/* Indent + absolute tick rather than a flex row: a flex `li` turns every
+   inline child (a <code>, a text run) into its own flex item, which reflows
+   the sentence into columns. */
+.blok-checklist li {
+	position: relative;
+	padding-left: 1.25rem;
+}
+
+.blok-checklist li::before {
+	content: "✓";
+	position: absolute;
+	left: 0;
+	color: var(--blok-accent-ink);
+	font-weight: 700;
+}
+
+/* ── error page ───────────────────────────────────────────────────────────── */
+
+.blok-error-page {
+	display: grid;
+	place-items: center;
+	text-align: center;
+	padding: var(--blok-space-7) 0;
+}
+
+.blok-error-page h1 {
+	margin-top: var(--blok-space-4);
+	font-size: 1.5rem;
+}
+
+.blok-error-page p {
+	margin-top: var(--blok-space-3);
+	color: var(--blok-muted);
+}
+
+/* AFTER `.blok-error-page p`, and element-qualified to match its specificity:
+   the status number is a <p> too, and the muted rule would otherwise win. */
+p.blok-error-page__status {
+	margin-top: 0;
+	font-size: clamp(4rem, 14vw, 7rem);
+	font-weight: 700;
+	line-height: 1;
+	letter-spacing: -0.04em;
+	/* The FILL green is 2.08:1 on white — text this size still needs 3:1. */
+	color: var(--blok-accent-ink);
+	font-variant-numeric: tabular-nums;
+}
+
+.blok-error-page .blok-btn {
+	margin-top: var(--blok-space-6);
+}
+
+/* ── toast (flash) ────────────────────────────────────────────────────────── */
+
+.blok-toast {
+	position: fixed;
+	inset-block-end: var(--blok-space-5);
+	inset-inline-end: var(--blok-space-5);
+	z-index: 50;
+	max-inline-size: min(24rem, calc(100vw - 2rem));
+	padding: var(--blok-space-3) var(--blok-space-4);
+	border: 1px solid var(--blok-line);
+	border-left: 3px solid var(--blok-accent);
+	border-radius: var(--blok-radius);
+	background: var(--blok-surface);
+	color: var(--blok-text-strong);
+	font-size: 0.875rem;
+	box-shadow: var(--blok-shadow-lg);
+}
+
+/* ── responsive ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 48rem) {
+	.blok-user {
+		display: inline;
+	}
+}
+
+@media (max-width: 47.99rem) {
+	.blok-container {
+		padding: 0 var(--blok-space-4);
+	}
+
+	.blok-header__inner > .blok-nav {
+		display: none;
+	}
+
+	.blok-menu {
+		display: block;
+	}
+
+	.blok-main {
+		padding: var(--blok-space-5) 0 var(--blok-space-6);
+	}
+
+	.blok-page-header h1 {
+		font-size: 1.375rem;
+	}
+
+	.blok-card__header,
+	.blok-card__body,
+	.blok-table thead th,
+	.blok-table td,
+	.blok-feed li {
+		padding-left: var(--blok-space-4);
+		padding-right: var(--blok-space-4);
+	}
+}

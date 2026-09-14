@@ -8,22 +8,29 @@
 
 import { http, type Handle, branch, eq, step, workflow } from "@blokjs/core";
 import { ValidateNode } from "@blokjs/helpers";
-import { definePage } from "@blokjs/inertia";
+import { always, definePage } from "@blokjs/inertia";
 import { z } from "zod";
-import { createOrder, rejectOrder } from "../nodes.js";
+import { createOrder, currentUser, rejectOrder } from "../nodes.js";
 
 export const OrderSchema = z.object({
 	sku: z.string().min(1, "Required."),
 	total: z.number().min(1, "Must be at least 1."),
 });
 
-export const OrdersCreate = definePage("Orders/Create", {});
+/**
+ * `auth` is `always()` here for the same reason the dashboard declares it:
+ * the persistent AppLayout reads it for the header identity, so a page that
+ * omits it makes the signed-in user vanish on the way from / to /orders/new.
+ */
+export const OrdersCreate = definePage("Orders/Create", {
+	auth: always(currentUser),
+});
 
 export const page = workflow(
 	"orders-create-page",
 	{ version: "1.0.0", trigger: http.get("/orders/new", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		OrdersCreate.render(req, "page", "/orders/new", {});
+		OrdersCreate.render(req, "page", "/orders/new", {}, { viewData: { title: "New order" } });
 	},
 );
 

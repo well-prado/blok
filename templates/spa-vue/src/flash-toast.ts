@@ -3,8 +3,12 @@
  * client fires after a page swap that carried flash data (Blok puts it there
  * from the signed one-shot cookie).
  *
- * ponytail: 20 lines of DOM instead of a toast library. Swap in your own
- * component the moment you want stacking, actions or animation.
+ * ponytail: 20 lines of DOM instead of a toast library. It borrows `.blok-toast`
+ * from `blok.css`, so it is themed for free. Swap in your own component the
+ * moment you want stacking, actions or animation.
+ *
+ * The SAME BYTES ship in every template and example — `tests/docs/spa-design.test.ts`
+ * fails if they drift.
  */
 interface FlashEventDetail {
 	flash: Record<string, unknown>;
@@ -12,22 +16,15 @@ interface FlashEventDetail {
 
 function toast(message: string): void {
 	const el = document.createElement("div");
-	el.textContent = message;
+	el.className = "blok-toast";
 	el.setAttribute("role", "status");
-	el.style.cssText = [
-		"position:fixed",
-		"inset-block-end:1rem",
-		"inset-inline-end:1rem",
-		"max-inline-size:min(24rem, calc(100vw - 2rem))",
-		"padding:0.75rem 1rem",
-		"border-radius:0.5rem",
-		"background:#111827",
-		"color:#f9fafb",
-		"font:400 0.875rem/1.4 system-ui, sans-serif",
-		"box-shadow:0 10px 20px rgb(0 0 0 / 0.2)",
-		"z-index:9999",
-	].join(";");
+	// The live region has to be in the DOM BEFORE its text changes, or a screen
+	// reader sees a node that was born with content and announces nothing. Append
+	// empty, fill on the next frame.
 	document.body.append(el);
+	requestAnimationFrame(() => {
+		el.textContent = message;
+	});
 	setTimeout(() => el.remove(), 4000);
 }
 

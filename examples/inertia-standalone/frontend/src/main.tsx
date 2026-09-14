@@ -1,14 +1,23 @@
 import { createInertiaApp } from "@inertiajs/react";
 import { createRoot } from "react-dom/client";
 import "./blok-routes.js";
+import { listenForFlash } from "./flash-toast.js";
+import "./styles/blok.css";
+import { initTheme, installFavicon } from "./styles/theme.js";
 
 const BACKEND = import.meta.env.VITE_BLOK_URL ?? "http://localhost:4000";
+
+initTheme();
+installFavicon();
+listenForFlash();
 
 /**
  * Standalone mode: the first page is NOT in a `data-page` attribute — the SPA
  * fetches it from the backend, cross-origin, with credentials on.
  */
 void createInertiaApp({
+	title: (title) => (title ? `${title} · Blok` : "Blok"),
+	progress: { color: "#2bcd71" },
 	page: await fetch(`${BACKEND}${window.location.pathname}`, {
 		credentials: "include",
 		headers: { "X-Inertia": "true", "X-Inertia-Version": import.meta.env.BLOK_ASSET_VERSION ?? "" },
