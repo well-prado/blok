@@ -86,6 +86,30 @@ workflow present in BOTH the scan and the map resolves to exactly one
 route, no error. It's no longer a step new workflows need.
 </Note>
 
+### What a scanned workflow may import
+
+The scanner imports the `.ts` **source** file, even when the project was
+built and started with `node dist/triggers/http/index.js`. Node's type
+stripping resolves specifiers literally, so `import "../nodes/greet.js"`
+(the specifier `tsc` expects) would not find `greet.ts` on its own. The
+scanner installs a resolve hook that maps a missing `./x.js` (or bare
+`./x`) to its `.ts` sibling, so a workflow may import:
+
+- npm packages;
+- project-local `.ts` modules by their `.js` or extensionless specifier —
+  its own node under `src/nodes/`, a shared helper, a constants file.
+
+Two constraints follow from "Node strips types, it does not compile":
+
+- Everything a workflow imports is loaded under type stripping, so it must
+  avoid TypeScript-only runtime syntax (`enum`, parameter properties,
+  `namespace`). Plain types, interfaces and `as` are fine.
+- The hook needs Node >= 22.15 (`module.registerHooks`). On an older Node
+  the boot log names the import that failed and the existing `.ts` sibling
+  instead of a bare `ERR_MODULE_NOT_FOUND`, and the route is not registered.
+  `blokctl dev` runs under Bun, which resolves `.js` → `.ts` itself, so this
+  only ever shows up in production.
+
 ### Debugging an unknown route
 
 In dev mode (`NODE_ENV=development` or `BLOK_HMR=true`), a 404 from an

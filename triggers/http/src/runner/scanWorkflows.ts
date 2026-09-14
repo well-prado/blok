@@ -1,6 +1,7 @@
-import { promises as fsp } from "node:fs";
+import { existsSync, promises as fsp } from "node:fs";
+import module from "node:module";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
  * scanWorkflows — recursive directory scanner that discovers HTTP-triggered
@@ -192,10 +193,83 @@ async function loadOne(file: string, kind: "ts" | "json", cacheBust?: string): P
 	// TS / JS — dynamic import; default export is the workflow. A cache-buster
 	// needs a proper file: URL to carry the query string, so only the hot-reload
 	// path pays the conversion; boot keeps importing the bare path as before.
+	enableTsSpecifierResolution();
 	const specifier = cacheBust ? `${pathToFileURL(file).href}?blokHmr=${cacheBust}` : file;
-	const mod = (await import(specifier)) as { default?: unknown };
+	let mod: { default?: unknown };
+	try {
+		mod = (await import(specifier)) as { default?: unknown };
+	} catch (err) {
+		throw explainTsSiblingMiss(err);
+	}
 	if (mod.default === undefined) return null;
 	return mod.default;
+}
+
+/**
+ * `./x.js` → `./x.ts` when only the `.ts` exists — the rewrite `tsc` and
+ * bundlers do and Node's type stripping does NOT. Without it a scanned
+ * workflow cannot import its own node or a shared helper under
+ * `node dist/triggers/http/index.js`: Node resolves the specifier literally,
+ * the import throws ERR_MODULE_NOT_FOUND, and the route silently never
+ * registers (Bun hides this, so it only surfaces in production).
+ *
+ * Same hook `blokctl gen` installs (`packages/cli/.../pagesTypes.ts`); the
+ * two packages share no runtime module, so it is duplicated rather than
+ * exported from @blokjs/core. ponytail: fold both into one export if a third
+ * copy ever appears.
+ */
+function tsFallbackUrl(specifier: string, parentURL: string | undefined): string | undefined {
+	if (parentURL === undefined || !/^\.{1,2}\//.test(specifier)) return undefined;
+	let target: URL;
+	try {
+		target = new URL(specifier, parentURL);
+	} catch {
+		return undefined;
+	}
+	if (target.protocol !== "file:") return undefined;
+	const asPath = fileURLToPath(target);
+	if (existsSync(asPath)) return undefined;
+	const candidate = asPath.endsWith(".js") ? `${asPath.slice(0, -3)}.ts` : `${asPath}.ts`;
+	return existsSync(candidate) ? pathToFileURL(candidate).href : undefined;
+}
+
+let hooksRegistered = false;
+
+/**
+ * `module.registerHooks()` is Node >= 22.15 and synchronous, so it applies to
+ * the very next `import()`. Bun and older Node lack it: Bun already resolves
+ * `.js` → `.ts` itself, and a Node without it gets the explanation from
+ * `explainTsSiblingMiss` instead.
+ */
+function enableTsSpecifierResolution(): void {
+	if (hooksRegistered) return;
+	hooksRegistered = true;
+	const registerHooks = (module as { registerHooks?: (hooks: Record<string, unknown>) => void }).registerHooks;
+	if (typeof registerHooks !== "function") return;
+	registerHooks({
+		resolve(
+			specifier: string,
+			context: { parentURL?: string },
+			nextResolve: (s: string, c: { parentURL?: string }) => unknown,
+		) {
+			const fallback = tsFallbackUrl(specifier, context.parentURL);
+			return fallback === undefined ? nextResolve(specifier, context) : { url: fallback, shortCircuit: true };
+		},
+	});
+}
+
+/**
+ * ERR_MODULE_NOT_FOUND on a `.js` specifier whose `.ts` sibling exists is the
+ * one import failure worth translating: the raw message names a file the
+ * user never wrote, and the route it dropped 404s with no other trace.
+ */
+function explainTsSiblingMiss(err: unknown): unknown {
+	if (!(err instanceof Error) || (err as { code?: string }).code !== "ERR_MODULE_NOT_FOUND") return err;
+	const missing = /Cannot find module '([^']+\.js)'/.exec(err.message)?.[1];
+	if (!missing || !existsSync(`${missing.slice(0, -3)}.ts`)) return err;
+	err.message +=
+		" — the .ts sibling exists but this Node cannot rewrite the .js specifier to it (module.registerHooks needs Node >= 22.15). Upgrade Node, or run under Bun.";
+	return err;
 }
 
 function defaultExtensions(kind: "ts" | "json"): readonly string[] {
