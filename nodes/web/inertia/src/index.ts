@@ -46,6 +46,7 @@ export * from "./middleware/index.js";
 // --- production error pages (#1014) ------------------------------------------
 export * from "./errors.js";
 export * from "./ssr.js";
+export * from "./devtools/index.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
 export {

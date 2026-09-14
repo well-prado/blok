@@ -113,6 +113,24 @@ asset version and component, and fall back to the client-rendered shell.
 such as `#:~:text=` require SSR because the browser needs the target text in the
 initial HTML.
 
+### DevTools protocol
+
+In development, the HTTP trigger records local Inertia requests under
+`.blok/devtools`, adds the DevTools discovery/correlation headers, and exposes
+`GET /_inertia/devtools/entries` plus
+`GET /_inertia/devtools/entries/:id`. Configure redaction, exclusions, storage,
+TTL, and per-tab retention with `configureDevtools()` or the
+`BLOK_INERTIA_DEVTOOLS_*` environment variables.
+
+The read API is denied in production unless a named gate allows it:
+
+```ts
+import { defineDevtoolsGate } from "@blokjs/inertia";
+
+defineDevtoolsGate("admins", (request) => request.headers.get("x-admin") === "true");
+// BLOK_INERTIA_DEVTOOLS_GATE=admins
+```
+
 ## Control responses
 
 | Input / export | Response |
@@ -915,6 +933,9 @@ import InertiaNode, {
   handleExceptionsUsing,
   render,                    // the hook's return value: render(component, props)
   renderErrorPage,           // what the HTTP trigger calls
+  // local DevTools protocol (#1017)
+  configureDevtools,
+  defineDevtoolsGate,
   // #996
   redirectBack,
   back,
