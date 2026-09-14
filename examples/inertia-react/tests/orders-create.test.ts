@@ -38,7 +38,7 @@ describe("POST /orders", () => {
 			headers: { referer: "/orders/new" },
 		});
 
-		page.assertRedirect("/orders/new").status(303).assertFlash("toast.type", "success");
+		page.assertRedirect("/orders/new").status(303).assertFlash("toast", "BLOK-9 created.");
 		expect(page.run.step("reject")?.executed).toBe(false);
 	});
 
