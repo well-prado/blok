@@ -11,7 +11,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,5 +155,24 @@ describe("the built example serves a page that can actually boot", () => {
 
 		expect(response.status).toBe(200);
 		expect(page.component).toBe("Orders/Create");
+	});
+
+	/**
+	 * The server half of a nested page is useless if the client cannot load it.
+	 * A hand-written `import(`./pages/${name}.tsx`)` resolver builds fine and
+	 * then throws `Unknown variable dynamic import` at runtime, because Vite
+	 * resolves a template-literal dynamic import only ONE directory deep — so
+	 * the guard has to be that every page on disk is a chunk in the build.
+	 */
+	it("builds a chunk for every page, nested ones included", () => {
+		const manifest = JSON.parse(readFileSync(join(dist, ".vite", "manifest.json"), "utf8")) as Record<
+			string,
+			{ file: string }
+		>;
+
+		for (const page of ["src/pages/Dashboard.tsx", "src/pages/Orders/Create.tsx", "src/pages/Errors/Error.tsx"]) {
+			expect(Object.keys(manifest)).toContain(page);
+			expect(existsSync(join(dist, manifest[page].file))).toBe(true);
+		}
 	});
 });

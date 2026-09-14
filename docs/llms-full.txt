@@ -325,12 +325,21 @@ import { createInertiaApp } from "@inertiajs/react";
 import { createRoot } from "react-dom/client";
 
 void createInertiaApp({
-  resolve: (name: string) => import(`./pages/${name}.tsx`),
   setup({ el, App, props }) {
     createRoot(el).render(<App {...props} />);
   },
 });
 ```
+
+<Warning>
+Do **not** hand-write `resolve: (name) => import(`./pages/${name}.tsx`)`. Vite
+resolves a template-literal dynamic import only ONE directory deep, so a nested
+page such as `Orders/Create` throws `Unknown variable dynamic import` in a
+production build. With no `resolve`, `@inertiajs/vite` injects an
+`import.meta.glob("./pages/**/*.tsx")` resolver that handles any depth; pass
+`pages: { path, extension }` if your pages live somewhere other than
+`src/pages`.
+</Warning>
 
 ```tsx client/src/pages/Dashboard.tsx
 interface Props {
@@ -1344,7 +1353,9 @@ createServer((page) =>
   createInertiaApp({
     page,
     render: ReactDOMServer.renderToString,
-    resolve: (name: string) => import(`./pages/${name}.tsx`),
+    // No `resolve` — `@inertiajs/vite` injects the glob resolver. A
+    // hand-written `import(`./pages/${name}.tsx`)` only resolves one directory
+    // deep, so nested pages break the same way they do on the client.
     setup: ({ App, props }) => <App {...props} />,
   }),
 );

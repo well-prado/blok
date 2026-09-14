@@ -27,7 +27,9 @@ createServer((page) =>
   createInertiaApp({
     page,
     render: ReactDOMServer.renderToString,
-    resolve: (name: string) => import(`./pages/${name}.tsx`),
+    // No `resolve` — `@inertiajs/vite` injects the glob resolver. A
+    // hand-written `import(`./pages/${name}.tsx`)` only resolves one directory
+    // deep, so nested pages break the same way they do on the client.
     setup: ({ App, props }) => <App {...props} />,
   }),
 );

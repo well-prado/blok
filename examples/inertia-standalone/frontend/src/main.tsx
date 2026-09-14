@@ -13,8 +13,13 @@ void createInertiaApp({
 		credentials: "include",
 		headers: { "X-Inertia": "true", "X-Inertia-Version": import.meta.env.BLOK_ASSET_VERSION ?? "" },
 	}).then((response) => response.json()),
-	resolve: (name: string) => import(`./pages/${name}.tsx`),
+	// No `resolve`: `@inertiajs/vite` injects an
+	// `import.meta.glob("./pages/**/*.tsx")` resolver at build time. Hand-writing
+	// `import(`./pages/${name}.tsx`)` looks equivalent and is not — Vite resolves
+	// a template-literal dynamic import only ONE directory deep, so a nested page
+	// like `Orders/Index` throws "Unknown variable dynamic import" in production.
 	setup({ el, App, props }) {
-		createRoot(el).render(<App {...props} />);
+		// `el` is the root the shell rendered — present by the time setup runs.
+		if (el) createRoot(el).render(<App {...props} />);
 	},
 });
