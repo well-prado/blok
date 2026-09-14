@@ -10,7 +10,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		root: resolve(import.meta.dirname, "../.."),
-		include: ["tests/docs/**/*.test.ts", "examples/inertia-*/tests/**/*.test.ts"],
+		include: ["tests/docs/**/*.test.ts", "examples/inertia-*/**/tests/**/*.test.ts"],
 		testTimeout: 120_000,
 		hookTimeout: 120_000,
 	},

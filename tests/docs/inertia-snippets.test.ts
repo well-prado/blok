@@ -151,7 +151,10 @@ describe("examples/inertia-* — authoring rules", () => {
 		const offenders: string[] = [];
 		for (const dir of exampleDirs) {
 			for (const file of walk(dir)) {
-				const source = readFileSync(file, "utf8");
+				// Comments EXPLAIN these rules ("fills ctx.state.auth"); only code breaks them.
+				const source = readFileSync(file, "utf8")
+					.replace(/\/\*[\s\S]*?\*\//g, "")
+					.replace(/^\s*\/\/[^\n]*$/gm, "");
 				if (/["'`]js\//.test(source)) offenders.push(`${relative(REPO_ROOT, file)}: js/ expression string`);
 				if (/ctx\.state/.test(source)) offenders.push(`${relative(REPO_ROOT, file)}: ctx.state read`);
 				if (/(?::\s*any\b|\bas any\b|<any>)/.test(source)) offenders.push(`${relative(REPO_ROOT, file)}: any`);
