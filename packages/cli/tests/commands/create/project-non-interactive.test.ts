@@ -100,9 +100,10 @@ describe("create project (non-interactive)", () => {
 		SCAFFOLD_TIMEOUT,
 	);
 
-	// #1030: twenty consecutive real installs in CI, with fresh projects each time.
-	it.each(Array.from({ length: process.env.CI ? 20 : 1 }, (_, index) => index + 1))(
-		"should accept package-manager flag in non-interactive mode (run %i)",
+	// #1030: runs in its own vitest project after every sibling file (see
+	// vitest.config.ts), so nothing writes into packages/cli while bun copies it.
+	it(
+		"should accept package-manager flag in non-interactive mode",
 		async () => {
 			await scaffold("test-ni-pm", { packageManager: "bun" });
 		},
