@@ -146,4 +146,14 @@ describe("the built example serves a page that can actually boot", () => {
 		expect(response.headers.get("x-inertia")).toBe("true");
 		expect(page.component).toBe("Dashboard");
 	});
+
+	it("routes the second page too, so the Dashboard's link is not dead", async () => {
+		const response = await fetch(`http://127.0.0.1:${port}/orders/new`, {
+			headers: { "X-Inertia": "true", "X-Inertia-Version": "" },
+		});
+		const page = (await response.json()) as { component: string };
+
+		expect(response.status).toBe(200);
+		expect(page.component).toBe("Orders/Create");
+	});
 });

@@ -20,6 +20,7 @@ import {
 } from "@blokjs/inertia";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { currentUser } from "./nodes.js";
+import { page as ordersNewPage } from "./workflows/orders-create.js";
 
 /** Shared data: every page gets it, and its key rides the page object. */
 share("appName", "Blok SPA example");
@@ -33,6 +34,11 @@ export default {
 	"inertia.shared": await createSharedMiddleware({ currentUser }),
 	"inertia.auth": await createAuthMiddleware({ redirectTo: "/login" }),
 	"inertia.csrf": await createCsrfMiddleware(),
+	// `GET /orders/new` lives beside the submit in `orders-create.ts`, and the
+	// file scanner only routes a file's DEFAULT export — so this second workflow
+	// has to be registered by hand, or the "New order" link 404s. Not a
+	// collision (#733): the scanner never saw it.
+	"orders-create-page": ordersNewPage,
 };
 
 WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.csrf"]);
