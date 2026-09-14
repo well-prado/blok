@@ -5,6 +5,7 @@ import type { TriggerOpts } from "@blokjs/helper";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
 import { DebugController, ManualTrigger, TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
+import { PRECOGNITION_ROUTE } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { RoutingDiagnostics } from "@blokjs/runner";
@@ -2343,6 +2344,17 @@ export default class HttpTrigger extends TriggerBase {
 					span.setAttribute("workflow_cpu_usage", `${average.cpu.usage}`);
 					span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
 					span.setStatus({ code: SpanStatusCode.OK });
+
+					// #1011 — `Vary: Precognition` on EVERY response from a route
+					// whose workflow marks a `precognition: true` step, not just on
+					// the dry runs: a shared cache that ignored the header would
+					// hand a real visit the 204 it stored for a keystroke. The
+					// runner sets the marker before the first step executes (see
+					// `precognition.ts`), so a run that short-circuits earlier still
+					// varies correctly.
+					if ((ctx as Record<string, unknown>)[PRECOGNITION_ROUTE]) {
+						c.header("Vary", "Precognition", { append: true });
+					}
 
 					// Emit the response from the finished workflow's ctx.response.
 					// Honors a `@blokjs/respond` envelope (status / headers /

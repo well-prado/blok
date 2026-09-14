@@ -170,6 +170,7 @@ The fourth argument to `step()` changes where, or whether, the output is stored.
 | `{ as: "name" }` | Store at `ctx.state[name]`; the returned handle is rooted at `name`. |
 | `{ spread: true }` | Shallow-merge returned object keys into `ctx.state`; field handles root at those keys. |
 | `{ ephemeral: true }` | Store nothing. The returned handle is deliberately unreadable downstream. |
+| `{ precognition: true }` | Store normally, and mark this step as the workflow's validation boundary: on an Inertia Precognition request the runner stops right after it and answers `204` / `422 { errors }` from its `{ ok, errors }` output, so nothing later runs. Ordinary requests are unaffected. |
 
 ```ts
 const user = step("load", loadUser, { id: req.params.id });

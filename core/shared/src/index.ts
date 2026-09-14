@@ -150,7 +150,7 @@ import type StateContext from "./types/StateContext";
 import type Step from "./types/Step";
 import type StreamContext from "./types/StreamContext";
 import type VarsContext from "./types/VarsContext";
-import mapper from "./utils/Mapper";
+import mapper, { cloneResolvable } from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
 import { NamedMissingStateError } from "./utils/NamedMissingStateError";
@@ -735,6 +735,7 @@ export {
 	Metrics,
 	MemoryUsage,
 	type MetricsType,
+	cloneResolvable,
 	mapper,
 	MapperResolutionError,
 	NamedMissingStateError,

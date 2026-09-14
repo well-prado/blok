@@ -89,6 +89,14 @@ export default abstract class NodeBase {
 	 */
 	public ephemeral = false;
 
+	/**
+	 * #1011 — marks this step as the workflow's validation boundary. On a
+	 * request carrying `Precognition: true` the runner stops right after it and
+	 * answers 204/422 from its `{ ok, errors }` output; every other request runs
+	 * the workflow through unchanged.
+	 */
+	public precognition = false;
+
 	// =========================================================================
 	// V2 idempotency cache + retry knobs — populated by Configuration.getSteps
 	// from the step definition. Read by RunnerSteps before delegating to

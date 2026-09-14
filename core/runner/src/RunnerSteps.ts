@@ -30,6 +30,7 @@ import {
 	hasPolicyExecution,
 	recordPostExecution,
 } from "./policy/PolicyPipeline";
+import { PRECOGNITION_ROUTE, applyPrecognition } from "./precognition";
 import { getPrimitiveStack } from "./runtime/PrimitiveStack";
 import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
@@ -341,6 +342,15 @@ export default abstract class RunnerSteps {
 				tracker,
 				traceRunId,
 			);
+			// #1011 — flag the run BEFORE anything executes when this pipeline
+			// contains a precognition step. The http trigger reads it to put
+			// `Vary: Precognition` on every response from the route, not just on
+			// the dry runs (a cache keyed without it would serve a 204 to a real
+			// visit). Scanning here rather than at the hook means a run that
+			// short-circuits before the validation step still varies correctly.
+			if (steps.some((candidate) => candidate.precognition)) {
+				(ctx as Record<string, unknown>)[PRECOGNITION_ROUTE] = true;
+			}
 			const binding = getEnforcementBinding(ctx);
 			if (binding && binding.profile !== "advisory" && !hasPolicyExecution(ctx)) {
 				throw new EnforcementBypassError(
@@ -852,6 +862,14 @@ export default abstract class RunnerSteps {
 							);
 							await recordPostExecution(ctx, cachePolicy, "success");
 							ctx.logger.log(`${stepPrefix} → cached (from run ${hit.sourceRunId})`);
+							// #1011 — a cached validation result is still the answer a
+							// dry run asked for. Stop here too, or the cache hit would
+							// walk straight into the side effects precognition exists
+							// to skip.
+							if (applyPrecognition(ctx, step, stepOutput(hit.data))) {
+								ctx.logger.log(`${stepPrefix} → precognition dry run, stopping the workflow`);
+								break;
+							}
 							continue;
 						}
 					}
@@ -1090,6 +1108,16 @@ export default abstract class RunnerSteps {
 						// OBS-02 B4 — close the per-step span on every exit (success / failure /
 						// wait / cancel / timeout).
 						stepSpan.end();
+					}
+
+					// #1011 — precognition stop. A step marked `precognition: true`
+					// is the last thing a `Precognition: true` request runs: its
+					// result becomes a 204/422 and every later step (the write, the
+					// email, the charge) is skipped. Non-HTTP triggers carry no such
+					// header, so the same workflow runs end to end there.
+					if (applyPrecognition(ctx, step, stepOutput(ctx.response))) {
+						ctx.logger.log(`${stepPrefix} → precognition dry run, stopping the workflow`);
+						break;
 					}
 				} else {
 					stepName = step.name;

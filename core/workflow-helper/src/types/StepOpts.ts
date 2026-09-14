@@ -341,6 +341,16 @@ export const V2RegularStepSchema = z
 					"Only ctx.prev carries it to the immediately next step. " +
 					"Use for side-effects (logging, audit, telemetry).",
 			),
+		precognition: z
+			.boolean()
+			.optional()
+			.describe(
+				"If true, this step is the workflow's validation boundary for Inertia Precognition. " +
+					"On a request carrying `Precognition: true` the runner stops right after this step and answers " +
+					"204 (no errors) or 422 { errors } from its { ok, errors } output — no later step runs, so a " +
+					"live-validation keystroke never triggers the write. `Precognition-Validate-Only: a,b` narrows " +
+					"the reported errors to those fields. Requests without the header run the workflow unchanged.",
+			),
 		runtime: RuntimeKindSchema.optional().describe(
 			"Optional runtime hint. Most authors don't need this; the type already encodes it.",
 		),
