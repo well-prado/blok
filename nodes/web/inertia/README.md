@@ -12,6 +12,11 @@ already-resolved props and the request headers into a `RespondEnvelope` the
 
 Both answers carry `Vary: X-Inertia` — the same URL serves both.
 
+> **Author docs:** [`docs/d/spa/`](../../../docs/d/spa/index.mdx) — one page per
+> Inertia v3 concept, the Laravel comparison table, and four runnable examples
+> under `examples/inertia-{react,vue,svelte,standalone}`. This README is the
+> package reference; that section is the guide.
+
 This node is the **serializer**. Deciding which props to compute (optional,
 deferred, merge, once, scroll) is the `page` control step's job — see
 [Typed pages](#typed-pages-definepage-and-the-page-control-step) below; by the
@@ -483,9 +488,11 @@ clearing `Set-Cookie`. Anything you pass through `render()`'s options wins —
 ```ts
 import { definePage, shared } from "@blokjs/inertia";
 
-const OrdersPage = definePage("Orders/Index", { auth: shared(currentUser, "auth") });
-export default workflow("orders", { version: "1.0.0", trigger: http.get("/orders") }, () => {
-  OrdersPage.render("page", { auth: shared(currentUser, "auth") });
+// A prop is a NODE; `shared()` reads the middleware's state slot into that
+// node's INPUTS (and `render()` takes req, id, url, inputs — see above).
+const OrdersPage = definePage("Orders/Index", { orders: listOrders });
+export default workflow("orders", { version: "1.0.0", trigger: http.get("/orders") }, (req) => {
+  OrdersPage.render(req, "page", "/orders", { orders: { userId: shared(currentUser, "auth").id } });
 });
 ```
 
