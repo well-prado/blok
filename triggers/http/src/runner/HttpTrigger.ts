@@ -28,6 +28,7 @@ import {
 	type Context,
 	GlobalError,
 	type RequestContext,
+	type RespondEnvelope,
 	SPOOFABLE_METHODS,
 	type StreamContext,
 	UploadTooLargeError,
@@ -68,7 +69,12 @@ import {
 import { bounded } from "./bootTimeout.js";
 import { bootstrapMetrics } from "./metrics/opentelemetry_metrics.js";
 import { buildNodeCatalog } from "./nodeCatalog.js";
-import { emitWorkflowResponse, inertia303SafetyNet, normalizeResponseEnvelope } from "./responseEmitter.js";
+import {
+	emitRespondEnvelope,
+	emitWorkflowResponse,
+	inertia303SafetyNet,
+	normalizeResponseEnvelope,
+} from "./responseEmitter.js";
 import { scanWorkflows } from "./scanWorkflows.js";
 import NodeTypes from "./types/NodeTypes.js";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow.js";
@@ -234,6 +240,73 @@ const CORS_EXPOSE_HEADERS = [
  */
 function isDevMode(): boolean {
 	return process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development";
+}
+
+/**
+ * #1014 — production Inertia error pages.
+ *
+ * `@blokjs/inertia` is OPTIONAL and appears in no manifest — the same shape
+ * `src/Nodes.ts` uses for `@blokjs/browser`: a non-literal specifier plus
+ * try/catch, so this trigger boots and errors exactly as before when the
+ * adapter is not installed. The adapter decides EVERYTHING (whether error
+ * pages are on at all, which statuses, which component, Inertia-vs-HTML); this
+ * side just asks, once per failing request.
+ */
+const INERTIA_PKG = "@blokjs/inertia";
+type InertiaErrorRenderer = (request: unknown, status: number, error: unknown) => Promise<RespondEnvelope | null>;
+let inertiaErrorRenderer: InertiaErrorRenderer | null | undefined;
+
+async function loadInertiaErrorRenderer(): Promise<InertiaErrorRenderer | null> {
+	if (inertiaErrorRenderer !== undefined) return inertiaErrorRenderer;
+	try {
+		const mod = (await import(INERTIA_PKG)) as { renderErrorPage?: InertiaErrorRenderer };
+		inertiaErrorRenderer = typeof mod.renderErrorPage === "function" ? mod.renderErrorPage : null;
+	} catch {
+		// not installed — the trigger's own error bodies stay in place
+		inertiaErrorRenderer = null;
+	}
+	return inertiaErrorRenderer;
+}
+
+/**
+ * The Inertia error page for this failure, or `undefined` to keep the
+ * trigger's own response body.
+ *
+ * Never throws: a broken error-page config (or a user exception hook) must not
+ * replace one error with another — it degrades to the response this request
+ * would have had anyway, with the reason logged.
+ */
+async function inertiaErrorResponse(
+	c: HonoContext,
+	status: number,
+	error: unknown,
+	logger: { error: (message: string) => void },
+): Promise<Response | undefined> {
+	try {
+		const render = await loadInertiaErrorRenderer();
+		if (!render) return undefined;
+		const url = new URL(c.req.url);
+		const env = await render(
+			{
+				headers: Object.fromEntries(c.req.raw.headers.entries()),
+				method: c.req.method,
+				path: c.req.path,
+				url: c.req.url,
+				query: Object.fromEntries(url.searchParams.entries()),
+				params: c.req.param(),
+			},
+			status,
+			error,
+		);
+		return env ? emitRespondEnvelope(c, env) : undefined;
+	} catch (err) {
+		logger.error(
+			`[blok][inertia] error page for ${status} ${c.req.path} failed to render, keeping the default response: ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
+		return undefined;
+	}
 }
 
 /** One scan root's contribution to the boot-time route table / 404 diagnostics. */
@@ -2520,7 +2593,11 @@ export default class HttpTrigger extends TriggerBase {
 							});
 							span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
 							this.logger.error(`${JSON.stringify(error_context.context.json)}`);
-							return c.json(error_context.context.json as object, code as 500);
+							// #1014 — e.g. `authorize()`'s 403.
+							return (
+								(await inertiaErrorResponse(c, code, e, this.logger)) ??
+								c.json(error_context.context.json as object, code as 500)
+							);
 						}
 
 						workflow_runner_errors.add(1, {
@@ -2531,7 +2608,11 @@ export default class HttpTrigger extends TriggerBase {
 						});
 						span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
 						this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
-						return c.json({ error: error_context.message }, code as 500);
+						// #1014 — e.g. the 500 a thrown step becomes.
+						return (
+							(await inertiaErrorResponse(c, code, e, this.logger)) ??
+							c.json({ error: error_context.message }, code as 500)
+						);
 					}
 
 					// #693 — unknown route: the catch-all fell through to
@@ -2551,6 +2632,10 @@ export default class HttpTrigger extends TriggerBase {
 						const diagnostics = this.buildRouteMissDiagnostics(method, requestedPath);
 						this.logUnknownRoute(method, requestedPath, diagnostics);
 						span.setStatus({ code: SpanStatusCode.ERROR, message: "workflow_not_found" });
+						// #1014 — an unmatched route is a 404 page for a browser or an
+						// Inertia visit; every other client keeps the JSON below.
+						const notFoundPage = await inertiaErrorResponse(c, 404, e, this.logger);
+						if (notFoundPage) return notFoundPage;
 						if (!isDevMode()) {
 							return c.json({ error: e.message }, 404);
 						}
@@ -2568,7 +2653,8 @@ export default class HttpTrigger extends TriggerBase {
 						`${workflowNameInPath}: ${(e as Error).message}`,
 						`${(e as Error).stack?.replace(/\n/g, " ")}`,
 					);
-					return c.json({ error: (e as Error).message }, 500);
+					// #1014 — the catch-all 500.
+					return (await inertiaErrorResponse(c, 500, e, this.logger)) ?? c.json({ error: (e as Error).message }, 500);
 				} finally {
 					if (remoteNodeExecution) {
 						delete this.nodeMap.workflows[id];

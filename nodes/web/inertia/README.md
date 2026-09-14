@@ -639,6 +639,68 @@ dry.errors;                            // { sku: "Required." }
 dry.run.step("create")?.executed;      // false — the assertion that matters
 ```
 
+## Production error pages (#1014)
+
+In development nothing changes: the trigger's JSON diagnostics are a NON-Inertia
+response, and the stock client shows those in its error modal — the documented
+dev experience.
+
+In production (`NODE_ENV=production`, or `BLOK_INERTIA_ERROR_PAGES=1` anywhere)
+a failing request is rendered as an **Inertia page response carrying the real
+status**. The client's own `isHttpException()` path fires
+`inertia:httpException` and then swaps the page in, so a 404 renders in place,
+the URL updates, and Back works. `BLOK_INERTIA_ERROR_PAGES=0` opts a production
+deploy back out.
+
+```ts
+import { configureErrorPages, handleExceptionsUsing, render } from "@blokjs/inertia";
+
+configureErrorPages({
+  pages: { 404: "Errors/NotFound", 503: "Errors/Maintenance", default: "Errors/Error" },
+  statuses: [403, 404, 500, 503],   // the default set
+  viewData: { title: "Acme" },      // same shell/viewData knobs as a normal page
+});
+```
+
+- `props` are `{ status, message }`, where `message` is the status's standard
+  reason phrase — **never** the thrown error's message and never a stack. A
+  production error body is exactly where a driver message or a connection
+  string leaks.
+- Shared data (`share()` / `shareOnce()`) is resolved on the error page, so a
+  layout reading `auth` still renders. Errors happen outside the page workflow,
+  so the MIDDLEWARE chain (`inertia.shared`, flash) has not run — anything the
+  error page needs must come from the registry.
+- `X-Inertia` requests get the JSON page object; a plain browser navigation gets
+  the HTML shell. A client that is neither (an API call asking for JSON) keeps
+  the trigger's own JSON body, untouched.
+- Unmatched routes go through the same path: a browser or an Inertia visit gets
+  the 404 page, everything else the trigger's JSON 404.
+- A status named in `pages` is rendered even when it is not in `statuses`;
+  every other status is gated by `statuses` and mapped through `default`.
+
+### `handleExceptionsUsing()`
+
+```ts
+handleExceptionsUsing(({ status, error, request }) => {
+  if (status === 503) return render("Errors/Maintenance", { until: "10:00" });
+  if (status === 404) return null;          // this one keeps the trigger's own 404
+  return render("Errors/Error", { status });
+});
+```
+
+The hook sees EVERY status, not just the configured set, so it can add pages the
+default map does not carry. Returning `null` (or `undefined`) falls through to
+the response the trigger would have sent anyway — it is the per-status opt-out.
+
+The HTTP trigger reaches all of this through ONE exported function,
+`renderErrorPage(request, status, error)`, loaded with an optional dynamic
+import: a project without `@blokjs/inertia` installed boots and errors exactly
+as before.
+
+> The `Errors/*` page components themselves ship with the SPA templates (#999).
+> Until then, point `pages` at components your own client provides; a component
+> the client cannot resolve is a client-side error, not a server one.
+
 ## Exports
 
 ```ts
@@ -684,6 +746,11 @@ import InertiaNode, {
   resolveUrlUsing,
   transformComponentUsing,
   ensurePagesExist,
+  // production error pages (#1014)
+  configureErrorPages,
+  handleExceptionsUsing,
+  render,                    // the hook's return value: render(component, props)
+  renderErrorPage,           // what the HTTP trigger calls
   // #996
   redirectBack,
   back,
