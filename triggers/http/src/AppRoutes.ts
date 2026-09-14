@@ -86,7 +86,18 @@ export function readAssetVersion(root: string): string | null {
 	}
 }
 
-app.get("/", (c) => {
+app.get("/", async (c, next) => {
+	// #1051 — SPA mode: `/` belongs to a page workflow, not to this placeholder.
+	// `AppRoutes` is mounted BEFORE the file-based routes, so without this the
+	// welcome page shadows the home page of every Inertia app and the site looks
+	// like a fresh install. Yielding lets the workflow route answer.
+	//
+	// ponytail: `BLOK_STATIC_DIR` is the signal because it is what turns SPA
+	// mode on (#1000) and AppRoutes cannot see the route table. Upgrade path:
+	// have HttpTrigger skip this route outright when a scanned route claims
+	// `GET /`.
+	if (process.env.BLOK_STATIC_DIR) return next();
+
 	const html = `
 	<!DOCTYPE html>
 	<html lang="en">

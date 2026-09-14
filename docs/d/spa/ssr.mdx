@@ -19,7 +19,7 @@ The SSR entry is ordinary Inertia; `@inertiajs/vite` builds it and
 `blokInertia()` records where it is.
 
 ```tsx client/src/ssr.tsx
-import { createInertiaApp } from "@inertiajs/react";
+import { type ResolvedComponent, createInertiaApp } from "@inertiajs/react";
 import createServer from "@inertiajs/react/server";
 import ReactDOMServer from "react-dom/server";
 
@@ -27,7 +27,13 @@ createServer((page) =>
   createInertiaApp({
     page,
     render: ReactDOMServer.renderToString,
-    resolve: (name: string) => import(`./pages/${name}.tsx`),
+    // A glob, never `import(`./pages/${name}.tsx`)`: Vite resolves a
+    // template-literal import only one directory deep, so nested pages break.
+    // (The SSR overload's types require `resolve`; the client entry may omit it.)
+    resolve: (name: string) => {
+      const pages = import.meta.glob<ResolvedComponent>("./pages/**/*.tsx", { import: "default" });
+      return pages[`./pages/${name}.tsx`]();
+    },
     setup: ({ App, props }) => <App {...props} />,
   }),
 );

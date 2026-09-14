@@ -101,6 +101,12 @@ export function serializePage(page: unknown): string {
 /** Where the shell wants the `<Head>` defaults and the app root + boot script. */
 export const HEAD_MARKER = "<!--blok:head-->";
 export const APP_MARKER = "<!--blok:app-->";
+/**
+ * Where the shell wants the client bundle's `<script>` / `<link>` tags (#1051).
+ * `viteAssetTags()` in `./vite-assets.ts` produces them; this file stays free
+ * of the filesystem so the SSR server and DevTools can import it anywhere.
+ */
+export const ASSETS_MARKER = "<!--blok:assets-->";
 
 /**
  * The default shell. `data-inertia` (v3 renamed it from `inertia`) marks the
@@ -113,6 +119,7 @@ export const DEFAULT_SHELL = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title data-inertia>{{title}}</title>
 ${HEAD_MARKER}
+${ASSETS_MARKER}
 </head>
 <body>
 ${APP_MARKER}
@@ -136,6 +143,11 @@ export interface RenderShellOptions {
 	rootId?: string;
 	/** Markup injected at {@link HEAD_MARKER} (server-rendered `<Head>` tags). */
 	head?: string;
+	/**
+	 * Markup injected at {@link ASSETS_MARKER} — the client bundle's tags from
+	 * `viteAssetTags()`. A shell without the marker is left untouched.
+	 */
+	assets?: string;
 	/** Template-only values — `{{key}}` in the shell. NEVER sent to the client. */
 	viewData?: Record<string, unknown>;
 	/** Pre-rendered app markup. Omit for the normal client-rendered root + page script. */
@@ -171,7 +183,11 @@ export function renderShell(page: PageObject, opts: RenderShellOptions = {}): st
 	// Replacer FUNCTIONS, not strings: a prop containing `$&` or `$'` would
 	// otherwise be re-expanded by String.replace's substitution patterns.
 	const head = opts.head ?? "";
-	return html.replace(HEAD_MARKER, () => head).replace(APP_MARKER, () => boot);
+	const assets = opts.assets ?? "";
+	return html
+		.replace(HEAD_MARKER, () => head)
+		.replace(ASSETS_MARKER, () => assets)
+		.replace(APP_MARKER, () => boot);
 }
 
 // =============================================================================

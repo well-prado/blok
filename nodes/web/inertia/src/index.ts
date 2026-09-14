@@ -23,9 +23,12 @@ import { resolveUrl, transformComponent } from "./routing.js";
 import { resolveClearHistory, resolveEncryptHistory } from "./security/history.js";
 import { resolveSharedProps } from "./shared.js";
 import { renderSsr } from "./ssr.js";
+// #1051 — the `<script type="module">` that actually loads the client bundle.
+import { viteAssetTags } from "./vite-assets.js";
 
 export {
 	APP_MARKER,
+	ASSETS_MARKER,
 	DEFAULT_SHELL,
 	HEAD_MARKER,
 	clearHistory,
@@ -47,6 +50,9 @@ export * from "./middleware/index.js";
 export * from "./errors.js";
 export * from "./ssr.js";
 export * from "./devtools/index.js";
+// --- client bundle tags for the HTML shell (#1051) ---------------------------
+export { _resetViteAssets, tagsFor, viteAssetTags } from "./vite-assets.js";
+export type { ViteAssetTagsOptions, ViteDescriptor, ViteFramework } from "./vite-assets.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
 export {
@@ -204,6 +210,10 @@ const inputSchema = z.object({
 	rootId: z.string().optional().describe("Root element id and data-page attribute value. Default 'app'."),
 	shell: z.string().optional().describe("HTML shell template. Must contain <!--blok:app-->."),
 	head: z.string().optional().describe("Markup injected at <!--blok:head-->."),
+	assets: z
+		.string()
+		.optional()
+		.describe("Markup injected at <!--blok:assets-->. Defaults to viteAssetTags() from BLOK_STATIC_DIR."),
 	viewData: z.record(z.unknown()).optional().describe("Shell-template values ({{key}}). NEVER sent to the client."),
 
 	// --- control responses ---
@@ -229,6 +239,14 @@ const VARY: Record<string, string> = { Vary: "X-Inertia" };
 function requestField(ctx: unknown, field: "headers" | "method" | "url"): unknown {
 	const request = (ctx as { request?: Record<string, unknown> } | undefined)?.request;
 	return request?.[field];
+}
+
+/** `ctx.logger` when the runner supplied one, else `console.warn`. */
+function warner(ctx: unknown): (message: string) => void {
+	const logger = (ctx as { logger?: { logLevel?: (level: string, message: string) => void } } | undefined)?.logger;
+	if (typeof logger?.logLevel !== "function") return console.warn;
+	const logLevel = logger.logLevel.bind(logger);
+	return (message: string) => logLevel("warn", message);
 }
 
 /** Both lists, in order, without duplicates. `undefined` when neither has anything. */
@@ -435,6 +453,9 @@ export default defineNode({
 			body: renderShell(page, {
 				shell: input.shell,
 				rootId: input.rootId,
+				// The shell is HTML, not an Inertia payload: without these tags
+				// nothing on the page ever parses the boot script (#1051).
+				assets: input.assets ?? viteAssetTags({ warn: warner(ctx) }),
 				head: [input.head, ...(ssr?.head ?? [])].filter(Boolean).join("\n"),
 				viewData: input.viewData as Record<string, unknown> | undefined,
 				body: ssr?.body,

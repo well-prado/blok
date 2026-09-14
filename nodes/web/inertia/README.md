@@ -79,16 +79,39 @@ does not apply — never `false`, never `[]`, never `{}`.
 ## Shell
 
 The default shell carries `<title data-inertia>` (v3 renamed the attribute from
-`inertia`) and two markers:
+`inertia`) and three markers:
 
 | Marker | Replaced with |
 | --- | --- |
 | `<!--blok:head-->` | the `head` input — server-rendered `<Head>` tags |
+| `<!--blok:assets-->` | the `assets` input, defaulting to `viteAssetTags()` — the client bundle's `<script>` / `<link>` tags |
 | `<!--blok:app-->` | `<div id="app"></div>` plus the boot script |
 
 `rootId` renames the root element (and the script's `data-page` value).
 `viewData` fills `{{key}}` placeholders in the shell and is **never** sent to
-the client. A custom `shell` must contain `<!--blok:app-->`.
+the client. A custom `shell` must contain `<!--blok:app-->`; the other two
+markers are optional, and a shell without `<!--blok:assets-->` gets no bundle
+tags (pass your own through the `assets` input instead).
+
+### Loading the client bundle (#1051)
+
+`viteAssetTags()` is Blok's `@vite`. It reads
+`<BLOK_STATIC_DIR ?? client/dist>/.blok-vite.json` — written by `blokInertia()`
+in `@blokjs/inertia-client/vite` — and emits, for a build, a
+`<link rel="modulepreload">` per static import, a `<link rel="stylesheet">` per
+stylesheet and the hashed `<script type="module">`; for a running dev server,
+`/@vite/client` plus the entry as absolute URLs on the dev origin, preceded by
+the `@vitejs/plugin-react` refresh preamble when the descriptor says React.
+
+Vite hashes filenames and serves the dev entry from its own port, so the tags
+cannot be hard-coded — the descriptor is the only honest source. Its result is
+cached per descriptor modification time, so a rebuild is picked up without a
+restart and a dev server that moves port is followed.
+
+With no descriptor the node logs ONE warning naming the fix and renders the
+shell without tags: the page object still ships (inspectable), the app just does
+not boot. A server that is started before the client has ever been built should
+not 500.
 
 The page JSON is escaped for a `<script>` context — every `/` as `\/`, every
 `<` as its `<` escape, and the two JS line terminators — with **no**
@@ -898,6 +921,10 @@ import InertiaNode, {
   DEFAULT_SHELL,
   HEAD_MARKER,
   APP_MARKER,
+  // client bundle tags for the shell (#1051)
+  ASSETS_MARKER,   // <!--blok:assets--> — where the tags go, inside <head>
+  viteAssetTags,   // reads <BLOK_STATIC_DIR>/.blok-vite.json, returns the tags
+  tagsFor,         // the pure descriptor -> tags function
   // security (#1013)
   configureHistory,          // adapter option: { encrypt: boolean }
   encryptHistoryMiddleware,  // the `inertia.encryptHistory` middleware workflow

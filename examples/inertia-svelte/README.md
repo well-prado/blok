@@ -30,15 +30,24 @@ tests/                        the runPage suite — `bun run e2e`
 bun run build      # from the repo root, once
 bun run e2e        # the runPage suite — no server, no browser
 
-BLOK_FLASH_SECRET=dev-secret BLOK_STATIC_DIR=client/dist blokctl dev   # terminal 1
-bun run dev                                                            # terminal 2
+bun run build      # the Vite client — writes client/dist/.blok-vite.json
+
+# the server, from THIS directory
+BLOK_FLASH_SECRET=dev-secret BLOK_STATIC_DIR=client/dist bun run src/index.ts
+bun run dev                                                    # Vite, 2nd terminal
 ```
+
+Open the **Blok** URL (<http://localhost:4000>). `blokctl dev` is the scaffold's
+runner and expects `.blok/config.json` plus `src/triggers/http/index.ts`; this
+hand-built example boots `src/index.ts` directly instead.
 
 `@sveltejs/vite-plugin-svelte` is **not** installed in this monorepo (the
 lockfile rule: no new hoists for an example), so `bun run build`, `bun run dev`
 and `bun run typecheck` (the Vite config imports the plugin) need an install of
 this example's own `devDependencies` first. `bun run e2e` — the part CI runs —
-needs neither.
+needs neither. Until the client is built there is no `.blok-vite.json`, so the
+server serves the shell, logs one warning naming the fix, and the page stays
+blank — see [assets and versioning](../../docs/d/spa/assets-and-versioning.mdx).
 
 ## `bun run e2e` is a placeholder, on purpose
 

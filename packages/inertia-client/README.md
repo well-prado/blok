@@ -132,11 +132,13 @@ export default defineConfig({
 (`createInertiaApp({ pages: { path, extension, lazy, transform } })`), the SSR
 transform and the HMR-backed dev SSR endpoint are all upstream behaviour, and
 every `@inertiajs/vite` option (`ssr`, `frameworks`) is passed through. On top
-of that it adds four Blok-specific things, all written into the Vite `outDir`
-(`dist/` by default), which is the handoff directory the Blok server reads:
+of that it adds the Blok-specific things below, all written into the Vite
+`outDir` (`dist/` by default), which is the handoff directory the Blok server
+reads:
 
 | File / value | What it is |
 |---|---|
+| `dist/.blok-vite.json` | What the HTML shell must load — Blok's `@vite` (#1051). After `vite build`: `{ mode: "build", entry: "assets/index-<hash>.js", css, imports, framework }`, resolved from the manifest's entry chunk. While `vite` runs: `{ mode: "dev", devUrl: "http://localhost:<port>", entry: "src/main.tsx", framework }`, and the file is **deleted** when the dev server stops so a later production boot cannot point at a dead port. `viteAssetTags()` in `@blokjs/inertia` turns it into `<link rel="modulepreload">` / `<link rel="stylesheet">` / `<script type="module">` (plus the React refresh preamble in dev). |
 | `dist/.blok-asset-version` | sha256 of `dist/.vite/manifest.json`. The server reads it into `ASSET_VERSION` and sends it as `X-Inertia-Version`. `"dev"` while the dev server runs. |
 | `import.meta.env.BLOK_ASSET_VERSION` | The same value, inlined into the bundle. |
 | `dist/pages.json` | `{ root, pages }` — the page components found on disk, for the server's `ensurePagesExist` check. |

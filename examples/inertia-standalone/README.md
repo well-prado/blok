@@ -76,9 +76,17 @@ function Index({ orders }: PageProps<"Orders/Index">) {
 bun run build          # from the repo root, once
 bun run e2e            # the backend's runPage suite — no server, no browser
 
-BLOK_CORS_ORIGIN=http://localhost:5173 BLOK_FLASH_SECRET=dev-secret blokctl dev  # terminal 1
-bun run dev:frontend                                                             # terminal 2
+# the backend, from examples/inertia-standalone/backend
+BLOK_CORS_ORIGIN=http://localhost:5173 BLOK_FLASH_SECRET=dev-secret bun run src/index.ts
+
+bun run dev:frontend   # Vite, 2nd terminal, from examples/inertia-standalone
 ```
+
+Open the **Vite** URL (5173) — in standalone mode the SPA owns the HTML and Blok
+never renders a shell, so there is no `BLOK_STATIC_DIR` and no `.blok-vite.json`
+here. `blokctl dev` is the scaffold's runner and expects `.blok/config.json`
+plus `src/triggers/http/index.ts`; this hand-built backend boots `src/index.ts`
+directly instead.
 
 ## `bun run e2e` is a placeholder, on purpose
 
