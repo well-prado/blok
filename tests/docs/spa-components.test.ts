@@ -23,7 +23,7 @@
  * `vue-tsc` and `svelte-check` are not installed and cannot be installed here,
  * so a type error inside a `.vue`/`.svelte` file is still only caught by a real
  * `vite build` (the scaffold smoke does that for the templates). Closing it
- * needs the plugins hoisted — see the follow-up issue linked from PR #1057.
+ * needs the plugins hoisted: https://github.com/well-prado/blok/issues/1061.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";

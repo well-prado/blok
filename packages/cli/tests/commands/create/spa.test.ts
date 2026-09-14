@@ -251,7 +251,12 @@ describe("blokctl create spa / add spa (#999)", () => {
 		expect(files).toContain("src/nodes/current-user/index.ts");
 		// #1051 — the adapter's default shell loads the bundle from `.blok-vite.json`; no custom shell.
 		expect(files).not.toContain("src/inertia-shell.ts");
-		expect(fsExtra.readFileSync(path.join(workDir, "src/workflows/home.ts"), "utf8")).not.toContain("inertia-shell");
+		const homeWorkflow = fsExtra.readFileSync(path.join(workDir, "src/workflows/home.ts"), "utf8");
+		expect(homeWorkflow).not.toContain("inertia-shell");
+		// #1054 — the shell fills `{{title}}` from `viewData`, and the client's
+		// `title:` callback only runs AFTER hydration. Without this the first paint
+		// of a scaffolded app has an empty <title>.
+		expect(homeWorkflow).toContain('viewData: { title: "Home" }');
 		expect(files).toContain("client/vite.config.ts");
 	});
 

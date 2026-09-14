@@ -358,6 +358,13 @@ pre {
 	display: block;
 }
 
+/* The panel wraps a `.blok-nav`, which is a flex ROW in the header bar. In a
+   dropdown the links stack. */
+.blok-menu__panel .blok-nav {
+	flex-direction: column;
+	align-items: stretch;
+}
+
 /* `.blok-user` is hidden below 48rem, so the compact panel is where the
    signed-in identity lives at phone width instead of disappearing. */
 .blok-menu__user {
