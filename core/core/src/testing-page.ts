@@ -24,11 +24,10 @@
  * await page.loadDeferredProps("dashboard", (p) => p.has("stats"));
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { type RunWorkflowOptions, type WorkflowRun, runWorkflow } from "@blokjs/runner/testing";
-import * as shared from "@blokjs/shared";
-import { isRespondEnvelope } from "@blokjs/shared";
+import type { RespondEnvelope } from "@blokjs/shared";
+import { FLASH_COOKIE, isRespondEnvelope, readCookie, verifyFlash } from "@blokjs/shared";
 
 // =============================================================================
 // Options
@@ -189,14 +188,65 @@ export async function runPage<TProps = Record<string, unknown>>(
 	return buildResult<TProps>(run, { workflow: model, opts, component });
 }
 
+// =============================================================================
+// Precognition (#1011)
+// =============================================================================
+
+export interface RunPrecognitionOptions extends Omit<RunWorkflowOptions, "input"> {
+	/** The submitted form payload — becomes `ctx.request.body`. */
+	body?: unknown;
+	/** `Precognition-Validate-Only`. Omit (or pass `[]`) to validate every field. */
+	fields?: readonly string[] | string;
+}
+
+export interface PrecognitionResult {
+	/** `204` when the validated fields are clean, `422` when they are not. */
+	readonly status: number;
+	/** The `422` body's errors, `{}` on a 204. */
+	readonly errors: Record<string, unknown>;
+	/** Response headers (`Precognition`, `Precognition-Success`, `Vary`). */
+	readonly headers: Record<string, string>;
+	/** The underlying `runWorkflow` result — assert which steps did NOT run. */
+	readonly run: WorkflowRun;
+}
+
 /**
- * Precognition (`X-Precognition`) dry runs — validation without side effects.
+ * Drive a workflow the way Inertia's live validation does: `Precognition: true`
+ * (plus `Precognition-Validate-Only` when `fields` is given) on a POST, and the
+ * `204`/`422` the runner answers from the step marked `{ precognition: true }`.
  *
- * @throws always: the precognition request pipeline is #1011's, and a helper
- * that quietly returned a 204 it never obtained would be worse than missing.
+ * `run` is the whole `runWorkflow` result, which is the point: the assertion
+ * that matters most about a dry run is the one about the steps it did NOT
+ * reach — `result.run.step("create")?.executed === false`.
+ *
+ * @example
+ * const dry = await runPrecognition(createOrder, { body: { sku: "" }, fields: ["sku"] });
+ * expect(dry.status).toBe(422);
+ * expect(dry.errors).toEqual({ sku: "Required." });
+ * expect(dry.run.step("create")?.executed).toBe(false);
  */
-export function runPrecognition(_workflow: unknown, _opts?: unknown): never {
-	throw new Error("runPrecognition(): precognition support lands with #1011.");
+export async function runPrecognition(
+	workflow: unknown,
+	opts: RunPrecognitionOptions = {},
+): Promise<PrecognitionResult> {
+	const fields = list(opts.fields);
+	const run = await runWorkflow(await workflow, opts.body, {
+		...opts,
+		method: opts.method ?? "POST",
+		headers: {
+			precognition: "true",
+			...(fields.length > 0 ? { "precognition-validate-only": fields.join(",") } : {}),
+			...opts.headers,
+		},
+	});
+	// Deliberately NOT routed through `runPage`: a workflow whose validation
+	// step is unmarked answers with whatever its last step returned, and that is
+	// the result test 9 asserts on — `runPage` would reject it for not ending in
+	// a page object before the test could look.
+	if (!isRespondEnvelope(run.response)) return { status: 200, errors: {}, headers: {}, run };
+	const envelope = run.response;
+	const errors = isObject(envelope.body) ? record<unknown>((envelope.body as { errors?: unknown }).errors) : {};
+	return { status: envelope.status ?? 200, errors, headers: record<string>(envelope.headers), run };
 }
 
 // =============================================================================
@@ -361,7 +411,7 @@ async function reload<TProps>(
  * Normally the final step's output; a page step followed by another step still
  * has one further back, so the steps are scanned in reverse before giving up.
  */
-function finalEnvelope(run: WorkflowRun): shared.RespondEnvelope {
+function finalEnvelope(run: WorkflowRun): RespondEnvelope {
 	if (isRespondEnvelope(run.response)) return run.response;
 	for (let i = run.steps.length - 1; i >= 0; i--) {
 		const step = run.steps[i];
@@ -542,23 +592,6 @@ function assertFlashMissing(bag: Record<string, unknown>, key: string, where: st
 // Flash cookie
 // =============================================================================
 
-/**
- * The `@blokjs/shared` flash primitives (#996). Read through the namespace
- * rather than imported by name: this helper ships BEFORE that lands, and a
- * static import of a not-yet-exported symbol would not compile.
- *
- * ponytail: the local verifier below is the same 6-line HMAC check, kept only
- * so `assertFlash` works on a tree without #996. Delete it once that merges.
- */
-interface FlashApi {
-	FLASH_COOKIE?: string;
-	readCookie?: (header: string | undefined, name?: string) => string | undefined;
-	verifyFlash?: (token: string | undefined, secret: string) => Record<string, unknown> | undefined;
-}
-
-const flashApi = shared as unknown as FlashApi;
-const FLASH_COOKIE_NAME = flashApi.FLASH_COOKIE ?? "blok_flash";
-
 /** Verify + decode the flash token the redirect set, as `{ ...flash, errors }`. */
 function redirectFlash(result: PageResult<never>, ctx: RunContext): Record<string, unknown> {
 	const token = flashToken(result.cookies);
@@ -569,10 +602,10 @@ function redirectFlash(result: PageResult<never>, ctx: RunContext): Record<strin
 			"assertFlash(): the response carries a signed flash cookie but no secret to verify it with. Set BLOK_FLASH_SECRET, or pass `flashSecret` to runPage().",
 		);
 	}
-	const payload = (flashApi.verifyFlash ?? verifyFlashLocally)(token, secret);
+	const payload = verifyFlash(token, secret);
 	if (!payload) {
 		throw new Error(
-			`assertFlash(): the ${FLASH_COOKIE_NAME} cookie did not verify against the secret in use — tampered, or signed with a different one.`,
+			`assertFlash(): the ${FLASH_COOKIE} cookie did not verify against the secret in use — tampered, or signed with a different one.`,
 		);
 	}
 	const errors = payload.errors;
@@ -582,37 +615,10 @@ function redirectFlash(result: PageResult<never>, ctx: RunContext): Record<strin
 /** The flash cookie's VALUE out of the envelope's raw `Set-Cookie` strings. */
 function flashToken(cookies: readonly string[]): string | undefined {
 	for (const cookie of cookies) {
-		const value = (flashApi.readCookie ?? readCookieLocally)(cookie.split(";")[0], FLASH_COOKIE_NAME);
+		const value = readCookie(cookie.split(";")[0], FLASH_COOKIE);
 		if (value !== undefined && value.length > 0) return value;
 	}
 	return undefined;
-}
-
-function readCookieLocally(header: string | undefined, name: string = FLASH_COOKIE_NAME): string | undefined {
-	if (!header) return undefined;
-	for (const pair of header.split(";")) {
-		const eq = pair.indexOf("=");
-		if (eq < 0 || pair.slice(0, eq).trim() !== name) continue;
-		return pair.slice(eq + 1).trim();
-	}
-	return undefined;
-}
-
-function verifyFlashLocally(token: string | undefined, secret: string): Record<string, unknown> | undefined {
-	if (!token) return undefined;
-	const split = token.lastIndexOf(".");
-	if (split <= 0) return undefined;
-	const body = token.slice(0, split);
-	const expected = createHmac("sha256", secret).update(body).digest("base64url");
-	const a = Buffer.from(token.slice(split + 1), "utf8");
-	const b = Buffer.from(expected, "utf8");
-	if (a.length !== b.length || !timingSafeEqual(a, b)) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-		return isObject(parsed) ? (parsed as Record<string, unknown>) : undefined;
-	} catch {
-		return undefined;
-	}
 }
 
 // =============================================================================

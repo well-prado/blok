@@ -39,7 +39,7 @@ export interface FlashPersistOptions extends FlashCookieOptions {
 export interface RedirectBackOptions extends FlashPersistOptions {
 	/** Validation errors to show on the page we bounce back to. */
 	errors?: Record<string, unknown>;
-	/** Error-bag name the errors nest under (`X-Inertia-Error-Bag`). */
+	/** Error-bag name the errors nest under. Defaults to the request's `X-Inertia-Error-Bag`. */
 	bag?: string;
 	/** Page-object flash data to carry across the redirect. */
 	flash?: Record<string, unknown>;
@@ -84,7 +84,12 @@ export function redirectBack(req: FlashRequest, opts: RedirectBackOptions = {}):
 	const cookie = flashCookie(
 		{
 			errors: opts.errors,
-			bag: opts.bag,
+			// #1011 — the bag defaults to the REQUEST's `X-Inertia-Error-Bag`, the
+			// mirror of what the adapter already does on the render side. The
+			// bounce-back GET does not carry the header, so if the name is not
+			// persisted here the errors un-nest on exactly the visit that shows
+			// them, and a page with two forms puts one form's errors on the other.
+			bag: opts.bag ?? headers["x-inertia-error-bag"],
 			flash: opts.flash,
 			preserveFragment: opts.preserveFragment,
 			clearHistory: opts.clearHistory,

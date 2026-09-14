@@ -183,6 +183,40 @@ function flashRedirectWorkflow(token: string) {
 	});
 }
 
+/** #1011 — a validation step, and the write a dry run must never reach. */
+const checkOrder = defineNode({
+	name: "rp-check-order",
+	description: "Validate an order, returning { ok, errors } rather than throwing.",
+	input: z.object({ body: z.record(z.unknown()).optional() }),
+	output: z.object({ ok: z.boolean(), errors: z.record(z.unknown()) }),
+	async execute(_ctx, input) {
+		const errors: Record<string, string> = {};
+		const body = input.body ?? {};
+		if (typeof body.sku !== "string" || body.sku.length === 0) errors.sku = "Required.";
+		if (typeof body.qty !== "number" || body.qty < 1) errors.qty = "Must be at least 1.";
+		return { ok: Object.keys(errors).length === 0, errors };
+	},
+});
+
+const createOrder = defineNode({
+	name: "rp-create-order",
+	description: "The side effect a dry run must skip.",
+	input: z.object({}),
+	output: z.object({ id: z.string() }),
+	async execute() {
+		count("rp-create-order");
+		return { id: "o-1" };
+	},
+});
+
+/** POST /orders: validate (optionally marked), then write. */
+function precognitionWorkflow(marked = true) {
+	return workflow("run-page-precognition", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+		step("check", checkOrder, { body: req.body }, marked ? { precognition: true } : {});
+		step("create", createOrder, {});
+	});
+}
+
 const SEED = { auth: { id: "u-1", email: "a@b.c" } };
 
 beforeEach(() => {
@@ -410,8 +444,43 @@ describe("12 — flash on a redirect", () => {
 	});
 });
 
-describe("13 — precognition", () => {
-	it("is not implemented until #1011", () => {
-		expect(() => runPrecognition(null)).toThrow("runPrecognition(): precognition support lands with #1011.");
+describe("13 — precognition (#1011)", () => {
+	it("answers 422 with the narrowed errors and never reaches the write", async () => {
+		const dry = await runPrecognition(await precognitionWorkflow(), {
+			body: { sku: "", qty: -1 },
+			fields: ["sku"],
+		});
+
+		expect(dry.status).toBe(422);
+		expect(dry.errors).toEqual({ sku: "Required." });
+		expect(dry.headers.Precognition).toBe("true");
+		expect(dry.headers.Vary).toBe("Precognition");
+		expect(dry.run.step("create")?.executed).toBe(false);
+		expect(calls("rp-create-order")).toBe(0);
+	});
+
+	it("answers an empty 204 when the asked-about fields are clean", async () => {
+		const dry = await runPrecognition(await precognitionWorkflow(), {
+			body: { sku: "SKU-1", qty: -1 },
+			fields: "sku",
+		});
+
+		expect(dry.status).toBe(204);
+		expect(dry.errors).toEqual({});
+		expect(dry.headers["Precognition-Success"]).toBe("true");
+		expect(dry.run.step("create")?.executed).toBe(false);
+	});
+
+	it("validates every field when no field list is given", async () => {
+		const dry = await runPrecognition(await precognitionWorkflow(), { body: { sku: "", qty: -1 } });
+		expect(dry.status).toBe(422);
+		expect(dry.errors).toEqual({ sku: "Required.", qty: "Must be at least 1." });
+	});
+
+	it("leaves a workflow with no marked step running normally", async () => {
+		const dry = await runPrecognition(await precognitionWorkflow(false), { body: { sku: "SKU-2", qty: 3 } });
+		expect(dry.status).toBe(200);
+		expect(dry.run.step("create")?.executed).toBe(true);
+		expect(calls("rp-create-order")).toBe(1);
 	});
 });
