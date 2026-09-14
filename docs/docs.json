@@ -155,6 +155,7 @@
 									"d/reference/helpers/ctx-publish",
 									"d/reference/helpers/ctx-publish-many",
 									"d/reference/helpers/json-schema",
+									"d/reference/helpers/validate",
 									"d/reference/helpers/hmac-verify",
 									"d/reference/helpers/jwt-verify",
 									"d/reference/helpers/in-memory-kv",
