@@ -10,7 +10,7 @@ import { runNode } from "@blokjs/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import InertiaNode from "../src/index.js";
 import { APP_MARKER, ASSETS_MARKER, DEFAULT_SHELL, HEAD_MARKER, renderShell } from "../src/protocol.js";
-import { type ViteDescriptor, _resetViteAssets, viteAssetTags } from "../src/vite-assets.js";
+import { type ViteDescriptor, _resetViteAssets, assetVersion, viteAssetTags } from "../src/vite-assets.js";
 
 const PAGE = { component: "Dashboard", props: {}, url: "/", version: "v1" };
 
@@ -165,6 +165,50 @@ describe("the serializer node wires the two together", () => {
 			expect(String(response.body)).toContain('<script type="module" src="/assets/index-zz99.js"></script>');
 		} finally {
 			process.env.BLOK_STATIC_DIR = undefined;
+		}
+	});
+});
+
+describe("assetVersion() — the page object's version (#999)", () => {
+	const previous = process.env.ASSET_VERSION;
+	afterEach(() => {
+		// Under Node, assigning `undefined` stores the STRING "undefined".
+		if (previous === undefined) delete process.env.ASSET_VERSION;
+		else process.env.ASSET_VERSION = previous;
+	});
+
+	it("reads .blok-asset-version and follows a rebuild without a restart", () => {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, ".blok-asset-version"), "abc123\n");
+		expect(assetVersion({ dir })).toBe("abc123");
+
+		writeFileSync(join(dir, ".blok-asset-version"), "dev");
+		expect(assetVersion({ dir })).toBe("dev");
+	});
+
+	it("falls back to ASSET_VERSION, then to '' (untracked)", () => {
+		process.env.ASSET_VERSION = "from-env";
+		expect(assetVersion({ dir })).toBe("from-env");
+		delete process.env.ASSET_VERSION;
+		expect(assetVersion({ dir })).toBe("");
+	});
+
+	it("is what the serializer ships when a page passes no version", async () => {
+		writeDescriptor({ mode: "build", entry: "assets/index-zz99.js", css: [], imports: [], framework: null });
+		writeFileSync(join(dir, ".blok-asset-version"), "build-7");
+		process.env.BLOK_STATIC_DIR = dir;
+		try {
+			const response = (await runNode(InertiaNode, {
+				component: "Dashboard",
+				props: {},
+				url: "/",
+				headers: { "x-inertia": "true" },
+				method: "GET",
+			} as never)) as unknown as { body?: { version?: string } };
+			// An Inertia visit answers with the page object itself, not a string.
+			expect(response.body?.version).toBe("build-7");
+		} finally {
+			delete process.env.BLOK_STATIC_DIR;
 		}
 	});
 });

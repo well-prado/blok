@@ -37,11 +37,17 @@ export interface ViteAssetTagsOptions {
 }
 
 export const DESCRIPTOR_FILE = ".blok-vite.json";
+/** Written next to the descriptor by the same plugin: a manifest hash, or `dev`. */
+export const VERSION_FILE = ".blok-asset-version";
+
+function staticDir(options: Pick<ViteAssetTagsOptions, "dir">): string {
+	const dir = options.dir ?? process.env.BLOK_STATIC_DIR ?? "client/dist";
+	return isAbsolute(dir) ? dir : resolve(process.cwd(), dir);
+}
 
 function descriptorPath(options: ViteAssetTagsOptions): string {
 	if (options.descriptor !== undefined) return options.descriptor;
-	const dir = options.dir ?? process.env.BLOK_STATIC_DIR ?? "client/dist";
-	return join(isAbsolute(dir) ? dir : resolve(process.cwd(), dir), DESCRIPTOR_FILE);
+	return join(staticDir(options), DESCRIPTOR_FILE);
 }
 
 function readDescriptor(path: string): ViteDescriptor | null {
@@ -110,10 +116,38 @@ export function tagsFor(descriptor: ViteDescriptor): string {
 const cache = new Map<string, string>();
 const warned = new Set<string>();
 
-/** Test-only: forget cached tags and re-arm the once-per-path warning. */
+const versions = new Map<string, string>();
+
+/** Test-only: forget cached tags and versions, and re-arm the once-per-path warning. */
 export function _resetViteAssets(): void {
 	cache.clear();
+	versions.clear();
 	warned.clear();
+}
+
+/**
+ * The client build's version for the page object — what Inertia's stale-asset
+ * 409 compares `X-Inertia-Version` against.
+ *
+ * Read from `.blok-asset-version` beside the descriptor, mtime-cached like the
+ * tags: a manifest hash after `vite build`, `"dev"` while the dev server runs
+ * (the same value the dev proxy stamps on every request, so a proxied visit
+ * never 409s). Per render rather than at boot, so a server that outlives a
+ * rebuild announces the new version at once instead of after a restart. Falls
+ * back to `ASSET_VERSION`, then `""` (untracked, no version checking).
+ */
+export function assetVersion(options: Pick<ViteAssetTagsOptions, "dir"> = {}): string {
+	const path = join(staticDir(options), VERSION_FILE);
+	try {
+		const key = `${path}|${statSync(path).mtimeMs}`;
+		const hit = versions.get(key);
+		if (hit !== undefined) return hit;
+		const version = readFileSync(path, "utf8").trim();
+		versions.set(key, version);
+		return version;
+	} catch {
+		return process.env.ASSET_VERSION ?? "";
+	}
 }
 
 /**

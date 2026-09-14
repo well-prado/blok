@@ -24,7 +24,7 @@ import { resolveClearHistory, resolveEncryptHistory } from "./security/history.j
 import { resolveSharedProps } from "./shared.js";
 import { renderSsr } from "./ssr.js";
 // #1051 — the `<script type="module">` that actually loads the client bundle.
-import { viteAssetTags } from "./vite-assets.js";
+import { assetVersion, viteAssetTags } from "./vite-assets.js";
 
 export {
 	APP_MARKER,
@@ -51,7 +51,7 @@ export * from "./errors.js";
 export * from "./ssr.js";
 export * from "./devtools/index.js";
 // --- client bundle tags for the HTML shell (#1051) ---------------------------
-export { _resetViteAssets, tagsFor, viteAssetTags } from "./vite-assets.js";
+export { _resetViteAssets, assetVersion, tagsFor, viteAssetTags } from "./vite-assets.js";
 export type { ViteAssetTagsOptions, ViteDescriptor, ViteFramework } from "./vite-assets.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
@@ -134,7 +134,10 @@ const inputSchema = z.object({
 		.optional()
 		.describe("Already-resolved page props. #1008 resolves them; this node ships them."),
 	url: z.string().optional().describe("Page URL written into the page object. Defaults to the current request URL."),
-	version: z.string().optional().describe("Asset version. '' means untracked (no version checking)."),
+	version: z
+		.string()
+		.optional()
+		.describe("Asset version. Defaults to the client build's .blok-asset-version; '' means untracked."),
 	errors: z
 		.record(z.unknown())
 		.optional()
@@ -341,7 +344,9 @@ export default defineNode({
 		// required `render()` argument), and an override nothing can reach would
 		// be no override at all.
 		const url = resolveUrl((ctx as { request?: unknown } | undefined)?.request) ?? toRelativeUrl(rawUrl);
-		const version = input.version ?? "";
+		// #999 — default to the client build's own version, so the stale-asset
+		// 409 works without every page passing `render(..., { version })`.
+		const version = input.version ?? assetVersion();
 
 		// --- control responses come before any page work ---
 		if (input.location !== undefined) return location(input.location);
