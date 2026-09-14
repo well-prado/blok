@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { type IncomingMessage, type Server, createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type ViteDevServer, build, createServer as createViteServer } from "vite";
+import { type Plugin, type ViteDevServer, build, createServer as createViteServer } from "vite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ASSET_VERSION_FILE, PAGES_FILE, SSR_URL_FILE, blokInertia } from "../src/vite.js";
+import { ASSET_VERSION_FILE, PAGES_FILE, SSR_URL_FILE, VITE_DESCRIPTOR_FILE, blokInertia } from "../src/vite.js";
 
 const APP_ENTRY = "document.title = `${import.meta.env.BLOK_ASSET_VERSION} v1`;\n";
 
@@ -204,5 +204,97 @@ describe("blokInertia() dev server", () => {
 			rendered = (await response.json()) as { body?: string } | null;
 		}
 		expect(rendered?.body).toContain('data-component="Orders/Index"');
+	});
+});
+
+// =============================================================================
+// #1051 — the asset descriptor the Blok shell is built from
+// =============================================================================
+
+/** Stands in for `@vitejs/plugin-react` without pulling it in: only the name is read. */
+const FAKE_REACT: Plugin = { name: "vite:react-babel" };
+
+interface Descriptor {
+	mode: string;
+	devUrl?: string;
+	entry: string;
+	css?: string[];
+	imports?: string[];
+	framework: string | null;
+}
+
+function descriptor(root: string): Descriptor {
+	return JSON.parse(read(root, VITE_DESCRIPTOR_FILE)) as Descriptor;
+}
+
+describe("blokInertia() asset descriptor (#1051)", () => {
+	it("describes the built entry, its css and its static imports", async () => {
+		const root = makeProject({
+			"src/app.css": "body { color: red }\n",
+			"src/app.js": `${APP_ENTRY}import "./app.css";\nimport("./lazy.js");\n`,
+			"src/lazy.js": "export const lazy = 1;\n",
+		});
+		await buildProject(root);
+
+		const file = descriptor(root);
+		const manifest = JSON.parse(read(root, ".vite", "manifest.json")) as Record<string, { file: string }>;
+
+		expect(file.mode).toBe("build");
+		expect(file.framework).toBeNull();
+		// The entry is the manifest's JS entry chunk, and it exists on disk.
+		// (Vite keys an HTML input by the HTML file; `file` is the hashed JS.)
+		expect(file.entry).toBe(manifest["index.html"]?.file);
+		expect(file.entry).toMatch(/^assets\/.+\.js$/);
+		expect(existsSync(join(root, "dist", file.entry))).toBe(true);
+		// The stylesheet the entry imports is listed, and also exists.
+		expect(file.css).toHaveLength(1);
+		expect(file.css?.[0]).toMatch(/^assets\/.+\.css$/);
+		expect(existsSync(join(root, "dist", file.css?.[0] ?? ""))).toBe(true);
+		// A dynamic import is NOT a static import: preloading it would defeat it.
+		expect(file.imports).toEqual([]);
+	});
+
+	it("records the framework so the shell can emit the React refresh preamble", async () => {
+		const root = makeProject();
+		await build({ root, logLevel: "silent", plugins: [blokInertia({ ssr: false, proxy: false }), FAKE_REACT] });
+
+		expect(descriptor(root).framework).toBe("react");
+	});
+
+	it("points at the live dev server, and removes the descriptor when it closes", async () => {
+		const root = makeProject();
+		const port = await freePort();
+		dev = await createViteServer({
+			root,
+			logLevel: "silent",
+			server: { host: "127.0.0.1", port, strictPort: true },
+			plugins: [blokInertia({ ssr: false, proxy: false }), FAKE_REACT],
+		});
+		await dev.listen();
+
+		expect(descriptor(root)).toEqual({
+			mode: "dev",
+			devUrl: `http://localhost:${port}`,
+			// The module script of index.html, exactly as Vite serves it.
+			entry: "src/app.js",
+			framework: "react",
+		});
+
+		await dev.close();
+		dev = null;
+		expect(existsSync(join(root, "dist", VITE_DESCRIPTOR_FILE))).toBe(false);
+	});
+
+	it("prefers an explicit rollupOptions.input over index.html", async () => {
+		const root = makeProject({ "src/other.js": "export const other = 1;\n" });
+		await build({
+			root,
+			logLevel: "silent",
+			build: { rollupOptions: { input: join(root, "src/other.js") } },
+			plugins: [blokInertia({ ssr: false, proxy: false })],
+		});
+
+		const manifest = JSON.parse(read(root, ".vite", "manifest.json")) as Record<string, { file: string }>;
+		expect(descriptor(root).entry).toBe(manifest["src/other.js"]?.file);
 	});
 });
