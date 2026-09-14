@@ -1,0 +1,7 @@
+{
+	"mode": "build",
+	"entry": "assets/index.js",
+	"css": [],
+	"imports": [],
+	"framework": "react"
+}

@@ -28,12 +28,12 @@ import {
 } from "../gen/pagesTypes.js";
 import { checkSsr } from "./ssr.js";
 
-/** One check's verdict. `skip` means "not applicable here", never "unknown". */
+/** One check's verdict. `skip` means "not applicable" and `warn` is non-fatal. */
 export interface DoctorCheck {
 	name: string;
-	status: "ok" | "fail" | "skip";
+	status: "ok" | "fail" | "skip" | "warn";
 	detail: string;
-	/** Present exactly when `status` is `"fail"`. Always starts with `Fix:`. */
+	/** Present on actionable failures and warnings; always starts with `Fix:`. */
 	fix?: string;
 }
 
@@ -57,6 +57,9 @@ function fail(name: string, detail: string, fix: string): DoctorCheck {
 }
 function skip(name: string, detail: string): DoctorCheck {
 	return { name, status: "skip", detail };
+}
+function warn(name: string, detail: string, fix?: string): DoctorCheck {
+	return { name, status: "warn", detail, ...(fix === undefined ? {} : { fix }) };
 }
 
 /** The client build directory, the same way the adapter and the trigger resolve it. */
@@ -128,8 +131,53 @@ function checkAssetVersion(cwd: string, env: NodeJS.ProcessEnv): DoctorCheck {
 	return fail(
 		"ASSET_VERSION",
 		`not set, and no .blok-asset-version in ${dir} — asset-version mismatches will not force a hard reload.`,
-		"Fix: build the client once (the blokInertia() Vite plugin writes .blok-asset-version into its outDir), or set ASSET_VERSION explicitly.",
+		"Fix: run `vite build` / `vite` in the client with `blokInertia()` in vite.config.ts; set BLOK_STATIC_DIR=client/dist (or set ASSET_VERSION explicitly).",
 	);
+}
+
+const VITE_DESCRIPTOR_FIX =
+	"Fix: run `vite build` / `vite` in the client with `blokInertia()` in vite.config.ts; set BLOK_STATIC_DIR=client/dist.";
+
+/** The shell's asset tags come from the Vite plugin's descriptor. */
+async function checkViteDescriptor(cwd: string, env: NodeJS.ProcessEnv): Promise<DoctorCheck> {
+	const dir = staticDir(cwd, env);
+	const file = path.join(dir, ".blok-vite.json");
+	let descriptor: unknown;
+	try {
+		descriptor = JSON.parse(await fsp.readFile(file, "utf8")) as unknown;
+	} catch (err) {
+		const detail =
+			err instanceof Error && "code" in err && err.code === "ENOENT"
+				? `not found in ${dir}.`
+				: `could not be read: ${err instanceof Error ? err.message : String(err)}.`;
+		return fail(".blok-vite.json", detail, VITE_DESCRIPTOR_FIX);
+	}
+
+	if (typeof descriptor !== "object" || descriptor === null) {
+		return fail(".blok-vite.json", `invalid descriptor in ${file}.`, VITE_DESCRIPTOR_FIX);
+	}
+	const mode = (descriptor as { mode?: unknown }).mode;
+	if (mode !== "build" && mode !== "dev") {
+		return fail(".blok-vite.json", `invalid mode in ${file}; expected "build" or "dev".`, VITE_DESCRIPTOR_FIX);
+	}
+
+	if (mode === "dev") {
+		const devUrl = (descriptor as { devUrl?: unknown }).devUrl;
+		if (typeof devUrl !== "string" || devUrl.trim() === "") {
+			return fail(".blok-vite.json", `dev descriptor in ${file} has no devUrl.`, VITE_DESCRIPTOR_FIX);
+		}
+		try {
+			await fetch(devUrl, { signal: AbortSignal.timeout(1_000) });
+		} catch {
+			return warn(
+				".blok-vite.json",
+				`dev mode is configured for ${devUrl}, but nothing is listening there.`,
+				VITE_DESCRIPTOR_FIX,
+			);
+		}
+	}
+
+	return ok(".blok-vite.json", `${mode} descriptor found in ${file}.`);
 }
 
 /** Custom shells must carry both markers — `renderShell` only enforces the first. */
@@ -254,6 +302,7 @@ export async function inertiaDoctor(options: DoctorOptions = {}): Promise<Doctor
 	checks.push(await ensurePagesCheck(projectRoot, cwd, env));
 	checks.push(...checkSecrets(env, deps));
 	checks.push(checkAssetVersion(cwd, env));
+	checks.push(await checkViteDescriptor(cwd, env));
 	checks.push(await checkCsrf(projectRoot, dir));
 	checks.push(await checkSsrHealth(cwd, env));
 	return checks;
@@ -304,7 +353,7 @@ async function ensurePagesCheck(projectRoot: string, cwd: string, env: NodeJS.Pr
 export async function runDoctor(options: DoctorOptions = {}): Promise<void> {
 	const log = options.log ?? ((line: string) => console.log(line));
 	const checks = await inertiaDoctor(options);
-	const icons = { ok: "✅", fail: "❌", skip: "➖" } as const;
+	const icons = { ok: "✅", fail: "❌", skip: "➖", warn: "⚠️" } as const;
 
 	log("blokctl inertia doctor\n");
 	for (const check of checks) {

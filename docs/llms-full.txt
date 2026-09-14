@@ -3628,7 +3628,7 @@ export function describePages(): string[] {
 
 ## blokctl inertia doctor
 
-Six classes of misconfiguration that all present as "it just doesn't work":
+Checks for misconfiguration that otherwise presents as "it just doesn't work":
 
 ```bash
 blokctl inertia doctor
@@ -3640,8 +3640,15 @@ blokctl inertia doctor
 | `ensurePagesExist` | a declared component has no file in the client's pages directory |
 | secrets | `BLOK_FLASH_SECRET` is unset (or `BLOK_SESSION_SECRET`, once `@blokjs/session` is installed) |
 | `ASSET_VERSION` | neither the variable nor `<staticDir>/.blok-asset-version` exists |
+| `.blok-vite.json` | the Vite descriptor is missing or invalid, so the shell cannot load the client assets |
 | `inertia.csrf` | `src/Workflows.ts` does not register the middleware |
 | SSR | SSR is configured but the server does not answer `/health` |
+
+In dev mode, the descriptor's `devUrl` is also probed and a warning is printed
+when no Vite server is listening there. Run `vite` in the client, or run
+`vite build` for a production descriptor, with `blokInertia()` in
+`vite.config.ts`; set `BLOK_STATIC_DIR=client/dist` when the static directory
+is elsewhere.
 
 Every failing check prints a line starting with `Fix:`, and the command exits
 non-zero — so it is usable as a deploy gate, not only as a hint.
