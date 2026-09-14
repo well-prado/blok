@@ -42,6 +42,8 @@ export * from "./security/index.js";
 export { back, flash, flashCookie, normalizeErrors, redirectBack } from "./flash.js";
 export type { FlashBuilder, FlashPayload, FlashPersistOptions, FlashRequest, RedirectBackOptions } from "./flash.js";
 export * from "./middleware/index.js";
+// --- production error pages (#1014) ------------------------------------------
+export * from "./errors.js";
 
 // --- typed page contracts (#995, v3 shape per #1008) -------------------------
 export {
