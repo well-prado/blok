@@ -8,8 +8,8 @@
 
 import { runNode } from "@blokjs/core/testing";
 import type { RespondEnvelope } from "@blokjs/shared";
-import { describe, expect, it } from "vitest";
-import InertiaNode, { type PageObject, location, redirect, serializePage } from "../src/index.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import InertiaNode, { type PageObject, _resetReflashWarning, location, redirect, serializePage } from "../src/index.js";
 
 type Envelope = RespondEnvelope;
 
@@ -340,6 +340,56 @@ describe("10 — asset version mismatch", () => {
 		expect(same.status).toBe(200);
 		const none = await run({ component: "Home", url: "/", version: "v2", headers: INERTIA });
 		expect(none.status).toBe(200);
+	});
+
+	// The 409 RE-FLASHES pending flash so it survives the client's re-visit —
+	// which needs a signing secret. An app that never configured one must still
+	// get its 409, not a 500 over a toast.
+	describe("re-flash without BLOK_FLASH_SECRET", () => {
+		const flashed = {
+			component: "Home",
+			url: "/users",
+			version: "v2",
+			method: "GET",
+			headers: mismatch,
+			flash: { toast: "Saved" },
+		};
+
+		beforeEach(() => {
+			vi.unstubAllEnvs();
+			_resetReflashWarning();
+		});
+
+		it("still answers 409, drops the cookie, and warns once naming the env var", async () => {
+			vi.stubEnv("BLOK_FLASH_SECRET", undefined);
+			// The warning goes to the run's own logger when there is one, which is
+			// what an operator actually reads (it reaches Studio's log viewer too).
+			const warnings: string[] = [];
+			const logger = { logLevel: (_level: string, message: string) => warnings.push(message) };
+			const conflict = async () =>
+				(await runNode(InertiaNode, flashed as never, { logger } as never)) as unknown as Envelope;
+
+			const env = await conflict();
+			expect(env.status).toBe(409);
+			expect(env.headers?.["X-Inertia-Location"]).toBe("/users");
+			expect(env.cookies).toBeUndefined();
+
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("BLOK_FLASH_SECRET");
+			expect(warnings[0]).toContain("Fix:");
+
+			// Once per process — a stale asset version affects every in-flight
+			// visit at once, and one warning per request would be a flood.
+			await conflict();
+			expect(warnings).toHaveLength(1);
+		});
+
+		it("signs the cookie as before once the secret is set", async () => {
+			vi.stubEnv("BLOK_FLASH_SECRET", "test-secret");
+			const env = await run(flashed);
+			expect(env.status).toBe(409);
+			expect(env.cookies?.[0]).toMatch(/^blok_flash=/);
+		});
 	});
 });
 

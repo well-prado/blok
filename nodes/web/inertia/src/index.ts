@@ -233,6 +233,31 @@ export function _resetOversizedWarning(): void {
 	warnedOversized = false;
 }
 
+/**
+ * The 409 re-flash could not be signed — report it once and carry on.
+ *
+ * The re-flash is a nicety (a toast survives the client's re-visit); the 409
+ * itself is what makes the app work. An app that never configured
+ * `BLOK_FLASH_SECRET` should not have its stale-asset visits 500 over a toast,
+ * so this degrades to a plain conflict and names the fix once per process.
+ */
+let warnedReflash = false;
+
+function warnReflashSkipped(ctx: unknown, error: unknown): void {
+	if (warnedReflash) return;
+	warnedReflash = true;
+	const logger = (ctx as { logger?: { logLevel?: (level: string, message: string) => void } } | undefined)?.logger;
+	const reason = error instanceof Error ? error.message : String(error);
+	const message = `[blok] @blokjs/inertia: an asset-version 409 could not re-sign the pending flash, so it was dropped — the client will re-visit without it. Reason: ${reason} Fix: set BLOK_FLASH_SECRET (the same value every process uses). (Warned once per process.)`;
+	if (typeof logger?.logLevel === "function") logger.logLevel("warn", message);
+	else console.warn(message);
+}
+
+/** Test-only: re-arm the once-per-process re-flash warning. */
+export function _resetReflashWarning(): void {
+	warnedReflash = false;
+}
+
 /** `http://host/users?page=2` -> `/users?page=2`; anything unparseable is kept. */
 function toRelativeUrl(raw: string): string {
 	try {
@@ -290,12 +315,22 @@ export default defineNode({
 			// read and cleared the cookie) would vanish between the two visits.
 			// Sign it straight back into a fresh cookie, and drop the clearing
 			// cookie that would otherwise cancel it.
-			const reflash = flashCookie({
-				errors: input.errors as Record<string, unknown> | undefined,
-				bag: input.errorBag ?? headers["x-inertia-error-bag"],
-				flash: input.flash as Record<string, unknown> | undefined,
-				preserveFragment: input.preserveFragment,
-			});
+			//
+			// Opportunistic, so it DEGRADES: signing needs `BLOK_FLASH_SECRET` and
+			// throws without it, and losing a toast is not worth 500ing a visit the
+			// client only has to repeat. One warning per process names the fix.
+			// (`redirectBack()` stays strict — there the flash IS the payload.)
+			let reflash: string | undefined;
+			try {
+				reflash = flashCookie({
+					errors: input.errors as Record<string, unknown> | undefined,
+					bag: input.errorBag ?? headers["x-inertia-error-bag"],
+					flash: input.flash as Record<string, unknown> | undefined,
+					preserveFragment: input.preserveFragment,
+				});
+			} catch (error) {
+				warnReflashSkipped(ctx, error);
+			}
 			const conflict = versionConflict(url, version);
 			return reflash ? { ...conflict, cookies: [reflash] } : conflict;
 		}

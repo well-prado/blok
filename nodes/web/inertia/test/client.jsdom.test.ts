@@ -297,7 +297,10 @@ describe("12 (#1015) — an instant visit renders shared props first, then the r
 		expect(landed.props.auth).toEqual(AUTH);
 		expect((dashboards[1] as Page).props.stats).toEqual({ total: 42 });
 		expect(requests - before).toBe(1);
+	});
+});
 
+/**
  * Issue #1009, test 13 — merge props and once props through the STOCK client.
  *
  * The server half is the real thing: every request below runs the whole

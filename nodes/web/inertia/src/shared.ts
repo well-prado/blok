@@ -70,8 +70,8 @@ export interface ShareOptions {
 export interface ShareOnceOptions {
 	/** Cache key. Defaults to the shared key. */
 	as?: string;
-	/** Lifetime — a duration (`"1d"`), a ms number, or an absolute timestamp. */
-	until?: string | number;
+	/** Lifetime — a duration (`"1d"`), a number of SECONDS, or an absolute date. */
+	until?: string | number | Date;
 }
 
 interface SharedEntry {
@@ -246,20 +246,38 @@ const DURATION = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/;
 const DURATION_UNITS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 /**
- * A `until` → an ISO expiry, or `null` when it never expires.
+ * A shared entry's `until` → the expiry as EPOCH MILLISECONDS, or `null` when
+ * it never expires.
  *
- * ponytail: an eight-line twin of `PageNode.onceExpiry`. The runner owns that
- * one and this package cannot import it (the dependency runs the other way).
- * Upgrade path if the two ever disagree: move it to `@blokjs/shared`, which
- * both sides already depend on.
+ * Milliseconds, not an ISO string, because that is what the client compares:
+ * `@inertiajs/core` keeps a remembered entry while
+ * `onceProp.expiresAt > Date.now()`. A string loses that comparison every time,
+ * and page-prop and shared once entries land in the SAME `onceProps` map — one
+ * string value would make the client forget the whole page's once props.
+ *
+ * ponytail: a nine-line twin of `PageNode.onceExpiry`, kept identical by hand.
+ * The runner owns that one and this package cannot import it (the dependency
+ * runs the other way). Upgrade path if the two ever disagree: move it to
+ * `@blokjs/shared`, which both sides already depend on.
  */
-function onceExpiry(until: string | number | undefined): string | null {
+function onceExpiry(until: string | number | Date | undefined): number | null {
 	if (until === undefined) return null;
-	if (typeof until === "number") return new Date(Date.now() + until).toISOString();
+	if (until instanceof Date) return Number.isNaN(until.getTime()) ? null : until.getTime();
+	if (typeof until === "number") return Date.now() + until * 1000;
 	const match = DURATION.exec(until.trim());
-	if (match) return new Date(Date.now() + Number(match[1]) * (DURATION_UNITS[match[2]] as number)).toISOString();
+	if (match) return Date.now() + Number(match[1]) * (DURATION_UNITS[match[2]] as number);
 	const parsed = Date.parse(until);
-	return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+	return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Has an ABSOLUTE `until` already passed? A relative duration is measured from
+ * NOW, so it is never expired at emission and this is always `false` —
+ * enforcing THAT deadline is the client's job (it stops listing the key).
+ */
+function onceExpired(until: string | number | Date | undefined): boolean {
+	const expiry = onceExpiry(until);
+	return expiry !== null && expiry <= Date.now();
 }
 
 /** What {@link resolveSharedProps} hands the serializer. */
@@ -270,8 +288,8 @@ export interface SharedResolution {
 	keys: string[];
 	/** Keys declared `always`, to add to `alwaysProps`. */
 	alwaysKeys: string[];
-	/** `onceProps` entries contributed by {@link shareOnce}. */
-	onceProps: Record<string, { prop: string; expiresAt: string | null }>;
+	/** `onceProps` entries contributed by {@link shareOnce}. `expiresAt` is epoch ms. */
+	onceProps: Record<string, { prop: string; expiresAt: number | null }>;
 }
 
 /** `posts.data` in an `only` header names the prop `posts`. */
@@ -341,10 +359,14 @@ interface SelectionInput {
 function selects(entry: SharedEntry, { partial, only, except, exceptOnce }: SelectionInput): boolean {
 	if (entry.mode === "always") return true;
 	if (except.has(entry.key)) return false;
-	if (entry.mode === "once" && exceptOnce.has(entry.once?.as ?? entry.key)) return false;
-	if (!partial) return true;
-	if (only.size > 0) return only.has(entry.key);
-	// A partial without `only` reloads the regular set; a `once` value stays
-	// cached unless the client asks for it by name.
-	return entry.mode !== "once";
+	// Naming a `once` entry in `only` always resolves it — an explicit request
+	// outranks the client's "I still have it" claim.
+	if (partial && only.size > 0) return only.has(entry.key);
+	// Otherwise a `once` entry belongs to the regular set, and stays out only
+	// while the client holds a LIVE copy: an absolute `until` that has already
+	// passed invalidates the claim. Same rule as `PageNode.resolveOnce` (#1009).
+	if (entry.mode === "once" && exceptOnce.has(entry.once?.as ?? entry.key)) {
+		return onceExpired(entry.once?.until);
+	}
+	return true;
 }
