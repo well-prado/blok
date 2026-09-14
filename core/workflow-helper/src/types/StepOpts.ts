@@ -1102,6 +1102,12 @@ export type V2TryCatchStep = z.infer<typeof V2TryCatchStepSchema>;
  *     }
  *   }
  */
+/**
+ * One merge direction's target (#1009): `true` (the whole prop), a sub-path,
+ * a list of sub-paths, or a `{ "<sub-path>": "<matchField>" }` map.
+ */
+const MergeTargetSchema = z.union([z.boolean(), z.string(), z.array(z.string()), z.record(z.string())]);
+
 export const V2PagePropSchema = z
 	.object({
 		use: z.string().min(1).describe("Node reference that resolves this prop (e.g. '@acme/list-orders')."),
@@ -1116,7 +1122,8 @@ export const V2PagePropSchema = z
 			.describe(
 				"Resolution mode. 'regular' (default) runs on full visits and when selected on a partial; " +
 					"'always' ignores only/except; 'optional' and 'defer' run ONLY when explicitly requested; " +
-					"'merge'/'once'/'scroll' resolve like 'regular' and add client-side prop metadata.",
+					"'merge'/'scroll' resolve like 'regular' and add client-side prop metadata; 'once' resolves like " +
+					"'regular' but is SKIPPED while the client says it still holds the remembered value.",
 			),
 		group: z.string().min(1).optional().describe("Deferred-prop group the client fetches together. `defer` only."),
 		rescue: z
@@ -1127,8 +1134,8 @@ export const V2PagePropSchema = z
 			),
 		merge: z
 			.object({
-				append: z.string().optional(),
-				prepend: z.string().optional(),
+				append: MergeTargetSchema.optional(),
+				prepend: MergeTargetSchema.optional(),
 				deep: z.union([z.string(), z.boolean()]).optional(),
 				matchOn: z.string().optional(),
 			})
@@ -1140,7 +1147,11 @@ export const V2PagePropSchema = z
 		once: z
 			.object({
 				as: z.string().optional(),
-				until: z.union([z.string(), z.number()]).optional(),
+				until: z
+					.union([z.string(), z.number()])
+					.optional()
+					.describe("A duration ('1h'), a number of SECONDS, or an absolute date."),
+				fresh: z.boolean().optional().describe("Resolve even when the client still holds the remembered value."),
 			})
 			.strict()
 			.optional()

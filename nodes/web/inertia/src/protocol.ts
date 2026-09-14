@@ -23,10 +23,15 @@ export interface ScrollProp {
 	reset?: boolean;
 }
 
-/** A once-prop entry: which prop it caches, and when the cache expires. */
+/**
+ * A once-prop entry: which prop it caches, and when the cache expires.
+ *
+ * `expiresAt` is EPOCH MILLISECONDS (`null` = never). That is the client's own
+ * contract — it keeps an entry while `expiresAt > Date.now()`.
+ */
 export interface OnceProp {
 	prop: string;
-	expiresAt: string | null;
+	expiresAt: number | null;
 }
 
 /**

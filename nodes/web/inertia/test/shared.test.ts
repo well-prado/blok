@@ -250,9 +250,14 @@ describe("4 — shareOnce() resolves once and the client keeps it", () => {
 		const first = await runPage(page("Shared/Once", "/once", { stats: loadStats }));
 		expect(first.props.countries).toEqual({ list: ["BR", "NL"] });
 		expect(calls("countries")).toBe(1);
-		const entry = first.onceProps.countries as { prop: string; expiresAt: string };
+		const entry = first.onceProps.countries as { prop: string; expiresAt: number };
 		expect(entry.prop).toBe("countries");
-		const ttl = Date.parse(entry.expiresAt) - Date.now();
+		// Epoch MILLISECONDS, in the future: the client keeps a remembered entry
+		// while `expiresAt > Date.now()`, a comparison any other shape loses —
+		// and shared entries share the page's `onceProps` map (#1009).
+		expect(typeof entry.expiresAt).toBe("number");
+		expect(entry.expiresAt).toBeGreaterThan(Date.now());
+		const ttl = entry.expiresAt - Date.now();
 		expect(ttl).toBeGreaterThan(23 * 3_600_000);
 		expect(ttl).toBeLessThanOrEqual(24 * 3_600_000 + 1000);
 
@@ -264,6 +269,41 @@ describe("4 — shareOnce() resolves once and the client keeps it", () => {
 		expect(calls("countries")).toBe(1);
 		// The ENTRY still ships: dropping it would invalidate the client's cache.
 		expect((cached.onceProps.countries as { prop: string }).prop).toBe("countries");
+	});
+
+	it("resolves on a partial reload without `only` unless the client says it holds it (#1009)", async () => {
+		shareOnce("countries", loadCountries);
+
+		// A bare `router.reload()`: no `only`, and no except-once header — the
+		// client does NOT have the value, so the shared entry belongs to the
+		// regular set and resolves. Same rule as a page-level `once` prop.
+		const reloaded = await runPage(page("Shared/Bare", "/bare", { stats: loadStats }), {
+			headers: { "x-inertia-partial-component": "Shared/Bare" },
+		});
+		expect(reloaded.props.countries).toEqual({ list: ["BR", "NL"] });
+		expect(calls("countries")).toBe(1);
+
+		// Same request, but now the client holds it: the resolver never runs.
+		const held = await runPage(page("Shared/Bare2", "/bare2", { stats: loadStats }), {
+			headers: {
+				"x-inertia-partial-component": "Shared/Bare2",
+				"x-inertia-except-once-props": "countries",
+			},
+		});
+		expect(held.props).not.toHaveProperty("countries");
+		expect(calls("countries")).toBe(1);
+	});
+
+	it("resolves again when an absolute `until` has already passed (#1009)", async () => {
+		shareOnce("countries", loadCountries, { until: "2020-01-01T00:00:00.000Z" });
+
+		const stale = await runPage(page("Shared/Stale", "/stale", { stats: loadStats }), {
+			headers: { "x-inertia-except-once-props": "countries" },
+		});
+		// The client's claim is stale, so the value ships despite the header.
+		expect(stale.props.countries).toEqual({ list: ["BR", "NL"] });
+		expect(calls("countries")).toBe(1);
+		expect((stale.onceProps.countries as { expiresAt: number }).expiresAt).toBe(Date.parse("2020-01-01T00:00:00.000Z"));
 	});
 });
 

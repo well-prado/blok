@@ -8,8 +8,8 @@
 
 import { runNode } from "@blokjs/core/testing";
 import type { RespondEnvelope } from "@blokjs/shared";
-import { describe, expect, it } from "vitest";
-import InertiaNode, { type PageObject, location, redirect, serializePage } from "../src/index.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import InertiaNode, { type PageObject, _resetReflashWarning, location, redirect, serializePage } from "../src/index.js";
 
 type Envelope = RespondEnvelope;
 
@@ -150,16 +150,20 @@ describe("4 — history + fragment flags are omitted unless true", () => {
 });
 
 describe("5 — merge metadata", () => {
-	it("emits merge labels verbatim", async () => {
+	const labels = {
+		mergeProps: ["posts.data"],
+		matchPropsOn: ["posts.data.id"],
+		prependProps: ["feed.items"],
+		deepMergeProps: ["settings"],
+	};
+
+	it("emits merge labels verbatim on a partial reload", async () => {
 		const page = pageOf(
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: INERTIA,
-				mergeProps: ["posts.data"],
-				matchPropsOn: ["posts.data.id"],
-				prependProps: ["feed.items"],
-				deepMergeProps: ["settings"],
+				headers: { ...INERTIA, "x-inertia-partial-component": "Posts" },
+				...labels,
 			}),
 		);
 		expect(page.mergeProps).toEqual(["posts.data"]);
@@ -168,12 +172,22 @@ describe("5 — merge metadata", () => {
 		expect(page.deepMergeProps).toEqual(["settings"]);
 	});
 
+	it("drops every one of them on a full visit (#1009)", async () => {
+		// "Prop merging only works during partial reloads. Full page visits will
+		// always replace props entirely, even if you've marked them for merging."
+		const page = pageOf(await run({ component: "Posts", url: "/posts", headers: INERTIA, ...labels }));
+		expect(page.mergeProps).toBeUndefined();
+		expect(page.matchPropsOn).toBeUndefined();
+		expect(page.prependProps).toBeUndefined();
+		expect(page.deepMergeProps).toBeUndefined();
+	});
+
 	it("omits every empty array", async () => {
 		const page = pageOf(
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: INERTIA,
+				headers: { ...INERTIA, "x-inertia-partial-component": "Posts" },
 				mergeProps: [],
 				matchPropsOn: [],
 				prependProps: [],
@@ -246,12 +260,14 @@ describe("8 — onceProps", () => {
 				url: "/",
 				headers: INERTIA,
 				props: { menu: ["a"], config: { x: 1 } },
-				onceProps: { "menu:v1": { prop: "menu" }, "config:v1": { prop: "config", expiresAt: "2030-01-01T00:00:00Z" } },
+				// `expiresAt` is epoch MILLISECONDS — the client keeps an entry while
+				// `expiresAt > Date.now()`, a comparison an ISO string always loses.
+				onceProps: { "menu:v1": { prop: "menu" }, "config:v1": { prop: "config", expiresAt: 1_893_456_000_000 } },
 			}),
 		);
 		expect(page.onceProps).toEqual({
 			"menu:v1": { prop: "menu", expiresAt: null },
-			"config:v1": { prop: "config", expiresAt: "2030-01-01T00:00:00Z" },
+			"config:v1": { prop: "config", expiresAt: 1_893_456_000_000 },
 		});
 	});
 
@@ -278,11 +294,11 @@ describe("8 — onceProps", () => {
 				url: "/",
 				headers: { ...INERTIA, "x-inertia-except-once-props": "menu:v1" },
 				props: { menu: ["a"], other: 1 },
-				onceProps: { "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } },
+				onceProps: { "menu:v1": { prop: "menu", expiresAt: 1_924_992_000_000 } },
 			}),
 		);
 		expect(page.props).toEqual({ menu: ["a"], other: 1, errors: {} });
-		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: "2031-01-01T00:00:00Z" } });
+		expect(page.onceProps).toEqual({ "menu:v1": { prop: "menu", expiresAt: 1_924_992_000_000 } });
 	});
 });
 
@@ -324,6 +340,56 @@ describe("10 — asset version mismatch", () => {
 		expect(same.status).toBe(200);
 		const none = await run({ component: "Home", url: "/", version: "v2", headers: INERTIA });
 		expect(none.status).toBe(200);
+	});
+
+	// The 409 RE-FLASHES pending flash so it survives the client's re-visit —
+	// which needs a signing secret. An app that never configured one must still
+	// get its 409, not a 500 over a toast.
+	describe("re-flash without BLOK_FLASH_SECRET", () => {
+		const flashed = {
+			component: "Home",
+			url: "/users",
+			version: "v2",
+			method: "GET",
+			headers: mismatch,
+			flash: { toast: "Saved" },
+		};
+
+		beforeEach(() => {
+			vi.unstubAllEnvs();
+			_resetReflashWarning();
+		});
+
+		it("still answers 409, drops the cookie, and warns once naming the env var", async () => {
+			vi.stubEnv("BLOK_FLASH_SECRET", undefined);
+			// The warning goes to the run's own logger when there is one, which is
+			// what an operator actually reads (it reaches Studio's log viewer too).
+			const warnings: string[] = [];
+			const logger = { logLevel: (_level: string, message: string) => warnings.push(message) };
+			const conflict = async () =>
+				(await runNode(InertiaNode, flashed as never, { logger } as never)) as unknown as Envelope;
+
+			const env = await conflict();
+			expect(env.status).toBe(409);
+			expect(env.headers?.["X-Inertia-Location"]).toBe("/users");
+			expect(env.cookies).toBeUndefined();
+
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("BLOK_FLASH_SECRET");
+			expect(warnings[0]).toContain("Fix:");
+
+			// Once per process — a stale asset version affects every in-flight
+			// visit at once, and one warning per request would be a flood.
+			await conflict();
+			expect(warnings).toHaveLength(1);
+		});
+
+		it("signs the cookie as before once the secret is set", async () => {
+			vi.stubEnv("BLOK_FLASH_SECRET", "test-secret");
+			const env = await run(flashed);
+			expect(env.status).toBe(409);
+			expect(env.cookies?.[0]).toMatch(/^blok_flash=/);
+		});
 	});
 });
 
@@ -474,7 +540,11 @@ describe("16 — reset", () => {
 			await run({
 				component: "Posts",
 				url: "/posts",
-				headers: { ...INERTIA, "x-inertia-infinite-scroll-merge-intent": "prepend" },
+				headers: {
+					...INERTIA,
+					"x-inertia-partial-component": "Posts",
+					"x-inertia-infinite-scroll-merge-intent": "prepend",
+				},
 				mergeProps: ["posts.data"],
 				scrollProps: { "posts.data": { pageName: "page" } },
 			}),

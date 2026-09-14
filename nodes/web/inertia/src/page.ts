@@ -25,7 +25,7 @@ export interface PageMetadata {
 	deferredProps?: Record<string, string[]>;
 	rescuedProps?: string[];
 	sharedProps?: string[];
-	onceProps?: Record<string, { prop: string; expiresAt?: string | null }>;
+	onceProps?: Record<string, { prop: string; expiresAt?: number | null }>;
 	flash?: Record<string, unknown>;
 	encryptHistory?: boolean;
 	clearHistory?: boolean;
@@ -112,11 +112,17 @@ export function buildPage(input: BuildPageInput): PageObject {
 	if (input.clearHistory) page.clearHistory = true;
 	if (input.preserveFragment) page.preserveFragment = true;
 
-	// Reset paths come back unmerged: the client replaces them wholesale.
+	// Merge labels ship on PARTIAL RELOADS ONLY — "full page visits will always
+	// replace props entirely, even if you've marked them for merging". The rule
+	// lives here rather than in the prop resolver so a hand-written serializer
+	// step obeys it too.
+	//
+	// Reset paths come back unmerged for the same reason: the client asked for a
+	// fresh copy, so it replaces them wholesale.
 	const reset = headerList(headers["x-inertia-reset"]);
-	let mergeProps = strip(input.mergeProps, reset);
-	let prependProps = strip(input.prependProps, reset);
-	const deepMergeProps = strip(input.deepMergeProps, reset);
+	let mergeProps = partial ? strip(input.mergeProps, reset) : [];
+	let prependProps = partial ? strip(input.prependProps, reset) : [];
+	const deepMergeProps = partial ? strip(input.deepMergeProps, reset) : [];
 	const scrollProps = applyReset(input.scrollProps, reset);
 
 	// Infinite scroll tells us which end the client is growing, which decides
@@ -142,7 +148,12 @@ export function buildPage(input: BuildPageInput): PageObject {
 	if (mergeProps.length > 0) page.mergeProps = mergeProps;
 	if (prependProps.length > 0) page.prependProps = prependProps;
 	if (deepMergeProps.length > 0) page.deepMergeProps = deepMergeProps;
-	const matchPropsOn = input.matchPropsOn ?? [];
+	// A match field is addressed as `<mergePath>.<field>`, so a reset path takes
+	// its matching key with it — an entry naming a path nothing merges any more
+	// is dead weight on the wire.
+	const matchPropsOn = partial
+		? (input.matchPropsOn ?? []).filter((entry) => !reset.includes(entry.split(".").slice(0, -1).join(".")))
+		: [];
 	if (matchPropsOn.length > 0) page.matchPropsOn = matchPropsOn;
 	if (scrollProps && Object.keys(scrollProps).length > 0) page.scrollProps = scrollProps;
 
@@ -174,7 +185,7 @@ function resolveErrors(errors: Record<string, unknown> | undefined, errorBag: st
 }
 
 function normalizeOnceProps(
-	onceProps: Record<string, { prop: string; expiresAt?: string | null }> | undefined,
+	onceProps: Record<string, { prop: string; expiresAt?: number | null }> | undefined,
 ): Record<string, OnceProp> {
 	const out: Record<string, OnceProp> = {};
 	for (const [key, entry] of Object.entries(onceProps ?? {})) {
