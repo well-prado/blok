@@ -102,7 +102,8 @@ export function materialize(snippets: readonly Snippet[], outDir: string): strin
 					module: "es2022",
 					moduleResolution: "bundler",
 					jsx: "react-jsx",
-					types: ["node"],
+					// `vite/client` because a client entry is a Vite module (`import.meta.glob`).
+					types: ["node", "vite/client"],
 					lib: ["es2023", "dom", "dom.iterable"],
 					esModuleInterop: true,
 					forceConsistentCasingInFileNames: true,

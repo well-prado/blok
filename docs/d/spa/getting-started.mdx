@@ -77,7 +77,7 @@ import { createRoot } from "react-dom/client";
 
 void createInertiaApp({
   setup({ el, App, props }) {
-    createRoot(el).render(<App {...props} />);
+    if (el) createRoot(el).render(<App {...props} />);
   },
 });
 ```
