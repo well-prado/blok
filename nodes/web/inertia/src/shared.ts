@@ -100,14 +100,14 @@ const perRequest = new WeakMap<object, Map<string, unknown>>();
 
 function assertKey(fn: string, key: string): void {
 	if (typeof key !== "string" || key.length === 0) {
-		throw new Error(`${fn}() requires a non-empty key, e.g. ${fn}("auth", …).`);
+		throw new Error(`${fn}() requires a non-empty key. Fix: ${fn}("auth", value).`);
 	}
 	// Same reason the page step rejects a dotted prop key: partial reloads and
 	// `sharedProps` address TOP-LEVEL keys, so `auth.user` would be read as a
 	// path into a sibling prop.
 	if (key.includes(".")) {
 		throw new Error(
-			`${fn}("${key}") — shared keys are top-level prop keys and cannot contain a dot. Namespace by sharing an OBJECT instead: ${fn}("${key.split(".")[0]}", { ${key.split(".").slice(1).join(".")}: … }).`,
+			`${fn}("${key}") — shared keys are top-level prop keys and cannot contain a dot. Fix: namespace by sharing an OBJECT instead: ${fn}("${key.split(".")[0]}", { ${key.split(".").slice(1).join(".")}: … }).`,
 		);
 	}
 }
@@ -143,7 +143,8 @@ export function shareOnce(key: string, source: SharedNode | SharedResolver, opti
 	const entry: SharedEntry = { key, mode: "once", once: { ...options } };
 	if (typeof source === "function") entry.resolver = source as SharedResolver;
 	else if (source && typeof source.name === "string" && source.name.length > 0) entry.node = source;
-	else throw new Error(`shareOnce("${key}") requires a node value (from defineNode) or a (req) => value function.`);
+	else
+		throw new Error(`shareOnce("${key}") needs a source. Fix: pass a defineNode() value or a (req) => value function.`);
 	registry.set(key, entry);
 }
 
@@ -233,7 +234,7 @@ async function resolveEntry(entry: SharedEntry, ctx: unknown): Promise<unknown> 
 async function runSharedNode(node: SharedNode, ctx: unknown): Promise<unknown> {
 	if (typeof node.handle !== "function") {
 		throw new Error(
-			`shareOnce(): node "${node.name}" has no in-process handle() — cross-runtime nodes cannot back a shared value. Share a (req) => value function instead.`,
+			`shareOnce(): node "${node.name}" has no in-process handle() — cross-runtime nodes cannot back a shared value. Fix: share a (req) => value function instead.`,
 		);
 	}
 	const result = await node.handle(ctx, {});

@@ -147,7 +147,9 @@ function wrap(mode: PropMode, node: PropValue, options: Record<string, unknown> 
 	const inner = readMode(node);
 	const base = (inner?.node ?? node) as NodeLike;
 	if (!base || typeof base.name !== "string" || base.name.length === 0) {
-		throw new Error(`${mode}() requires a node value (from defineNode/runtimeNode), or another mode wrapper.`);
+		throw new Error(
+			`${mode}() requires a node value (from defineNode/runtimeNode), or another mode wrapper. Fix: ${mode}(listOrders).`,
+		);
 	}
 	const modes = { ...(inner?.modes ?? {}), [mode]: options };
 	// The laziest resolution mode in the chain wins; with none, the outer
@@ -310,7 +312,7 @@ export interface RenderOptions {
  */
 export function withProps<B extends PageShape>(bundle: B): B {
 	if (!bundle || typeof bundle !== "object") {
-		throw new Error("withProps() requires a props object, e.g. withProps({ auth: always(currentUser) }).");
+		throw new Error("withProps() requires a props object. Fix: withProps({ auth: always(currentUser) }).");
 	}
 	return { ...bundle };
 }
@@ -409,16 +411,18 @@ function outputSchemaOf(node: NodeLike): z.ZodTypeAny | undefined {
  */
 export function definePage<P extends PageShape>(component: string, shape: P): PageDef<P> {
 	if (typeof component !== "string" || component.length === 0) {
-		throw new Error('definePage() requires a non-empty component name, e.g. definePage("Orders/Index", { … }).');
+		throw new Error('definePage() requires a non-empty component name. Fix: definePage("Orders/Index", { … }).');
 	}
 	if (!shape || typeof shape !== "object") {
-		throw new Error(`definePage("${component}") requires a props object.`);
+		throw new Error(
+			`definePage("${component}") requires a props object. Fix: definePage("${component}", { orders: listOrders }).`,
+		);
 	}
 	const existing = registry.get(component);
 	if (existing) {
 		const where = existing.source ? ` (first declared at ${existing.source.file}:${existing.source.line})` : "";
 		throw new Error(
-			`definePage("${component}") — that component name is already declared${where}. Component names are the page identity: pick a distinct one.`,
+			`definePage("${component}") — that component name is already declared${where}. Component names are the page identity. Fix: pick a distinct component name.`,
 		);
 	}
 
@@ -430,7 +434,7 @@ export function definePage<P extends PageShape>(component: string, shape: P): Pa
 		const node = (wrapped?.node ?? declared) as NodeLike;
 		if (!node || typeof node.name !== "string" || node.name.length === 0) {
 			throw new Error(
-				`definePage("${component}") prop "${key}" must be a node value, or a node in a mode wrapper (always/optional/defer/merge/once/scroll).`,
+				`definePage("${component}") prop "${key}" must be a node value, or a node in a mode wrapper (always/optional/defer/merge/once/scroll). Fix: ${key}: listOrders, or ${key}: defer(listOrders).`,
 			);
 		}
 		// Each wrapper contributes its OWN bag, so a composed prop keeps all of
@@ -498,10 +502,10 @@ export function definePage<P extends PageShape>(component: string, shape: P): Pa
  */
 export function shared<N extends NodeLike>(node: N, stepId: string): Handle<OutputOf<N>> {
 	if (!node || typeof node.name !== "string" || node.name.length === 0) {
-		throw new Error("shared() requires a node value (from defineNode/runtimeNode).");
+		throw new Error('shared() requires a node value (from defineNode/runtimeNode). Fix: shared(currentUser, "auth").');
 	}
 	if (typeof stepId !== "string" || stepId.length === 0) {
-		throw new Error('shared() requires the state key the value lives at, e.g. shared(currentUser, "auth").');
+		throw new Error('shared() requires the state key the value lives at. Fix: shared(currentUser, "auth").');
 	}
 	return makeHandle<OutputOf<N>>(stepId);
 }

@@ -261,7 +261,7 @@ function blokPlugin(options: BlokInertiaOptions): Plugin {
 			const manifest = join(outDir, ".vite", "manifest.json");
 			if (!existsSync(manifest)) {
 				throw new Error(
-					`blokInertia(): expected a Vite manifest at ${manifest}. Do not set build.manifest to false — the Blok asset version is a hash of it.`,
+					`blokInertia(): expected a Vite manifest at ${manifest}. Fix: leave build.manifest enabled — the Blok asset version is a hash of it.`,
 				);
 			}
 
