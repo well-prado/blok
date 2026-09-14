@@ -8,6 +8,7 @@ import color from "picocolors";
 import { checkProject } from "./commands/check/index.js";
 import { createNode } from "./commands/create/node.js";
 import { createProject } from "./commands/create/project.js";
+import { addSpa, createSpa } from "./commands/create/spa.js";
 import { createWorkflow } from "./commands/create/workflow.js";
 import { devProject } from "./commands/dev/index.js";
 import { type OptionValues, program, withErrorBoundary } from "./services/commander.js";
@@ -39,6 +40,7 @@ import "./commands/cost/index.js";
 import "./commands/trace/index.js";
 import "./commands/watch/index.js";
 import "./commands/inertia/index.js";
+import "./commands/add/index.js";
 import { Command } from "commander";
 
 const version = await getPackageVersion();
@@ -123,13 +125,20 @@ async function main() {
 				"Comma-separated observability modules: metrics,tracing,trace-store,logging,alerting,error-sink",
 			)
 			.option("--examples", "Install example workflows and nodes")
+			.option("--spa <framework>", "Also run `add spa` with this framework: react, vue, svelte")
+			.option("--ssr", "With --spa: also scaffold the Inertia SSR entry and build:ssr script")
 			.action(
 				withErrorBoundary(async (options: OptionValues) => {
 					await analytics.trackCommandExecution({
 						command: "create project",
 						args: options,
 						execution: async () => {
-							await createProject(options, version, false, options.local);
+							const dir = await createProject(options, version, false, options.local);
+							// #999 — `--spa <fw>` is sugar for `create project` + `add spa`,
+							// so both paths go through exactly one implementation.
+							if (options.spa) {
+								await addSpa({ ...options, framework: options.spa, cwd: dir }, version, options.local);
+							}
 						},
 					});
 				}),
@@ -220,9 +229,34 @@ async function main() {
 				}),
 			);
 
+		// #999 — a standalone Inertia SPA, for people who keep the frontend out of
+		// the Blok project. `blokctl add spa` is the in-project counterpart.
+		const spa = new Command("spa")
+			.description("Create a standalone Inertia SPA (Vite + React/Vue/Svelte) for a Blok backend")
+			.argument("[name]", "Directory to create the SPA in")
+			.option("-f, --framework <value>", "Frontend framework: react, vue, svelte")
+			.option("--blok-url <url>", "Blok server the dev proxy forwards to (default: http://localhost:4000)")
+			.option("--pm <value>", "Package manager: npm, yarn, pnpm, bun")
+			.option("--no-install", "Skip installing dependencies")
+			.option("--ssr", "Also scaffold the Inertia SSR entry and the build:ssr script")
+			.option("--kit <value>", "Starter kit to include (auth lands with #1018)")
+			.option("-l, --local <path>", "Link @blokjs/* from a local repo checkout instead of npm")
+			.action(
+				withErrorBoundary(async (name: string | undefined, options: OptionValues) => {
+					await analytics.trackCommandExecution({
+						command: "create spa",
+						args: options,
+						execution: async () => {
+							await createSpa({ ...options, name: name ?? options.name }, version, options.local);
+						},
+					});
+				}),
+			);
+
 		create.addCommand(project);
 		create.addCommand(node);
 		create.addCommand(workflow);
+		create.addCommand(spa);
 
 		program.addCommand(create);
 
