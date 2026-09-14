@@ -13,5 +13,10 @@
 		"noEmit": true,
 		"allowImportingTsExtensions": false
 	},
-	"include": ["src/**/*.ts", "client/**/*.ts", "client/**/*.tsx", "tests/**/*.ts"]
+	"include": [
+		"src/**/*.ts",
+		"client/**/*.ts",
+		"client/**/*.tsx",
+		"tests/**/*.ts"
+	]
 }

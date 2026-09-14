@@ -15,11 +15,7 @@ export default function Create() {
 				form.post("/orders");
 			}}
 		>
-			<input
-				value={form.data.sku}
-				onChange={(event) => form.setData("sku", event.target.value)}
-				placeholder="SKU"
-			/>
+			<input value={form.data.sku} onChange={(event) => form.setData("sku", event.target.value)} placeholder="SKU" />
 			{form.errors.sku ? <span>{form.errors.sku}</span> : null}
 
 			<input

@@ -7,14 +7,7 @@
  */
 
 import { defineNode, runtimeNode } from "@blokjs/core";
-import {
-	cursorPaginate,
-	cursorPaginatedSchema,
-	flash,
-	paginate,
-	paginatedSchema,
-	redirectBack,
-} from "@blokjs/inertia";
+import { cursorPaginate, cursorPaginatedSchema, flash, paginate, paginatedSchema, redirectBack } from "@blokjs/inertia";
 import { z } from "zod";
 
 const Order = z.object({ id: z.string(), sku: z.string(), total: z.number() });
@@ -39,9 +32,7 @@ export const currentUser = defineNode({
 	output: z.object({ id: z.string(), email: z.string() }),
 	execute: (_ctx, input) => {
 		const cookie = input.headers?.cookie ?? "";
-		return cookie.includes("guest=1")
-			? { id: "", email: "" }
-			: { id: "u-1", email: "ada@example.com" };
+		return cookie.includes("guest=1") ? { id: "", email: "" } : { id: "u-1", email: "ada@example.com" };
 	},
 });
 
@@ -120,10 +111,9 @@ export const createOrder = defineNode({
 	output: z.unknown(),
 	execute: (ctx, input) => {
 		ORDERS.push({ id: `o-${ORDERS.length + 1}`, sku: input.sku, total: input.total });
-		return flash("toast", { type: "success", message: `${input.sku} created.` }).redirectBack(
-			ctx.request,
-			{ fallback: "/orders/new" },
-		);
+		return flash("toast", { type: "success", message: `${input.sku} created.` }).redirectBack(ctx.request, {
+			fallback: "/orders/new",
+		});
 	},
 });
 

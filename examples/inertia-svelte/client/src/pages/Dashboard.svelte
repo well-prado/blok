@@ -4,7 +4,7 @@ import { Deferred, InfiniteScroll } from "@inertiajs/svelte";
 import type { Dashboard } from "../../../src/workflows/dashboard.js";
 
 // The page contract types the stock Svelte props — no Blok wrapper component.
-let { auth, orders, stats, posts }: PageProps<typeof Dashboard> = $props();
+const { auth, orders, stats, posts }: PageProps<typeof Dashboard> = $props();
 </script>
 
 <main>

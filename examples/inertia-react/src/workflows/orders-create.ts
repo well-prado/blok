@@ -6,7 +6,7 @@
  * goes through the same workflow, header-free.
  */
 
-import { branch, eq, http, step, workflow } from "@blokjs/core";
+import { http, branch, eq, step, workflow } from "@blokjs/core";
 import { ValidateNode } from "@blokjs/helpers";
 import { definePage } from "@blokjs/inertia";
 import { z } from "zod";
@@ -31,12 +31,7 @@ export default workflow(
 	"orders-create",
 	{ version: "1.0.0", trigger: http.post("/orders", { middleware: ["inertia.shared"] }) },
 	(req) => {
-		const checked = step(
-			"check",
-			ValidateNode,
-			{ schema: OrderSchema, data: req.body },
-			{ precognition: true },
-		);
+		const checked = step("check", ValidateNode, { schema: OrderSchema, data: req.body }, { precognition: true });
 		branch("route", eq(checked.ok, true), {
 			then: () => {
 				step("create", createOrder, { sku: req.body.sku, total: req.body.total });

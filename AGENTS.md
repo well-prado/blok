@@ -432,6 +432,50 @@ Testing utilities — all from `@blokjs/core/testing`, no server and no config:
 
 Author docs: `docs/d/fundamentals/testing.mdx`.
 
+## SPA / Inertia
+
+Blok speaks the Inertia **v3** protocol against the stock
+`@inertiajs/react | vue3 | svelte` client. A page is a workflow, a prop is a
+step, and the contract is declared ONCE outside the workflow callback so the
+frontend can `import type` it.
+
+```ts
+import { http, workflow } from "@blokjs/core";
+import { always, defer, definePage, shared } from "@blokjs/inertia";
+
+export const Dashboard = definePage("Dashboard", {
+  auth: always(currentUser),                          // exempt from only/except
+  orders: listOrders,                                 // regular
+  stats: defer(heavyStats, { group: "dashboard" }),   // announced, fetched next
+});
+
+export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") }, (req) => {
+  Dashboard.render(req, "page", "/", { orders: { userId: shared(currentUser, "auth").id } });
+});
+```
+
+- `render(req, id, url, inputs, options?)` takes **node inputs per prop**, not
+  values, and emits ONE `page` control step. The runner resolves the selected
+  props in parallel as steps `<id>.<key>` (plus `<id>.$render`), so per-prop
+  `retry` / `idempotencyKey` / `maxDuration` work and a prop can be a
+  `runtimeNode()` in any language.
+- Props run concurrently: one prop can never read another's output. Read the
+  request, or a middleware step's output through `shared(node, "auth")`.
+- Modes: `always`, `optional`, `defer`, `merge`, `once`, `scroll` — `merge` and
+  `scroll` only describe what the CLIENT does, so they compose with the others.
+- Middleware is the EXISTING middleware system: `inertia.shared` (steps `auth`
+  and `flash`), `inertia.auth`, `inertia.csrf`, `inertia.encryptHistory`,
+  registered by name. **`auth` and `flash` are reserved step ids.**
+- There is no session store: flash and error bags ride a signed one-shot cookie
+  and `BLOK_FLASH_SECRET` is required.
+- Test with `runPage()` / `runPrecognition()` from `@blokjs/core/testing`; a
+  prop's step id is `"<pageId>.<propKey>"`.
+- Never hand-roll the page object — the wire format lives only in
+  `@blokjs/inertia`.
+
+Author docs: `docs/d/spa/` (start at `docs/d/spa/index.mdx`). Runnable
+examples: `examples/inertia-{react,vue,svelte,standalone}`.
+
 ## Blok Studio
 
 Studio lives in `apps/studio` and is served at `/__blok` by triggers that enable

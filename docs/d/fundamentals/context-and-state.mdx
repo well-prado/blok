@@ -244,6 +244,23 @@ step("respond", RespondNode, { body: receipt.data }, { ephemeral: true });
 
 The child name must match the registered workflow name.
 
+### Inertia pages
+
+`definePage().render()` emits one `page` control step, and the runner lowers it
+to one inner step per prop plus the serializer. Those inner steps persist like
+any other, under a **dotted** id:
+
+```ts
+run.state("page.orders");        // the `orders` prop's output
+run.step("page.stats")?.executed; // false on a visit that deferred it
+run.state("page.$render");        // the serialized response envelope
+```
+
+Which props run is decided per request from the Inertia headers, and the
+selected ones run **concurrently** — so a prop can never read another prop's
+handle. Read the request, or a middleware step's output through
+`shared(node, "auth")`. Full surface: [SPA (Inertia)](/d/spa/pages-and-props).
+
 ## The four control-flow footguns
 
 <AccordionGroup>

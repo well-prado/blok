@@ -9,10 +9,10 @@ import {
 	currentUser,
 	dashboardStats,
 	listActivity,
+	listOrders,
 	listPosts,
 	loadNotifications,
 	loadPlans,
-	listOrders,
 } from "../nodes.js";
 
 export const Dashboard = definePage("Dashboard", {
