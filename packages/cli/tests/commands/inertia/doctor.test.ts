@@ -2,17 +2,18 @@
  * `blokctl inertia doctor` (#1019, test 3).
  *
  * Two fixtures: `inertia-doctor` is wired correctly, `inertia-doctor-broken`
- * is wrong in four ways at once (component missing from the client, custom
- * shell without `<!--blok:head-->`, no `inertia.csrf`, no asset version). The
- * env is injected rather than mutated, so the checks are exercised in both
- * directions without a global `process.env` dance.
+ * is wrong in five ways at once (component missing from the client, custom
+ * shell without `<!--blok:head-->`, no `inertia.csrf`, no asset version, no
+ * Vite descriptor). The env is injected rather than mutated, so the checks
+ * are exercised in both directions without a global `process.env` dance.
  *
  * The last case runs the REAL command through the built CLI, because the thing
  * under test there is the exit status.
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type DoctorCheck, inertiaDoctor } from "../../../src/commands/inertia/doctor.js";
@@ -56,8 +57,10 @@ describe("inertia doctor — the healthy fixture", () => {
 		assertFixtureCommitted(HEALTHY);
 		assertFixtureCommitted(BROKEN);
 		expect(existsSync(join(HEALTHY, "client-build/.blok-asset-version"))).toBe(true);
-		// The broken fixture deliberately has NO asset version.
+		expect(existsSync(join(HEALTHY, "client-build/.blok-vite.json"))).toBe(true);
+		// The broken fixture deliberately has NO asset version or Vite descriptor.
 		expect(existsSync(join(BROKEN, "client-build/.blok-asset-version"))).toBe(false);
+		expect(existsSync(join(BROKEN, "client-build/.blok-vite.json"))).toBe(false);
 	});
 
 	it("passes every check", async () => {
@@ -67,6 +70,7 @@ describe("inertia doctor — the healthy fixture", () => {
 		expect(find(checks, "ensurePagesExist").status).toBe("ok");
 		expect(find(checks, "inertia.csrf").status).toBe("ok");
 		expect(find(checks, "ASSET_VERSION").status).toBe("ok");
+		expect(find(checks, ".blok-vite.json").status).toBe("ok");
 		// SSR is not configured here, so it is skipped rather than failed.
 		expect(find(checks, "SSR").status).toBe("skip");
 	}, 60_000);
@@ -101,10 +105,30 @@ describe("inertia doctor — the healthy fixture", () => {
 		expect(ssr.status).toBe("fail");
 		expect(ssr.fix).toContain("blokctl inertia start-ssr");
 	}, 60_000);
+
+	it("warns when a dev descriptor points at a dead port", async () => {
+		const staticDir = mkdtempSync(join(tmpdir(), "blok-inertia-doctor-"));
+		try {
+			writeFileSync(
+				join(staticDir, ".blok-vite.json"),
+				JSON.stringify({ mode: "dev", devUrl: "http://127.0.0.1:1", entry: "src/main.tsx" }),
+			);
+			const checks = await inertiaDoctor({
+				cwd: HEALTHY,
+				env: healthyEnv({ BLOK_STATIC_DIR: staticDir }),
+			});
+			const descriptor = find(checks, ".blok-vite.json");
+			expect(descriptor.status).toBe("warn");
+			expect(descriptor.detail).toContain("nothing is listening");
+			expect(descriptor.fix).toContain("blokInertia()");
+		} finally {
+			rmSync(staticDir, { recursive: true, force: true });
+		}
+	}, 60_000);
 });
 
 describe("inertia doctor — the broken fixture", () => {
-	it("catches the missing component, the shell marker, the CSRF middleware and the asset version", async () => {
+	it("catches the missing component, shell marker, CSRF middleware, asset version and Vite descriptor", async () => {
 		const checks = await inertiaDoctor({
 			cwd: BROKEN,
 			env: healthyEnv({ BLOK_STATIC_DIR: join(BROKEN, "client-build") }),
@@ -112,6 +136,7 @@ describe("inertia doctor — the broken fixture", () => {
 
 		const failures = checks.filter((check) => check.status === "fail");
 		expect(failures.map((check) => check.name).sort()).toEqual([
+			".blok-vite.json",
 			"ASSET_VERSION",
 			"ensurePagesExist",
 			"inertia.csrf",
@@ -123,6 +148,7 @@ describe("inertia doctor — the broken fixture", () => {
 		expect(find(checks, "ensurePagesExist").detail).toContain("Dashboard/Missing");
 		expect(find(checks, "shell markers").fix).toContain("<!--blok:head-->");
 		expect(find(checks, "inertia.csrf").fix).toContain("createCsrfMiddleware");
+		expect(find(checks, ".blok-vite.json").fix).toContain("BLOK_STATIC_DIR=client/dist");
 	}, 60_000);
 });
 
