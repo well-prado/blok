@@ -497,10 +497,10 @@ export function buildPagesSource(scan: PagesScan, opts: PagesSourceOptions = {})
 		lines.push("\tinterface Pages {");
 		for (const page of scan.pages) {
 			if (page.props.length === 0) {
-				lines.push(`\t\t${quote(page.component)}: Record<string, never>;`);
+				lines.push(`\t\t${keyOf(page.component)}: Record<string, never>;`);
 				continue;
 			}
-			lines.push(`\t\t${quote(page.component)}: {`);
+			lines.push(`\t\t${keyOf(page.component)}: {`);
 			for (const prop of page.props) {
 				lines.push(`\t\t\t${keyOf(prop.key)}${prop.optional ? "?" : ""}: ${prop.type};`);
 			}
@@ -514,8 +514,8 @@ export function buildPagesSource(scan: PagesScan, opts: PagesSourceOptions = {})
 		lines.push("\tinterface Routes {");
 		for (const route of scan.routes) {
 			// Biome counts a tab as `indentWidth` (2) columns; two tabs of indent = 4.
-			const columns = 4 + quote(route.name).length + 2;
-			lines.push(`\t\t${quote(route.name)}: ${routeType(route, columns)};`);
+			const columns = 4 + keyOf(route.name).length + 2;
+			lines.push(`\t\t${keyOf(route.name)}: ${routeType(route, columns)};`);
 		}
 		lines.push("\t}");
 	}
@@ -551,7 +551,7 @@ export function buildRoutesModuleSource(routes: readonly ScannedRoute[]): string
 		"registerRoutes({",
 		...routes.map((route) => {
 			const component = route.component === undefined ? "" : `, component: ${quote(route.component)}`;
-			return `\t${quote(route.name)}: { url: ${quote(route.url)}, method: ${quote(route.method)}${component} },`;
+			return `\t${keyOf(route.name)}: { url: ${quote(route.url)}, method: ${quote(route.method)}${component} },`;
 		}),
 		"});",
 		"",

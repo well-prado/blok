@@ -154,10 +154,18 @@ export function buildAppTypeSource(
 		"",
 	].join("\n");
 
+	// #999 — emit already-formatted: a generated file has to pass the consuming
+	// project's `biome check` with zero edits, and Biome's organizeImports sorts
+	// by module specifier, not by scan order.
+	const sortedImports = [...imports].sort((a, b) => {
+		const specOf = (line: string) => line.match(/from "([^"]+)"/)?.[1] ?? line;
+		return specOf(a) < specOf(b) ? -1 : specOf(a) > specOf(b) ? 1 : 0;
+	});
+
 	const body =
-		imports.length === 0
+		sortedImports.length === 0
 			? "export type BlokApp = Record<string, never>;\n"
-			: `${imports.join("\n")}\n\nexport type BlokApp = ${render(tree, "")};\n`;
+			: `${sortedImports.join("\n")}\n\nexport type BlokApp = ${render(tree, "")};\n`;
 
 	return { source: `${header}${body}`, collisions };
 }

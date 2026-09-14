@@ -23,6 +23,7 @@ const dist = join(root, "client", "dist");
 let port = 0;
 let server: ReturnType<typeof spawn> | null = null;
 let output = "";
+let clientVersion = "";
 
 async function freePort(): Promise<number> {
 	return await new Promise((resolve, reject) => {
@@ -66,6 +67,7 @@ async function waitForBoot(url: string): Promise<void> {
 beforeAll(async () => {
 	// The client build writes `.blok-vite.json`, which is what the shell reads.
 	await run("bun", ["run", "build"]);
+	clientVersion = readFileSync(join(dist, ".blok-asset-version"), "utf8").trim();
 	port = await freePort();
 	server = spawn("bun", ["run", "src/index.ts"], {
 		cwd: root,
@@ -139,7 +141,7 @@ describe("the built example serves a page that can actually boot", () => {
 
 	it("answers an Inertia visit with JSON instead of the shell", async () => {
 		const response = await fetch(`http://127.0.0.1:${port}/`, {
-			headers: { "X-Inertia": "true", "X-Inertia-Version": "" },
+			headers: { "X-Inertia": "true", "X-Inertia-Version": clientVersion },
 		});
 		const page = (await response.json()) as { component: string };
 
@@ -149,7 +151,7 @@ describe("the built example serves a page that can actually boot", () => {
 
 	it("routes the second page too, so the Dashboard's link is not dead", async () => {
 		const response = await fetch(`http://127.0.0.1:${port}/orders/new`, {
-			headers: { "X-Inertia": "true", "X-Inertia-Version": "" },
+			headers: { "X-Inertia": "true", "X-Inertia-Version": clientVersion },
 		});
 		const page = (await response.json()) as { component: string };
 

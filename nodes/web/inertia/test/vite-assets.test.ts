@@ -7,10 +7,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runNode } from "@blokjs/core/testing";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InertiaNode from "../src/index.js";
 import { APP_MARKER, ASSETS_MARKER, DEFAULT_SHELL, HEAD_MARKER, renderShell } from "../src/protocol.js";
-import { type ViteDescriptor, _resetViteAssets, viteAssetTags } from "../src/vite-assets.js";
+import { type ViteDescriptor, _resetViteAssets, assetVersion, viteAssetTags } from "../src/vite-assets.js";
 
 const PAGE = { component: "Dashboard", props: {}, url: "/", version: "v1" };
 
@@ -24,6 +24,7 @@ beforeEach(() => {
 afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 	_resetViteAssets();
+	vi.unstubAllEnvs();
 });
 
 function writeDescriptor(descriptor: ViteDescriptor): string {
@@ -151,20 +152,49 @@ describe("renderShell() asset marker", () => {
 describe("the serializer node wires the two together", () => {
 	it("serves an HTML shell whose script tag comes from the descriptor", async () => {
 		writeDescriptor({ mode: "build", entry: "assets/index-zz99.js", css: [], imports: [], framework: "react" });
-		process.env.BLOK_STATIC_DIR = dir;
-		try {
-			const response = (await runNode(InertiaNode, {
-				component: "Dashboard",
-				props: {},
-				url: "/",
-				version: "v1",
-				headers: {},
-				method: "GET",
-			} as never)) as unknown as { body?: unknown };
+		vi.stubEnv("BLOK_STATIC_DIR", dir);
+		const response = (await runNode(InertiaNode, {
+			component: "Dashboard",
+			props: {},
+			url: "/",
+			version: "v1",
+			headers: {},
+			method: "GET",
+		} as never)) as unknown as { body?: unknown };
 
-			expect(String(response.body)).toContain('<script type="module" src="/assets/index-zz99.js"></script>');
-		} finally {
-			process.env.BLOK_STATIC_DIR = undefined;
-		}
+		expect(String(response.body)).toContain('<script type="module" src="/assets/index-zz99.js"></script>');
+	});
+});
+
+describe("assetVersion() — the page object's version (#999)", () => {
+	it("reads .blok-asset-version and follows a rebuild without a restart", () => {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, ".blok-asset-version"), "abc123\n");
+		expect(assetVersion({ dir })).toBe("abc123");
+
+		writeFileSync(join(dir, ".blok-asset-version"), "dev");
+		expect(assetVersion({ dir })).toBe("dev");
+	});
+
+	it("falls back to ASSET_VERSION, then to '' (untracked)", () => {
+		vi.stubEnv("ASSET_VERSION", "from-env");
+		expect(assetVersion({ dir })).toBe("from-env");
+		vi.stubEnv("ASSET_VERSION", undefined);
+		expect(assetVersion({ dir })).toBe("");
+	});
+
+	it("is what the serializer ships when a page passes no version", async () => {
+		writeDescriptor({ mode: "build", entry: "assets/index-zz99.js", css: [], imports: [], framework: null });
+		writeFileSync(join(dir, ".blok-asset-version"), "build-7");
+		vi.stubEnv("BLOK_STATIC_DIR", dir);
+		const response = (await runNode(InertiaNode, {
+			component: "Dashboard",
+			props: {},
+			url: "/",
+			headers: { "x-inertia": "true" },
+			method: "GET",
+		} as never)) as unknown as { body?: { version?: string } };
+		// An Inertia visit answers with the page object itself, not a string.
+		expect(response.body?.version).toBe("build-7");
 	});
 });

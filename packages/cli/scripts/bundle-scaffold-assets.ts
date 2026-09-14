@@ -27,6 +27,7 @@ const ASSET_DIRS = [
 	"infra/milvus",
 	"infra/metrics", // observability stack tiers
 	"sdks", // runtime SDK sources vendored into .blok/runtimes/<lang>
+	"templates", // node + SPA (#999) templates copied verbatim by create/add
 ];
 
 /** Build junk that must never ship (per-language build output + deps + tests). */

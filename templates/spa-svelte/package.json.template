@@ -1,0 +1,29 @@
+{
+	"name": "__BLOK_SPA_NAME__",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"engines": {
+		"node": ">=20.19.0"
+	},
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"build:ssr": "vite build --ssr",
+		"preview": "vite preview",
+		"typecheck": "tsc --noEmit",
+		"gen:types": "blokctl gen app-types --out src"
+	},
+	"dependencies": {
+		"@blokjs/inertia-client": "__BLOK_DEP_RANGE__",
+		"@inertiajs/svelte": "^3.7.1",
+		"svelte": "^5.57.0"
+	},
+	"devDependencies": {
+		"@inertiajs/vite": "^3.7.1",
+		"@sveltejs/vite-plugin-svelte": "^7.3.0",
+		"blokctl": "__BLOK_DEP_RANGE__",
+		"typescript": "^5.8.3",
+		"vite": "^8.0.0"
+	}
+}

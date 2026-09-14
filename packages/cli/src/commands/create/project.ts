@@ -86,6 +86,19 @@ const BUNDLED_SCAFFOLD_REPO = path.resolve(path.dirname(fileURLToPath(import.met
 export const HONO_NODE_SERVER_RANGE = "^2.0.11";
 
 /**
+ * The version range scaffolded projects pin @blokjs/* deps at.
+ * Bumped alongside major framework releases (0.4 was the
+ * explicit-path-only routing release; 0.5 will drop the
+ * BLOK_ROUTING_LEGACY escape hatch).
+ *
+ * Exported since #999: `create spa` / `add spa` pin `@blokjs/inertia` and
+ * `@blokjs/inertia-client` in the SPA templates from the SAME constant, so the
+ * two scaffolds can never drift apart (and `checkCliConstants` in
+ * `scripts/release-preflight.ts` keeps checking exactly one declaration).
+ */
+export const BLOKJS_DEP_RANGE = "^2.3.0";
+
+/**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
  * by runtime kind → filename under `examples/ts-workflows/`. Each runs that
  * SDK's built-in `hello-world` node over gRPC. Single source of truth shared by
@@ -999,12 +1012,6 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blokjs/core": "core/core",
 		};
 
-		// The version range scaffolded projects pin @blokjs/* deps at.
-		// Bumped alongside major framework releases (0.4 was the
-		// explicit-path-only routing release; 0.5 will drop the
-		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^2.3.0";
-
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
 			if (!deps) continue;
@@ -1623,6 +1630,10 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (examples) {
 			console.log(examples_url);
 		}
+
+		// #999 — `create project --spa <framework>` needs the directory the
+		// scaffold actually landed in to run `add spa` on top of it.
+		return dirPath;
 	} catch (error) {
 		// Stop the spinner (it owns the terminal), then rethrow: a failed
 		// scaffold must FAIL the process — this catch used to swallow
