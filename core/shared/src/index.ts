@@ -79,6 +79,22 @@ import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
 import NodeBase from "./NodeBase";
 import {
+	CSRF_COOKIE,
+	CSRF_EXPIRED_MESSAGE,
+	CSRF_FIELD,
+	CSRF_HEADER,
+	type CsrfCookieOptions,
+	csrfPathExempt,
+	csrfSecureFor,
+	csrfSetCookie,
+	csrfTokenOf,
+	csrfTokensMatch,
+	issueCsrfCookie,
+	markCsrfToken,
+	newCsrfToken,
+	pendingCsrfCookies,
+} from "./csrf";
+import {
 	FLASH_COOKIE,
 	FLASH_SECRET_ENV,
 	type FlashCookieOptions,
@@ -700,6 +716,22 @@ export {
 	resolveFlashSecret,
 	signFlash,
 	verifyFlash,
+	// #1012 — double-submit CSRF cookie, shared by the `@blokjs/csrf` node and
+	// `@blokjs/inertia`'s `rotateCsrf()`.
+	CSRF_COOKIE,
+	CSRF_EXPIRED_MESSAGE,
+	CSRF_FIELD,
+	CSRF_HEADER,
+	type CsrfCookieOptions,
+	csrfPathExempt,
+	csrfSecureFor,
+	csrfSetCookie,
+	csrfTokenOf,
+	csrfTokensMatch,
+	issueCsrfCookie,
+	markCsrfToken,
+	newCsrfToken,
+	pendingCsrfCookies,
 	type EnvContext,
 	type ErrorContext,
 	type LoggerContext,

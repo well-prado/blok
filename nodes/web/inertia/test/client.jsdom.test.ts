@@ -14,7 +14,14 @@
 import { type Server, createServer } from "node:http";
 import { http, defineNode, workflow } from "@blokjs/core";
 import { runNode, runWorkflow } from "@blokjs/core/testing";
-import type { RespondEnvelope } from "@blokjs/shared";
+import {
+	CSRF_COOKIE,
+	type RespondEnvelope,
+	csrfSetCookie,
+	csrfTokensMatch,
+	newCsrfToken,
+	readCookie,
+} from "@blokjs/shared";
 import { type Page, getInitialPageFromDOM, router } from "@inertiajs/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -449,6 +456,77 @@ describe("13 (#1009) — the client appends, resets, and stops asking for a once
 		expect(planRuns).toBe(1);
 		expect(billing.props.plans).toEqual({ tiers: ["pro"] });
 		expect(feedRuns).toBe(3);
+	});
+});
+
+/**
+ * Issue #1012, test 9 — the cookie → header round trip, through the STOCK
+ * client, with NO CSRF code anywhere in the page.
+ *
+ * The issue asks for Playwright (`useForm().post` from a real React page); the
+ * browser half lands with the harness in #1003. What is testable HERE is the
+ * half that actually matters for "zero config": `@inertiajs/core`'s own
+ * `XhrHttpClient` reads `document.cookie` for `XSRF-TOKEN` and sets
+ * `X-XSRF-TOKEN` on every request by itself — so the ONLY thing the server has
+ * to get right is the cookie's name and its readability. Nothing below sets a
+ * header, and no page prop is consulted: the cookie arrives on a normal visit
+ * and the very next write carries it back.
+ *
+ * Declared BEFORE the #1013 block for the reason stated there.
+ */
+describe("9 (#1012) — the client echoes the XSRF cookie back as a header, unprompted", () => {
+	it("a visit sets XSRF-TOKEN and the next post verifies against it", async () => {
+		const token = newCsrfToken();
+		let sentHeader: string | undefined;
+		let verified = false;
+
+		// The GET that issues the cookie — `csrfSetCookie()` is the exact string
+		// the `@blokjs/csrf` node writes.
+		dynamic.set("/csrf/form", async () => ({
+			...(await render({
+				component: "Orders/New",
+				url: "/csrf/form",
+				version: "v1",
+				headers: { "x-inertia": "true" },
+			})),
+			cookies: [csrfSetCookie(token)],
+		}));
+
+		// The write, verified exactly the way the node does it.
+		dynamic.set("/csrf/submit", async (headers) => {
+			sentHeader = headers["x-xsrf-token"];
+			verified = csrfTokensMatch(readCookie(headers.cookie, CSRF_COOKIE), sentHeader);
+			return render({
+				component: verified ? "Orders/Saved" : "Orders/Expired",
+				url: "/csrf/submit",
+				version: "v1",
+				headers: { "x-inertia": "true" },
+			});
+		});
+
+		const initialPage = (
+			await render({ component: "Orders/New", url: "/csrf/form", version: "v1", headers: { "x-inertia": "true" } })
+		).body as unknown as Page;
+		window.history.replaceState({}, "", "/csrf/form");
+		router.init({
+			initialPage,
+			resolveComponent: async (name: string) => ({ name }),
+			swapComponent: async () => {},
+		});
+
+		await clientVisit((hooks) => router.visit("/csrf/form", { method: "get", ...hooks }), "visit(/csrf/form)");
+		// Readable from JavaScript — a `HttpOnly` cookie would be invisible here,
+		// and the client would have nothing to echo.
+		expect(document.cookie).toContain(`${CSRF_COOKIE}=${token}`);
+
+		const saved = await clientVisit(
+			(hooks) => router.post("/csrf/submit", { sku: "abc" }, hooks),
+			"post(/csrf/submit)",
+		);
+
+		expect(sentHeader).toBe(token);
+		expect(verified).toBe(true);
+		expect(saved.component).toBe("Orders/Saved");
 	});
 });
 

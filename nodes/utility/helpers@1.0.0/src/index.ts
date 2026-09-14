@@ -22,6 +22,7 @@
 
 import type { NodeBase } from "@blokjs/shared";
 import AuditLogNode, { _resetAuditEventsForTests, getAuditEvents } from "./auditLog";
+import CsrfNode from "./csrf";
 import CtxPublishNode from "./ctxPublish";
 import CtxPublishManyNode from "./ctxPublishMany";
 import ExprNode from "./expr";
@@ -50,6 +51,7 @@ import WsReplyNode from "./wsReply";
 
 export {
 	AuditLogNode,
+	CsrfNode,
 	CtxPublishNode,
 	CtxPublishManyNode,
 	ExprNode,
@@ -134,6 +136,7 @@ try {
  */
 export const HELPER_NODES = {
 	"@blokjs/audit-log": AuditLogNode,
+	"@blokjs/csrf": CsrfNode,
 	"@blokjs/ctx-publish": CtxPublishNode,
 	"@blokjs/ctx-publish-many": CtxPublishManyNode,
 	"@blokjs/expr": ExprNode,
