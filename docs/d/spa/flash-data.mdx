@@ -36,8 +36,7 @@ import { flash, redirectBack } from "@blokjs/inertia";
 
 const request = { headers: { referer: "/orders/new" }, method: "POST" };
 
-export const saved = flash("toast", { type: "success", message: "Order created." })
-  .redirectBack(request, { fallback: "/orders" });
+export const saved = flash("toast", "Order created.").redirectBack(request, { fallback: "/orders" });
 ```
 
 On the client it is an ordinary prop:
@@ -46,12 +45,18 @@ On the client it is an ordinary prop:
 import { usePage } from "@inertiajs/react";
 
 export function Toast() {
-  const flash = usePage().props.flash as { toast?: { message: string } } | undefined;
-  return flash?.toast ? <p>{flash.toast.message}</p> : null;
+  const flash = usePage().props.flash as { toast?: string } | undefined;
+  return flash?.toast ? <p>{flash.toast}</p> : null;
 }
 ```
 
 The page object's `flash` field is emitted only when non-empty.
+
+The payload is arbitrary, but the toast helper the examples and scaffolds ship
+(`client/src/flash-toast.ts`, bound to the `inertia:flash` DOM event) renders
+STRING values only — `flash("toast", { type, message })` still reaches
+`page.flash` and shows nothing until you write a component like the one above
+for it.
 
 ## Without the `page` step
 

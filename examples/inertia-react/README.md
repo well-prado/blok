@@ -121,8 +121,9 @@ or the create flow failing to update the list, is a test failure.
 
 `tests/python-stats.test.ts` starts the real sidecar (on a free port) and
 resolves the `stats` prop through it with **no mock**. It skips itself, with the
-reason on stdout, when this machine has no python3 with `grpcio` — run
-`bun run setup:python` once to exercise it. The other suites mock
+reason on stdout, when this machine has no python3 that can serve the node
+(3.11+ with `grpcio` and `pydantic`) — run `bun run setup:python` once to
+exercise it. The other suites mock
 `dashboard-stats` by node ref, the way any cross-runtime step is mocked.
 
 ## What each piece demonstrates
