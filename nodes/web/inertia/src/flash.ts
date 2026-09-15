@@ -73,9 +73,49 @@ export function flashCookie(payload: FlashPayload, opts: FlashPersistOptions = {
  * `X-Inertia-Preserve-Fragment` stopgap header `redirect()` emits — the next
  * render reads it back off the flash and puts it on the page object.
  */
+/**
+ * The `Referer` to bounce back to, or `undefined` when it is not OURS.
+ *
+ * A `Referer` is attacker-controllable, and `redirectBack()` answers a failed
+ * write — so without this check `POST /login` with
+ * `Referer: https://evil.example/x` answers 303 to evil.example, carrying the
+ * flash cookie's errors to a phishing page that looks like the bounce the user
+ * expected (#1018 security review L1).
+ *
+ * Same-origin means: a relative path (what a same-origin browser navigation
+ * sends), or an absolute URL whose host matches the request's own `Origin` /
+ * `Host` (`X-Forwarded-Host` first, behind a proxy).
+ */
+function sameOriginReferer(referer: string | undefined, headers: Record<string, string>): string | undefined {
+	if (referer === undefined || referer === "") return undefined;
+	// A protocol-relative URL (`//evil.example/x`) is absolute to a browser.
+	if (referer.startsWith("/") && !referer.startsWith("//")) return referer;
+
+	let url: URL;
+	try {
+		url = new URL(referer);
+	} catch {
+		return undefined;
+	}
+	const origin = headers.origin;
+	if (typeof origin === "string" && origin.length > 0) {
+		try {
+			if (new URL(origin).host === url.host) return referer;
+		} catch {
+			// An unparsable Origin proves nothing; fall through to Host.
+		}
+	}
+	const forwarded = headers["x-forwarded-host"]?.split(",")[0]?.trim();
+	const host = forwarded && forwarded.length > 0 ? forwarded : headers.host;
+	return typeof host === "string" && host.length > 0 && host.toLowerCase() === url.host.toLowerCase()
+		? referer
+		: undefined;
+}
+
 export function redirectBack(req: FlashRequest, opts: RedirectBackOptions = {}): RespondEnvelope {
 	const headers = normalizeHeaders(req?.headers);
-	const target = headers.referer ?? headers.referrer ?? opts.fallback ?? "/";
+	const referer = sameOriginReferer(headers.referer ?? headers.referrer, headers);
+	const target = referer ?? opts.fallback ?? "/";
 	const env = redirect(target, {
 		method: req?.method,
 		prefetch: headers.purpose === "prefetch",
