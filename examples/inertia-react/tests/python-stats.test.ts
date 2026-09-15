@@ -15,6 +15,7 @@
 import type { ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { runPage } from "@blokjs/core/testing";
+import { runShutdownCleanups } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { findPython, startPythonSidecar, waitForSidecar } from "../src/python-sidecar.js";
 import dashboard from "../src/workflows/dashboard.js";
@@ -84,4 +85,29 @@ describe.skipIf(python === null)("the Dashboard's Python prop, through the real 
 		expect(loaded.props.stats).toBeUndefined();
 		loaded.assert().component("Dashboard").has("auth").etc();
 	}, 30_000);
+
+	/**
+	 * #1065 review, D1. The sidecar used to be stopped from its own
+	 * `process.once("SIGINT"/"SIGTERM")` listeners — and a signal listener
+	 * SUPPRESSES Node's default terminate, so with
+	 * `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1` (which turns off `TriggerBase`'s
+	 * handlers) `kill -TERM` left the server running forever. It goes through
+	 * the framework's shutdown drain instead; this is the test that says so.
+	 */
+	it("stops the sidecar from the framework's shutdown drain, adding no signal listener", async () => {
+		const before = { term: process.listenerCount("SIGTERM"), int: process.listenerCount("SIGINT") };
+		const port = await freePort();
+		const child = startPythonSidecar({ port, install: false });
+		expect(child).not.toBeNull();
+		await waitForSidecar(port, 60_000);
+
+		expect(process.listenerCount("SIGTERM")).toBe(before.term);
+		expect(process.listenerCount("SIGINT")).toBe(before.int);
+
+		const exited = new Promise<void>((done) => child?.once("exit", () => done()));
+		await runShutdownCleanups();
+		await exited;
+
+		expect(child?.killed).toBe(true);
+	}, 90_000);
 });

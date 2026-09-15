@@ -25,12 +25,17 @@ import type { NodeBase } from "@blokjs/shared";
 import HttpTrigger from "@blokjs/trigger-http/dist/runner/HttpTrigger.js";
 import workflows from "./Workflows.js";
 import * as nodes from "./nodes.js";
-import { startPythonSidecar } from "./python-sidecar.js";
+import { pythonGrpcPort, startPythonSidecar, waitForSidecar } from "./python-sidecar.js";
 
 // The cross-runtime half of the stack: one Python node, same lifetime as the
-// server. Started before `listen()` so it is up by the time the first visit's
-// deferred follow-up asks for `stats`.
-if (process.env.BLOK_SKIP_PYTHON_SIDECAR !== "1") startPythonSidecar();
+// server. Started AND awaited before `listen()`, because the sidecar takes
+// about a second to bind: without the wait the first visit's deferred
+// follow-up loses the race and the tile shows its rescue text on a stack that
+// is, a moment later, perfectly healthy. A sidecar that never binds is not
+// fatal — it is the same "no python3" story, and the prop is rescued.
+if (process.env.BLOK_SKIP_PYTHON_SIDECAR !== "1" && startPythonSidecar() !== null) {
+	await waitForSidecar(pythonGrpcPort(), 15_000).catch((error: Error) => console.warn(`[example] ${error.message}`));
+}
 
 const trigger = new HttpTrigger();
 const registry = trigger.getNodeMap();
