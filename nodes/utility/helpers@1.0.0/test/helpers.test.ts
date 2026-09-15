@@ -71,6 +71,8 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/inertia.authorize",
 				"@blokjs/inertia.history",
 				"@blokjs/inertia.logout",
+				// #1018 security review H1 — the guest guard's no-store mark.
+				"@blokjs/inertia.private",
 				"@blokjs/json-schema",
 				"@blokjs/jwt-verify",
 				"@blokjs/llm-agent",
