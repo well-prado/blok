@@ -201,6 +201,22 @@ def test_execute_stream_emits_started_then_final(client):
     assert json.loads(final.data) == {"shape": "round"}
 
 
+def test_ctx_logger_is_the_logger_the_server_captures():
+    """`ctx.logger` is part of the documented node ABI (#1064).
+
+    It must BE the `blok.node` logger, not a second one: the test below proves
+    records on that logger are streamed back to the runner, so a node writing
+    through `ctx.logger` gets the same treatment without knowing the name.
+    """
+    import logging as _logging
+
+    from blok.server.grpc_server import NODE_LOGGER_NAME
+    from blok.types.context import NODE_LOGGER_NAME as CONTEXT_NODE_LOGGER_NAME
+
+    assert NODE_LOGGER_NAME == CONTEXT_NODE_LOGGER_NAME == "blok.node"
+    assert Context().logger is _logging.getLogger(NODE_LOGGER_NAME)
+
+
 def test_execute_stream_streams_log_records_from_blok_node_logger(client):
     """A node that emits to ``blok.node`` logger should produce LogLine frames."""
     import logging

@@ -1,5 +1,13 @@
 from __future__ import annotations
+
+import logging
 from typing import Any, Callable, Dict, Optional
+
+# The one logger a node writes to: only records on this name are captured and
+# streamed back to the runner (``blok.server.grpc_server`` re-exports this as
+# ``NODE_LOGGER_NAME``). It lives here because ``blok.types`` has no optional
+# dependency, so ``ctx.logger`` works in every install.
+NODE_LOGGER_NAME = "blok.node"
 
 
 class Request:
@@ -85,7 +93,9 @@ class Response:
 class Context:
     """Represents the workflow execution context passed between nodes."""
 
-    __slots__ = ("id", "workflow_name", "workflow_path", "request", "response", "vars", "env", "_emit_sink")
+    __slots__ = (
+        "id", "workflow_name", "workflow_path", "request", "response", "vars", "env", "logger", "_emit_sink",
+    )
 
     def __init__(
         self,
@@ -104,6 +114,10 @@ class Context:
         self.response = response or Response()
         self.vars = vars if vars is not None else {}
         self.env = env if env is not None else {}
+        # `ctx.logger` is part of the documented node ABI. It IS the
+        # `blok.node` logger, so everything a node writes to it is captured and
+        # sent back to the runner with the node's result (#1064).
+        self.logger = logging.getLogger(NODE_LOGGER_NAME)
         # Set by the gRPC server during ``ExecuteStream`` so ``emit()`` can
         # push live data events back to the runner. ``None`` under the unary
         # ``Execute`` path (and any non-streaming caller) — ``emit()`` is then

@@ -6,7 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "blok-blok-python3"
 version = "1.0.0"
 description = "Blok Blok SDK for Python 3 — build workflow nodes as HTTP microservices or gRPC servers"
-requires-python = ">=3.10"
+# 3.11 is the real floor: `blok/node/capability_manifest.py` imports
+# `typing.NotRequired`, added in 3.11, so `@node` authoring cannot even be
+# imported on 3.10 (#1064). The Dockerfile and CI both run 3.12.
+requires-python = ">=3.11"
 license = {text = "MIT"}
 
 [project.optional-dependencies]

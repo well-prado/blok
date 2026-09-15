@@ -17,11 +17,14 @@ Environment variables:
     BLOK_NODES_DIR   Directory of user-authored nodes to discover (each node in
                      a `<name>/node.py` using the `@node` decorator). Set by
                      blokctl to the project's `runtimes/python3/nodes`. When
-                     unset, only the SDK's built-in example nodes load.
+                     unset, only the SDK's built-in example nodes load. When
+                     set, a loader that cannot be imported (Python < 3.11, or
+                     no pydantic) is a startup error, not a silent 0 nodes.
 """
 
 import logging
 import os
+import platform
 import signal
 import sys
 import threading
@@ -35,6 +38,11 @@ from blok.middleware.recovery_middleware import recovery_middleware
 from blok.node.node_registry import NodeRegistry
 from blok.server.runtime_server import RuntimeServer
 from examples import register_all
+
+# The floor `pyproject.toml` declares. `blok.node.capability_manifest` imports
+# `typing.NotRequired`, which exists only from 3.11 — an older interpreter
+# cannot import the typed-node loader at all.
+REQUIRED_PYTHON = "3.11"
 
 
 def _start_http(registry: NodeRegistry, config: ServerConfig) -> RuntimeServer:
@@ -86,14 +94,30 @@ def _start_grpc(registry: NodeRegistry, config: ServerConfig):
 def _load_user_nodes(registry: NodeRegistry) -> int:
     """Discover user nodes from ``BLOK_NODES_DIR`` (delegates to the SDK).
 
-    `@node` authoring requires pydantic; if it isn't installed there are no
-    user nodes to load, so a missing import is a no-op.
+    `@node` authoring needs pydantic and Python >= REQUIRED_PYTHON. With no
+    nodes dir configured there is nothing to load, so a missing import stays a
+    no-op. With one configured, user nodes WERE asked for: failing to import
+    the loader is fatal and says why. Returning 0 there boots a sidecar that
+    serves zero user nodes, turning every `runtime.python3` step into "node not
+    found" with no diagnostic anywhere (#1064).
     """
+    nodes_dir = os.environ.get("BLOK_NODES_DIR")
     try:
         from blok.node.define_node import load_user_nodes
-    except ImportError:
-        return 0
-    return load_user_nodes(registry, os.environ.get("BLOK_NODES_DIR"))
+    except ImportError as exc:
+        if not nodes_dir:
+            return 0
+        logging.getLogger("blok.serve").error(
+            "Cannot load the user nodes in BLOK_NODES_DIR=%s: %s. This interpreter is "
+            "Python %s (%s); the Blok Python3 SDK requires Python >= %s with pydantic >= 2.",
+            nodes_dir,
+            exc,
+            platform.python_version(),
+            sys.executable,
+            REQUIRED_PYTHON,
+        )
+        raise SystemExit(1) from exc
+    return load_user_nodes(registry, nodes_dir)
 
 
 def main():

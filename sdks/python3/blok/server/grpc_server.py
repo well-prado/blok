@@ -45,7 +45,7 @@ from blok.errors.blok_error import (
     ErrorSeverity,
 )
 from blok.node.node_registry import NodeRegistry
-from blok.types.context import Context, Request, Response
+from blok.types.context import NODE_LOGGER_NAME, Context, Request, Response
 from blok.types.execution_request import ExecutionRequest, NodeConfig
 from blok.types.execution_result import ExecutionResult
 
@@ -54,11 +54,12 @@ from blok.runtime.v1 import runtime_pb2_grpc as pb_grpc
 
 logger = logging.getLogger("blok.grpc")
 
-# Logger that node handlers should emit to in order to have their messages
-# streamed back to the runner via ``ExecuteStream``. This is a deliberate
-# convention: only events on this named logger are captured, so the handler
-# doesn't have to filter out unrelated noise from third-party libraries.
-NODE_LOGGER_NAME = "blok.node"
+# ``NODE_LOGGER_NAME`` (re-exported from ``blok.types.context``, where
+# ``ctx.logger`` also comes from) is the logger node handlers emit to in order
+# to have their messages streamed back to the runner via ``ExecuteStream``.
+# This is a deliberate convention: only events on this named logger are
+# captured, so the handler doesn't have to filter out unrelated noise from
+# third-party libraries.
 
 # =============================================================================
 # ADR 0014 — claim-check ("blob") support
