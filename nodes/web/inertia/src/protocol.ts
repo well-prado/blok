@@ -184,6 +184,14 @@ export function renderShell(page: PageObject, opts: RenderShellOptions = {}): st
 	// otherwise be re-expanded by String.replace's substitution patterns.
 	const head = opts.head ?? "";
 	const assets = opts.assets ?? "";
+	// #1003 — the shell's `<title data-inertia>` is the NO-JS fallback. When the
+	// head being injected carries its own (SSR rendering `<Head title>`, which is
+	// the whole point of SSR'ing the head) the document would otherwise ship two
+	// titles. `data-inertia` marks the tag Inertia owns, so that is the one to
+	// drop — a `<title>` the app wrote itself is left alone.
+	if (/<title[\s>]/i.test(head)) {
+		html = html.replace(/[^\S\n]*<title\b[^>]*\bdata-inertia\b[^>]*>[\s\S]*?<\/title>\n?/i, "");
+	}
 	return html
 		.replace(HEAD_MARKER, () => head)
 		.replace(ASSETS_MARKER, () => assets)
