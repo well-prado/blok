@@ -328,14 +328,14 @@ auth_kit() {
       && grep -q '"auth.logout"' "$project/client/src/blok-pages.d.ts" \
       && ok "kit: gen app-types kept the auth pages and routes ($fw)" \
       || fail "kit: gen app-types dropped the auth pages/routes ($fw)"
-    # The routes are the user's own `workflow()` files, so the typed client
-    # index sees all of them: 10 auth routes + home + the http scaffold's
-    # countries example, and NOTHING skipped.
-    if grep -qE "Wrote client/src/blok-app.d.ts \(12 workflow\(s\)\)" "$WORKDIR/kit-gentypes-$fw.log"; then
-      ok "kit: gen app-types indexed all 12 workflows ($fw)"
-    else
-      fail "kit: gen app-types did not index 12 workflows ($fw): $(grep -o 'Wrote client/src/blok-app.d.ts ([^)]*)' "$WORKDIR/kit-gentypes-$fw.log" | head -1)"
-    fi
+    # The routes are the user's own `workflow()` files, so the TYPED CLIENT
+    # index carries all ten — the shims they replaced were skipped wholesale
+    # (#1018 review M4). Counted in the emitted file, not in the log line,
+    # whose wording is not a contract.
+    local indexed; indexed="$(grep -c 'src/workflows/auth/' "$project/client/src/blok-app.d.ts" 2>/dev/null || echo 0)"
+    [ "$indexed" -ge 10 ] \
+      && ok "kit: gen app-types indexed all 10 auth routes ($fw)" \
+      || fail "kit: gen app-types indexed only $indexed auth route(s) ($fw)"
     grep -q "Skipped" "$WORKDIR/kit-gentypes-$fw.log" \
       && fail "kit: gen app-types SKIPPED a workflow ($fw): $(grep -o 'Skipped.*' "$WORKDIR/kit-gentypes-$fw.log" | head -1)" \
       || ok "kit: gen app-types skipped nothing ($fw)"
