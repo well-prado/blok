@@ -51,6 +51,25 @@ describe("docs/d/spa — code samples", () => {
 		expect(status).toBe(0);
 	}, 180_000);
 
+	/**
+	 * #1062: the error-page sample is an EXCERPT of the component the templates
+	 * really ship (minus its `AppLayout` wiring, which cannot resolve from a
+	 * generated snippet module), so the doc cannot drift back to a hand-written
+	 * minimal component while the shipped one moves on.
+	 */
+	it("quotes the Errors/Error component the templates ship", () => {
+		const doc = join(SPA_DOCS, "error-handling.mdx");
+		const shipped = readFileSync(join(REPO_ROOT, "templates/spa-react/src/pages/Errors/Error.tsx"), "utf8");
+		const sample = extract(doc).find((snippet) => snippet.path.endsWith("Errors/Error.tsx"));
+		expect(sample, "no ```tsx client/src/pages/Errors/Error.tsx block in error-handling.mdx").toBeDefined();
+
+		const strayed = (sample?.code ?? "").split("\n").filter((line) => line.trim() !== "" && !shipped.includes(line));
+		expect(strayed, "sample lines absent from templates/spa-react/src/pages/Errors/Error.tsx").toEqual([]);
+		expect(readFileSync(doc, "utf8"), "the pre-#999 'Until those land' caveat is stale").not.toMatch(
+			/Until those land/,
+		);
+	});
+
 	it("fails on a sample with a type error (self-check)", () => {
 		const broken = extract(join(FIXTURES, "broken-snippet.mdx"));
 		expect(broken.length).toBeGreaterThan(0);
