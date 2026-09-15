@@ -24,7 +24,7 @@
  * `inertia.session` middleware step returning it.
  */
 
-import { issueCsrfCookie as issueCookie } from "@blokjs/shared";
+import { csrfSecureFor, issueCsrfCookie as issueCookie } from "@blokjs/shared";
 import {
 	SESSION_MAX_AGE,
 	type SessionCookieOptions,
@@ -79,8 +79,26 @@ export function _resetSession(): void {
 	store = undefined;
 }
 
-function cookieOptions(): SessionCookieOptions {
-	return { ...options.cookie, maxAge: options.cookie?.maxAge ?? options.ttl ?? SESSION_MAX_AGE };
+/**
+ * The cookie attributes for THIS request.
+ *
+ * `secure` is derived from the request the way the CSRF cookie derives it
+ * (`csrfSecureFor`): an HTTPS request — or a plain one behind a TLS terminator
+ * that set `X-Forwarded-Proto: https` — gets `Secure`, and a dev request over
+ * http does not (a `Secure` cookie on http is silently dropped, which would
+ * sign every local developer out). An explicit `configureSession({ cookie:
+ * { secure } })` still wins (#1018 security review B4).
+ *
+ * `persistent: false` omits `Max-Age`, i.e. the cookie dies with the browser —
+ * a sign-in without "remember me" (#1018 security review M2).
+ */
+function cookieOptions(ctx?: unknown, persistent = true): SessionCookieOptions {
+	const maxAge = persistent ? (options.cookie?.maxAge ?? options.ttl ?? SESSION_MAX_AGE) : null;
+	return {
+		secure: csrfSecureFor((ctx as SessionHost | undefined)?.request),
+		...options.cookie,
+		maxAge,
+	};
 }
 
 function ttlMs(): number {
@@ -177,9 +195,19 @@ export async function replaceSession(ctx: unknown, data: Record<string, unknown>
  * This is the LOGIN path: a fresh id means a session-fixation cookie planted
  * before sign-in is worthless afterwards.
  */
+export interface StartSessionOptions {
+	/**
+	 * Keep the cookie across browser restarts (the `ttl` window). `false` makes
+	 * it a browser-session cookie — what an unticked "remember me" gets.
+	 * Default `true`.
+	 */
+	persistent?: boolean;
+}
+
 export async function startSession(
 	ctx: unknown,
 	data: Record<string, unknown> = {},
+	opts: StartSessionOptions = {},
 ): Promise<{ state: SessionState; cookie: string }> {
 	const current = await loadSession(ctx);
 	if (current.id) await getSessionStore().destroy(current.id);
@@ -189,7 +217,10 @@ export async function startSession(
 	const state: SessionState = { id, data };
 	markSession((ctx as SessionHost).request, state);
 
-	const cookie = sessionSetCookie(signSessionId(id, resolveSessionSecret(options.secret)), cookieOptions());
+	const cookie = sessionSetCookie(
+		signSessionId(id, resolveSessionSecret(options.secret)),
+		cookieOptions(ctx, opts.persistent ?? true),
+	);
 	issueCookie(ctx, cookie);
 	return { state, cookie };
 }
@@ -208,7 +239,7 @@ export async function destroySession(ctx: unknown): Promise<string> {
 	const current = await loadSession(ctx);
 	if (current.id) await getSessionStore().destroy(current.id);
 	markSession((ctx as SessionHost).request, { id: null, data: {} });
-	const cookie = clearSessionCookie(cookieOptions());
+	const cookie = clearSessionCookie(cookieOptions(ctx));
 	issueCookie(ctx, cookie);
 	return cookie;
 }

@@ -34,8 +34,14 @@ export const SESSION_MAX_AGE = 60 * 60 * 24 * 14;
 export interface SessionCookieOptions {
 	name?: string;
 	path?: string;
-	/** Seconds. Default {@link SESSION_MAX_AGE}. */
-	maxAge?: number;
+	/**
+	 * Seconds. Default {@link SESSION_MAX_AGE}.
+	 *
+	 * `null` omits `Max-Age` entirely, i.e. a BROWSER-SESSION cookie that dies
+	 * when the window closes — what a sign-in without "remember me" gets
+	 * (#1018 security review M2).
+	 */
+	maxAge?: number | null;
 	/** `SameSite`. Default `Lax`; `None` additionally forces `Secure`. */
 	sameSite?: "Lax" | "Strict" | "None";
 	/** Add `Secure`. Set it from the request's scheme in production. */
@@ -83,13 +89,16 @@ function attributes(opts: SessionCookieOptions): string[] {
 	return parts;
 }
 
-/** Build the `Set-Cookie` that PERSISTS a signed session token. */
+/**
+ * Build the `Set-Cookie` that PERSISTS a signed session token.
+ *
+ * `maxAge: null` omits `Max-Age`: the cookie then lives exactly as long as the
+ * browser session, which is what an unticked "remember me" must produce.
+ */
 export function sessionSetCookie(token: string, opts: SessionCookieOptions = {}): string {
-	return [
-		`${opts.name ?? SESSION_COOKIE}=${token}`,
-		...attributes(opts),
-		`Max-Age=${opts.maxAge ?? SESSION_MAX_AGE}`,
-	].join("; ");
+	const parts = [`${opts.name ?? SESSION_COOKIE}=${token}`, ...attributes(opts)];
+	if (opts.maxAge !== null) parts.push(`Max-Age=${opts.maxAge ?? SESSION_MAX_AGE}`);
+	return parts.join("; ");
 }
 
 /** Build the `Set-Cookie` that CLEARS the session cookie (`Max-Age=0`). */

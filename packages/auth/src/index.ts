@@ -42,6 +42,7 @@ export {
 	hitThrottle,
 	setThrottleBackend,
 	throttleKey,
+	trustsProxyHeaders,
 } from "./throttle.js";
 export { consumeResetToken, createResetToken, hashResetToken } from "./tokens.js";
 export {

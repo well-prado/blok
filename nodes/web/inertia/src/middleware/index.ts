@@ -11,7 +11,13 @@
  * the same ctx — so a page step called `auth` would overwrite the shared user.
  */
 
-export { authMiddleware, createAuthMiddleware } from "./auth.js";
+export {
+	authMiddleware,
+	createAuthMiddleware,
+	isPrivateResponse,
+	markPrivateResponse,
+	privateResponseNode,
+} from "./auth.js";
 export type { AuthMiddlewareOptions } from "./auth.js";
 export {
 	CSRF_COOKIE,

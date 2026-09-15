@@ -155,6 +155,7 @@ interface PageObject {
 	props: { auth: { user: { id: string; name: string; email: string } | null }; errors: Record<string, string> };
 	flash?: Record<string, unknown>;
 	clearHistory?: boolean;
+	encryptHistory?: boolean;
 }
 
 async function page(res: Response): Promise<PageObject> {
@@ -411,5 +412,76 @@ describe("HttpTrigger — auth starter kit (#1018)", () => {
 		expect(shown.props.errors.password).toMatch(/at least 8/);
 		expect(shown.props.errors.passwordConfirmation).toMatch(/do not match/);
 		expect(await users.findByEmail("not-an-email")).toBeUndefined();
+	});
+
+	// ── #1018 security review: B3 / H1 / L3 ───────────────────────────────────
+
+	/** Sign `ada@example.com` in and return her jar. */
+	async function signIn(app: App): Promise<Jar> {
+		await users.create({ name: "Ada", email: "ada@example.com", passwordHash: await hashPassword("lovelace-1843") });
+		const jar = await visitorAt(app, "/login");
+		const res = await post(app, "/login", { email: "ada@example.com", password: "lovelace-1843" }, jar, INERTIA);
+		expect(res.status).toBe(303);
+		return jar;
+	}
+
+	/**
+	 * B3 — `inertia.encryptHistory` was never in the chain, so no page object
+	 * carried `encryptHistory` and logout's `clearHistory` rotated a key that
+	 * was protecting nothing.
+	 */
+	it("B3 — every page the kit serves carries encryptHistory: true", async () => {
+		const app = await buildApp();
+		const guest = await visitorAt(app, "/login");
+		expect((await page(await get(app, "/login", guest, INERTIA))).encryptHistory).toBe(true);
+
+		const jar = await signIn(app);
+		const dashboard = await page(await get(app, "/dashboard", jar, INERTIA));
+		expect(dashboard.encryptHistory).toBe(true);
+		expect(dashboard.props.auth.user).toBeTruthy();
+	});
+
+	/**
+	 * H1 — a guarded page is per-user. Without `no-store` a shared cache may
+	 * keep it, and the browser may re-render it from its own cache when the user
+	 * presses Back after signing out.
+	 */
+	it("H1 — a guarded page answers no-store and varies on Cookie", async () => {
+		const app = await buildApp();
+		const jar = await signIn(app);
+
+		const res = await get(app, "/dashboard", jar, INERTIA);
+		expect(res.headers.get("cache-control")).toContain("no-store");
+		expect(res.headers.get("vary")?.toLowerCase()).toContain("cookie");
+
+		// The HTML first load, not just the Inertia XHR.
+		const html = await get(app, "/dashboard", jar);
+		expect(html.headers.get("cache-control")).toContain("no-store");
+
+		// ...and an UNGUARDED page is untouched: the mark belongs to the guard,
+		// it is not something every response now carries.
+		expect((await get(app, "/login", jar, INERTIA)).headers.get("cache-control")).toBeNull();
+	});
+
+	/**
+	 * L3 — the scaffold smoke's CSRF claim was overstated: every POST it sends
+	 * carries a valid token. THIS is the guard — a cross-site-shaped POST with
+	 * the cookie present and the header absent.
+	 */
+	it("L3 — a POST without the CSRF header is bounced and no session is issued", async () => {
+		const app = await buildApp();
+		await users.create({ name: "Ada", email: "ada@example.com", passwordHash: await hashPassword("lovelace-1843") });
+		const jar = await visitorAt(app, "/login");
+
+		const res = await app.fetch(
+			new Request("http://localhost/login", {
+				method: "POST",
+				headers: { "content-type": "application/json", cookie: jar.header() },
+				body: JSON.stringify({ email: "ada@example.com", password: "lovelace-1843" }),
+			}),
+		);
+		expect(res.status).toBe(303);
+		const issued = res.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`) && !/max-age=0/i.test(c));
+		expect(issued).toBe(false);
 	});
 });

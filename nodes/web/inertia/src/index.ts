@@ -12,6 +12,7 @@ import { defineNode } from "@blokjs/core";
 import { RESPOND_BRAND, type RespondEnvelope } from "@blokjs/shared";
 import { z } from "zod";
 import { flashCookie, normalizeErrors } from "./flash.js";
+import { isPrivateResponse } from "./middleware/auth.js";
 import { buildPage, isInertiaRequest } from "./page.js";
 import { type PageObject, location, normalizeHeaders, redirect, renderShell, versionConflict } from "./protocol.js";
 // #1015 — the adapter-wide url / component overrides, and the shared-data
@@ -239,6 +240,25 @@ const outputSchema = z.object({
 /** `Vary: X-Inertia` — the same URL answers HTML or JSON depending on it. */
 const VARY: Record<string, string> = { Vary: "X-Inertia" };
 
+/**
+ * Cache headers for a page the `inertia.auth` guard marked private (#1018
+ * security review H1).
+ *
+ * `no-store` because a signed-in page is per-user: without it a shared cache
+ * may keep it, and the browser may re-render it from its own disk cache when
+ * the user presses Back after signing out. `Vary: …, Cookie` because the same
+ * URL answers differently per session.
+ */
+const PRIVATE_VARY: Record<string, string> = {
+	Vary: "X-Inertia, Cookie",
+	"Cache-Control": "no-store, no-cache, must-revalidate, private",
+};
+
+/** The cache headers for this response: private when the guard said so. */
+function varyFor(ctx: unknown): Record<string, string> {
+	return isPrivateResponse(ctx) ? PRIVATE_VARY : VARY;
+}
+
 function requestField(ctx: unknown, field: "headers" | "method" | "url"): unknown {
 	const request = (ctx as { request?: Record<string, unknown> } | undefined)?.request;
 	return request?.[field];
@@ -441,7 +461,7 @@ export default defineNode({
 				[RESPOND_BRAND]: true,
 				status: 200,
 				contentType: "application/json",
-				headers: { ...VARY, "X-Inertia": "true" },
+				headers: { ...varyFor(ctx), "X-Inertia": "true" },
 				...cookies,
 				body: page,
 			};
@@ -453,7 +473,7 @@ export default defineNode({
 			[RESPOND_BRAND]: true,
 			status: 200,
 			contentType: "text/html; charset=utf-8",
-			headers: { ...VARY },
+			headers: { ...varyFor(ctx) },
 			...cookies,
 			body: renderShell(page, {
 				shell: input.shell,

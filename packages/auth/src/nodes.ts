@@ -170,7 +170,7 @@ export const loginNode = defineNode({
 		const body = (input.body ?? {}) as Record<string, unknown>;
 		const email = normalizeEmail(String(body.email ?? ""));
 		const password = String(body.password ?? "");
-		const key = throttleKey(req.headers, email);
+		const key = throttleKey(req.headers, email, { trustProxy: opts.trustProxy });
 
 		// Counted BEFORE the hash: a throttled attempt must not cost a scrypt.
 		const verdict = await hitThrottle(key, { limit: opts.throttleLimit, windowSeconds: opts.throttleWindow });
@@ -198,7 +198,12 @@ export const loginNode = defineNode({
 		}
 
 		await clearThrottle(key);
-		const { cookie } = await startSession(ctx, { userId: user.id });
+		// "Remember me", for real (#1018 security review M2): ticked keeps the
+		// cookie for the session TTL, unticked makes it a BROWSER-SESSION cookie
+		// that dies with the window. The checkbox was on the form and in the
+		// schema before this; nothing read it.
+		const remember = body.remember === true || body.remember === "true" || body.remember === "on";
+		const { cookie } = await startSession(ctx, { userId: user.id }, { persistent: remember });
 		rotateCsrf(ctx);
 		return seeOther(opts.redirectAfterLogin, req.method, [cookie]);
 	},

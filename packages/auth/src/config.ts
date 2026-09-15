@@ -24,6 +24,14 @@ export interface AuthOptions {
 	throttleWindow?: number;
 	/** Signing secret for reset tokens. Defaults to `BLOK_SESSION_SECRET`. */
 	secret?: string;
+	/**
+	 * Is a reverse proxy in front of this app? Only then may `X-Forwarded-For` /
+	 * `X-Real-IP` / `CF-Connecting-IP` name the client for login throttling —
+	 * they are ordinary headers anyone can set, and trusting them without a
+	 * proxy lets an attacker mint a fresh throttle bucket per attempt.
+	 * Default: `BLOK_TRUST_PROXY=1`.
+	 */
+	trustProxy?: boolean;
 	/** Path a reset link points at. `:token` is substituted. Default `/reset-password/:token`. */
 	resetPath?: string;
 	/**
@@ -57,8 +65,8 @@ export function configureAuth(next: AuthOptions): void {
 }
 
 /** The resolved options, defaults applied. */
-export function authOptions(): Required<Omit<AuthOptions, "users" | "secret" | "sendResetLink">> &
-	Pick<AuthOptions, "secret" | "sendResetLink"> {
+export function authOptions(): Required<Omit<AuthOptions, "users" | "secret" | "sendResetLink" | "trustProxy">> &
+	Pick<AuthOptions, "secret" | "sendResetLink" | "trustProxy"> {
 	return {
 		redirectAfterLogin: options.redirectAfterLogin ?? DEFAULTS.redirectAfterLogin,
 		redirectAfterLogout: options.redirectAfterLogout ?? DEFAULTS.redirectAfterLogout,
@@ -66,6 +74,7 @@ export function authOptions(): Required<Omit<AuthOptions, "users" | "secret" | "
 		throttleLimit: options.throttleLimit ?? DEFAULTS.throttleLimit,
 		throttleWindow: options.throttleWindow ?? DEFAULTS.throttleWindow,
 		resetPath: options.resetPath ?? DEFAULTS.resetPath,
+		...(options.trustProxy !== undefined ? { trustProxy: options.trustProxy } : {}),
 		...(options.secret !== undefined ? { secret: options.secret } : {}),
 		...(options.sendResetLink !== undefined ? { sendResetLink: options.sendResetLink } : {}),
 	};
