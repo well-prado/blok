@@ -21,6 +21,7 @@ import {
 import { WorkflowRegistry } from "@blokjs/runner";
 import { currentUser } from "./nodes.js";
 import { page as ordersNewPage } from "./workflows/orders-create.js";
+import { page as postsNewPage } from "./workflows/posts-create.js";
 
 /** Shared data: every page gets it, and its key rides the page object. */
 share("appName", "Blok SPA example");
@@ -39,6 +40,8 @@ export default {
 	// has to be registered by hand, or the "New order" link 404s. Not a
 	// collision (#733): the scanner never saw it.
 	"orders-create-page": ordersNewPage,
+	// Same story for `GET /posts/new`, which lives beside `POST /posts`.
+	"posts-create-page": postsNewPage,
 };
 
 WorkflowRegistry.getInstance().setGlobalMiddleware(["inertia.csrf"]);

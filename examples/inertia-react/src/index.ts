@@ -10,6 +10,11 @@
  * identical: `listen()` auto-discovers `src/workflows/*.ts`, mounts
  * `BLOK_STATIC_DIR`, and publishes `ASSET_VERSION`.
  *
+ * It also starts the `runtime.python3` sidecar (what `blokctl dev` does from
+ * `.blok/config.json`), so the Dashboard's Python prop resolves for real. No
+ * python3 → a warning and a rescued prop, never a failed boot.
+ * `BLOK_SKIP_PYTHON_SIDECAR=1` opts out.
+ *
  * ```bash
  * bun run build                                    # the Vite client
  * BLOK_FLASH_SECRET=dev-secret BLOK_STATIC_DIR=client/dist bun run src/index.ts
@@ -20,6 +25,17 @@ import type { NodeBase } from "@blokjs/shared";
 import HttpTrigger from "@blokjs/trigger-http/dist/runner/HttpTrigger.js";
 import workflows from "./Workflows.js";
 import * as nodes from "./nodes.js";
+import { pythonGrpcPort, startPythonSidecar, waitForSidecar } from "./python-sidecar.js";
+
+// The cross-runtime half of the stack: one Python node, same lifetime as the
+// server. Started AND awaited before `listen()`, because the sidecar takes
+// about a second to bind: without the wait the first visit's deferred
+// follow-up loses the race and the tile shows its rescue text on a stack that
+// is, a moment later, perfectly healthy. A sidecar that never binds is not
+// fatal — it is the same "no python3" story, and the prop is rescued.
+if (process.env.BLOK_SKIP_PYTHON_SIDECAR !== "1" && startPythonSidecar() !== null) {
+	await waitForSidecar(pythonGrpcPort(), 15_000).catch((error: Error) => console.warn(`[example] ${error.message}`));
+}
 
 const trigger = new HttpTrigger();
 const registry = trigger.getNodeMap();

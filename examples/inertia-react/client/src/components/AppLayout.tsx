@@ -19,6 +19,7 @@ interface NavItem {
 const NAV: NavItem[] = [
 	{ href: "/", label: "Dashboard" },
 	{ href: "/orders/new", label: "Orders" },
+	{ href: "/posts/new", label: "New post" },
 	{ href: "https://blok.build", label: "Docs", external: true },
 ];
 

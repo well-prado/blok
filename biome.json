@@ -21,6 +21,7 @@
 			"sdks/*/.dart_tool/**",
 			"sdks/*/.build/**",
 			"sdks/*/.venv/**",
+			"**/python3_runtime/**",
 			"sdks/python3/**/__pycache__/**",
 			"sdks/rust/target/**",
 			"apps/desktop/src-tauri/target/**",

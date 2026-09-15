@@ -8,6 +8,7 @@
 		"dev": "vite --config client/vite.config.ts client",
 		"build": "vite build --config client/vite.config.ts client",
 		"e2e": "vitest run tests",
+		"setup:python": "bun -e \"const { installPython } = await import('./src/python-sidecar.js'); process.exit(installPython() === null ? 1 : 0)\"",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

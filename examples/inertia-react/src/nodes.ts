@@ -11,10 +11,14 @@ import { cursorPaginate, cursorPaginatedSchema, flash, paginate, paginatedSchema
 import { z } from "zod";
 
 const Order = z.object({ id: z.string(), sku: z.string(), total: z.number() });
-const Post = z.object({ id: z.string(), title: z.string() });
+const Post = z.object({ id: z.string(), title: z.string(), body: z.string() });
 const Plan = z.object({ id: z.string(), price: z.number() });
 
-/** In-memory data, so the example runs with no database. */
+/**
+ * In-memory data, so the example runs with no database. A process restart is
+ * the "migration": `create-post` below pushes onto this array and nothing else.
+ * A real app writes to its store in exactly the same place.
+ */
 const ORDERS = [
 	{ id: "o-1", sku: "BLOK-1", total: 120 },
 	{ id: "o-2", sku: "BLOK-2", total: 40 },
@@ -22,6 +26,7 @@ const ORDERS = [
 const POSTS = Array.from({ length: 25 }, (_, index) => ({
 	id: `p-${index + 1}`,
 	title: `Post ${index + 1}`,
+	body: `The body of post ${index + 1}.`,
 }));
 
 /** Who is signed in. `inertia.shared` runs this into `ctx.state.auth`. */
@@ -111,16 +116,38 @@ export const createOrder = defineNode({
 	output: z.unknown(),
 	execute: (ctx, input) => {
 		ORDERS.push({ id: `o-${ORDERS.length + 1}`, sku: input.sku, total: input.total });
-		return flash("toast", { type: "success", message: `${input.sku} created.` }).redirectBack(ctx.request, {
+		// A STRING, not `{ type, message }`: `client/src/flash-toast.ts` — the
+		// listener every template and example ships — toasts string flash values.
+		// An object payload still reaches `page.flash`, it just renders nothing
+		// until you write a component that reads it (docs/d/spa/flash-data.mdx).
+		return flash("toast", `${input.sku} created.`).redirectBack(ctx.request, {
 			fallback: "/orders/new",
 		});
 	},
 });
 
-export const rejectOrder = defineNode({
-	name: "reject-order",
-	description: "Redirect back carrying the validation errors.",
-	input: z.object({ errors: z.record(z.unknown()) }),
+/**
+ * The write behind `POST /posts`. New posts go to the FRONT of the list, so the
+ * redirect back re-renders the page with the new one already at the top.
+ */
+export const createPost = defineNode({
+	name: "create-post",
+	description: "Persist a post and bounce back with a toast.",
+	input: z.object({ title: z.string(), body: z.string() }),
 	output: z.unknown(),
-	execute: (ctx, input) => redirectBack(ctx.request, { errors: input.errors, fallback: "/orders/new" }),
+	execute: (ctx, input) => {
+		POSTS.unshift({ id: `p-${POSTS.length + 1}`, title: input.title, body: input.body });
+		return flash("toast", "Post created.").redirectBack(ctx.request, {
+			fallback: "/posts/new",
+		});
+	},
+});
+
+/** Redirect back carrying the validation errors — the `else` arm of any form. */
+export const rejectSubmission = defineNode({
+	name: "reject-submission",
+	description: "Redirect back carrying the validation errors.",
+	input: z.object({ errors: z.record(z.unknown()), fallback: z.string() }),
+	output: z.unknown(),
+	execute: (ctx, input) => redirectBack(ctx.request, { errors: input.errors, fallback: input.fallback }),
 });

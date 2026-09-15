@@ -127,11 +127,15 @@ export interface FlashBuilder {
 }
 
 /**
- * Start a flash chain: `flash("toast", { msg }).render({ component, props })`
+ * Start a flash chain: `flash("toast", "Order created.").render({ component, props })`
  * or `flash({ toast }).redirectBack(req, { errors })`.
  *
+ * The payload is arbitrary — it lands on `page.flash` as-is. The toast helper
+ * the examples and scaffolds ship (`client/src/flash-toast.ts`) shows STRING
+ * values, so an object payload needs a component of your own to render it.
+ *
  * @example
- * return flash("toast", { type: "success" }).render({ component: "Orders/Index", props });
+ * return flash("toast", "Order created.").render({ component: "Orders/Index", props });
  */
 export function flash(key: string | Record<string, unknown>, value?: unknown): FlashBuilder {
 	const bag: Record<string, unknown> = {};

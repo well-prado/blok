@@ -79,6 +79,14 @@ beforeAll(async () => {
 			// The page's one Python prop is `defer(..., { rescue: true })`, so the
 			// sidecar is not needed to render; keep the runtime worker out too.
 			BLOK_SKIP_JS_WORKER: "1",
+			// Same reason, for the python3 sidecar `src/index.ts` otherwise starts:
+			// this suite is the proof that the example serves a page WITHOUT it.
+			// `tests/python-stats.test.ts` is the suite that starts it for real.
+			BLOK_SKIP_PYTHON_SIDECAR: "1",
+			// …and point the runner's python3 adapter at a port nothing is on, so a
+			// sidecar someone left running on the default 10007 cannot resolve the
+			// prop behind this suite's back and turn the rescue assertion green.
+			RUNTIME_PYTHON3_GRPC_PORT: String(await freePort()),
 		},
 		stdio: "pipe",
 	});
@@ -160,6 +168,96 @@ describe("the built example serves a page that can actually boot", () => {
 	});
 
 	/**
+	 * The Python prop with no sidecar running: the deferred follow-up still
+	 * answers 200 and the page still renders — it just reports the prop as
+	 * rescued, which is what the Dashboard's rescue text is bound to.
+	 */
+	it("rescues the Python prop when the sidecar is not running", async () => {
+		const response = await fetch(`http://127.0.0.1:${port}/`, {
+			headers: {
+				"X-Inertia": "true",
+				"X-Inertia-Version": clientVersion,
+				"X-Inertia-Partial-Component": "Dashboard",
+				"X-Inertia-Partial-Data": "stats",
+			},
+		});
+		const page = (await response.json()) as { props: Record<string, unknown>; rescuedProps?: string[] };
+
+		expect(response.status).toBe(200);
+		expect(page.rescuedProps).toEqual(["stats"]);
+		expect(page.props.stats).toBeUndefined();
+	});
+
+	/**
+	 * Issue #1063 — "create a post and see it in the list" over real HTTP.
+	 *
+	 * POST /posts as the client does it (Inertia headers + the double-submit
+	 * CSRF header), then the Inertia GET the 303 sends the client to. The new
+	 * post has to be in that response's `posts` prop: no second write, no
+	 * client-side list surgery, and never a full page load.
+	 */
+	it("creates a post and returns it in the next Inertia visit's props", async () => {
+		const shell = await fetch(`http://127.0.0.1:${port}/posts/new`);
+		const cookies = shell.headers.getSetCookie().map((value) => value.split(";")[0]);
+		const token = cookies.find((value) => value.startsWith("XSRF-TOKEN="))?.slice("XSRF-TOKEN=".length);
+		expect(token).toBeDefined();
+		const cookie = cookies.join("; ");
+
+		const title = `Created at ${Date.now()}`;
+		const created = await fetch(`http://127.0.0.1:${port}/posts`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/json",
+				cookie,
+				"X-Inertia": "true",
+				"X-Inertia-Version": clientVersion,
+				"X-XSRF-TOKEN": decodeURIComponent(token as string),
+			},
+			body: JSON.stringify({ title, body: "Written by the serve test." }),
+		});
+
+		// 303 back to the referring page — the client follows it as a GET visit.
+		expect(created.status).toBe(303);
+		expect(created.headers.get("location")).toBe("/posts/new");
+
+		const visit = await fetch(`http://127.0.0.1:${port}${created.headers.get("location")}`, {
+			headers: { cookie, "X-Inertia": "true", "X-Inertia-Version": clientVersion },
+		});
+		const page = (await visit.json()) as {
+			component: string;
+			props: { posts: { data: Array<{ title: string }> }; flash?: Record<string, unknown> };
+		};
+
+		expect(visit.headers.get("x-inertia")).toBe("true");
+		expect(page.component).toBe("Posts/Create");
+		expect(page.props.posts.data[0].title).toBe(title);
+	});
+
+	it("refuses the write on a Precognition dry run, and answers 422 per field", async () => {
+		const shell = await fetch(`http://127.0.0.1:${port}/posts/new`);
+		const cookies = shell.headers.getSetCookie().map((value) => value.split(";")[0]);
+		const token = cookies.find((value) => value.startsWith("XSRF-TOKEN="))?.slice("XSRF-TOKEN=".length);
+
+		const response = await fetch(`http://127.0.0.1:${port}/posts`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				cookie: cookies.join("; "),
+				"X-Inertia": "true",
+				"X-XSRF-TOKEN": decodeURIComponent(token as string),
+				Precognition: "true",
+				"Precognition-Validate-Only": "title",
+			},
+			body: JSON.stringify({ title: "", body: "" }),
+		});
+		const payload = (await response.json()) as { errors: Record<string, string> };
+
+		expect(response.status).toBe(422);
+		expect(payload.errors).toEqual({ title: "Required." });
+	});
+
+	/**
 	 * The server half of a nested page is useless if the client cannot load it.
 	 * A hand-written `import(`./pages/${name}.tsx`)` resolver builds fine and
 	 * then throws `Unknown variable dynamic import` at runtime, because Vite
@@ -172,7 +270,12 @@ describe("the built example serves a page that can actually boot", () => {
 			{ file: string }
 		>;
 
-		for (const page of ["src/pages/Dashboard.tsx", "src/pages/Orders/Create.tsx", "src/pages/Errors/Error.tsx"]) {
+		for (const page of [
+			"src/pages/Dashboard.tsx",
+			"src/pages/Orders/Create.tsx",
+			"src/pages/Posts/Create.tsx",
+			"src/pages/Errors/Error.tsx",
+		]) {
 			expect(Object.keys(manifest)).toContain(page);
 			expect(existsSync(join(dist, manifest[page].file))).toBe(true);
 		}

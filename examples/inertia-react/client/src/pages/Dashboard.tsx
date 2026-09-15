@@ -32,6 +32,9 @@ export default function Dashboard({ auth, orders, stats, plans, posts }: PagePro
 					</p>
 				</div>
 				<div className="blok-page-header__end">
+					<Link href="/posts/new" className="blok-btn">
+						New post
+					</Link>
 					<Link href="/orders/new" className="blok-btn blok-btn--primary">
 						New order
 					</Link>

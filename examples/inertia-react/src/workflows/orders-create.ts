@@ -10,7 +10,7 @@ import { http, type Handle, branch, eq, step, workflow } from "@blokjs/core";
 import { ValidateNode } from "@blokjs/helpers";
 import { always, definePage } from "@blokjs/inertia";
 import { z } from "zod";
-import { createOrder, currentUser, rejectOrder } from "../nodes.js";
+import { createOrder, currentUser, rejectSubmission } from "../nodes.js";
 
 export const OrderSchema = z.object({
 	sku: z.string().min(1, "Required."),
@@ -47,7 +47,7 @@ export default workflow(
 				step("create", createOrder, { sku: body.sku, total: body.total });
 			},
 			else: () => {
-				step("reject", rejectOrder, { errors: checked.errors });
+				step("reject", rejectSubmission, { errors: checked.errors, fallback: "/orders/new" });
 			},
 		});
 	},

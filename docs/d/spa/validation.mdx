@@ -120,6 +120,15 @@ The mechanism is the **runner's**, not the HTTP trigger's: a worker or cron run
 carries no such header and is unaffected, and any transport that understands a
 response envelope gets the 204/422 for free.
 
+<Note>
+  Client-side gotcha: the stock `@inertiajs/react` `form.post()` does not cancel
+  an in-flight `validate()`, which is debounced — so a form that clears itself
+  on success can have that late round trip validate the now-EMPTY data and paint
+  "Required." over a submit that just worked. Remount the form instead of
+  resetting it (a changing React `key`, as
+  `examples/inertia-react/client/src/pages/Posts/Create.tsx` does).
+</Note>
+
 ```ts src/precognition.test.ts
 import { runPrecognition } from "@blokjs/core/testing";
 import { expect, it } from "vitest";

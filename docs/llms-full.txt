@@ -949,7 +949,7 @@ export const withErrors = redirectBack(request, {
   fallback: "/orders",
 });
 
-export const withToast = flash("toast", { type: "success" }).redirectBack(request);
+export const withToast = flash("toast", "Order created.").redirectBack(request);
 export const alias = back(request, { fallback: "/" });
 ```
 
@@ -957,7 +957,7 @@ export const alias = back(request, { fallback: "/" });
 | --- | --- |
 | `errors` | validation errors, persisted in the signed cookie |
 | `bag` | error-bag name — defaults to the request's `X-Inertia-Error-Bag` |
-| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form) |
+| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form). The toast helper the examples ship renders STRING values; an object needs a component of your own |
 | `fallback` | where to go when the request carried no `Referer` |
 | `preserveFragment` | keep the URL fragment across the bounce |
 | `clearHistory` | ask the client to drop its encrypted history |
@@ -2310,8 +2310,7 @@ import { flash, redirectBack } from "@blokjs/inertia";
 
 const request = { headers: { referer: "/orders/new" }, method: "POST" };
 
-export const saved = flash("toast", { type: "success", message: "Order created." })
-  .redirectBack(request, { fallback: "/orders" });
+export const saved = flash("toast", "Order created.").redirectBack(request, { fallback: "/orders" });
 ```
 
 On the client it is an ordinary prop:
@@ -2320,12 +2319,18 @@ On the client it is an ordinary prop:
 import { usePage } from "@inertiajs/react";
 
 export function Toast() {
-  const flash = usePage().props.flash as { toast?: { message: string } } | undefined;
-  return flash?.toast ? <p>{flash.toast.message}</p> : null;
+  const flash = usePage().props.flash as { toast?: string } | undefined;
+  return flash?.toast ? <p>{flash.toast}</p> : null;
 }
 ```
 
 The page object's `flash` field is emitted only when non-empty.
+
+The payload is arbitrary, but the toast helper the examples and scaffolds ship
+(`client/src/flash-toast.ts`, bound to the `inertia:flash` DOM event) renders
+STRING values only — `flash("toast", { type, message })` still reaches
+`page.flash` and shows nothing until you write a component like the one above
+for it.
 
 ## Without the `page` step
 
@@ -2543,6 +2548,15 @@ validation and the real submit.
 The mechanism is the **runner's**, not the HTTP trigger's: a worker or cron run
 carries no such header and is unaffected, and any transport that understands a
 response envelope gets the 204/422 for free.
+
+<Note>
+  Client-side gotcha: the stock `@inertiajs/react` `form.post()` does not cancel
+  an in-flight `validate()`, which is debounced — so a form that clears itself
+  on success can have that late round trip validate the now-EMPTY data and paint
+  "Required." over a submit that just worked. Remount the form instead of
+  resetting it (a changing React `key`, as
+  `examples/inertia-react/client/src/pages/Posts/Create.tsx` does).
+</Note>
 
 ```ts src/precognition.test.ts
 import { runPrecognition } from "@blokjs/core/testing";

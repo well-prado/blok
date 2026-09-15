@@ -117,7 +117,7 @@ export const withErrors = redirectBack(request, {
   fallback: "/orders",
 });
 
-export const withToast = flash("toast", { type: "success" }).redirectBack(request);
+export const withToast = flash("toast", "Order created.").redirectBack(request);
 export const alias = back(request, { fallback: "/" });
 ```
 
@@ -125,7 +125,7 @@ export const alias = back(request, { fallback: "/" });
 | --- | --- |
 | `errors` | validation errors, persisted in the signed cookie |
 | `bag` | error-bag name — defaults to the request's `X-Inertia-Error-Bag` |
-| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form) |
+| `flash` | arbitrary flash payload (`flash("toast", …)` is the chainable form). The toast helper the examples ship renders STRING values; an object needs a component of your own |
 | `fallback` | where to go when the request carried no `Referer` |
 | `preserveFragment` | keep the URL fragment across the bounce |
 | `clearHistory` | ask the client to drop its encrypted history |
