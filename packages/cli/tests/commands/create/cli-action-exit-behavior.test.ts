@@ -98,3 +98,37 @@ describe("create workflow — same swallowed-failure shape as #888, fixed alongs
 		expect(looksLikeCrashDump(combined), `expected a clean message, got a crash dump:\n${combined}`).toBe(false);
 	});
 });
+
+describe("create project --kit — the auth starter kit's flag wiring (#1018)", () => {
+	it("advertises --kit on both commands that can install one", () => {
+		workdir = mkdtempSync(join(tmpdir(), "blok-cli-kit-help-"));
+		for (const args of [
+			["create", "project", "--help"],
+			["add", "spa", "--help"],
+		]) {
+			const help = runCli(args, workdir).stdout;
+			expect(help, `${args.join(" ")} does not advertise --kit`).toContain("--kit");
+			expect(help).toContain("auth");
+		}
+	});
+
+	/**
+	 * `--kit` without `--spa` used to be silently ignored: the project was
+	 * created, the kit was not, and nothing said so. The kit IS the SPA client
+	 * plus its server wiring, so there is nowhere to put it.
+	 */
+	it("refuses --kit without --spa instead of scaffolding a kit-less project", () => {
+		workdir = mkdtempSync(join(tmpdir(), "blok-cli-kit-no-spa-"));
+		const result = runCli(
+			["create", "project", "--name", "app", "--kit", "auth", "--triggers", "http", "--non-interactive"],
+			workdir,
+		);
+		const combined = `${result.stdout}${result.stderr}`;
+
+		expect(result.status, `expected non-zero exit, got 0. Output:\n${combined}`).not.toBe(0);
+		expect(combined).toContain("--kit needs --spa");
+		expect(looksLikeCrashDump(combined), `expected a clean message, got a crash dump:\n${combined}`).toBe(false);
+		// ...and it refuses BEFORE creating anything.
+		expect(existsSync(join(workdir, "app"))).toBe(false);
+	});
+});

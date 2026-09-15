@@ -24,7 +24,15 @@ const NAV: NavItem[] = [
 	{ href: "https://github.com/well-prado/blok", label: "GitHub", external: true },
 ];
 
-const { children, auth }: { children?: Snippet; auth?: { email?: string } } = $props();
+/**
+ * `auth` is shaped by `@blokjs/auth`'s `currentUser` node — the same shape the
+ * `--kit auth` scaffold and the plain one both publish, so this header needs no
+ * kit-specific variant.
+ */
+const { children, auth }: { children?: Snippet; auth?: { user?: { name?: string; email?: string } | null } } = $props();
+
+const user = $derived(auth?.user ?? null);
+const label = $derived(user ? (user.name ?? user.email) : undefined);
 
 /**
  * The 375px menu is a native `<details>` inside a PERSISTENT layout, so an
@@ -48,6 +56,18 @@ function closeMenu(event: MouseEvent): void {
 	{/each}
 {/snippet}
 
+<!--
+	Sign out is a POST (`<Link method="post">`, a real form submit), never an
+	`<a href>`: a GET logout is CSRF-able and gets pre-fetched. It renders only
+	when someone is signed in — the plain scaffold has no `/logout` route, and its
+	`current-user` node always answers `null`.
+-->
+{#snippet signOut()}
+	{#if user}
+		<Link href="/logout" method="post" as="button" class="blok-btn blok-btn--ghost">Sign out</Link>
+	{/if}
+{/snippet}
+
 <div class="blok-shell">
 	<header class="blok-header">
 		<div class="blok-container blok-header__inner">
@@ -60,9 +80,10 @@ function closeMenu(event: MouseEvent): void {
 			</nav>
 
 			<div class="blok-header__end">
-				{#if auth?.email}
-					<span class="blok-user">{auth.email}</span>
+				{#if label}
+					<span class="blok-user">{label}</span>
 				{/if}
+				{@render signOut()}
 				<button
 					type="button"
 					class="blok-btn blok-btn--ghost blok-btn--icon blok-theme-toggle"
@@ -118,12 +139,13 @@ function closeMenu(event: MouseEvent): void {
 						</svg>
 					</summary>
 					<div class="blok-menu__panel">
-						{#if auth?.email}
-							<p class="blok-menu__user">{auth.email}</p>
+						{#if label}
+							<p class="blok-menu__user">{label}</p>
 						{/if}
 						<nav class="blok-nav" aria-label="Primary, compact">
 							{@render navLinks()}
 						</nav>
+						{@render signOut()}
 					</div>
 				</details>
 			</div>

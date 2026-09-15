@@ -22,7 +22,7 @@ add
 	.option("--pm <value>", "Package manager: npm, yarn, pnpm, bun")
 	.option("--no-install", "Skip installing dependencies")
 	.option("--ssr", "Also scaffold the Inertia SSR entry and the build:ssr script")
-	.option("--kit <value>", "Starter kit to include (auth lands with #1018)")
+	.option("--kit <value>", "Starter kit to include: auth (sessions, sign-in/up/reset pages)")
 	.option("-l, --local <path>", "Link @blokjs/* from a local repo checkout instead of npm")
 	.action(
 		withErrorBoundary(async (options: OptionValues) => {

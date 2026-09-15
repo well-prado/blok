@@ -482,6 +482,12 @@ export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") 
   project; `blokctl create spa` for a new one), `blokctl inertia start-ssr` /
   `stop-ssr` / `check-ssr`, and `blokctl inertia doctor` (shell markers, page
   existence, secrets, `ASSET_VERSION`, `inertia.csrf`, SSR health).
+- `--kit auth` on `add spa` (or `create project --spa <fw> --kit auth`) is the
+  auth starter kit: `@blokjs/session` + `@blokjs/auth`, the ten routes written
+  as one file each under `src/workflows/auth/`, the `Auth/*` + `Dashboard`
+  pages with a `GuestLayout`, generated session/flash secrets, and
+  `inertia.session,inertia.shared,inertia.csrf` as the global chain. See
+  `docs/d/spa/starter-kit.mdx`.
 - An agent can read the page contract without reading source: the MCP tools
   `inertia.pages.list`, `inertia.page.get(component)` and
   `inertia.routes.list` (read-only, dev-only unless `BLOK_INERTIA_MCP=1`), and

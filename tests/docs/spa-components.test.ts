@@ -35,8 +35,12 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-const VUE_DIRS = ["templates/spa-vue/src", "examples/inertia-vue/client/src"];
-const SVELTE_DIRS = ["templates/spa-svelte/src", "examples/inertia-svelte/client/src"];
+const VUE_DIRS = ["templates/spa-vue/src", "templates/spa-vue/kits/auth/src", "examples/inertia-vue/client/src"];
+const SVELTE_DIRS = [
+	"templates/spa-svelte/src",
+	"templates/spa-svelte/kits/auth/src",
+	"examples/inertia-svelte/client/src",
+];
 
 function walk(dir: string, ext: string): string[] {
 	const out: string[] = [];
@@ -53,8 +57,9 @@ const svelteFiles = SVELTE_DIRS.flatMap((dir) => walk(path.join(ROOT, dir), ".sv
 
 describe("every Vue component compiles", () => {
 	it("finds the components to compile", () => {
-		// 2 clients × (AppLayout, BlokLogo, NavLinks) + their pages.
-		expect(vueFiles.length).toBeGreaterThanOrEqual(8);
+		// 2 clients × (AppLayout, BlokLogo, NavLinks) + their pages, plus the
+		// auth kit's GuestLayout and five pages (#1018).
+		expect(vueFiles.length).toBeGreaterThanOrEqual(14);
 	});
 
 	for (const file of vueFiles) {

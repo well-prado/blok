@@ -46,9 +46,36 @@ function navLinks(url: string): ReactNode {
 	);
 }
 
+/**
+ * The signed-in user, as `@blokjs/auth`'s `currentUser` node shapes it — the
+ * same shape the `--kit auth` scaffold and the plain one both publish, so this
+ * header needs no kit-specific variant.
+ */
+interface AuthProp {
+	user?: { name?: string; email?: string } | null;
+}
+
+/**
+ * Sign out is a POST, so it is a `<Link method="post">` (a real form submit),
+ * never an `<a href>`: a GET logout is CSRF-able and gets pre-fetched by
+ * browsers and link scanners.
+ *
+ * It renders only when someone is signed in — the plain scaffold has no
+ * `/logout` route, and its `current-user` node always answers `null`.
+ */
+function SignOut({ user }: { user: AuthProp["user"] }): ReactNode {
+	if (!user) return null;
+	return (
+		<Link href="/logout" method="post" as="button" className="blok-btn blok-btn--ghost">
+			Sign out
+		</Link>
+	);
+}
+
 export function AppLayout({ children }: { children: ReactNode }) {
-	const { url, props } = usePage<{ auth?: { email?: string } }>();
-	const email = props.auth?.email;
+	const { url, props } = usePage<{ auth?: AuthProp }>();
+	const user = props.auth?.user ?? null;
+	const email = user === null ? undefined : (user.name ?? user.email);
 
 	return (
 		<div className="blok-shell">
@@ -64,6 +91,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
 					<div className="blok-header__end">
 						{email === undefined ? null : <span className="blok-user">{email}</span>}
+						<SignOut user={user} />
 						<button
 							type="button"
 							className="blok-btn blok-btn--ghost blok-btn--icon blok-theme-toggle"
@@ -93,6 +121,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 								<nav className="blok-nav" aria-label="Primary, compact">
 									{navLinks(url)}
 								</nav>
+								<SignOut user={user} />
 							</div>
 						</details>
 					</div>
