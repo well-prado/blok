@@ -2,28 +2,25 @@
  * Issue #1054 review, B2 — a static gate for the Vue and Svelte clients.
  *
  * `examples/inertia-{vue,svelte}` and `templates/spa-{vue,svelte}` had NO
- * static gate at all: `tsc --noEmit` ignores `.vue`/`.svelte`, Biome parses
- * only their script blocks, and the examples' Vite plugins
- * (`@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`) are not hoisted in
- * this monorepo — adding them would rewrite `bun.lock`, which the SPA work is
- * not allowed to do.
+ * static gate at all: `tsc --noEmit` ignores `.vue`/`.svelte`, and Biome parses
+ * only their script blocks.
  *
- * What IS already installed, transitively and with no lockfile change, is each
- * framework's own COMPILER: `@vue/compiler-sfc` (a dependency of `vue`) and
- * `svelte/compiler` (part of `svelte`). Compiling every component with them
- * catches exactly the class of defect that reached `main` in the first round:
- * a template that does not parse, a snippet with the wrong shape, a script
- * block terminated early by a literal `</script>` inside a string.
+ * This file compiles every component with the framework's own COMPILER —
+ * `@vue/compiler-sfc` (a dependency of `vue`) and `svelte/compiler` (part of
+ * `svelte`) — which catches exactly the class of defect that reached `main` in
+ * the first round: a template that does not parse, a snippet with the wrong
+ * shape, a script block terminated early by a literal `</script>` inside a
+ * string. It runs over the TEMPLATES too, which no `vite build` in this repo
+ * covers.
  *
- * Both compilers resolve from the root install — `vue` and `svelte` are real
- * devDependencies of `@blokjs/inertia-client` — so this file adds nothing to
- * `tests/docs/package.json` and nothing to `bun.lock`.
+ * Since #1061 the two Vite plugins ARE hoisted, so `inertia-snippets.test.ts`
+ * additionally builds `examples/inertia-{vue,svelte}` for real — that is what
+ * catches a component the plugin chain rejects (it caught the Vue example's
+ * `defineProps<PageProps<…>>()`, which `@vue/compiler-sfc` cannot resolve).
  *
- * REMAINING GAP, stated plainly: this is a COMPILE gate, not a TYPE gate.
- * `vue-tsc` and `svelte-check` are not installed and cannot be installed here,
- * so a type error inside a `.vue`/`.svelte` file is still only caught by a real
- * `vite build` (the scaffold smoke does that for the templates). Closing it
- * needs the plugins hoisted: https://github.com/well-prado/blok/issues/1061.
+ * REMAINING GAP, stated plainly: compiling and building are not TYPE checking.
+ * `vue-tsc` and `svelte-check` are still not installed, so a type error inside
+ * a `.vue`/`.svelte` body is caught by neither this file nor the build.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";

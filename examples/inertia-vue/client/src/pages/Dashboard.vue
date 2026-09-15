@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import type { PageProps } from "@blokjs/inertia";
-import { Deferred, Head, InfiniteScroll } from "@inertiajs/vue3";
+import { Deferred, Head, InfiniteScroll, usePage } from "@inertiajs/vue3";
 import { computed } from "vue";
 import type { Dashboard } from "../../../src/workflows/dashboard.js";
 import AppLayout from "../components/AppLayout.vue";
 
-// The page contract types the stock macro — no Blok wrapper component.
-const props = defineProps<PageProps<typeof Dashboard>>();
+// The page contract types the stock `usePage`, not `defineProps`: @vue/compiler-sfc
+// resolves prop TYPES with its own resolver, which cannot follow the generic
+// indexed access inside `PageProps`, so `defineProps<PageProps<…>>()` fails the
+// SFC compile (#1061). `usePage` is plain TypeScript — same contract, no macro.
+// Read through `page.props` at USE time: a deferred prop arrives while this
+// component stays mounted, and a captured `const props = page.props` would not
+// see it.
+const page = usePage<PageProps<typeof Dashboard>>();
 
 // Inertia keeps the layout MOUNTED across visits; only this page swaps.
 defineOptions({ layout: AppLayout });
 
-const orderValue = computed(() => props.orders.reduce((sum, order) => sum + order.total, 0));
+const orderValue = computed(() => page.props.orders.reduce((sum, order) => sum + order.total, 0));
 </script>
 
 <template>
@@ -39,13 +45,13 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 					<p class="blok-stat__value">—</p>
 					<p class="blok-stat__delta">stats node unavailable</p>
 				</template>
-				<p class="blok-stat__value">${{ props.stats?.revenue }}</p>
+				<p class="blok-stat__value">${{ page.props.stats?.revenue }}</p>
 				<p class="blok-stat__delta blok-stat__delta--up">defer() · fetched after the first paint</p>
 			</Deferred>
 		</div>
 		<div class="blok-stat">
 			<p class="blok-stat__label">Orders</p>
-			<p class="blok-stat__value">{{ props.orders.length }}</p>
+			<p class="blok-stat__value">{{ page.props.orders.length }}</p>
 			<p class="blok-stat__delta">regular prop</p>
 		</div>
 		<div class="blok-stat">
@@ -55,8 +61,8 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 		</div>
 		<div class="blok-stat">
 			<p class="blok-stat__label">Posts</p>
-			<p class="blok-stat__value">{{ props.posts.total }}</p>
-			<p class="blok-stat__delta">scroll() · {{ props.posts.perPage }} per page</p>
+			<p class="blok-stat__value">{{ page.props.posts.total }}</p>
+			<p class="blok-stat__delta">scroll() · {{ page.props.posts.perPage }} per page</p>
 		</div>
 	</div>
 
@@ -75,7 +81,7 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 					</tr>
 				</thead>
 				<tbody>
-					<tr v-for="order in props.orders" :key="order.id">
+					<tr v-for="order in page.props.orders" :key="order.id">
 						<td>
 							<code>{{ order.id }}</code>
 						</td>
@@ -94,7 +100,7 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 		</div>
 		<InfiniteScroll data="posts">
 			<ul class="blok-feed">
-				<li v-for="post in props.posts.data" :key="post.id">
+				<li v-for="post in page.props.posts.data" :key="post.id">
 					<span>{{ post.title }}</span>
 					<span class="blok-feed__meta">{{ post.id }}</span>
 				</li>
@@ -103,7 +109,7 @@ const orderValue = computed(() => props.orders.reduce((sum, order) => sum + orde
 				<p class="blok-end-of-list"><span class="blok-spinner" /> Loading more posts…</p>
 			</template>
 			<template #next="{ hasMore }">
-				<p v-if="!hasMore" class="blok-end-of-list">That is all {{ props.posts.total }} posts.</p>
+				<p v-if="!hasMore" class="blok-end-of-list">That is all {{ page.props.posts.total }} posts.</p>
 			</template>
 		</InfiniteScroll>
 	</div>

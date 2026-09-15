@@ -21,7 +21,7 @@
 	},
 	"devDependencies": {
 		"@inertiajs/vite": "^3.7.1",
-		"@sveltejs/vite-plugin-svelte": "^6.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.3.0",
 		"@types/node": "^22.15.21",
 		"typescript": "^5.8.3",
 		"vite": "^8.0.0",
