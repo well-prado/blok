@@ -559,7 +559,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		const gitignoreLine = "\n# Blok Studio trace data (managed by blokctl)\n.blok/\n";
 		if (fsExtra.existsSync(gitignorePath)) {
 			const existing = fsExtra.readFileSync(gitignorePath, "utf8");
-			if (!existing.includes(".blok/")) {
+			// A LINE that is exactly `.blok/`, not the substring: the repo's own
+			// .gitignore (which this file is copied from) already carries
+			// `.blok/runtimes/**/bin/`, so a substring test matched and the rule was
+			// silently never appended — which is how `.blok/auth.db` and
+			// `.blok/sessions.db` became committable (#1018 security review M1).
+			if (!/^\.blok\/\s*$/m.test(existing)) {
 				fsExtra.appendFileSync(gitignorePath, gitignoreLine);
 			}
 		} else {

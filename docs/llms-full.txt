@@ -3514,8 +3514,10 @@ on `/dashboard`, sign out — with **zero edits**. `--framework vue` and
 
 On disk:
 
-- `src/workflows/auth/*.ts` — one file per route. Each one routes a workflow
-  from `@blokjs/auth/examples`; paste the workflow's source in to make it yours.
+- `src/workflows/auth/*.ts` — one file per route, written as real
+  `workflow()` declarations in YOUR project. Change a redirect, add a field,
+  delete a route: it is ordinary code, and `blokctl gen app-types` indexes all
+  of it. Only the nodes and schemas come from `@blokjs/auth`.
 - `client/src/pages/Auth/*` and `client/src/pages/Dashboard.*` — the components,
   plus a `GuestLayout` and the kit's own `styles/auth.css`.
 - `src/Workflows.ts` — one spread registers `inertia.session`,
@@ -3523,9 +3525,14 @@ On disk:
 - `src/Nodes.ts` — `SESSION_NODES` and `AUTH_NODES` (npm packages are registered
   explicitly; only `src/nodes/**` is auto-discovered).
 - `.env.local` — a generated `BLOK_SESSION_SECRET` and `BLOK_FLASH_SECRET`, and
-  `BLOK_GLOBAL_MIDDLEWARE=inertia.session,inertia.shared,inertia.csrf`. The
-  order matters: the session has to be loaded before the `auth` shared prop is
-  resolved. `.env.example` gets the same block with the secrets blank.
+  `BLOK_GLOBAL_MIDDLEWARE=inertia.session,inertia.shared,inertia.csrf,inertia.encryptHistory`.
+  The order matters: the session has to be loaded before the `auth` shared prop
+  is resolved, and `inertia.encryptHistory` is what gives sign-out's
+  `clearHistory` something to protect. `.env.example` gets the same block with
+  the secrets blank.
+
+`blokctl check` fails when either secret is missing or too short — before the
+first request, not with a 500 in production.
 
 Every page carries an `auth` prop:
 
@@ -3586,7 +3593,12 @@ const users: UserStore = {
   },
 };
 
-configureAuth({ users, redirectAfterLogin: "/dashboard" });
+configureAuth({
+  users,
+  redirectAfterLogin: "/dashboard",
+  // Only when a reverse proxy you control is in front — see below.
+  trustProxy: true,
+});
 ```
 
 Drizzle, Prisma or a hand-rolled repository all fit the same six methods — none
@@ -3629,11 +3641,31 @@ can install on their own:
   [validation](/d/spa/validation) and
   [history encryption](/d/spa/history-encryption).
 
-Security properties worth knowing: sign-in answers the same message (and costs
-the same wall-clock time) for an unknown address as for a wrong password;
-`forgot-password` answers the same way whether or not the address exists;
-sign-out clears the client's history and rotates the CSRF token; and no
-password, hash, session id or reset token is ever a step output.
+Security properties worth knowing:
+
+- Sign-in answers the same message — and costs the same wall-clock time — for an
+  unknown address as for a wrong password, and `forgot-password` answers the
+  same way whether or not the address exists. **Registration is the one
+  exception**: "that email address is already registered" is what makes the form
+  usable, and it is what Laravel does.
+- The session cookie is `HttpOnly`, `SameSite=Lax`, signed, and `Secure`
+  whenever the request arrived over HTTPS (`X-Forwarded-Proto` behind a
+  terminator). A new id is minted on sign-in and sign-up, so a cookie planted
+  before is worthless after.
+- **"Remember me"** keeps the cookie for the session window; without it the
+  cookie dies with the browser.
+- Guarded pages answer `Cache-Control: no-store` and `Vary: Cookie`, so the
+  browser will not re-render one from history after sign-out, and every page is
+  history-encrypted; sign-out clears that history and rotates the CSRF token.
+- Login throttling is per IP + email, but a **forwarding header is only trusted
+  when you say so**: set `BLOK_TRUST_PROXY=1` (or
+  `configureAuth({ trustProxy: true })`) when a reverse proxy you control is in
+  front. Without it, `X-Forwarded-For` is ignored — anyone can send that header,
+  and trusting it would give an attacker a fresh throttle bucket per attempt.
+- No password, hash, session id or reset token is ever a step output, and the
+  trace store redacts `password`, `passwordConfirmation`, `cookies` and friends
+  by word, so none of them reaches `.blok/trace.db` either.
+- The kit's SQLite files (`.blok/auth.db`, `.blok/sessions.db`) are gitignored.
 
 ## Next
 

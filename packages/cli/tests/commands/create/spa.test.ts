@@ -14,10 +14,11 @@ import fsExtra from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { generateSharedNodesFile, generateSharedWorkflowsFile } from "../../../src/commands/create/project.js";
 import {
-	AUTH_NODES_IMPORT_BLOCK,
+	AUTH_NODES_IMPORT,
 	AUTH_ROUTE_FILES,
 	AUTH_WORKFLOWS_ENTRY_BLOCK,
 	AUTH_WORKFLOWS_IMPORT_BLOCK,
+	SESSION_NODES_IMPORT,
 	STATIC_DIR_ENV,
 	WORKFLOWS_ENTRY_BLOCK,
 	WORKFLOWS_IMPORT_BLOCK,
@@ -375,7 +376,10 @@ describe("blokctl create spa / add spa (#999)", () => {
 		// The kit's nodes are npm packages: `discoverNodes()` cannot see them, so
 		// without an explicit registration every auth step fails at runtime.
 		const nodes = fsExtra.readFileSync(path.join(workDir, "src", "Nodes.ts"), "utf8");
-		expect(nodes).toContain(AUTH_NODES_IMPORT_BLOCK);
+		// Each import lands at its own SORTED position, so they are asserted
+		// separately rather than as one adjacent block (see k8).
+		expect(nodes).toContain(AUTH_NODES_IMPORT);
+		expect(nodes).toContain(SESSION_NODES_IMPORT);
 		expect(nodes).toContain("...(Object.values(SESSION_NODES) as unknown as NodeBase[])");
 		expect(nodes).toContain("...(Object.values(AUTH_NODES) as unknown as NodeBase[])");
 		// The local-node discovery it splices into must survive.
@@ -388,8 +392,24 @@ describe("blokctl create spa / add spa (#999)", () => {
 		for (const name of Object.keys(AUTH_ROUTE_FILES)) {
 			expect(files, `src/workflows/auth/${name} missing`).toContain(`src/workflows/auth/${name}`);
 		}
-		expect(fsExtra.readFileSync(path.join(workDir, "src/workflows/auth/login.ts"), "utf8")).toContain(
-			'import { loginWorkflow } from "@blokjs/auth/examples";',
+		// #1018 security review M4 — the routes are the USER's files: real
+		// `workflow()` declarations with a literal name, not re-export shims.
+		// `blokctl gen app-types` parses that literal statically; the shims were
+		// skipped, and every auth route vanished from the typed client index.
+		for (const [name, source] of Object.entries(AUTH_ROUTE_FILES)) {
+			expect(source, `${name} declares no literal workflow name`).toMatch(/workflow\(\s*"auth\.[A-Za-z]+"/);
+			expect(source, `${name} is a re-export shim`).not.toContain("@blokjs/auth/examples");
+		}
+		const login = fsExtra.readFileSync(path.join(workDir, "src/workflows/auth/login.ts"), "utf8");
+		expect(login).toContain('workflow("auth.login"');
+		expect(login).toContain('trigger: http.post("/login")');
+		// The validation → branch → bounce shape, editable in place.
+		expect(login).toContain('step("validate", validate, { schema: LoginSchema, data: req.body })');
+		expect(login).toContain("bounceNode");
+		// The page contracts live in the workflow module that renders them, which
+		// is what makes them visible to the generator's scan.
+		expect(fsExtra.readFileSync(path.join(workDir, "src/workflows/auth/dashboard.ts"), "utf8")).toContain(
+			'definePage("Dashboard"',
 		);
 
 		// The placeholder current-user node would only shadow @blokjs/auth's.
@@ -411,7 +431,11 @@ describe("blokctl create spa / add spa (#999)", () => {
 		expect(new Set(secrets).size).toBe(2);
 		// `inertia.session` runs FIRST — `inertia.shared`'s auth step reads what it
 		// puts in state.
-		expect(envLocal).toContain("BLOK_GLOBAL_MIDDLEWARE=inertia.session,inertia.shared,inertia.csrf");
+		// `inertia.encryptHistory` LAST: without it the client's history is never
+		// encrypted and logout's clearHistory rotates a key protecting nothing.
+		expect(envLocal).toContain(
+			"BLOK_GLOBAL_MIDDLEWARE=inertia.session,inertia.shared,inertia.csrf,inertia.encryptHistory",
+		);
 
 		// The committed example keeps the shape and neither secret.
 		const example = fsExtra.readFileSync(path.join(workDir, ".env.example"), "utf8");
@@ -471,5 +495,37 @@ describe("blokctl create spa / add spa (#999)", () => {
 		// Sign out is a POST, never a GET link: a GET logout is CSRF-able and gets
 		// pre-fetched.
 		expect(layout).toContain('href="/logout" method="post"');
+	});
+
+	it("k7. every kit route file keeps its imports in Biome's sorted order", () => {
+		for (const [name, source] of Object.entries(AUTH_ROUTE_FILES)) {
+			const imports = [...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1] as string);
+			expect([...imports].sort(), `${name} has unsorted imports — the scaffold fails its own lint`).toEqual(imports);
+		}
+	});
+
+	it("k8. the src/Nodes.ts splice lands at the sorted import positions", async () => {
+		fakeBlokProject(workDir);
+		await addSpa({ framework: "react", install: false, kit: "auth" }, "0.0.0-test", REPO_ROOT);
+
+		const nodes = fsExtra.readFileSync(path.join(workDir, "src", "Nodes.ts"), "utf8");
+		const position = (specifier: string): number => nodes.indexOf(`from "${specifier}"`);
+		// Biome sorts imports and treats an unsorted block as an error (#1018
+		// security review L2): api-call < auth < helpers … runner < shared < session.
+		expect(position("@blokjs/api-call")).toBeLessThan(position("@blokjs/auth"));
+		expect(position("@blokjs/auth")).toBeLessThan(position("@blokjs/if-else"));
+		expect(position("@blokjs/shared")).toBeLessThan(position("@blokjs/session"));
+	});
+
+	it("k9. the kit's databases are gitignored — they hold password hashes and live sessions", async () => {
+		fakeBlokProject(workDir);
+		fsExtra.writeFileSync(path.join(workDir, ".gitignore"), "node_modules\n");
+		await addSpa({ framework: "react", install: false, kit: "auth" }, "0.0.0-test", REPO_ROOT);
+
+		const ignored = fsExtra.readFileSync(path.join(workDir, ".gitignore"), "utf8");
+		expect(ignored).toContain(".blok/*.db");
+		expect(ignored).toContain(".blok/*.db-wal");
+		// Idempotent: a second look must not stack the block up again.
+		expect(ignored.match(/\.blok\/\*\.db$/gm)?.length).toBe(1);
 	});
 });

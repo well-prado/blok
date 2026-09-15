@@ -205,6 +205,7 @@ describe("@blokjs/auth — the throttle only trusts a proxy when told to", () =>
 		try {
 			expect(throttleKey({ "x-forwarded-for": "203.0.113.7" }, EMAIL)).toBe("203.0.113.7|ada@example.com");
 		} finally {
+			// biome-ignore lint/performance/noDelete: the var must be ABSENT again, not the string "undefined".
 			delete process.env.BLOK_TRUST_PROXY;
 		}
 	});
@@ -216,6 +217,7 @@ describe("@blokjs/auth — the throttle only trusts a proxy when told to", () =>
 				"direct|ada@example.com",
 			);
 		} finally {
+			// biome-ignore lint/performance/noDelete: the var must be ABSENT again, not the string "undefined".
 			delete process.env.BLOK_TRUST_PROXY;
 		}
 	});

@@ -328,6 +328,17 @@ auth_kit() {
       && grep -q '"auth.logout"' "$project/client/src/blok-pages.d.ts" \
       && ok "kit: gen app-types kept the auth pages and routes ($fw)" \
       || fail "kit: gen app-types dropped the auth pages/routes ($fw)"
+    # The routes are the user's own `workflow()` files, so the typed client
+    # index sees all of them: 10 auth routes + home + the http scaffold's
+    # countries example, and NOTHING skipped.
+    if grep -qE "Wrote client/src/blok-app.d.ts \(12 workflow\(s\)\)" "$WORKDIR/kit-gentypes-$fw.log"; then
+      ok "kit: gen app-types indexed all 12 workflows ($fw)"
+    else
+      fail "kit: gen app-types did not index 12 workflows ($fw): $(grep -o 'Wrote client/src/blok-app.d.ts ([^)]*)' "$WORKDIR/kit-gentypes-$fw.log" | head -1)"
+    fi
+    grep -q "Skipped" "$WORKDIR/kit-gentypes-$fw.log" \
+      && fail "kit: gen app-types SKIPPED a workflow ($fw): $(grep -o 'Skipped.*' "$WORKDIR/kit-gentypes-$fw.log" | head -1)" \
+      || ok "kit: gen app-types skipped nothing ($fw)"
   else
     fail "kit: gen app-types — tail:"; tail -20 "$WORKDIR/kit-gentypes-$fw.log"
   fi
@@ -391,6 +402,32 @@ auth_kit() {
   echo "$dash" | grep -q '"component":"Dashboard"' && echo "$dash" | grep -q "$email" \
     && ok "kit: GET /dashboard is the Dashboard page carrying auth.user ($fw)" \
     || fail "kit: /dashboard is not the signed-in Dashboard ($fw): $(echo "$dash" | head -c 200)"
+
+  # 3a — the page object carries encryptHistory, or logout's clearHistory
+  #      rotates a key that was protecting nothing (#1018 review B3).
+  echo "$dash" | grep -q '"encryptHistory":true' \
+    && ok "kit: the signed-in page object carries encryptHistory ($fw)" \
+    || fail "kit: no encryptHistory on the signed-in page ($fw)"
+
+  # 3b — and it is never cached: a shared cache must not store it, and the
+  #      browser must not re-render it from history after sign-out (review H1).
+  local dashHeaders; dashHeaders="$(curl -fsS -b "$jar" -D - -o /dev/null "$base/dashboard")"
+  echo "$dashHeaders" | grep -qi "^cache-control:.*no-store" \
+    && ok "kit: the guarded page answers no-store ($fw)" \
+    || fail "kit: /dashboard is cacheable ($fw): $(echo "$dashHeaders" | grep -i cache-control | head -1)"
+  echo "$dashHeaders" | grep -qi "^vary:.*cookie" \
+    && ok "kit: the guarded page varies on Cookie ($fw)" \
+    || fail "kit: /dashboard does not vary on Cookie ($fw)"
+
+  # 3c — the CSRF guard, for real: cookie present, header absent. Every other
+  #       POST in this lane carries a valid token, so without this the lane
+  #       proves the token is ACCEPTED, never that its absence is refused.
+  local noCsrf; noCsrf="$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' \
+    -X POST "$base/login" -H 'content-type: application/json' \
+    -d "$(printf '{"email":"%s","%s":"%s"}' "$email" "$pw_field" "$pw")")"
+  [ "$noCsrf" = "303" ] \
+    && ok "kit: a POST without the CSRF header is bounced ($fw)" \
+    || fail "kit: a POST without the CSRF header answered $noCsrf ($fw)"
 
   # 4 — wrong password bounces back with the error on the email field.
   token="$(awk '/XSRF-TOKEN/ {print $7}' "$jar" | tail -1)"

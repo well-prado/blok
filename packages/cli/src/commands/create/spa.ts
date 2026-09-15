@@ -29,6 +29,7 @@ import fsExtra from "fs-extra";
 import color from "picocolors";
 import { isNonInteractive } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
+import { AUTH_ROUTE_FILES } from "./auth-kit-workflows.js";
 import { BLOKJS_DEP_RANGE } from "./project.js";
 
 const exec = util.promisify(child_process.exec);
@@ -82,6 +83,8 @@ export function resolveFramework(value: string): SpaFramework {
 	}
 	return framework as SpaFramework;
 }
+
+export { AUTH_ROUTE_FILES } from "./auth-kit-workflows.js";
 
 /** Starter kits `--kit` accepts. One so far: the auth slice (#1018). */
 export const SPA_KITS = ["auth"] as const;
@@ -343,7 +346,13 @@ export const WORKFLOWS_ENTRY_BLOCK = `\t// Inertia SPA (blokctl add spa). Both r
  * block with the values blank.
  */
 export function envBlock(flashSecret: string, kit?: SpaKit, sessionSecret = ""): string {
-	const chain = kit === "auth" ? "inertia.session,inertia.shared,inertia.csrf" : "inertia.shared,inertia.csrf";
+	// `inertia.encryptHistory` is what makes logout's `clearHistory` mean
+	// anything: without it nothing in the client's history is encrypted and the
+	// key rotation on sign-out protects nothing (#1018 security review B3).
+	const chain =
+		kit === "auth"
+			? "inertia.session,inertia.shared,inertia.csrf,inertia.encryptHistory"
+			: "inertia.shared,inertia.csrf";
 	const base = `
 # --- Inertia SPA (blokctl add spa) ---
 # Root of the built client. Mounts /assets/* and publishes ASSET_VERSION (#1000).
@@ -363,6 +372,11 @@ BLOK_SESSION_SECRET=${sessionSecret}
 # share sessions across processes.
 # BLOK_SESSION_SQLITE_PATH=.blok/sessions.db
 # BLOK_AUTH_SQLITE_PATH=.blok/auth.db
+# Set this ONLY when a reverse proxy you control is in front: it lets
+# X-Forwarded-For name the client for login throttling. Anyone can send that
+# header, so trusting it without a proxy gives an attacker a fresh throttle
+# bucket per attempt.
+# BLOK_TRUST_PROXY=1
 `;
 }
 
@@ -424,10 +438,15 @@ export function patchWorkflowsSource(source: string, kit?: SpaKit): string {
 	return imported.replace(openMarker, `${openMarker}${entryBlock}`);
 }
 
-/** Inserted into `src/Nodes.ts` by `--kit auth` — exported so the test asserts the EXACT text. */
-export const AUTH_NODES_IMPORT_BLOCK = `import { AUTH_NODES } from "@blokjs/auth";
-import { SESSION_NODES } from "@blokjs/session";
-`;
+/**
+ * The two imports `--kit auth` splices into `src/Nodes.ts`, each at its
+ * sorted position (`@blokjs/auth` before `@blokjs/if-else`, `@blokjs/session`
+ * after `@blokjs/shared`). Exported so the test asserts the EXACT text.
+ */
+export const AUTH_NODES_IMPORT = `import { AUTH_NODES } from "@blokjs/auth";\n`;
+export const SESSION_NODES_IMPORT = `import { SESSION_NODES } from "@blokjs/session";\n`;
+/** Both lines, for a test that only cares that the registrations are there. */
+export const AUTH_NODES_IMPORT_BLOCK = `${AUTH_NODES_IMPORT}${SESSION_NODES_IMPORT}`;
 
 /** The kit's node registrations, spliced into the loop `src/Nodes.ts` builds its map with. */
 export const AUTH_NODES_ENTRY =
@@ -444,17 +463,44 @@ export const AUTH_NODES_ENTRY =
 export function patchNodesSource(source: string): string {
 	if (source.includes("AUTH_NODES")) return source;
 	const marker = ", ...local]";
-	if (!source.includes(marker) || !source.includes('import type { NodeBase } from "@blokjs/shared";')) {
+	const anchors =
+		source.includes(marker) &&
+		source.includes('import IfElse from "@blokjs/if-else";') &&
+		source.includes('import type { NodeBase } from "@blokjs/shared";');
+	if (!anchors) {
 		throw new Error(
 			"Could not find the node registry in src/Nodes.ts — register @blokjs/session's and @blokjs/auth's nodes by hand.",
 		);
 	}
+	// Biome sorts imports: `@blokjs/auth` goes after `@blokjs/api-call` and
+	// before `@blokjs/helpers`, and `@blokjs/session` after `@blokjs/runner` —
+	// so each line is spliced at its sorted position rather than appended
+	// (#1018 security review L2).
 	return source
+		.replace('import IfElse from "@blokjs/if-else";\n', `${AUTH_NODES_IMPORT}import IfElse from "@blokjs/if-else";\n`)
 		.replace(
 			'import type { NodeBase } from "@blokjs/shared";\n',
-			`import type { NodeBase } from "@blokjs/shared";\n${AUTH_NODES_IMPORT_BLOCK}`,
+			`import type { NodeBase } from "@blokjs/shared";\n${SESSION_NODES_IMPORT}`,
 		)
 		.replace(marker, `, ${AUTH_NODES_ENTRY}...local]`);
+}
+
+/** The `.gitignore` rule for the kit's SQLite files — exported so the test asserts it. */
+export const KIT_GITIGNORE_BLOCK = `
+# Auth starter kit: the user table and live sessions (blokctl add spa --kit auth)
+.blok/*.db
+.blok/*.db-shm
+.blok/*.db-wal
+`;
+
+/** Add {@link KIT_GITIGNORE_BLOCK} to `file`, once. */
+function ignoreKitDatabases(file: string): void {
+	const current = fsExtra.existsSync(file) ? fsExtra.readFileSync(file, "utf8") : "";
+	if (current.includes(".blok/*.db")) return;
+	fsExtra.writeFileSync(
+		file,
+		current === "" || current.endsWith("\n") ? current + KIT_GITIGNORE_BLOCK : `${current}\n${KIT_GITIGNORE_BLOCK}`,
+	);
 }
 
 /** Append a block to a dotenv file, creating it when absent. */
@@ -556,6 +602,12 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 	fsExtra.writeFileSync(workflowsPath, patchWorkflowsSource(fsExtra.readFileSync(workflowsPath, "utf8"), kit));
 
 	if (kit === "auth") {
+		// The user table and the session table are SQLite files under `.blok/`,
+		// which the scaffold ignores wholesale — but a project that decides to
+		// track `.blok/` (its `config.json` is a reasonable thing to commit) must
+		// not thereby commit password hashes and live session ids
+		// (#1018 security review M1).
+		ignoreKitDatabases(path.join(projectDir, ".gitignore"));
 		// The kit's nodes are npm packages — `discoverNodes()` only finds files
 		// under `src/nodes/`, so they are registered explicitly.
 		const nodesPath = path.join(projectDir, "src", "Nodes.ts");
@@ -601,140 +653,6 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 // =============================================================================
 // Generated server-side sources
 // =============================================================================
-
-/**
- * The `--kit auth` route files (#1018), keyed by filename under
- * `src/workflows/auth/`.
- *
- * One file per route because that is what both consumers need: the HTTP
- * trigger's TS auto-router routes a file's DEFAULT export, and
- * `blokctl gen app-types` imports these files to read the `definePage()`
- * contracts (a route registered from `Workflows.ts` instead would be routed
- * but invisible to the generator, and the client's page types would vanish on
- * the next `gen:types`).
- */
-export const AUTH_ROUTE_FILES: Record<string, string> = {
-	"login-page.ts": `// \`GET /login\` — the sign-in page.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { loginPageWorkflow } from "@blokjs/auth/examples";
-
-export default loginPageWorkflow();
-`,
-	"login.ts": `// \`POST /login\` — the sign-in form.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { loginWorkflow } from "@blokjs/auth/examples";
-
-export default loginWorkflow();
-`,
-	"logout.ts": `// \`POST /logout\` — sign out: destroy the session, clear history, rotate CSRF.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { logoutWorkflow } from "@blokjs/auth/examples";
-
-export default logoutWorkflow();
-`,
-	"register-page.ts": `// \`GET /register\` — the sign-up page.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { registerPageWorkflow } from "@blokjs/auth/examples";
-
-export default registerPageWorkflow();
-`,
-	"register.ts": `// \`POST /register\` — the sign-up form.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { registerWorkflow } from "@blokjs/auth/examples";
-
-export default registerWorkflow();
-`,
-	"forgot-password-page.ts": `// \`GET /forgot-password\` — ask for a reset link.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { forgotPasswordPageWorkflow } from "@blokjs/auth/examples";
-
-export default forgotPasswordPageWorkflow();
-`,
-	"forgot-password.ts": `// \`POST /forgot-password\` — issue a single-use reset link.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { forgotPasswordWorkflow } from "@blokjs/auth/examples";
-
-export default forgotPasswordWorkflow();
-`,
-	"reset-password-page.ts": `// \`GET /reset-password/:token\` — the reset form, with the token as a prop.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { resetPasswordPageWorkflow } from "@blokjs/auth/examples";
-
-export default resetPasswordPageWorkflow();
-`,
-	"reset-password.ts": `// \`POST /reset-password/:token\` — spend the token, set the password.
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { resetPasswordWorkflow } from "@blokjs/auth/examples";
-
-export default resetPasswordWorkflow();
-`,
-	"dashboard.ts": `// \`GET /dashboard\` — the guarded landing page (inertia.auth).
-//
-// The workflow itself lives in \`@blokjs/auth/examples\`, so it stays the one
-// the kit's tests drive. THIS file is what routes it: the HTTP trigger
-// auto-routes each file's default export under \`src/workflows/\`, and
-// \`blokctl gen app-types\` reads the page contract and the route table from
-// here. Make it yours by pasting the workflow's source in place of the
-// import — it is a dozen lines of the typed-handle DSL.
-import { dashboardWorkflow } from "@blokjs/auth/examples";
-
-export default dashboardWorkflow();
-`,
-};
 
 const CURRENT_USER_NODE = `import { defineNode } from "@blokjs/core";
 import { z } from "zod";

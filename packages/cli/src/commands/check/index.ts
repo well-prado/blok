@@ -2,6 +2,7 @@ import type { OptionValues } from "commander";
 import color from "picocolors";
 import { readProjectConfig, validateProjectRuntimes } from "../../services/runtime-setup.js";
 import { checkWorkflowRefs, formatRefReport, loadCatalog } from "./refs.js";
+import { checkSecrets, formatSecretReport } from "./secrets.js";
 
 /**
  * blokctl check — Validate runtime version requirements AND workflow
@@ -38,14 +39,24 @@ export async function checkProject(opts: OptionValues) {
 		catalogError = (err as Error).message;
 	}
 	const refs = await checkWorkflowRefs(currentPath, catalog);
+	// #1018 — the secrets the project's own dependencies require. Neither has a
+	// default and neither can get one, so a missing value must fail the check
+	// rather than the first production request.
+	const secrets = checkSecrets(currentPath);
+	const secretFailures = secrets.filter((secret) => secret.status !== "ok");
 
 	if (json) {
 		console.log(
 			JSON.stringify(
 				{
-					ok: runtimeFailures.length === 0 && refs.errorCount === 0 && catalogError === undefined,
+					ok:
+						runtimeFailures.length === 0 &&
+						refs.errorCount === 0 &&
+						catalogError === undefined &&
+						secretFailures.length === 0,
 					runtimes: results,
 					catalogError,
+					secrets,
 					workflowRefs: {
 						workflowCount: refs.workflowCount,
 						errorCount: refs.errorCount,
@@ -59,7 +70,7 @@ export async function checkProject(opts: OptionValues) {
 				2,
 			),
 		);
-		const jsonFailures = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0);
+		const jsonFailures = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0) + secretFailures.length;
 		if (jsonFailures > 0) {
 			throw new Error(`${jsonFailures} check${jsonFailures > 1 ? "s" : ""} failed.`);
 		}
@@ -96,7 +107,16 @@ export async function checkProject(opts: OptionValues) {
 	console.log(formatRefReport(refs, currentPath));
 	console.log();
 
-	const failed = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0);
+	if (secrets.length > 0) {
+		console.log(`  ${color.bold("Secrets")}`);
+		console.log("  ───────\n");
+		for (const line of formatSecretReport(secrets)) {
+			console.log(line.startsWith("    ✓") ? color.green(line) : color.red(line));
+		}
+		console.log();
+	}
+
+	const failed = runtimeFailures.length + refs.errorCount + (catalogError ? 1 : 0) + secretFailures.length;
 	if (failed > 0) {
 		throw new Error(`${failed} check${failed > 1 ? "s" : ""} failed.`);
 	}
