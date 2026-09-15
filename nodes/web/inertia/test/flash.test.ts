@@ -95,20 +95,42 @@ describe("redirectBack / back", () => {
 			expect(env.headers?.Location).toBe("/login");
 		});
 
-		it("follows an absolute Referer on our own Host", () => {
+		// #1003 — an accepted Referer bounces to its PATH, never to the absolute
+		// URL. Same-origin behaviour is identical; standalone mode needs it,
+		// because there the referring page is the SPA's origin and an absolute
+		// Location sends the browser to a server that answers no CORS at all.
+		it("follows an absolute Referer on our own Host, as a path", () => {
 			const env = redirectBack(
-				{ headers: { ...host, referer: "https://app.example/login" }, method: "POST" },
+				{ headers: { ...host, referer: "https://app.example/login?next=1" }, method: "POST" },
 				{ fallback: "/" },
 			);
-			expect(env.headers?.Location).toBe("https://app.example/login");
+			expect(env.headers?.Location).toBe("/login?next=1");
 		});
 
-		it("follows an absolute Referer matching the Origin header", () => {
+		it("follows an absolute Referer matching the Origin header, as a path", () => {
 			const env = redirectBack(
 				{ headers: { origin: "https://app.example", referer: "https://app.example/login" }, method: "POST" },
 				{ fallback: "/" },
 			);
-			expect(env.headers?.Location).toBe("https://app.example/login");
+			expect(env.headers?.Location).toBe("/login");
+		});
+
+		it("bounces a CROSS-ORIGIN SPA back onto the API's own origin", () => {
+			// Standalone mode: the Origin IS the SPA, so the Referer is legitimate
+			// — but the redirect must stay relative, or the XHR follows it to the
+			// Vite server and dies there.
+			const env = redirectBack(
+				{
+					headers: {
+						host: "api.example",
+						origin: "https://spa.example",
+						referer: "https://spa.example/orders/create",
+					},
+					method: "POST",
+				},
+				{ fallback: "/" },
+			);
+			expect(env.headers?.Location).toBe("/orders/create");
 		});
 
 		it("uses X-Forwarded-Host behind a proxy", () => {
@@ -123,7 +145,7 @@ describe("redirectBack / back", () => {
 				},
 				{ fallback: "/" },
 			);
-			expect(env.headers?.Location).toBe("https://app.example/login");
+			expect(env.headers?.Location).toBe("/login");
 		});
 	});
 
