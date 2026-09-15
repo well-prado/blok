@@ -73,6 +73,7 @@
 		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/browser --filter @blokjs/if-else --filter @blokjs/inertia --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
 		"build": "bunx nx run-many -t build && bun run scripts/fix-esm-extensions.ts",
+		"build:check": "bun run scripts/check-build-freshness.ts",
 		"check:packaging": "bun run scripts/check-packed-exports.ts",
 		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts",
 		"check:template-esm": "bun run scripts/fix-esm-extensions-src.ts --check"

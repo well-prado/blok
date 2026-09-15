@@ -10,6 +10,7 @@ import figlet from "figlet";
 import fsExtra from "fs-extra";
 import color from "picocolors";
 import simpleGit, { type SimpleGit, type SimpleGitOptions } from "simple-git";
+import { fileLinkDirs, findStaleDists, formatStaleDistWarning } from "../../services/local-dist-freshness.js";
 import { isNonInteractive, parseCommaSeparated, resolveOrThrow } from "../../services/non-interactive.js";
 import { setupObservabilityStack } from "../../services/obs-setup.js";
 import { type ObsStackTier, parseObsTier } from "../../services/obs-tiers.js";
@@ -1509,6 +1510,14 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 
 		fsExtra.writeFileSync(packageJson, JSON.stringify(packageJsonContent, null, 2));
+
+		// `--local` links dist/, not src/ — a repo that has not been rebuilt
+		// since its last source edit scaffolds a project that fails to compile
+		// against code the linked package does not have yet (#1067).
+		if (localRepoPath) {
+			const stale = findStaleDists(fileLinkDirs(packageJsonContent));
+			if (stale.length > 0) console.log(color.yellow(formatStaleDistWarning(stale, repoSource)));
+		}
 
 		// Create supervisord.conf with triggers and runtimes
 		const supervisordConfPath = `${dirPath}/supervisord.conf`;
