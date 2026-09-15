@@ -96,8 +96,9 @@ export {
  * `triggers/http/src/Nodes.ts` uses for `@blokjs/browser`, which likewise
  * appears in no manifest. A project that installed it gets the adapter ref
  * `@blokjs/inertia` plus the security nodes `@blokjs/inertia.authorize`,
- * `@blokjs/inertia.logout` and `@blokjs/inertia.history` (#1013); one that did
- * not boots fine without any of them.
+ * `@blokjs/inertia.logout`, `@blokjs/inertia.history` (#1013) and
+ * `@blokjs/inertia.private` (#1018 — the guest guard's no-store mark); one that
+ * did not boots fine without any of them.
  *
  * Deliberately NOT a dependency or a peer: bun installs the dependencies of a
  * `file:`-linked package, so a hard dependency on a package that is not yet on
@@ -113,10 +114,11 @@ try {
 		authorizeNode?: unknown;
 		logoutNode?: unknown;
 		historyNode?: unknown;
+		privateResponseNode?: unknown;
 	};
 	// The adapter plus the three named nodes (#1013). Keys come from each node's
 	// own `name` so a JSON workflow's `use:` and this map cannot drift apart.
-	for (const candidate of [mod.default, mod.authorizeNode, mod.logoutNode, mod.historyNode]) {
+	for (const candidate of [mod.default, mod.authorizeNode, mod.logoutNode, mod.historyNode, mod.privateResponseNode]) {
 		const node = candidate as NodeBase | undefined;
 		if (node?.name) inertiaNodes[node.name] = node;
 	}

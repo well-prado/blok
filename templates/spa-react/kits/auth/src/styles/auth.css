@@ -1,0 +1,96 @@
+/*
+ * auth.css — the guest shell, and nothing else.
+ *
+ * The auth kit (#1018) ships its own stylesheet instead of growing `blok.css`:
+ * that file is shared BY VALUE with every template and example and is byte-
+ * compared by `tests/docs/spa-design.test.ts`, so a kit-only screen must not
+ * add to it. Everything inside the card — labels, inputs, errors, buttons —
+ * is plain `blok.css`; only the centred shell is new.
+ *
+ * The SAME BYTES ship in all three templates (`tests/docs/spa-design.test.ts`).
+ */
+
+.blok-guest {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--blok-space-5);
+	min-height: 100vh;
+	padding: var(--blok-space-6) var(--blok-space-4);
+}
+
+/* The theme toggle has no header to live in here. `fixed`, not `absolute`:
+   nothing on this screen establishes a containing block. */
+.blok-guest__toggle {
+	position: fixed;
+	top: var(--blok-space-4);
+	right: var(--blok-space-4);
+	background: var(--blok-surface);
+}
+
+.blok-guest__card {
+	width: 100%;
+	max-width: 26rem;
+	padding: var(--blok-space-6);
+	background: var(--blok-surface);
+	border: 1px solid var(--blok-line);
+	border-radius: var(--blok-radius-lg);
+	box-shadow: var(--blok-shadow-lg);
+}
+
+.blok-guest__brand {
+	display: inline-flex;
+	margin-bottom: var(--blok-space-5);
+}
+
+.blok-guest__brand:hover {
+	text-decoration: none;
+}
+
+.blok-guest__card h1 {
+	font-size: 1.375rem;
+	letter-spacing: -0.02em;
+}
+
+.blok-guest__card .blok-lede {
+	margin-bottom: var(--blok-space-5);
+}
+
+/* The form inside the card owns the full width — `.blok-form` caps at 32rem. */
+.blok-guest__card .blok-form {
+	max-width: none;
+	gap: var(--blok-space-4);
+}
+
+.blok-guest__foot {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--blok-space-3);
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+}
+
+/* One row of "remember me" / "forgot password?", wrapping on a phone. */
+.blok-guest__row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--blok-space-3);
+}
+
+.blok-check {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--blok-space-2);
+	font-size: 0.8125rem;
+	color: var(--blok-muted);
+}
+
+.blok-check input {
+	accent-color: var(--blok-accent);
+	width: 0.875rem;
+	height: 0.875rem;
+}

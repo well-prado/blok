@@ -88,7 +88,7 @@ describe("@blokjs/auth — reset tokens", () => {
 
 describe("@blokjs/auth — throttle", () => {
 	it("allows the limit and refuses the one after it, with a retry window", async () => {
-		const key = throttleKey({ "x-forwarded-for": "203.0.113.7" }, "Ada@Example.com");
+		const key = throttleKey({ "x-forwarded-for": "203.0.113.7" }, "Ada@Example.com", { trustProxy: true });
 		expect(key).toBe("203.0.113.7|ada@example.com");
 		for (let attempt = 1; attempt <= 5; attempt += 1) {
 			expect((await hitThrottle(key, { limit: 5 })).allowed).toBe(true);
@@ -100,15 +100,16 @@ describe("@blokjs/auth — throttle", () => {
 	});
 
 	it("buckets per IP AND email, so one attacker cannot lock out a victim", async () => {
-		const attacker = throttleKey({ "x-forwarded-for": "203.0.113.7" }, "ada@example.com");
-		const victim = throttleKey({ "x-forwarded-for": "198.51.100.9" }, "ada@example.com");
+		const attacker = throttleKey({ "x-forwarded-for": "203.0.113.7" }, "ada@example.com", { trustProxy: true });
+		const victim = throttleKey({ "x-forwarded-for": "198.51.100.9" }, "ada@example.com", { trustProxy: true });
 		for (let attempt = 0; attempt < 6; attempt += 1) await hitThrottle(attacker, { limit: 5 });
 		expect((await hitThrottle(victim, { limit: 5 })).allowed).toBe(true);
 	});
 
 	it("a successful login clears the bucket", async () => {
 		const key = throttleKey({}, "ada@example.com");
-		expect(key.startsWith("unknown|")).toBe(true);
+		// No trusted proxy and no forwarding header: one bucket per address.
+		expect(key.startsWith("direct|")).toBe(true);
 		for (let attempt = 0; attempt < 5; attempt += 1) await hitThrottle(key, { limit: 5 });
 		await clearThrottle(key);
 		expect((await hitThrottle(key, { limit: 5 })).allowed).toBe(true);
@@ -159,5 +160,65 @@ describe("@blokjs/auth — UserStore", () => {
 	it("defaults to an in-memory store under NODE_ENV=test", () => {
 		_resetAuth();
 		expect(getUserStore()).toBeInstanceOf(MemoryUserStore);
+	});
+});
+
+/**
+ * #1018 security review H2 — `X-Forwarded-For` is an ordinary request header.
+ * Reading it unconditionally made the throttle a formality: rotate it per
+ * attempt and every guess lands in a fresh bucket.
+ */
+describe("@blokjs/auth — the throttle only trusts a proxy when told to", () => {
+	const EMAIL = "ada@example.com";
+
+	it("ignores forwarding headers by default, so a rotated header cannot mint buckets", async () => {
+		const keys = new Set<string>();
+		for (const ip of ["203.0.113.1", "203.0.113.2", "203.0.113.3"]) {
+			keys.add(throttleKey({ "x-forwarded-for": ip }, EMAIL));
+		}
+		// One bucket, not three.
+		expect(keys.size).toBe(1);
+
+		// ...and that bucket really does run out.
+		const key = [...keys][0] as string;
+		for (let attempt = 1; attempt <= 5; attempt += 1) {
+			expect((await hitThrottle(key, { limit: 5 })).allowed).toBe(true);
+		}
+		expect((await hitThrottle(throttleKey({ "x-forwarded-for": "203.0.113.9" }, EMAIL), { limit: 5 })).allowed).toBe(
+			false,
+		);
+	});
+
+	it("ignores X-Real-IP and CF-Connecting-IP too", () => {
+		const plain = throttleKey(undefined, EMAIL);
+		expect(throttleKey({ "x-real-ip": "203.0.113.1" }, EMAIL)).toBe(plain);
+		expect(throttleKey({ "cf-connecting-ip": "203.0.113.1" }, EMAIL)).toBe(plain);
+	});
+
+	it("reads X-Forwarded-For when configureAuth({ trustProxy: true })", () => {
+		configureAuth({ trustProxy: true });
+		expect(throttleKey({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }, EMAIL)).toBe("203.0.113.7|ada@example.com");
+	});
+
+	it("reads X-Forwarded-For when BLOK_TRUST_PROXY=1", () => {
+		process.env.BLOK_TRUST_PROXY = "1";
+		try {
+			expect(throttleKey({ "x-forwarded-for": "203.0.113.7" }, EMAIL)).toBe("203.0.113.7|ada@example.com");
+		} finally {
+			// biome-ignore lint/performance/noDelete: the var must be ABSENT again, not the string "undefined".
+			delete process.env.BLOK_TRUST_PROXY;
+		}
+	});
+
+	it("an explicit option beats the env var in both directions", () => {
+		process.env.BLOK_TRUST_PROXY = "1";
+		try {
+			expect(throttleKey({ "x-forwarded-for": "203.0.113.7" }, EMAIL, { trustProxy: false })).toBe(
+				"direct|ada@example.com",
+			);
+		} finally {
+			// biome-ignore lint/performance/noDelete: the var must be ABSENT again, not the string "undefined".
+			delete process.env.BLOK_TRUST_PROXY;
+		}
 	});
 });

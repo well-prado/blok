@@ -166,3 +166,73 @@ describe("sanitize", () => {
 		expect(result.tokenizer_config).toBe("kept");
 	});
 });
+
+/**
+ * #1018 security review B1/B2 — exact-set membership leaked by SPELLING.
+ *
+ * `password` was redacted; `passwordConfirmation`, the field the auth kit's
+ * sign-up form posts, was written to `.blok/trace.db` in plaintext. `cookie`
+ * was redacted; `cookies` — the `RespondEnvelope` key carrying the signed
+ * `blok_session` value — was not.
+ */
+describe("sanitize — sensitive keys are matched by substring (#1018 B1/B2)", () => {
+	const SECRET = "plaintext-value-that-must-never-be-stored";
+
+	it.each([
+		"passwordConfirmation",
+		"password_confirmation",
+		"currentPassword",
+		"newPassword",
+		"passwd",
+		"cookies",
+		"setCookie",
+		"set-cookie",
+		"accessToken",
+		"refreshToken",
+		"clientSecret",
+		"apiKeyHeader",
+	])("redacts %s", (field) => {
+		const result = sanitize({ [field]: SECRET }) as Record<string, unknown>;
+		expect(result[field]).toBe("[REDACTED]");
+	});
+
+	it("redacts the whole shape a register step actually carries", () => {
+		const body = {
+			name: "Ada",
+			email: "ada@example.com",
+			password: SECRET,
+			passwordConfirmation: SECRET,
+		};
+		const envelope = { body, cookies: [`blok_session=${SECRET}; HttpOnly`] };
+
+		expect(JSON.stringify(sanitize(envelope))).not.toContain(SECRET);
+	});
+
+	/**
+	 * The ambiguous short names stay EXACT-match, or a substring rule redacts
+	 * `monkey`, `author` and `sessionCount` into uselessness.
+	 */
+	it.each(["monkey", "author", "sessionCount", "keyboard", "authorName"])("does not redact %s", (field) => {
+		const result = sanitize({ [field]: "visible" }) as Record<string, unknown>;
+		expect(result[field]).toBe("visible");
+	});
+
+	it("extends BLOK_TRACE_SANITIZE_FIELDS by word too", () => {
+		process.env.BLOK_TRACE_SANITIZE_FIELDS = "pin";
+		const result = sanitize({ pinCode: "1234", pin: "1234", spinner: "x" }) as Record<string, unknown>;
+		expect(result.pin).toBe("[REDACTED]");
+		expect(result.pinCode).toBe("[REDACTED]");
+		// A WORD, not a substring: `spinner` is not a pin.
+		expect(result.spinner).toBe("x");
+	});
+
+	/**
+	 * The earlier FW-8 decision, kept: a raw `includes` rule would redact
+	 * `tokenizer_config` and make traces useless. The word rule is what lets
+	 * both reviews hold at once.
+	 */
+	it("still keeps a field that merely CONTAINS a stem inside a longer word", () => {
+		const result = sanitize({ tokenizer_config: "kept", monkeyKey: "kept" }) as Record<string, unknown>;
+		expect(result.tokenizer_config).toBe("kept");
+	});
+});

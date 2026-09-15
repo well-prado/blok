@@ -29,6 +29,7 @@ import fsExtra from "fs-extra";
 import color from "picocolors";
 import { isNonInteractive } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
+import { AUTH_ROUTE_FILES } from "./auth-kit-workflows.js";
 import { BLOKJS_DEP_RANGE } from "./project.js";
 
 const exec = util.promisify(child_process.exec);
@@ -48,6 +49,13 @@ const ENTRY_EXT: Record<SpaFramework, "ts" | "tsx"> = { react: "tsx", vue: "ts",
 
 /** npm package that proves a directory is a Blok project. */
 const BLOK_MARKER = "@blokjs/";
+
+/**
+ * SQLite driver range for `--kit auth`. `@blokjs/session` declares it as an
+ * OPTIONAL peer (Bun needs nothing), so the range lives here: a scaffold that
+ * starts with `node dist/…` must have a real driver installed.
+ */
+const SQLITE_RANGE = "^12.6.2";
 
 const HOME_REPO = path.join(os.homedir(), ".blok", "blok");
 /** Same bundle `create project` reads — `dist/commands/create/spa.js` → `dist/scaffold-repo`. */
@@ -76,13 +84,18 @@ export function resolveFramework(value: string): SpaFramework {
 	return framework as SpaFramework;
 }
 
-/** `--kit auth` is #1018's wiring; refuse clearly instead of scaffolding half of it. */
-export function resolveKit(value: string | undefined): void {
-	if (value === undefined) return;
-	if (value === "auth") {
-		throw new Error("--kit auth is not available yet: the auth starter kit lands with #1018.");
-	}
-	throw new Error(`Invalid value "${value}" for --kit. The only planned kit is "auth" (#1018).`);
+export { AUTH_ROUTE_FILES } from "./auth-kit-workflows.js";
+
+/** Starter kits `--kit` accepts. One so far: the auth slice (#1018). */
+export const SPA_KITS = ["auth"] as const;
+export type SpaKit = (typeof SPA_KITS)[number];
+
+/** Validate `--kit`. `undefined` (no kit) is the default and not an error. */
+export function resolveKit(value: string | undefined): SpaKit | undefined {
+	if (value === undefined) return undefined;
+	const kit = String(value).trim().toLowerCase();
+	if ((SPA_KITS as readonly string[]).includes(kit)) return kit as SpaKit;
+	throw new Error(`Invalid value "${value}" for --kit. Allowed: ${SPA_KITS.join(", ")}.`);
 }
 
 async function promptFramework(flag: string | undefined): Promise<SpaFramework> {
@@ -142,12 +155,18 @@ export interface RenderSpaOptions {
 	depRange: string;
 	/** `blokctl` devDependency — `file:` link under `--local`. */
 	cliRange: string;
+	/** Starter kit whose client half is overlaid on top of the base template. */
+	kit?: SpaKit;
 	localRepoPath?: string;
 }
 
 /**
  * Copy one template, substituting the `__BLOK_*__` tokens. Every file in a SPA
  * template is text, so there is no binary path to special-case.
+ *
+ * A `--kit` overlays `templates/spa-<fw>/kits/<kit>/` on top, LAST, so a kit
+ * file with the same path wins (the auth kit replaces the placeholder
+ * `src/blok-pages.d.ts` with one that also declares its five pages).
  */
 export function renderSpaTemplate(opts: RenderSpaOptions): string[] {
 	const source = spaTemplateDir(opts.framework, opts.localRepoPath);
@@ -166,6 +185,8 @@ export function renderSpaTemplate(opts: RenderSpaOptions): string[] {
 			.sort((a, b) => a.name.localeCompare(b.name))) {
 			const from = path.join(dir, entry.name);
 			const relPath = rel === "" ? entry.name : `${rel}/${entry.name}`;
+			// `kits/` is the OPT-IN half of the template, overlaid below.
+			if (rel === "" && entry.name === "kits") continue;
 			if (entry.isDirectory()) {
 				walk(from, relPath);
 				continue;
@@ -183,6 +204,13 @@ export function renderSpaTemplate(opts: RenderSpaOptions): string[] {
 		}
 	};
 	walk(source, "");
+	if (opts.kit !== undefined) {
+		const kitDir = path.join(source, "kits", opts.kit);
+		if (!fsExtra.existsSync(kitDir)) {
+			throw new Error(`The "${opts.kit}" kit has no ${opts.framework} client (looked for ${kitDir}).`);
+		}
+		walk(kitDir, "");
+	}
 
 	// Manifest touch-ups that are cheaper as JSON than as more tokens.
 	const manifestPath = path.join(opts.dest, "package.json");
@@ -196,7 +224,9 @@ export function renderSpaTemplate(opts: RenderSpaOptions): string[] {
 	manifest.devDependencies.blokctl = opts.cliRange;
 	fsExtra.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 
-	return written.sort();
+	// A kit file can replace a base file (`src/blok-pages.d.ts`), so the list is
+	// a SET: the caller's file list must name every path once.
+	return [...new Set(written)].sort();
 }
 
 // =============================================================================
@@ -213,7 +243,7 @@ async function installIn(dir: string, managerName: string): Promise<void> {
 }
 
 export async function createSpa(opts: OptionValues, _version: string, localRepoPath?: string): Promise<string> {
-	resolveKit(opts.kit as string | undefined);
+	const kit = resolveKit(opts.kit as string | undefined);
 	const framework = await promptFramework(opts.framework as string | undefined);
 
 	let name = (opts.name as string | undefined) ?? "";
@@ -240,12 +270,23 @@ export async function createSpa(opts: OptionValues, _version: string, localRepoP
 		ssr: opts.ssr === true,
 		depRange: linkOrRange("packages/inertia-client", localRepoPath),
 		cliRange: linkOrRange("packages/cli", localRepoPath),
+		...(kit === undefined ? {} : { kit }),
 		localRepoPath,
 	});
 
 	if (opts.install !== false) await installIn(dest, managerName);
 
 	console.log(color.green(`\n✅ ${framework} SPA created at ${name}/`));
+	if (kit === "auth") {
+		// A standalone SPA is only the CLIENT half: the pages POST to /login,
+		// /register and /logout, which exist on the BLOK side and are wired by
+		// `blokctl add spa --kit auth` there.
+		console.log(
+			color.yellow(
+				`   The auth pages need the kit's server half on ${blokUrl}:\n   run \`blokctl add spa --kit auth\` in the Blok project (see https://blok.build/d/spa/starter-kit).`,
+			),
+		);
+	}
 	console.log(twoTerminalRecipe({ framework, dir: name, blokUrl, managerName, ssr: opts.ssr === true }));
 	return dest;
 }
@@ -296,16 +337,46 @@ export const WORKFLOWS_ENTRY_BLOCK = `\t// Inertia SPA (blokctl add spa). Both r
 \t"inertia.csrf": await createCsrfMiddleware(),
 `;
 
-/** The `.env` block, minus the generated secret. */
-export function envBlock(flashSecret: string): string {
-	return `
+/**
+ * The `.env` block, minus the generated secrets.
+ *
+ * Both secrets are GENERATED, never defaulted: a constant flash secret lets
+ * anyone forge a flash message, and a constant session secret lets anyone forge
+ * a session cookie, i.e. sign in as any user. `.env.example` gets the same
+ * block with the values blank.
+ */
+export function envBlock(flashSecret: string, kit?: SpaKit, sessionSecret = ""): string {
+	// `inertia.encryptHistory` is what makes logout's `clearHistory` mean
+	// anything: without it nothing in the client's history is encrypted and the
+	// key rotation on sign-out protects nothing (#1018 security review B3).
+	const chain =
+		kit === "auth"
+			? "inertia.session,inertia.shared,inertia.csrf,inertia.encryptHistory"
+			: "inertia.shared,inertia.csrf";
+	const base = `
 # --- Inertia SPA (blokctl add spa) ---
 # Root of the built client. Mounts /assets/* and publishes ASSET_VERSION (#1000).
 ${STATIC_DIR_ENV}
 # Signing secret for the one-shot flash cookie. There is NO default.
 BLOK_FLASH_SECRET=${flashSecret}
 # Shared props (auth + flash) then the double-submit CSRF guard, on every request.
-BLOK_GLOBAL_MIDDLEWARE=inertia.shared,inertia.csrf
+BLOK_GLOBAL_MIDDLEWARE=${chain}
+`;
+	if (kit !== "auth") return base;
+	return `${base}
+# --- Auth starter kit (--kit auth) ---
+# Signs the session cookie. There is NO default; changing it signs everyone out.
+BLOK_SESSION_SECRET=${sessionSecret}
+# Sessions and users default to SQLite files under .blok/ — delete them to start
+# over. BLOK_SESSION_STORE=memory for a throwaway dev run, or set REDIS_URL to
+# share sessions across processes.
+# BLOK_SESSION_SQLITE_PATH=.blok/sessions.db
+# BLOK_AUTH_SQLITE_PATH=.blok/auth.db
+# Set this ONLY when a reverse proxy you control is in front: it lets
+# X-Forwarded-For name the client for login throttling. Anyone can send that
+# header, so trusting it without a proxy gives an attacker a fresh throttle
+# bucket per attempt.
+# BLOK_TRUST_PROXY=1
 `;
 }
 
@@ -330,18 +401,106 @@ export function assertBlokProject(dir: string): void {
 	}
 }
 
-/** `src/Workflows.ts` with the two middleware registrations spliced in. */
-export function patchWorkflowsSource(source: string): string {
-	if (source.includes('"inertia.shared"')) return source;
+/**
+ * `--kit auth` (#1018): the whole middleware chain comes from one package
+ * export, so the registration is a spread rather than four lines that can
+ * drift from what `@blokjs/auth` actually ships.
+ */
+export const AUTH_WORKFLOWS_IMPORT_BLOCK = `import { authKitMiddleware } from "@blokjs/auth";
+`;
+
+/** Inserted into the `workflows` map by `--kit auth` — instead of {@link WORKFLOWS_ENTRY_BLOCK}. */
+export const AUTH_WORKFLOWS_ENTRY_BLOCK = `\t// Auth starter kit (blokctl add spa --kit auth): inertia.session →
+\t// inertia.shared → inertia.csrf on every request (the order is in
+\t// BLOK_GLOBAL_MIDDLEWARE in .env.local), plus the per-route inertia.auth
+\t// guard that src/workflows/auth/dashboard.ts asks for.
+\t//
+\t// The cast is the package boundary: authKitMiddleware() returns built
+\t// workflows typed as \`unknown\` so @blokjs/auth need not depend on the
+\t// runner's types.
+\t...((await authKitMiddleware()) as Record<string, WorkflowV2Builder>),
+`;
+
+/** `src/Workflows.ts` with the middleware registrations for `kit` spliced in. */
+export function patchWorkflowsSource(source: string, kit?: SpaKit): string {
+	const importBlock = kit === "auth" ? AUTH_WORKFLOWS_IMPORT_BLOCK : WORKFLOWS_IMPORT_BLOCK;
+	const entryBlock = kit === "auth" ? AUTH_WORKFLOWS_ENTRY_BLOCK : WORKFLOWS_ENTRY_BLOCK;
+	if (source.includes(importBlock)) return source;
 	const openMarker = "const workflows: Record<string, WorkflowV2Builder> = {\n";
 	if (!source.includes(openMarker)) {
 		throw new Error("Could not find the workflow registry in src/Workflows.ts — add the Inertia middleware by hand.");
 	}
-	const imported = source.replace(
-		'import type { WorkflowV2Builder } from "@blokjs/helper";\n',
-		`import type { WorkflowV2Builder } from "@blokjs/helper";\n${WORKFLOWS_IMPORT_BLOCK}`,
+	// Biome sorts imports and treats an unsorted block as an error, so the kit's
+	// `@blokjs/auth` line goes BEFORE `@blokjs/helper` and the base block's
+	// `@blokjs/inertia` line after it.
+	const helper = 'import type { WorkflowV2Builder } from "@blokjs/helper";\n';
+	const imported = source.replace(helper, kit === "auth" ? `${importBlock}${helper}` : `${helper}${importBlock}`);
+	return imported.replace(openMarker, `${openMarker}${entryBlock}`);
+}
+
+/**
+ * The two imports `--kit auth` splices into `src/Nodes.ts`, each at its
+ * sorted position (`@blokjs/auth` before `@blokjs/if-else`, `@blokjs/session`
+ * after `@blokjs/shared`). Exported so the test asserts the EXACT text.
+ */
+export const AUTH_NODES_IMPORT = `import { AUTH_NODES } from "@blokjs/auth";\n`;
+export const SESSION_NODES_IMPORT = `import { SESSION_NODES } from "@blokjs/session";\n`;
+/** Both lines, for a test that only cares that the registrations are there. */
+export const AUTH_NODES_IMPORT_BLOCK = `${AUTH_NODES_IMPORT}${SESSION_NODES_IMPORT}`;
+
+/** The kit's node registrations, spliced into the loop `src/Nodes.ts` builds its map with. */
+export const AUTH_NODES_ENTRY =
+	"...(Object.values(SESSION_NODES) as unknown as NodeBase[]), ...(Object.values(AUTH_NODES) as unknown as NodeBase[]), ";
+
+/**
+ * `src/Nodes.ts` with the kit's nodes registered.
+ *
+ * They are npm packages, not files under `src/nodes/`, so `discoverNodes()`
+ * cannot find them: a published node is registered explicitly, exactly like
+ * `@blokjs/api-call` in the same file. Without this every auth step fails with
+ * "Node @blokjs/auth.login not found".
+ */
+export function patchNodesSource(source: string): string {
+	if (source.includes("AUTH_NODES")) return source;
+	const marker = ", ...local]";
+	const anchors =
+		source.includes(marker) &&
+		source.includes('import IfElse from "@blokjs/if-else";') &&
+		source.includes('import type { NodeBase } from "@blokjs/shared";');
+	if (!anchors) {
+		throw new Error(
+			"Could not find the node registry in src/Nodes.ts — register @blokjs/session's and @blokjs/auth's nodes by hand.",
+		);
+	}
+	// Biome sorts imports: `@blokjs/auth` goes after `@blokjs/api-call` and
+	// before `@blokjs/helpers`, and `@blokjs/session` after `@blokjs/runner` —
+	// so each line is spliced at its sorted position rather than appended
+	// (#1018 security review L2).
+	return source
+		.replace('import IfElse from "@blokjs/if-else";\n', `${AUTH_NODES_IMPORT}import IfElse from "@blokjs/if-else";\n`)
+		.replace(
+			'import type { NodeBase } from "@blokjs/shared";\n',
+			`import type { NodeBase } from "@blokjs/shared";\n${SESSION_NODES_IMPORT}`,
+		)
+		.replace(marker, `, ${AUTH_NODES_ENTRY}...local]`);
+}
+
+/** The `.gitignore` rule for the kit's SQLite files — exported so the test asserts it. */
+export const KIT_GITIGNORE_BLOCK = `
+# Auth starter kit: the user table and live sessions (blokctl add spa --kit auth)
+.blok/*.db
+.blok/*.db-shm
+.blok/*.db-wal
+`;
+
+/** Add {@link KIT_GITIGNORE_BLOCK} to `file`, once. */
+function ignoreKitDatabases(file: string): void {
+	const current = fsExtra.existsSync(file) ? fsExtra.readFileSync(file, "utf8") : "";
+	if (current.includes(".blok/*.db")) return;
+	fsExtra.writeFileSync(
+		file,
+		current === "" || current.endsWith("\n") ? current + KIT_GITIGNORE_BLOCK : `${current}\n${KIT_GITIGNORE_BLOCK}`,
 	);
-	return imported.replace(openMarker, `${openMarker}${WORKFLOWS_ENTRY_BLOCK}`);
 }
 
 /** Append a block to a dotenv file, creating it when absent. */
@@ -352,7 +511,7 @@ function appendEnv(file: string, block: string): void {
 }
 
 export async function addSpa(opts: OptionValues, _version: string, localRepoPath?: string): Promise<string> {
-	resolveKit(opts.kit as string | undefined);
+	const kit = resolveKit(opts.kit as string | undefined);
 	const projectDir = path.resolve((opts.cwd as string | undefined) ?? process.cwd());
 
 	// Both guards BEFORE anything is written — `add spa` twice must leave the
@@ -384,6 +543,7 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 		ssr: opts.ssr === true,
 		depRange: linkOrRange("packages/inertia-client", localRepoPath),
 		cliRange: linkOrRange("packages/cli", localRepoPath),
+		...(kit === undefined ? {} : { kit }),
 		localRepoPath,
 	});
 
@@ -400,14 +560,26 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 		...manifest.imports,
 		"#app/*": { bun: "./src/*.ts", node: "./dist/*.js", default: "./src/*.ts" },
 	};
-	const inertiaDep = linkOrRange("nodes/web/inertia", localRepoPath);
-	manifest.dependencies = { ...manifest.dependencies, "@blokjs/inertia": inertiaDep };
+	const blokDeps: Record<string, string> = { "@blokjs/inertia": linkOrRange("nodes/web/inertia", localRepoPath) };
+	if (kit === "auth") {
+		blokDeps["@blokjs/session"] = linkOrRange("packages/session", localRepoPath);
+		blokDeps["@blokjs/auth"] = linkOrRange("packages/auth", localRepoPath);
+	}
+	manifest.dependencies = {
+		...manifest.dependencies,
+		...blokDeps,
+		// The kit's default session and user stores are SQLite files. Bun has
+		// `bun:sqlite` built in, but `npm start` is `node dist/…`, and Node needs
+		// a driver — so this DEPENDENCY is what makes the scaffold work on first
+		// run instead of throwing on the first request.
+		...(kit === "auth" ? { "better-sqlite3": SQLITE_RANGE } : {}),
+	};
 	if (localRepoPath !== undefined) {
 		// Mirror `create project --local`: the file:-linked node resolves its own
 		// @blokjs/* deps through these, instead of 404-ing on an unpublished npm
 		// version.
-		manifest.overrides = { ...manifest.overrides, "@blokjs/inertia": inertiaDep };
-		manifest.resolutions = { ...manifest.resolutions, "@blokjs/inertia": inertiaDep };
+		manifest.overrides = { ...manifest.overrides, ...blokDeps };
+		manifest.resolutions = { ...manifest.resolutions, ...blokDeps };
 	}
 	const run = `${managerName} run`;
 	const scripts = manifest.scripts ?? {};
@@ -421,16 +593,40 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 	manifest.scripts = scripts;
 	fsExtra.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 
-	const block = envBlock(randomBytes(32).toString("hex"));
+	const block = envBlock(randomBytes(32).toString("hex"), kit, randomBytes(32).toString("hex"));
 	appendEnv(path.join(projectDir, ".env.local"), block);
-	// The committed example keeps the shape but never the secret.
-	appendEnv(path.join(projectDir, ".env.example"), envBlock(""));
+	// The committed example keeps the shape but never the secrets.
+	appendEnv(path.join(projectDir, ".env.example"), envBlock("", kit));
 
 	const workflowsPath = path.join(projectDir, "src", "Workflows.ts");
-	fsExtra.writeFileSync(workflowsPath, patchWorkflowsSource(fsExtra.readFileSync(workflowsPath, "utf8")));
+	fsExtra.writeFileSync(workflowsPath, patchWorkflowsSource(fsExtra.readFileSync(workflowsPath, "utf8"), kit));
 
-	fsExtra.ensureDirSync(path.join(projectDir, "src", "nodes", "current-user"));
-	fsExtra.writeFileSync(path.join(projectDir, "src", "nodes", "current-user", "index.ts"), CURRENT_USER_NODE);
+	if (kit === "auth") {
+		// The user table and the session table are SQLite files under `.blok/`,
+		// which the scaffold ignores wholesale — but a project that decides to
+		// track `.blok/` (its `config.json` is a reasonable thing to commit) must
+		// not thereby commit password hashes and live session ids
+		// (#1018 security review M1).
+		ignoreKitDatabases(path.join(projectDir, ".gitignore"));
+		// The kit's nodes are npm packages — `discoverNodes()` only finds files
+		// under `src/nodes/`, so they are registered explicitly.
+		const nodesPath = path.join(projectDir, "src", "Nodes.ts");
+		fsExtra.writeFileSync(nodesPath, patchNodesSource(fsExtra.readFileSync(nodesPath, "utf8")));
+		// One file per route, IN the project, so they are yours: `blokctl gen
+		// app-types` scans this directory (that is where the page contracts and
+		// the route table come from), and the HTTP trigger auto-routes each
+		// file's default export.
+		const authDir = path.join(projectDir, "src", "workflows", "auth");
+		fsExtra.ensureDirSync(authDir);
+		for (const [file, source] of Object.entries(AUTH_ROUTE_FILES)) {
+			fsExtra.writeFileSync(path.join(authDir, file), source);
+		}
+	} else {
+		// `--kit auth` brings the REAL one (`@blokjs/auth`'s currentUser, wired by
+		// authKitMiddleware); the placeholder would only shadow it.
+		fsExtra.ensureDirSync(path.join(projectDir, "src", "nodes", "current-user"));
+		fsExtra.writeFileSync(path.join(projectDir, "src", "nodes", "current-user", "index.ts"), CURRENT_USER_NODE);
+	}
 	fsExtra.ensureDirSync(path.join(projectDir, "src", "nodes", "home-greeting"));
 	fsExtra.writeFileSync(path.join(projectDir, "src", "nodes", "home-greeting", "index.ts"), HOME_GREETING_NODE);
 	fsExtra.ensureDirSync(path.join(projectDir, "src", "workflows"));
@@ -442,6 +638,12 @@ export async function addSpa(opts: OptionValues, _version: string, localRepoPath
 	}
 
 	console.log(color.green(`\n✅ ${framework} client added at ${CLIENT_DIR}/`));
+	if (kit === "auth") {
+		console.log(
+			`${color.green("   auth kit: ")}register → sign in → /dashboard → sign out, with sessions, CSRF and reset.\n` +
+				`   Routes in src/workflows/auth/, pages in ${CLIENT_DIR}/src/pages/Auth/ — both yours to edit.`,
+		);
+	}
 	console.log(`   ${run} build   builds the server AND the client into ${CLIENT_DIR}/dist`);
 	console.log(`   ${run} start   serves / as an Inertia page and /assets/* from ${CLIENT_DIR}/dist`);
 	console.log(twoTerminalRecipe({ framework, dir: CLIENT_DIR, blokUrl, managerName, ssr: opts.ssr === true }));
@@ -461,7 +663,12 @@ import { z } from "zod";
  * reads as the \`auth\` shared prop.
  *
  * The scaffold ships the guest answer — replace the body with your own session
- * lookup.
+ * lookup, or run \`blokctl add spa --kit auth\` to get the real one
+ * (\`@blokjs/auth\`), whose output this shape mirrors:
+ *
+ * - \`id\` is what \`inertia.auth\`'s guest guard tests — ABSENT for a guest;
+ * - \`user\` is what the client reads (\`usePage().props.auth.user\`), \`null\`
+ *   for a guest so a layout can branch on it without optional chaining.
  */
 export default defineNode({
 	name: "current-user",
@@ -470,11 +677,17 @@ export default defineNode({
 		headers: z.record(z.string()).optional(),
 	}),
 	output: z.object({
-		id: z.string().nullable(),
-		name: z.string().nullable(),
+		id: z.string().optional(),
+		user: z
+			.object({
+				id: z.string(),
+				name: z.string(),
+				email: z.string(),
+			})
+			.nullable(),
 	}),
 	async execute(_ctx, _input) {
-		return { id: null, name: null };
+		return { user: null };
 	},
 });
 `;

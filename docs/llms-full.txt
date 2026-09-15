@@ -270,8 +270,8 @@ blokctl create project --spa svelte           # both, in one command
 
 Flags: `--framework react|vue|svelte` (Angular is refused — no Inertia adapter
 exists), `--blok-url <url>` (default `http://localhost:4000`), `--pm`,
-`--no-install`, `--ssr`. `--kit auth` lands with
-[#1018](https://github.com/well-prado/blok/issues/1018).
+`--no-install`, `--ssr`. Add `--kit auth` for sessions, sign-in, sign-up,
+password reset and a guarded page — see [Starter kit](/d/spa/starter-kit).
 
 `add spa` refuses to run twice (it detects `client/`) and refuses outside a
 Blok project. The five steps below are what it writes — read them to understand
@@ -3489,70 +3489,206 @@ which reports every step, every resolved prop and the whole page object.
 
 Source: /d/spa/starter-kit
 
-Sessions, users and the auth pages — landing with #1018 and the SPA scaffolds in #999.
+One command for sessions, sign-in, sign-up, password reset and a guarded page — in React, Vue or Svelte.
 
 Counterpart: [Authentication](https://inertiajs.com/docs/v3/security/authentication)
 (Laravel's Breeze / starter kits).
 
-<Warning>
-**Not shipped yet.** `@blokjs/session` and `@blokjs/auth`, and the auth pages
-that go with them, land with
-[#1018](https://github.com/well-prado/blok/issues/1018); the
-`blokctl create spa --kit auth` wiring waits for
-[#999](https://github.com/well-prado/blok/issues/999). The decided shape, so
-nothing built now has to be undone:
+## One command
 
-- **no ORM** — a `UserStore` interface, a SQLite implementation by default, a
-  Postgres example, and Drizzle documented rather than depended on;
-- the server modules can land before the scaffolds; the CLI flag cannot.
-</Warning>
+```bash
+blokctl create project --name app --spa react --kit auth
+# or, in a project you already have:
+blokctl add spa --framework react --kit auth
+```
 
-## What you can build today
+Then `bun run build && bun run start` and open `/login`. Register, sign in, land
+on `/dashboard`, sign out — with **zero edits**. `--framework vue` and
+`--framework svelte` ship the same screens.
 
-Every piece the kit will assemble already exists:
+<Note>
+`--kit` needs a client to put the pages in, so it only works alongside
+`--spa <framework>` (or on `add spa`). It is refused, not ignored.
+</Note>
 
-| Concern | Today |
-| --- | --- |
-| who is signed in | your own `currentUser` node + [`inertia.shared`](/d/spa/middleware) |
-| guarding routes | [`inertia.auth`](/d/spa/middleware) — a 302 to `/login`, not a bare 401 |
-| sign-in form | an ordinary [form workflow](/d/spa/forms-and-redirects) with [validation](/d/spa/validation) |
-| sign-out | [`logoutNode` / `logoutResponse()`](/d/spa/history-encryption#logout-must-clear-it) — 303, `clearHistory`, and [`rotateCsrf()`](/d/spa/csrf#rotate-on-login-and-logout) |
-| permissions | [`can()` / `authorize()`](/d/spa/authorization) |
-| remembering the user | [`once()` / `shareOnce()`](/d/spa/once-props#sign-out-overwrite-do-not-forget) |
-| error pages | [`configureErrorPages()`](/d/spa/error-handling) |
+## What you get
 
-What the kit adds is the **session store** — the one thing Blok deliberately
-does not have today (flash rides a [signed cookie](/d/spa/flash-data), not a
-session) — plus the pages and the wiring, in one install.
+| Route | Page | What runs |
+| --- | --- | --- |
+| `GET /login` | `Auth/Login` | — |
+| `POST /login` | — | validate → `login` (throttled 5/min per IP+email) → 303 |
+| `POST /logout` | — | destroy session, `clearHistory`, rotate CSRF → 303 |
+| `GET /register` | `Auth/Register` | — |
+| `POST /register` | — | validate → `register` → new session → 303 |
+| `GET /forgot-password` | `Auth/ForgotPassword` | — |
+| `POST /forgot-password` | — | issue a single-use token, same answer either way |
+| `GET /reset-password/:token` | `Auth/ResetPassword` | the token, as a prop |
+| `POST /reset-password/:token` | — | spend the token, set the password → 303 |
+| `GET /dashboard` | `Dashboard` | guarded by [`inertia.auth`](/d/spa/middleware) |
+
+On disk:
+
+- `src/workflows/auth/*.ts` — one file per route, written as real
+  `workflow()` declarations in YOUR project. Change a redirect, add a field,
+  delete a route: it is ordinary code, and `blokctl gen app-types` indexes all
+  of it. Only the nodes and schemas come from `@blokjs/auth`.
+- `client/src/pages/Auth/*` and `client/src/pages/Dashboard.*` — the components,
+  plus a `GuestLayout` and the kit's own `styles/auth.css`.
+- `src/Workflows.ts` — one spread registers `inertia.session`,
+  `inertia.shared`, `inertia.csrf` and `inertia.auth`.
+- `src/Nodes.ts` — `SESSION_NODES` and `AUTH_NODES` (npm packages are registered
+  explicitly; only `src/nodes/**` is auto-discovered).
+- `.env.local` — a generated `BLOK_SESSION_SECRET` and `BLOK_FLASH_SECRET`, and
+  `BLOK_GLOBAL_MIDDLEWARE=inertia.session,inertia.shared,inertia.csrf,inertia.encryptHistory`.
+  The order matters: the session has to be loaded before the `auth` shared prop
+  is resolved, and `inertia.encryptHistory` is what gives sign-out's
+  `clearHistory` something to protect. `.env.example` gets the same block with
+  the secrets blank.
+
+`blokctl check` fails when either secret is missing or too short — before the
+first request, not with a 500 in production.
+
+Every page carries an `auth` prop:
+
+```ts
+// what `@blokjs/auth`'s currentUser node publishes
+type Auth = {
+  id?: string; // absent for a guest — `inertia.auth` gates on it
+  user: { id: string; name: string; email: string } | null;
+};
+```
+
+`blokctl gen app-types` picks all of this up from the Zod output schemas, so
+`PageProps<"Dashboard">` is typed without you writing a type.
+
+## No ORM
+
+The kit persists through a six-method interface. The default implementation is
+SQLite (`better-sqlite3` under Node, `bun:sqlite` under Bun); point it at
+anything else by handing `configureAuth` your own:
 
 ```ts src/auth.ts
-import { defineNode } from "@blokjs/core";
-import { z } from "zod";
+import { type AuthUser, type UserStore, configureAuth } from "@blokjs/auth";
 
-/** Until #1018: your own node, reading whatever session mechanism you already have. */
-export const currentUser = defineNode({
-  name: "current-user",
-  description: "Resolve the signed-in user from the request cookies.",
-  input: z.object({ headers: z.record(z.string()).optional() }),
-  output: z.object({ id: z.string().optional(), email: z.string().optional() }),
-  execute: (_ctx, input) => {
-    const cookie = input.headers?.cookie ?? "";
-    return cookie.includes("session=") ? { id: "u-1", email: "ada@example.com" } : {};
+/** Sketch: the same six methods over whatever database you already run. */
+declare const db: {
+  query: (sql: string, params: unknown[]) => Promise<AuthUser[]>;
+  run: (sql: string, params: unknown[]) => Promise<void>;
+};
+
+const users: UserStore = {
+  async findByEmail(email) {
+    return (await db.query("select * from users where email = $1", [email]))[0];
+  },
+  async findById(id) {
+    return (await db.query("select * from users where id = $1", [id]))[0];
+  },
+  async create(user) {
+    const rows = await db.query(
+      "insert into users (name, email, password_hash) values ($1, $2, $3) returning *",
+      [user.name, user.email, user.passwordHash],
+    );
+    return rows[0] as AuthUser;
+  },
+  async updatePassword(id, passwordHash) {
+    await db.run("update users set password_hash = $1 where id = $2", [passwordHash, id]);
+  },
+  async createResetToken(record) {
+    await db.run("insert into password_resets (user_id, token_hash, expires_at) values ($1, $2, $3)", [
+      record.userId,
+      record.tokenHash,
+      record.expiresAt,
+    ]);
+  },
+  async consumeResetToken(tokenHash) {
+    const rows = await db.query("delete from password_resets where token_hash = $1 returning user_id", [tokenHash]);
+    const row = rows[0] as { user_id?: string } | undefined;
+    return row?.user_id ? { userId: row.user_id } : undefined;
+  },
+};
+
+configureAuth({
+  users,
+  redirectAfterLogin: "/dashboard",
+  // Only when a reverse proxy you control is in front — see below.
+  trustProxy: true,
+});
+```
+
+Drizzle, Prisma or a hand-rolled repository all fit the same six methods — none
+of them is a dependency of Blok.
+
+## Sending the reset email
+
+With no mailer configured the reset link is **logged**, the way Laravel's `log`
+mail driver works, so the flow runs before you have email. Wire yours once:
+
+```ts src/mail.ts
+import { configureAuth } from "@blokjs/auth";
+
+configureAuth({
+  async sendResetLink({ email, url }) {
+    await fetch("https://api.example-mailer.com/send", {
+      method: "POST",
+      body: JSON.stringify({ to: email, subject: "Reset your password", body: url }),
+    });
   },
 });
 ```
 
-`inertia.auth` gates on `auth.id` being absent, which is why the guest case
-returns `{}` rather than throwing.
+The raw token reaches this callback and nowhere else — it is never a step
+output, so it cannot land in `ctx.state`, a trace or DevTools.
+
+## What it is made of
+
+Nothing here is a new framework layer; the kit is a generator over modules you
+can install on their own:
+
+- [`@blokjs/session`](/d/spa/middleware) — a signed, `HttpOnly`,
+  `SameSite=Lax` cookie carrying an opaque session id, with the data in a
+  pluggable store (`memory`, `sqlite` by default, `redis` when `REDIS_URL` is
+  set). Rotated on sign-in and sign-up, destroyed on sign-out.
+- `@blokjs/auth` — scrypt password hashing (`node:crypto`, no native addon),
+  the auth nodes, login throttling, and single-use reset tokens stored hashed.
+- The existing [middleware chain](/d/spa/middleware),
+  [CSRF](/d/spa/csrf), [flash](/d/spa/flash-data),
+  [validation](/d/spa/validation) and
+  [history encryption](/d/spa/history-encryption).
+
+Security properties worth knowing:
+
+- Sign-in answers the same message — and costs the same wall-clock time — for an
+  unknown address as for a wrong password, and `forgot-password` answers the
+  same way whether or not the address exists. **Registration is the one
+  exception**: "that email address is already registered" is what makes the form
+  usable, and it is what Laravel does.
+- The session cookie is `HttpOnly`, `SameSite=Lax`, signed, and `Secure`
+  whenever the request arrived over HTTPS (`X-Forwarded-Proto` behind a
+  terminator). A new id is minted on sign-in and sign-up, so a cookie planted
+  before is worthless after.
+- **"Remember me"** keeps the cookie for the session window; without it the
+  cookie dies with the browser.
+- Guarded pages answer `Cache-Control: no-store` and `Vary: Cookie`, so the
+  browser will not re-render one from history after sign-out, and every page is
+  history-encrypted; sign-out clears that history and rotates the CSRF token.
+- Login throttling is per IP + email, but a **forwarding header is only trusted
+  when you say so**: set `BLOK_TRUST_PROXY=1` (or
+  `configureAuth({ trustProxy: true })`) when a reverse proxy you control is in
+  front. Without it, `X-Forwarded-For` is ignored — anyone can send that header,
+  and trusting it would give an attacker a fresh throttle bucket per attempt.
+- No password, hash, session id or reset token is ever a step output, and the
+  trace store redacts `password`, `passwordConfirmation`, `cookies` and friends
+  by word, so none of them reaches `.blok/trace.db` either.
+- The kit's SQLite files (`.blok/auth.db`, `.blok/sessions.db`) are gitignored.
 
 ## Next
 
 <CardGroup cols={2}>
   <Card title="Middleware" icon="git-branch" href="/d/spa/middleware">
-    The chain the kit will register for you.
+    The chain the kit registers for you.
   </Card>
-  <Card title="Getting started" icon="play" href="/d/spa/getting-started">
-    The by-hand setup, today.
+  <Card title="Authorization" icon="shield" href="/d/spa/authorization">
+    `can()` and `authorize()` — who may do what, once they are signed in.
   </Card>
 </CardGroup>
 

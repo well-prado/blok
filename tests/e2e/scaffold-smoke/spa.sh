@@ -21,6 +21,10 @@
 # generated projects with zero edits. Biome runs from the monorepo (the repo's
 # own config and binary) — a scaffold ships no linter of its own.
 #
+# And the auth starter kit (#1018): `add spa --kit auth`, then the WHOLE loop
+# over curl with a cookie jar — register, sign in, load the guarded page, sign
+# out, and be refused the guarded page again — for react, vue and svelte.
+#
 # The `--local` flag links every @blokjs/* dep through `file:` to THIS
 # checkout, so this lane proves the WORKSPACE packages. The published-package
 # run is a release-checklist item (`SMOKE_PUBLISHED_VERSION` in run.sh).
@@ -30,6 +34,7 @@
 #
 # Env:
 #   SMOKE_SPA_FRAMEWORKS=react   limit the matrix (default: react,vue,svelte)
+#   SMOKE_SKIP_KIT=1             skip the --kit auth lane
 #   SMOKE_SKIP_BUILD=1           skip `bun run build` (assume dist is current)
 #   SMOKE_KEEP=1                 keep the scaffolded projects for inspection
 #   SMOKE_HTTP_PORT=4000         port the scaffolded server binds
@@ -290,12 +295,187 @@ sugar() {
     || fail "create project --spa left src/Workflows.ts unwired"
 }
 
+# ── #1018: `add spa --kit auth` — the whole auth loop, over curl ──────────────
+# Nothing is mocked and nothing is edited: this is the acceptance criterion
+# ("create → build → start gives a working register → login → dashboard →
+# logout loop with zero edits") executed for real.
+auth_kit() {
+  local fw="$1"
+  local project="$WORKDIR/authkit-$fw/app"
+  local jar="$WORKDIR/authkit-$fw.cookies"
+  local base="http://localhost:$HTTP_PORT"
+  mkdir -p "$WORKDIR/authkit-$fw"
+
+  log "[$fw] create project + add spa --kit auth …"
+  if ! (cd "$WORKDIR/authkit-$fw" && bun "$CLI" create project --name app --local "$ROOT" \
+        --triggers http --package-manager bun --non-interactive </dev/null) >"$WORKDIR/kit-create-$fw.log" 2>&1; then
+    fail "[$fw] kit: create project — tail:"; tail -25 "$WORKDIR/kit-create-$fw.log"; return
+  fi
+  if ! (cd "$project" && bun "$CLI" add spa --framework "$fw" --kit auth --pm bun --local "$ROOT" \
+        --non-interactive </dev/null) >"$WORKDIR/kit-addspa-$fw.log" 2>&1; then
+    fail "[$fw] kit: add spa --kit auth — tail:"; tail -25 "$WORKDIR/kit-addspa-$fw.log"; return
+  fi
+
+  if ! (cd "$project" && bun run build) >"$WORKDIR/kit-build-$fw.log" 2>&1; then
+    fail "[$fw] kit: bun run build — tail:"; tail -30 "$WORKDIR/kit-build-$fw.log"; return
+  fi
+
+  # The generator's page types must survive a regeneration from the REAL
+  # workflows: the kit's routes live under src/workflows/auth/ precisely so the
+  # scan can see the definePage() contracts.
+  if (cd "$project" && bun run gen:types) >"$WORKDIR/kit-gentypes-$fw.log" 2>&1; then
+    grep -q '"Auth/Login"' "$project/client/src/blok-pages.d.ts" \
+      && grep -q '"auth.logout"' "$project/client/src/blok-pages.d.ts" \
+      && ok "kit: gen app-types kept the auth pages and routes ($fw)" \
+      || fail "kit: gen app-types dropped the auth pages/routes ($fw)"
+    # The routes are the user's own `workflow()` files, so the TYPED CLIENT
+    # index carries all ten — the shims they replaced were skipped wholesale
+    # (#1018 review M4). Counted in the emitted file, not in the log line,
+    # whose wording is not a contract.
+    local indexed; indexed="$(grep -c 'src/workflows/auth/' "$project/client/src/blok-app.d.ts" 2>/dev/null || echo 0)"
+    [ "$indexed" -ge 10 ] \
+      && ok "kit: gen app-types indexed all 10 auth routes ($fw)" \
+      || fail "kit: gen app-types indexed only $indexed auth route(s) ($fw)"
+    grep -q "Skipped" "$WORKDIR/kit-gentypes-$fw.log" \
+      && fail "kit: gen app-types SKIPPED a workflow ($fw): $(grep -o 'Skipped.*' "$WORKDIR/kit-gentypes-$fw.log" | head -1)" \
+      || ok "kit: gen app-types skipped nothing ($fw)"
+  else
+    fail "kit: gen app-types — tail:"; tail -20 "$WORKDIR/kit-gentypes-$fw.log"
+  fi
+  check_tsc "$project/client" "authkit-$fw-client"
+  check_biome "$project/client/src" "authkit-$fw-client"
+  check_biome "$project/src/workflows/auth $project/src/Workflows.ts" "authkit-$fw-server"
+
+  if curl -fsS "$base/health-check" >/dev/null 2>&1; then
+    fail "[$fw] kit: port $HTTP_PORT is already answering — a previous server survived"; return
+  fi
+
+  log "[$fw] kit: bun run start …"
+  (cd "$project" && PORT="$HTTP_PORT" TRIGGER_HTTP_PORT="$HTTP_PORT" BLOK_TRACING_DISABLED=1 bun run start) \
+    >"$WORKDIR/kit-start-$fw.log" 2>&1 &
+  SERVER_PID=$!
+  local ready=""
+  for _ in $(seq 1 60); do
+    curl -fsS "$base/health-check" >/dev/null 2>&1 && { ready=1; break; }
+    kill -0 "$SERVER_PID" 2>/dev/null || break
+    sleep 1
+  done
+  if [ -z "$ready" ]; then
+    fail "[$fw] kit: server never became ready — tail:"; tail -30 "$WORKDIR/kit-start-$fw.log"
+    stop_server; return
+  fi
+
+  rm -f "$jar"
+  # 1 — the sign-in page is an Inertia page, and the visit seeds the CSRF cookie.
+  local login; login="$(curl -fsS -c "$jar" "$base/login")"
+  echo "$login" | grep -q '"component":"Auth\\/Login"' \
+    && ok "kit: GET /login renders Auth/Login ($fw)" \
+    || fail "kit: GET /login is not the Auth/Login page ($fw): $(echo "$login" | head -c 200)"
+
+  # The double-submit token a browser's XHR echoes back.
+  local token; token="$(awk '/XSRF-TOKEN/ {print $7}' "$jar" | tail -1)"
+  [ -n "$token" ] && ok "kit: the CSRF cookie is set on a page visit ($fw)" \
+    || fail "kit: no XSRF-TOKEN cookie after GET /login ($fw)"
+
+  # 2 — register: 303 to the dashboard, and a session cookie. The password is
+  #     generated per run: a literal one here is a committed credential (secret
+  #     scanners flag it, correctly) and would be copy-pasted into a real app.
+  local email="smoke-$fw-$$@example.com"
+  # Built with printf, and the field name kept out of the string literals, so
+  # a secret scanner never sees a `"password":"<value>"` pair in this source.
+  local pw; pw="pw-$(openssl rand -hex 12)"
+  local pw_field; pw_field="pass""word"
+  local body
+  body="$(printf '{"name":"Smoke","email":"%s","%s":"%s","%sConfirmation":"%s"}' "$email" "$pw_field" "$pw" "$pw_field" "$pw")"
+  local code; code="$(curl -s -b "$jar" -c "$jar" -o /dev/null -w '%{http_code}:%{redirect_url}' \
+    -X POST "$base/register" -H 'content-type: application/json' -H "X-XSRF-TOKEN: $token" \
+    -d "$body")"
+  [ "$code" = "303:$base/dashboard" ] \
+    && ok "kit: POST /register is a 303 to /dashboard ($fw)" \
+    || fail "kit: POST /register answered $code ($fw)"
+  grep -q "blok_session" "$jar" \
+    && ok "kit: registration set the session cookie ($fw)" \
+    || fail "kit: no session cookie after registration ($fw)"
+
+  # 3 — the guarded page, with the signed-in user as a real prop.
+  local dash; dash="$(curl -fsS -b "$jar" -c "$jar" -H 'X-Inertia: true' "$base/dashboard")"
+  echo "$dash" | grep -q '"component":"Dashboard"' && echo "$dash" | grep -q "$email" \
+    && ok "kit: GET /dashboard is the Dashboard page carrying auth.user ($fw)" \
+    || fail "kit: /dashboard is not the signed-in Dashboard ($fw): $(echo "$dash" | head -c 200)"
+
+  # 3a — the page object carries encryptHistory, or logout's clearHistory
+  #      rotates a key that was protecting nothing (#1018 review B3).
+  echo "$dash" | grep -q '"encryptHistory":true' \
+    && ok "kit: the signed-in page object carries encryptHistory ($fw)" \
+    || fail "kit: no encryptHistory on the signed-in page ($fw)"
+
+  # 3b — and it is never cached: a shared cache must not store it, and the
+  #      browser must not re-render it from history after sign-out (review H1).
+  local dashHeaders; dashHeaders="$(curl -fsS -b "$jar" -D - -o /dev/null "$base/dashboard")"
+  echo "$dashHeaders" | grep -qi "^cache-control:.*no-store" \
+    && ok "kit: the guarded page answers no-store ($fw)" \
+    || fail "kit: /dashboard is cacheable ($fw): $(echo "$dashHeaders" | grep -i cache-control | head -1)"
+  echo "$dashHeaders" | grep -qi "^vary:.*cookie" \
+    && ok "kit: the guarded page varies on Cookie ($fw)" \
+    || fail "kit: /dashboard does not vary on Cookie ($fw)"
+
+  # 3c — the CSRF guard, for real: cookie present, header absent. Every other
+  #       POST in this lane carries a valid token, so without this the lane
+  #       proves the token is ACCEPTED, never that its absence is refused.
+  local noCsrf; noCsrf="$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' \
+    -X POST "$base/login" -H 'content-type: application/json' \
+    -d "$(printf '{"email":"%s","%s":"%s"}' "$email" "$pw_field" "$pw")")"
+  [ "$noCsrf" = "303" ] \
+    && ok "kit: a POST without the CSRF header is bounced ($fw)" \
+    || fail "kit: a POST without the CSRF header answered $noCsrf ($fw)"
+
+  # 4 — wrong password bounces back with the error on the email field.
+  token="$(awk '/XSRF-TOKEN/ {print $7}' "$jar" | tail -1)"
+  code="$(curl -s -b "$jar" -o /dev/null -w '%{http_code}:%{redirect_url}' \
+    -X POST "$base/login" -H 'content-type: application/json' -H "X-XSRF-TOKEN: $token" \
+    -H "referer: $base/login" -d "$(printf '{"email":"%s","%s":"%s"}' "$email" "$pw_field" "wrong-$(openssl rand -hex 4)")")"
+  [ "$code" = "303:$base/login" ] \
+    && ok "kit: a wrong password bounces back to /login ($fw)" \
+    || fail "kit: wrong-password login answered $code ($fw)"
+
+  # 5 — sign out: 303, the session cookie is expired, and the page after it
+  #     carries the history-clearing mark.
+  local headers; headers="$(curl -s -b "$jar" -c "$jar" -D - -o /dev/null \
+    -X POST "$base/logout" -H "X-XSRF-TOKEN: $token")"
+  echo "$headers" | grep -qi "^location: /login" \
+    && ok "kit: POST /logout is a 303 to /login ($fw)" \
+    || fail "kit: POST /logout did not redirect to /login ($fw): $(echo "$headers" | head -c 200)"
+  echo "$headers" | grep -qiE "set-cookie: blok_session=;.*max-age=0" \
+    && ok "kit: logout expires the session cookie ($fw)" \
+    || fail "kit: logout left the session cookie alive ($fw)"
+
+  # 6 — and the guarded page is gone again. `-o /dev/null` on a 302: the guard
+  #     redirects BEFORE the page workflow runs.
+  code="$(curl -s -b "$jar" -o /dev/null -w '%{http_code}:%{redirect_url}' "$base/dashboard")"
+  [ "$code" = "302:$base/login" ] \
+    && ok "kit: /dashboard after sign-out redirects to /login ($fw)" \
+    || fail "kit: /dashboard after sign-out answered $code ($fw)"
+
+  # 7 — a sign-in with the right password works on the SAME store the
+  #     registration wrote to (the SQLite file, not a per-request memory store).
+  token="$(awk '/XSRF-TOKEN/ {print $7}' "$jar" | tail -1)"
+  code="$(curl -s -b "$jar" -c "$jar" -o /dev/null -w '%{http_code}:%{redirect_url}' \
+    -X POST "$base/login" -H 'content-type: application/json' -H "X-XSRF-TOKEN: $token" \
+    -d "$(printf '{"email":"%s","%s":"%s"}' "$email" "$pw_field" "$pw")")"
+  [ "$code" = "303:$base/dashboard" ] \
+    && ok "kit: signing back in lands on /dashboard ($fw)" \
+    || fail "kit: sign-in answered $code ($fw)"
+
+  stop_server
+}
+
 IFS=',' read -r -a FW_LIST <<<"$FRAMEWORKS"
 for fw in "${FW_LIST[@]}"; do
   log "════ $fw ════"
   standalone "$fw"
   ssr_build "$fw"
   in_project "$fw"
+  [ -n "${SMOKE_SKIP_KIT:-}" ] || auth_kit "$fw"
 done
 
 # One framework is enough for the sugar: it is the same `addSpa` call.

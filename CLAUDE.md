@@ -142,6 +142,10 @@ export default workflow("dashboard", { version: "1.0.0", trigger: http.get("/") 
   standalone (separate origin + `BLOK_CORS_ORIGIN`).
 - Commands: `blokctl gen app-types`, `blokctl add spa` (`create spa` for a new
   project), `blokctl inertia start-ssr`, `blokctl inertia doctor`.
+- `add spa --kit auth` (or `create project --spa <fw> --kit auth`) adds the auth
+  starter kit: `@blokjs/session` + `@blokjs/auth`, the ten routes under
+  `src/workflows/auth/`, and the sign-in/up/reset pages. `--kit` without a
+  framework is refused.
 - Agent surface: `docs/llms.txt` / `docs/llms-full.txt`, and the read-only MCP
   tools `inertia.pages.list` / `inertia.page.get` / `inertia.routes.list`
   (dev-only unless `BLOK_INERTIA_MCP=1`).

@@ -26,6 +26,13 @@ const CLIENT_SRC_DIRS = [
 	"examples/inertia-standalone/frontend/src",
 ];
 
+/** The auth kit's client half (#1018) — react, vue, svelte, in that order. */
+const KIT_DIRS = [
+	"templates/spa-react/kits/auth/src",
+	"templates/spa-vue/kits/auth/src",
+	"templates/spa-svelte/kits/auth/src",
+];
+
 /** The client entry of each of those, in the same order. */
 const ENTRIES = [
 	"templates/spa-react/src/app.tsx",
@@ -215,6 +222,54 @@ describe("the SPA design system ships as one system", () => {
 			const source = read(rel);
 			expect(source, `${rel} hard-codes its <title>`).toContain("pageTitle(");
 			expect(source, `${rel} hard-codes its <title>`).toMatch(/<title>\{pageTitle\(/);
+		}
+	});
+
+	/**
+	 * #1018 — the auth kit ships its own stylesheet instead of growing
+	 * `blok.css`, which is byte-compared across seven clients above. Its three
+	 * copies are held together the same way.
+	 */
+	it("has the same auth.css bytes in all three kit templates", () => {
+		assertIdentical(
+			KIT_DIRS.map((dir) => `${dir}/styles/auth.css`),
+			"auth.css",
+		);
+		// ...and it must NOT have leaked into the shared stylesheet, whose bytes
+		// are shared with four examples this issue does not touch.
+		expect(read(`${CLIENT_SRC_DIRS[0]}/styles/blok.css`)).not.toContain(".blok-guest");
+	});
+
+	it("declares the same five pages for every kit framework", () => {
+		assertIdentical(
+			KIT_DIRS.map((dir) => `${dir}/blok-pages.d.ts`),
+			"the kit's blok-pages.d.ts",
+		);
+		for (const [dir, ext] of KIT_DIRS.map((dir, i) => [dir, ["tsx", "vue", "svelte"][i]] as const)) {
+			for (const page of ["Auth/Login", "Auth/Register", "Auth/ForgotPassword", "Auth/ResetPassword", "Dashboard"]) {
+				const rel = `${dir}/pages/${page}.${ext}`;
+				expect(readFileSync(path.join(ROOT, rel), "utf8").length, `${rel} is empty`).toBeGreaterThan(0);
+			}
+			expect(readFileSync(path.join(ROOT, `${dir}/components/GuestLayout.${ext}`), "utf8")).toContain("blok-guest");
+		}
+	});
+
+	/**
+	 * The header's sign-out is a POST — a GET logout is CSRF-able and gets
+	 * pre-fetched by browsers and link scanners — and it renders only when
+	 * someone is signed in, because the kit-less scaffold has no `/logout`.
+	 */
+	it("signs out with a POST, in every framework, only when signed in", () => {
+		for (const rel of [
+			"templates/spa-react/src/components/AppLayout.tsx",
+			"templates/spa-vue/src/components/AppLayout.vue",
+			"templates/spa-svelte/src/components/AppLayout.svelte",
+		]) {
+			const source = read(rel);
+			// The two attributes TOGETHER: `method="post"` on its own also matches
+			// the comment above the component, which is not a sign-out button.
+			expect(source, `${rel} has no POST sign-out`).toContain('href="/logout" method="post"');
+			expect(source, `${rel} renders sign-out for a guest`).toMatch(/if\s*\(?!?user|v-if="user"|\{#if user\}/);
 		}
 	});
 

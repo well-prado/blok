@@ -21,8 +21,8 @@ blokctl create project --spa svelte           # both, in one command
 
 Flags: `--framework react|vue|svelte` (Angular is refused — no Inertia adapter
 exists), `--blok-url <url>` (default `http://localhost:4000`), `--pm`,
-`--no-install`, `--ssr`. `--kit auth` lands with
-[#1018](https://github.com/well-prado/blok/issues/1018).
+`--no-install`, `--ssr`. Add `--kit auth` for sessions, sign-in, sign-up,
+password reset and a guarded page — see [Starter kit](/d/spa/starter-kit).
 
 `add spa` refuses to run twice (it detects `client/`) and refuses outside a
 Blok project. The five steps below are what it writes — read them to understand

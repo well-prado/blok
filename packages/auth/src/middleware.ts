@@ -12,6 +12,7 @@ import {
 	createAuthMiddleware,
 	createCsrfMiddleware,
 	createSharedMiddleware,
+	encryptHistoryMiddleware,
 } from "@blokjs/inertia";
 import { createSessionMiddleware } from "@blokjs/session";
 import { authOptions } from "./config.js";
@@ -37,8 +38,10 @@ export function requireAuth(opts: AuthMiddlewareOptions = {}) {
  *
  * `inertia.session` has to run first (it fills `ctx.state.session`, which the
  * `auth` step reads); `inertia.csrf` runs after `inertia.shared` so a rejected
- * write can already flash. `inertia.auth` is per-route, so it is registered but
- * deliberately NOT in {@link AUTH_KIT_CHAIN}.
+ * write can already flash; `inertia.encryptHistory` runs last, marking the
+ * request so every page serialized afterwards carries `encryptHistory: true`.
+ * `inertia.auth` is per-route, so it is registered but deliberately NOT in
+ * {@link AUTH_KIT_CHAIN}.
  *
  * ```ts
  * // src/Workflows.ts
@@ -51,9 +54,20 @@ export async function authKitMiddleware(): Promise<Record<string, unknown>> {
 		"inertia.session": await createSessionMiddleware(),
 		"inertia.shared": await createSharedMiddleware({ currentUser: currentUserNode }),
 		"inertia.csrf": await createCsrfMiddleware(),
+		"inertia.encryptHistory": await encryptHistoryMiddleware(),
 		"inertia.auth": await requireAuth(),
 	};
 }
 
-/** The GLOBAL chain, in order. `inertia.auth` is per-route and not in it. */
-export const AUTH_KIT_CHAIN = ["inertia.session", "inertia.shared", "inertia.csrf"] as const;
+/**
+ * The GLOBAL chain, in order. `inertia.auth` is per-route and not in it.
+ *
+ * `inertia.encryptHistory` is what makes logout's `clearHistory` mean anything
+ * (#1018 security review B3): without it the page object carries no
+ * `encryptHistory`, nothing in the client's history is encrypted, and the key
+ * rotation on sign-out rotates a key that was never protecting anything — the
+ * signed-in pages behind the Back button stay readable in history state.
+ * It runs AFTER `inertia.csrf` (a rejected write never reaches a page, so the
+ * mark would be wasted work) and before any page step.
+ */
+export const AUTH_KIT_CHAIN = ["inertia.session", "inertia.shared", "inertia.csrf", "inertia.encryptHistory"] as const;

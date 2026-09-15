@@ -71,6 +71,62 @@ describe("redirectBack / back", () => {
 		expect(redirectBack({ headers: {} }).headers?.Location).toBe("/");
 	});
 
+	/**
+	 * #1018 security review L1 — `Referer` is attacker-controllable, and this
+	 * helper answers a FAILED WRITE: bouncing to another origin hands the flash
+	 * cookie's errors to a page the attacker chose, which is exactly the shape
+	 * of a credible phishing bounce after a failed sign-in.
+	 */
+	describe("only follows a SAME-ORIGIN Referer", () => {
+		const host = { host: "app.example" };
+
+		it.each([
+			["https://evil.example/x", "a foreign absolute URL"],
+			["//evil.example/x", "a protocol-relative URL, which is absolute to a browser"],
+			["https://app.example.evil.example/x", "a host that merely starts with ours"],
+			["not a url", "an unparsable value"],
+		])("ignores %s (%s)", (referer) => {
+			const env = redirectBack({ headers: { ...host, referer }, method: "POST" }, { fallback: "/login" });
+			expect(env.headers?.Location).toBe("/login");
+		});
+
+		it("follows a relative Referer", () => {
+			const env = redirectBack({ headers: { ...host, referer: "/login" }, method: "POST" }, { fallback: "/" });
+			expect(env.headers?.Location).toBe("/login");
+		});
+
+		it("follows an absolute Referer on our own Host", () => {
+			const env = redirectBack(
+				{ headers: { ...host, referer: "https://app.example/login" }, method: "POST" },
+				{ fallback: "/" },
+			);
+			expect(env.headers?.Location).toBe("https://app.example/login");
+		});
+
+		it("follows an absolute Referer matching the Origin header", () => {
+			const env = redirectBack(
+				{ headers: { origin: "https://app.example", referer: "https://app.example/login" }, method: "POST" },
+				{ fallback: "/" },
+			);
+			expect(env.headers?.Location).toBe("https://app.example/login");
+		});
+
+		it("uses X-Forwarded-Host behind a proxy", () => {
+			const env = redirectBack(
+				{
+					headers: {
+						host: "internal:4000",
+						"x-forwarded-host": "app.example",
+						referer: "https://app.example/login",
+					},
+					method: "POST",
+				},
+				{ fallback: "/" },
+			);
+			expect(env.headers?.Location).toBe("https://app.example/login");
+		});
+	});
+
 	it("carries the error BAG and preserveFragment in the cookie", () => {
 		const env = redirectBack(
 			{ headers: { referer: "/orders#new" }, method: "PUT" },

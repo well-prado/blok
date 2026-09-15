@@ -20,6 +20,8 @@
  * one shared NAT does not throttle a whole office after five bad attempts.
  */
 
+import { authOptions } from "./config.js";
+
 /** A pluggable counter. Implement it over Redis to make the limit fleet-wide. */
 export interface ThrottleBackend {
 	/** Count this attempt and return the running total inside the window. */
@@ -100,19 +102,45 @@ export async function clearThrottle(key: string): Promise<void> {
 }
 
 /**
+ * Is a forwarding header allowed to name the client?
+ *
+ * `X-Forwarded-For`, `X-Real-IP` and `CF-Connecting-IP` are ORDINARY REQUEST
+ * HEADERS: anything that can reach the server can set them. Trusting them
+ * unconditionally made the throttle a formality — rotate the header per attempt
+ * and every guess lands in its own bucket (#1018 security review H2). They are
+ * read only when the deployment says a proxy is in front:
+ * `configureAuth({ trustProxy: true })`, or `BLOK_TRUST_PROXY=1`.
+ *
+ * Exported so an app can assert its own expectation in a boot check.
+ */
+export function trustsProxyHeaders(explicit?: boolean): boolean {
+	if (explicit !== undefined) return explicit;
+	const env = process.env.BLOK_TRUST_PROXY;
+	return env === "1" || env?.toLowerCase() === "true";
+}
+
+/**
  * The bucket key for one login attempt: client IP + the address being tried.
  *
- * The IP comes from `X-Forwarded-For`'s first entry when present (the client as
- * the closest proxy saw it), else the socket address the trigger recorded, else
- * a constant — an unknown IP still gets throttled, just together with every
- * other unknown one.
+ * Behind a TRUSTED proxy the IP is `X-Forwarded-For`'s first entry (the client
+ * as the closest proxy saw it), else `X-Real-IP` / `CF-Connecting-IP`. Without
+ * one, every such header is ignored and the key is the email alone: an attacker
+ * can no longer mint a fresh bucket per attempt by rotating a header, at the
+ * cost of counting a shared NAT together. That is the right trade — the
+ * alternative was no effective throttle at all.
  */
-export function throttleKey(headers: Record<string, unknown> | undefined, email: string): string {
+export function throttleKey(
+	headers: Record<string, unknown> | undefined,
+	email: string,
+	opts: { trustProxy?: boolean } = {},
+): string {
+	const address = String(email).trim().toLowerCase();
+	if (!trustsProxyHeaders(opts.trustProxy ?? authOptions().trustProxy)) return `direct|${address}`;
 	const forwarded = headers?.["x-forwarded-for"];
 	const direct = headers?.["x-real-ip"] ?? headers?.["cf-connecting-ip"];
 	const ip =
 		(typeof forwarded === "string" && forwarded.split(",")[0]?.trim()) ||
 		(typeof direct === "string" ? direct : "") ||
 		"unknown";
-	return `${ip}|${String(email).trim().toLowerCase()}`;
+	return `${ip}|${address}`;
 }

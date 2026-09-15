@@ -127,12 +127,18 @@ async function main() {
 			.option("--examples", "Install example workflows and nodes")
 			.option("--spa <framework>", "Also run `add spa` with this framework: react, vue, svelte")
 			.option("--ssr", "With --spa: also scaffold the Inertia SSR entry and build:ssr script")
+			.option("--kit <value>", "With --spa: starter kit to include (auth)")
 			.action(
 				withErrorBoundary(async (options: OptionValues) => {
 					await analytics.trackCommandExecution({
 						command: "create project",
 						args: options,
 						execution: async () => {
+							// `--kit` only means anything with a client to put it in; silently
+							// scaffolding a kit-less project would look like it worked.
+							if (options.kit && !options.spa) {
+								throw new Error("--kit needs --spa <framework>: the starter kit includes the SPA client pages.");
+							}
 							const dir = await createProject(options, version, false, options.local);
 							// #999 — `--spa <fw>` is sugar for `create project` + `add spa`,
 							// so both paths go through exactly one implementation.
@@ -239,7 +245,7 @@ async function main() {
 			.option("--pm <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--no-install", "Skip installing dependencies")
 			.option("--ssr", "Also scaffold the Inertia SSR entry and the build:ssr script")
-			.option("--kit <value>", "Starter kit to include (auth lands with #1018)")
+			.option("--kit <value>", "Starter kit to include: auth (sessions, sign-in/up/reset pages)")
 			.option("-l, --local <path>", "Link @blokjs/* from a local repo checkout instead of npm")
 			.action(
 				withErrorBoundary(async (name: string | undefined, options: OptionValues) => {

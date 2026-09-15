@@ -199,3 +199,63 @@ describe("@blokjs/session — stores", () => {
 		_resetSession();
 	});
 });
+
+/**
+ * #1018 security review B4 + M2 — the two cookie attributes the kit actually
+ * depends on: `Secure` in production, and a cookie that dies with the browser
+ * when the user did not ask to be remembered.
+ */
+describe("@blokjs/session — cookie attributes per request", () => {
+	beforeEach(() => {
+		_resetSession();
+		configureSession({ store: new MemorySessionStore(), secret: SECRET });
+	});
+
+	/** A request as it arrives behind a TLS terminator (nginx, a load balancer, Fly, …). */
+	function tlsCtx(): { request: { headers: Record<string, string> } } {
+		return { request: { headers: { "x-forwarded-proto": "https" } } };
+	}
+
+	it("B4: adds Secure behind a TLS terminator", async () => {
+		const { cookie } = await startSession(tlsCtx(), { userId: "u-1" });
+		expect(cookie).toContain("Secure");
+	});
+
+	it("B4: adds Secure for an https request URL", async () => {
+		const ctx = { request: { headers: {}, url: "https://app.example/login" } };
+		const { cookie } = await startSession(ctx, { userId: "u-1" });
+		expect(cookie).toContain("Secure");
+	});
+
+	it("B4: does NOT add Secure on plain http, or the dev cookie is dropped", async () => {
+		const { cookie } = await startSession(makeCtx(), { userId: "u-1" });
+		expect(cookie).not.toContain("Secure");
+	});
+
+	it("B4: the clearing cookie carries the same attributes, or the browser keeps the old one", async () => {
+		const ctx = tlsCtx();
+		await startSession(ctx, { userId: "u-1" });
+		const cleared = await destroySession(ctx);
+		expect(cleared).toContain("Secure");
+		expect(cleared).toContain("Max-Age=0");
+	});
+
+	it("B4: an explicit configureSession({ cookie: { secure } }) still wins", async () => {
+		configureSession({ cookie: { secure: true } });
+		const { cookie } = await startSession(makeCtx(), { userId: "u-1" });
+		expect(cookie).toContain("Secure");
+	});
+
+	it("M2: persistent by default — Max-Age is the ttl window", async () => {
+		const { cookie } = await startSession(makeCtx(), { userId: "u-1" });
+		expect(cookie).toMatch(/Max-Age=\d+/);
+	});
+
+	it("M2: persistent:false omits Max-Age, so the cookie dies with the browser", async () => {
+		const { cookie } = await startSession(makeCtx(), { userId: "u-1" }, { persistent: false });
+		expect(cookie).not.toContain("Max-Age");
+		// ...and it is still a real session: the id reads back.
+		const loaded = await loadSession(makeCtx(pair(cookie)));
+		expect(loaded.data).toEqual({ userId: "u-1" });
+	});
+});

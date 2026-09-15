@@ -14,7 +14,45 @@
  * ```
  */
 
-import { branch, node, step, workflow } from "@blokjs/core";
+import { branch, defineNode, node, step, workflow } from "@blokjs/core";
+import { z } from "zod";
+
+/** Where the "this response is per-user" mark lives on the request. */
+const PRIVATE_MARK = "_blokPrivateResponse";
+
+/**
+ * Mark this request's response as per-user: the page it renders must not be
+ * stored by a shared cache or replayed from the browser's disk cache after
+ * sign-out (#1018 security review H1).
+ */
+export function markPrivateResponse(ctx: unknown): void {
+	const request = (ctx as { request?: Record<string, unknown> } | undefined)?.request;
+	if (request && typeof request === "object") request[PRIVATE_MARK] = true;
+}
+
+/** Has something (the guest guard) marked this response as per-user? */
+export function isPrivateResponse(ctx: unknown): boolean {
+	const request = (ctx as { request?: Record<string, unknown> } | undefined)?.request;
+	return request?.[PRIVATE_MARK] === true;
+}
+
+/**
+ * The marking node. It exists so a MIDDLEWARE workflow can declare "everything
+ * this route renders is private" — {@link createAuthMiddleware} runs it, and
+ * the page serializer turns the mark into `Cache-Control: no-store` and
+ * `Vary: …, Cookie`.
+ */
+export const privateResponseNode = defineNode({
+	name: "@blokjs/inertia.private",
+	description: "Mark the current request so the Inertia page it renders is never cached (no-store, Vary: Cookie).",
+	input: z.object({}),
+	output: z.object({ private: z.boolean() }),
+
+	async execute(ctx) {
+		markPrivateResponse(ctx);
+		return { private: true };
+	},
+});
 
 export interface AuthMiddlewareOptions {
 	/** Where a guest is sent. Default `/login`. */
@@ -32,6 +70,10 @@ export interface AuthMiddlewareOptions {
 export function createAuthMiddleware(opts: AuthMiddlewareOptions = {}) {
 	const { redirectTo = "/login", name = "inertia.auth", status = 302 } = opts;
 	return workflow(name, { version: "1.0.0", middleware: true }, () => {
+		// A guarded route's response is per-user by definition: no shared cache
+		// may store it, and the browser must not replay it from disk after
+		// sign-out. Marked BEFORE the gate so the guest redirect is covered too.
+		step("inertiaPrivate", privateResponseNode, {}, { ephemeral: true });
 		// ponytail: the guest test goes through `@blokjs/expr` rather than a
 		// handle condition (`not(shared(currentUser, "auth").id)`) so it
 		// OPTIONAL-CHAINS. A branch condition lowers to a bare

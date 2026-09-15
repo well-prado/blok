@@ -1,3 +1,36 @@
+/**
+ * Stems that make a key sensitive when they appear as a WORD inside it.
+ *
+ * Exact-set membership (the list below) leaks by spelling: `password` was
+ * redacted but `passwordConfirmation` — the field the auth kit's sign-up form
+ * actually posts — was written to `.blok/trace.db` in plaintext, and `cookie`
+ * was redacted while `cookies`, the `RespondEnvelope` key carrying the signed
+ * `blok_session` value, was not (#1018 security review B1/B2).
+ *
+ * Matching is by WORD, not by raw substring: the key is split on camelCase and
+ * `_ - . /` boundaries, and a stem matches a segment (or a pair of adjacent
+ * segments, so `apiKey` hits `apikey`), optionally plural. That keeps the
+ * earlier FW-8 decision intact — `tokenizer_config` is not a token, `monkey` is
+ * not a key, `author` is not authorization — while `newPassword`,
+ * `password_confirmation`, `setCookie`, `accessToken` and `clientSecret` all
+ * redact. The ambiguous short names (`key`, `auth`, `session`, `jwt`) stay
+ * whole-key exact matches only.
+ */
+const SENSITIVE_SUBSTRINGS = [
+	"password",
+	"passwd",
+	"secret",
+	"token",
+	"credential",
+	"cookie",
+	"authorization",
+	"apikey",
+	"api_key",
+	"api-key",
+	"private_key",
+	"privatekey",
+];
+
 const DEFAULT_SENSITIVE_FIELDS = new Set([
 	"password",
 	"secret",
@@ -43,6 +76,55 @@ function getSensitiveFields(): Set<string> {
 	return DEFAULT_SENSITIVE_FIELDS;
 }
 
+/**
+ * The words a field name is made of: `passwordConfirmation` → `password`,
+ * `confirmation`; `set-cookie` → `set`, `cookie`; `API_KEY` → `api`, `key`.
+ */
+function wordsOf(key: string): string[] {
+	return key
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter((word) => word.length > 0);
+}
+
+/** Does `stem` name one of these words, allowing a plural (`cookies`)? */
+function hasWord(words: readonly string[], stem: string): boolean {
+	const plural = `${stem}s`;
+	for (let i = 0; i < words.length; i++) {
+		const word = words[i] as string;
+		if (word === stem || word === plural) return true;
+		// Adjacent pair, so `apiKey` and `api_key` both reach the `apikey` stem.
+		const next = words[i + 1];
+		if (next !== undefined) {
+			const joined = word + next;
+			if (joined === stem || joined === plural) return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Is this key a secret? Whole-key exact membership, or a
+ * {@link SENSITIVE_SUBSTRINGS} stem appearing as a word in it.
+ *
+ * `BLOK_TRACE_SANITIZE_FIELDS` entries keep working as exact names AND join the
+ * word rule, so an operator naming one field also covers its `…Confirmation`
+ * sibling.
+ */
+export function isSensitiveKey(key: string, sensitiveFields: Set<string>): boolean {
+	const lower = key.toLowerCase();
+	if (sensitiveFields.has(lower)) return true;
+	const words = wordsOf(key);
+	if (SENSITIVE_SUBSTRINGS.some((stem) => hasWord(words, stem))) return true;
+	const extra = process.env.BLOK_TRACE_SANITIZE_FIELDS;
+	if (extra === undefined) return false;
+	return extra.split(",").some((entry) => {
+		const name = entry.trim().toLowerCase();
+		return name.length > 0 && hasWord(words, name);
+	});
+}
+
 function getMaxPayloadBytes(): number {
 	const envMax = process.env.BLOK_TRACE_PAYLOAD_MAX_KB;
 	if (envMax) {
@@ -73,7 +155,7 @@ function redactFields(obj: unknown, sensitiveFields: Set<string>, depth = 0, bud
 	if (typeof obj === "object") {
 		const result: Record<string, unknown> = {};
 		for (const [key, value] of Object.entries(obj)) {
-			if (sensitiveFields.has(key.toLowerCase())) {
+			if (isSensitiveKey(key, sensitiveFields)) {
 				result[key] = REDACTED;
 			} else {
 				result[key] = redactFields(value, sensitiveFields, depth + 1, budget);

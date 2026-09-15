@@ -45,6 +45,7 @@ export {
 export {
 	_resetSession,
 	type SessionOptions,
+	type StartSessionOptions,
 	type SessionState,
 	configureSession,
 	destroySession,

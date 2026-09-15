@@ -35,7 +35,7 @@ frontend can `import type` it.
 - [Title and meta](/d/spa/title-and-meta): The HTML shell, its two markers, viewData, and the server-side fallbacks behind the client's Head component.
 - [Client features](/d/spa/client-features): Links, manual visits, polling, prefetching, layouts, scroll, progress, transitions — behaviour that is entirely the stock client's.
 - [DevTools](/d/spa/devtools): The Inertia DevTools protocol server — landing with #1017.
-- [Starter kit](/d/spa/starter-kit): Sessions, users and the auth pages — landing with #1018 and the SPA scaffolds in #999.
+- [Starter kit](/d/spa/starter-kit): One command for sessions, sign-in, sign-up, password reset and a guarded page — in React, Vue or Svelte.
 - [AI-friendliness](/d/spa/ai): Everything an agent needs to build a Blok SPA correctly — llms.txt, the MCP page tools, the authoring block, and blokctl inertia doctor.
 
 ## Optional
