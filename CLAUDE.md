@@ -217,3 +217,7 @@ neither is refused at load time.
 - Do not use ESLint or Prettier; this repo uses Biome. Dart code is formatted and analyzed with the pinned Dart SDK toolchain.
 - Do not build with bare `bunx nx run-many -t build`; use `bun run build`, which
   appends the Node-ESM specifier fixup (#687).
+- If a build ever looks stale (a test passing against code you changed, a
+  scaffold failing to typecheck), run `bun run build:check`; the recovery is
+  `bunx nx reset && bun run build`. The nx daemon is off (`nx.json`) precisely
+  so a source edit can never be hashed at its old content (#1067).

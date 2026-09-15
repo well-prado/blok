@@ -60,6 +60,14 @@ emitted relative imports to the explicit `./x.js` form Node's ESM loader
 requires. Without it every `dist/` is Bun-only (#687). `bun run ci:packaging`
 proves the packed tarballs import under real Node.
 
+The nx daemon is disabled in `nx.json` (`useDaemonProcess: false`). It hashed
+build inputs from a filesystem watcher, so an edit made just before a build
+could be hashed at its OLD content: cache hit, task skipped, `dist/` left
+stale — and every test, scaffold and packaging gate then read the previous
+build (#1067). `bun run build:check` edits a source file, rebuilds, and fails
+if `dist` does not carry the edit; the recovery for a stale tree is
+`bunx nx reset && bun run build`.
+
 ## Authoring Surface
 
 New TypeScript workflows use the typed-handle DSL from `@blokjs/core`.
