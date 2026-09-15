@@ -188,13 +188,7 @@ describe("examples/inertia-* — authoring rules", () => {
 		}
 	});
 
-	/**
-	 * The two examples whose Vite plugin IS installed in this monorepo. The Vue
-	 * and Svelte ones need `@vitejs/plugin-vue` / `@sveltejs/vite-plugin-svelte`,
-	 * which are deliberately not hoisted here (adding them re-hoists `vite`), so
-	 * their configs cannot resolve and their full typecheck belongs to #1003.
-	 */
-	it.each(["examples/inertia-react", "examples/inertia-standalone"])(
+	it.each(["examples/inertia-react", "examples/inertia-standalone", "examples/inertia-svelte", "examples/inertia-vue"])(
 		"%s typechecks",
 		(dir) => {
 			const tsc = spawnSync("bunx", ["tsc", "--noEmit"], {
@@ -203,6 +197,27 @@ describe("examples/inertia-* — authoring rules", () => {
 			});
 			expect(`${tsc.stdout ?? ""}${tsc.stderr ?? ""}`.trim()).toBe("");
 			expect(tsc.status).toBe(0);
+		},
+		180_000,
+	);
+
+	/**
+	 * The client build is the only gate that runs the `.vue` / `.svelte` files
+	 * through their real plugin chain. `tsc --noEmit` above never opens them,
+	 * and `spa-components.test.ts` only parses them with the framework compiler.
+	 * The Vue example shipped a `defineProps<PageProps<typeof Dashboard>>()`
+	 * that `@vue/compiler-sfc` cannot resolve — it broke every `vite build` and
+	 * nothing in this repo said so until the plugins were hoisted (#1061).
+	 */
+	it.each(["examples/inertia-svelte", "examples/inertia-vue"])(
+		"%s builds its client",
+		(dir) => {
+			const build = spawnSync("bunx", ["vite", "build", "--config", "client/vite.config.ts", "client"], {
+				cwd: join(REPO_ROOT, dir),
+				encoding: "utf8",
+			});
+			expect(`${build.stdout ?? ""}${build.stderr ?? ""}`).not.toMatch(/error during build|Build failed/);
+			expect(build.status).toBe(0);
 		},
 		180_000,
 	);

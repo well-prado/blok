@@ -22,7 +22,7 @@
 	"devDependencies": {
 		"@inertiajs/vite": "^3.7.1",
 		"@types/node": "^22.15.21",
-		"@vitejs/plugin-vue": "^6.0.0",
+		"@vitejs/plugin-vue": "^6.0.9",
 		"typescript": "^5.8.3",
 		"vite": "^8.0.0",
 		"vitest": "^4.0.18",
