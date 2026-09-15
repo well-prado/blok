@@ -196,6 +196,15 @@ const CORS_ALLOW_HEADERS = [
 	"Authorization",
 	"Accept",
 	"X-Requested-With",
+	// #1003 — the stock client sets these ITSELF, and neither is a CORS-safelisted
+	// request header: `Cache-Control: no-cache` rides every partial reload (and so
+	// every `router.reload`, poll and deferred follow-up), `Purpose: prefetch`
+	// rides every prefetch. Leaving them out made the PREFLIGHT fail, so in
+	// standalone mode the first partial reload of a page died with
+	// "Request header field cache-control is not allowed by
+	// Access-Control-Allow-Headers" and nothing after it ever ran.
+	"Cache-Control",
+	"Purpose",
 	"X-Inertia",
 	"X-Inertia-Version",
 	"X-Inertia-Partial-Component",

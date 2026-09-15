@@ -88,6 +88,36 @@ describe("1 — initial HTML response (no X-Inertia header)", () => {
 		// viewData is shell-only — it must never reach the client.
 		expect(bootPage(html).props).toEqual({ errors: {} });
 	});
+
+	/**
+	 * #1003 — the shell's `<title data-inertia>` is the no-JS fallback. A head
+	 * that brings its OWN title (SSR rendering `<Head title>`) replaces it, or
+	 * the document ships two.
+	 */
+	it("keeps ONE title when the injected head brings its own", async () => {
+		const env = await run({
+			component: "Home",
+			url: "/",
+			head: "<title data-inertia>From SSR</title>",
+			viewData: { title: "Shell fallback" },
+		});
+		const html = env.body as string;
+		expect(html.match(/<title\b/gi) ?? []).toHaveLength(1);
+		expect(html).toContain("<title data-inertia>From SSR</title>");
+		expect(html).not.toContain("Shell fallback");
+	});
+
+	it("keeps the shell's title when the head brings none", async () => {
+		const env = await run({
+			component: "Home",
+			url: "/",
+			head: '<meta data-inertia="description" content="hi" />',
+			viewData: { title: "Shell fallback" },
+		});
+		const html = env.body as string;
+		expect(html.match(/<title\b/gi) ?? []).toHaveLength(1);
+		expect(html).toContain("<title data-inertia>Shell fallback</title>");
+	});
 });
 
 describe("2 — a prop that tries to close the script tag", () => {
