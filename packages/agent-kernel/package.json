@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/agent-kernel",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"description": "Provider-neutral, headless Blok agent kernel and model adapter contracts.",
 	"type": "module",
 	"main": "dist/index.js",

@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/docs-tests",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"private": true,
 	"description": "Docs gates: the SPA doc samples typecheck against the real packages, and the Inertia examples' runPage suites run.",
 	"type": "module",

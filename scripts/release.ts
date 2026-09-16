@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Lockstep publish for the 24 Blok public packages (8 pre-v0.6, plus 7
+ * Lockstep publish for the 29 Blok public packages (8 pre-v0.6, plus 7
  * added in v0.6.0 to support the new trigger surface — sse, websocket,
  * webhook, pubsub, cron, grpc, plus the helpers node — `trigger-mcp`,
  * added post-v0.6 and folded into the lockstep list here, and
@@ -146,7 +146,7 @@ interface CliFlags {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 24 Blok public packages to npm in dependency order using a
+Publishes the 29 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:
@@ -430,7 +430,10 @@ async function main(): Promise<void> {
 		}
 	}
 	if (!flags.skipTests) {
-		if (!runStep("Tests", "bunx", ["nx", "run-many", "-t", "test"])) {
+		// Use the root test script so the release gate inherits the repository's
+		// deliberate VITEST_MAX_WORKERS cap. Calling Nx directly oversubscribes
+		// every Vitest project and makes process-heavy HTTP/CLI tests time out.
+		if (!runStep("Tests", "bun", ["run", "test"])) {
 			console.error("Tests failed");
 			process.exit(1);
 		}

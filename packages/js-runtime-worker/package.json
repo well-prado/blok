@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/runtime-worker",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"description": "Persistent JavaScript/TypeScript execution worker for Blok — serves blok.runtime.v1 over gRPC under Node.js, Bun, or Deno.",
 	"type": "module",
 	"main": "dist/index.js",

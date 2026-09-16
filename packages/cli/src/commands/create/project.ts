@@ -59,7 +59,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v2.3.0";
+const GITHUB_REPO_RELEASE_TAG = "v2.4.0";
 // Scaffold assets bundled into the built package by scripts/
 // bundle-scaffold-assets.ts — repo-relative layout, so it substitutes for a
 // repo checkout. Compiled location: dist/commands/create/project.js →
@@ -97,7 +97,7 @@ export const HONO_NODE_SERVER_RANGE = "^2.0.11";
  * two scaffolds can never drift apart (and `checkCliConstants` in
  * `scripts/release-preflight.ts` keeps checking exactly one declaration).
  */
-export const BLOKJS_DEP_RANGE = "^2.3.0";
+export const BLOKJS_DEP_RANGE = "^2.4.0";
 
 /**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
