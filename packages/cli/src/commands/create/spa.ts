@@ -55,7 +55,7 @@ const BLOK_MARKER = "@blokjs/";
  * OPTIONAL peer (Bun needs nothing), so the range lives here: a scaffold that
  * starts with `node dist/…` must have a real driver installed.
  */
-const SQLITE_RANGE = "^12.6.2";
+const SQLITE_RANGE = "^12.11.1";
 
 const HOME_REPO = path.join(os.homedir(), ".blok", "blok");
 /** Same bundle `create project` reads — `dist/commands/create/spa.js` → `dist/scaffold-repo`. */

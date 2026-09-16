@@ -115,4 +115,54 @@ describe("@blokjs/csrf (#1012)", () => {
 		expect(cookie).toBeTruthy();
 		expect(cookie).toContain("SameSite=Lax");
 	});
+
+	/**
+	 * #1003 — the REJECTION is the path an attacker can trigger on demand: a
+	 * forged cross-site POST fails the check by construction. Bouncing to the raw
+	 * `Referer` would answer it with a 303 to their own site.
+	 */
+	describe("the bounce-back target is ours, and a path", () => {
+		it("refuses a foreign Referer and uses the fallback", async () => {
+			const { error } = await run(
+				{
+					method: "POST",
+					headers: { host: "app.example", referer: "https://evil.example/phish" },
+				},
+				{ fallback: "/login" },
+			);
+			expect(error?.context.code).toBe(303);
+			expect(error?.context.headers).toEqual({ Location: "/login" });
+		});
+
+		it("refuses a protocol-relative Referer", async () => {
+			const { error } = await run(
+				{ method: "POST", headers: { host: "app.example", referer: "//evil.example/phish" } },
+				{ fallback: "/login" },
+			);
+			expect(error?.context.headers).toEqual({ Location: "/login" });
+		});
+
+		it("reduces our own absolute Referer to its path, so the bounce stays on this origin", async () => {
+			const { error } = await run({
+				method: "POST",
+				headers: { host: "app.example", referer: "https://app.example/orders/create?x=1" },
+			});
+			expect(error?.context.headers).toEqual({ Location: "/orders/create?x=1" });
+		});
+
+		it("bounces a cross-origin SPA back onto the API's own origin", async () => {
+			// Standalone mode: `Origin` legitimately names the SPA, so the Referer
+			// is accepted — but an absolute Location would send the XHR to a server
+			// that answers no CORS, and the bounce would die there.
+			const { error } = await run({
+				method: "POST",
+				headers: {
+					host: "api.example",
+					origin: "https://spa.example",
+					referer: "https://spa.example/orders/create",
+				},
+			});
+			expect(error?.context.headers).toEqual({ Location: "/orders/create" });
+		});
+	});
 });

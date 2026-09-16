@@ -63,7 +63,7 @@ metadata, benchmarks, and documentation (PR for slice 2).
 
 | Acceptance criterion | Evidence | Result |
 | --- | --- | --- |
-| The shared conformance suite passes against the supported Node.js, Bun, and Deno versions in CI | `.github/workflows/ci.yml` → `js-runtime-targets` (setup-node 22.11.0, setup-bun 1.4.0, setup-deno v2.7.5) runs `tests/conformance.test.ts` and `tests/conformance.workflow.test.ts` | Pass |
+| The shared conformance suite passes against the supported Node.js, Bun, and Deno versions in CI | `.github/workflows/ci.yml` → `js-runtime-targets` (setup-node 24.21.0, setup-bun 1.4.0, setup-deno v2.7.5) runs `tests/conformance.test.ts` and `tests/conformance.workflow.test.ts` | Pass |
 | Scaffold and packed-consumer smoke tests pass for all three choices | `tests/e2e/scaffold-smoke/run.sh` per matrix target; `scripts/check-packed-exports.ts` imports every packed subpath and runs every packed bin under Node.js, Bun AND Deno | Pass: 540 subpath imports across the three engines |
 | Performance artifacts include environment, workload, throughput, p50/p95/p99 latency, errors, CPU, and memory | `benchmarks/js-runtime-worker.ts` (`bun run bench:runtimes`); measurements below | Pass |
 | A regression test proves worker reuse and bounded process count under concurrent load | `benchmarks/js-runtime-worker.ts` assertions; `tests/worker.integration.test.ts` | Pass |

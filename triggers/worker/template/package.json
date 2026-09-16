@@ -18,7 +18,7 @@
 		"test:dev": "vitest"
 	},
 	"devDependencies": {
-		"@types/node": "^22.15.21",
+		"@types/node": "^24.13.5",
 		"@types/uuid": "^11.0.0",
 		"rimraf": "^6.1.2",
 		"typescript": "^5.8.3",

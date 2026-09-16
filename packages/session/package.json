@@ -20,8 +20,8 @@
 	"keywords": ["blok", "session", "cookie", "sqlite", "redis"],
 	"devDependencies": {
 		"@types/better-sqlite3": "^7.6.13",
-		"@types/node": "^22.15.21",
-		"better-sqlite3": "^12.6.2",
+		"@types/node": "^24.13.5",
+		"better-sqlite3": "^12.11.1",
 		"rimraf": "^6.1.2",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"

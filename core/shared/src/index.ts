@@ -93,6 +93,7 @@ import {
 	markCsrfToken,
 	newCsrfToken,
 	pendingCsrfCookies,
+	safeRefererPath,
 } from "./csrf";
 import {
 	FLASH_COOKIE,
@@ -728,6 +729,7 @@ export {
 	csrfSetCookie,
 	csrfTokenOf,
 	csrfTokensMatch,
+	safeRefererPath,
 	issueCsrfCookie,
 	markCsrfToken,
 	newCsrfToken,

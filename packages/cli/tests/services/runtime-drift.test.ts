@@ -50,7 +50,7 @@ describe("JavaScript runtime identifiers do not drift", () => {
 	});
 
 	/** The `js-runtime-targets` job block. Other jobs pin their own toolchains
-	 * (`node-version: 'lts/*'` for the packaging lane, for instance), so the
+	 * (the packaging lane has its own Node setup, for instance), so the
 	 * pins that mean "the engine this worker is proven against" are only the
 	 * ones inside this job. */
 	function jsTargetsJob(): string {

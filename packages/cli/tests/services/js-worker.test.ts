@@ -47,7 +47,7 @@ describe("worker port resolution", () => {
 
 describe("version parsing", () => {
 	it("reads each engine's own --version format", () => {
-		expect(parseJavaScriptVersion("v22.11.0", "node")).toBe("22.11.0");
+		expect(parseJavaScriptVersion("v24.21.0", "node")).toBe("24.21.0");
 		expect(parseJavaScriptVersion("1.1.38", "bun")).toBe("1.1.38");
 		expect(parseJavaScriptVersion("deno 2.7.5 (stable, release, aarch64-apple-darwin)", "deno")).toBe("2.7.5");
 		// `deno --version` prints three lines; only the first names the engine.
