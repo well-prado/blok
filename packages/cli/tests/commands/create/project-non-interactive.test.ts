@@ -22,9 +22,10 @@ import { setNonInteractive } from "../../../src/services/non-interactive.js";
  */
 const REPO_ROOT = path.resolve(__dirname, "../../../../..");
 
-// A real scaffold runs a real install, so the package default 30s is not
-// enough headroom on a cold runner.
-const SCAFFOLD_TIMEOUT = 120_000;
+// A real scaffold runs a real install. Under the full Nx gate the Bun package
+// manager can be queued behind other cold installs, so allow five minutes for
+// the end-to-end operation while retaining a finite failure bound.
+const SCAFFOLD_TIMEOUT = 300_000;
 
 describe("create project (non-interactive)", () => {
 	const origCwd = process.cwd();
