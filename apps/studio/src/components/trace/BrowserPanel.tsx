@@ -74,7 +74,7 @@ export function BrowserPanel({ session, events, selectedArtifact, onShowLive, cl
 	);
 
 	const actions = useMemo(() => events.filter((event) => event.type === "BROWSER_ACTION").slice(-8), [events]);
-	const currentAction = actions.at(-1)?.payload as ActionPayload | undefined;
+	const currentAction = actions[actions.length - 1]?.payload as ActionPayload | undefined;
 	const box = currentAction?.box;
 	const displayUrl = selectedArtifact?.url || frameUrl;
 
