@@ -177,7 +177,11 @@ describe("#1000 CORS", () => {
 			headers: {
 				Origin: "http://localhost:5173",
 				"Access-Control-Request-Method": "POST",
-				"Access-Control-Request-Headers": "x-inertia,x-inertia-partial-data",
+				// #1003 — `cache-control` and `purpose` are what the STOCK client
+				// sends on a partial reload and a prefetch. They are not
+				// CORS-safelisted, so omitting them from the allow-list failed the
+				// preflight and broke every partial reload cross-origin.
+				"Access-Control-Request-Headers": "x-inertia,x-inertia-partial-data,cache-control,purpose",
 			},
 		});
 		expect(preflight.status).toBe(204);
@@ -186,6 +190,8 @@ describe("#1000 CORS", () => {
 		const allowed = (preflight.headers.get("access-control-allow-headers") ?? "").toLowerCase();
 		expect(allowed).toContain("x-inertia");
 		expect(allowed).toContain("x-inertia-partial-data");
+		expect(allowed).toContain("cache-control");
+		expect(allowed).toContain("purpose");
 		// The ordinary headers must survive the explicit allow-list.
 		expect(allowed).toContain("content-type");
 

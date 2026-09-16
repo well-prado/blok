@@ -35,7 +35,7 @@
 		"@blokjs/shared": "^2.3.0",
 		"@clack/prompts": "^1.0.0",
 		"ai": "^7.0.36",
-		"better-sqlite3": "^12.6.2",
+		"better-sqlite3": "^12.11.1",
 		"chalk": "^5.6.2",
 		"commander": "^14.0.3",
 		"express": "^4.21.2",
@@ -59,11 +59,30 @@
 		"@types/express": "^4.17.21",
 		"@types/figlet": "^1.7.0",
 		"@types/fs-extra": "^11.0.4",
-		"@types/node": "^22.15.21",
+		"@types/node": "^24.13.5",
 		"@types/pluralize": "^0.0.33",
 		"@types/react": "^19.2.10",
 		"rimraf": "^6.1.2",
 		"vitest": "^4.0.18"
+	},
+	"nx": {
+		"targets": {
+			"build": {
+				"inputs": [
+					"default",
+					"^default",
+					"{workspaceRoot}/triggers/**/*",
+					"{workspaceRoot}/workflows/**/*",
+					"{workspaceRoot}/examples/ts-workflows/**/*",
+					"{workspaceRoot}/sdk/**/*",
+					"{workspaceRoot}/infra/development/**/*",
+					"{workspaceRoot}/infra/milvus/**/*",
+					"{workspaceRoot}/infra/metrics/**/*",
+					"{workspaceRoot}/sdks/**/*",
+					"{workspaceRoot}/templates/**/*"
+				]
+			}
+		}
 	},
 	"private": false,
 	"publishConfig": {

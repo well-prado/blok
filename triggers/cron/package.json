@@ -24,7 +24,7 @@
 	},
 	"devDependencies": {
 		"@types/cron": "^2.4.3",
-		"@types/node": "^22.15.21",
+		"@types/node": "^24.13.5",
 		"@types/uuid": "^11.0.0",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"

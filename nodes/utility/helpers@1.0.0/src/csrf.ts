@@ -16,6 +16,7 @@ import {
 	pendingCsrfCookies,
 	readCookie,
 	resolveFlashSecret,
+	safeRefererPath,
 	signFlash,
 } from "@blokjs/shared";
 import { z } from "zod";
@@ -168,7 +169,15 @@ export default defineNode({
 			throw error;
 		}
 
-		const target = headerValue(headers, "referer") ?? headerValue(headers, "referrer") ?? input.fallback ?? "/";
+		// #1003 — the REJECTION path is the one an attacker can trigger (a forged
+		// cross-site POST fails the check by construction), so a raw `Referer`
+		// here is a 303 to whatever site they like. `safeRefererPath` is the same
+		// guard `redirectBack()` uses: ours, and path-only.
+		const referer = safeRefererPath(
+			headerValue(headers, "referer") ?? headerValue(headers, "referrer"),
+			headers as Record<string, string>,
+		);
+		const target = referer ?? input.fallback ?? "/";
 		// A rejected WRITE must come back as a GET — a 302 lets the browser (and
 		// a non-Inertia client) replay the POST against the target.
 		error.setCode(303);

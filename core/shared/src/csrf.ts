@@ -241,3 +241,53 @@ export function csrfPathExempt(path: string, patterns: readonly string[] | undef
 		return new RegExp(`^${source}$`).test(target);
 	});
 }
+
+/**
+ * The PATH of a `Referer` this app may bounce back to, or `undefined`.
+ *
+ * `Referer` is attacker-controllable and a bounce-back answers a FAILED WRITE,
+ * so a raw `Location: <referer>` hands an attacker a 303 to their own site,
+ * carrying whatever the bounce was going to show (#1018 security review L1).
+ * Both bounce-backs in this codebase — `redirectBack()` in `@blokjs/inertia`
+ * and the `@blokjs/csrf` node's rejection — go through here, because a guard
+ * that lives in one of them is a guard the other one does not have.
+ *
+ * Ours means: a relative path (what a same-origin browser navigation sends), or
+ * an absolute URL whose host matches the request's own `Origin` / `Host`
+ * (`X-Forwarded-Host` first, behind a proxy).
+ *
+ * The result is always PATH-ONLY (#1003), for two reasons:
+ *
+ * - **Standalone mode.** There the referring page is the SPA's origin, which
+ *   `Origin` legitimately names — and an absolute `Location` would send the
+ *   browser to the SPA server, an XHR redirect it cannot follow because that
+ *   server answers no CORS. A relative one resolves against the API.
+ * - **Defence in depth.** A path can never leave this app, so the phishing
+ *   shape is impossible even if the host comparison is ever fooled.
+ */
+export function safeRefererPath(referer: string | undefined, headers: Record<string, string>): string | undefined {
+	if (referer === undefined || referer === "") return undefined;
+	// A protocol-relative URL (`//evil.example/x`) is absolute to a browser.
+	if (referer.startsWith("/") && !referer.startsWith("//")) return referer;
+
+	let url: URL;
+	try {
+		url = new URL(referer);
+	} catch {
+		return undefined;
+	}
+	const path = `${url.pathname}${url.search}${url.hash}`;
+	const origin = headers.origin;
+	if (typeof origin === "string" && origin.length > 0) {
+		try {
+			if (new URL(origin).host === url.host) return path;
+		} catch {
+			// An unparsable Origin proves nothing; fall through to Host.
+		}
+	}
+	const forwarded = headers["x-forwarded-host"]?.split(",")[0]?.trim();
+	const host = forwarded && forwarded.length > 0 ? forwarded : headers.host;
+	return typeof host === "string" && host.length > 0 && host.toLowerCase() === url.host.toLowerCase()
+		? path
+		: undefined;
+}

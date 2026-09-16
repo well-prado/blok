@@ -52,7 +52,7 @@
 		"@inertiajs/svelte": "^3.7.1",
 		"@inertiajs/vite": "^3.7.1",
 		"@inertiajs/vue3": "^3.7.1",
-		"@types/node": "^22.15.21",
+		"@types/node": "^24.13.5",
 		"@types/react": "^19.2.10",
 		"react": "^19.0.0",
 		"svelte": "^5.0.0",

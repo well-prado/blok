@@ -275,6 +275,13 @@ export interface RenderOptions {
 	version?: string | Handle<string>;
 	/** Validation errors. Always emitted as `props.errors`. */
 	errors?: Refable<Record<string, unknown>>;
+	/**
+	 * `true` ships EVERY message per field (`string[]`) instead of Inertia's
+	 * default one message per field. The serializer has always accepted it;
+	 * without this entry a `render()` caller could not reach it without dropping
+	 * to the raw node (#1003).
+	 */
+	withAllErrors?: boolean;
 	/** Shell-template values (`{{key}}`). NEVER sent to the client. */
 	viewData?: Refable<Record<string, unknown>>;
 	/** HTML shell template. Must contain `<!--blok:app-->`. */

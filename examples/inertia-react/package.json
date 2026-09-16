@@ -24,7 +24,7 @@
 	},
 	"devDependencies": {
 		"@inertiajs/vite": "^3.7.1",
-		"@types/node": "^22.15.21",
+		"@types/node": "^24.13.5",
 		"@types/react": "^19.2.10",
 		"@vitejs/plugin-react": "^4.7.0",
 		"typescript": "^5.8.3",
