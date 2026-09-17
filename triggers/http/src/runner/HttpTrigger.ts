@@ -95,6 +95,9 @@ import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from ".
  */
 export type AppBindings = { Bindings: HttpBindings };
 
+/** Controls whether preparation may initialize process-owned observability. */
+export type HttpPreparationMode = "server" | "serverless";
+
 /**
  * v0.6 — file-based routing is ON by default. Operators opt OUT via
  * either:
@@ -415,6 +418,14 @@ export default class HttpTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
 	private workflowSourcePaths = new Map<unknown, string>();
 	private server: Server | null = null;
+
+	/**
+	 * The application preparation promise is shared by every caller.  This is
+	 * deliberately a promise (rather than a boolean) so two serverless
+	 * invocations arriving during a cold start cannot scan and mount the app
+	 * twice.
+	 */
+	private preparation: Promise<Hono<AppBindings>> | null = null;
 
 	/**
 	 * #693 — the last-built route table + its registration-source snapshot.
@@ -1412,13 +1423,44 @@ export default class HttpTrigger extends TriggerBase {
 		process.exit(routes.length > 0 ? 0 : 1);
 	}
 
+	/**
+	 * Prepare the Hono application without taking ownership of a process
+	 * socket.  Function adapters should await this once at module scope (or on
+	 * their first request) and pass requests to the returned app.  Preparation
+	 * is idempotent and concurrent-safe for the lifetime of this trigger.
+	 */
+	public prepare(mode: HttpPreparationMode = "serverless"): Promise<Hono<AppBindings>> {
+		if (!this.preparation) this.preparation = this.prepareApplication(mode);
+		return this.preparation;
+	}
+
+	/**
+	 * Serverless request entry point.  Awaiting {@link prepare} here means an
+	 * adapter can export one stable function without having to coordinate a
+	 * separate cold-start promise of its own.
+	 */
+	public async fetch(request: Request, env?: AppBindings["Bindings"]): Promise<Response> {
+		const app = await this.prepare();
+		return app.fetch(request, env);
+	}
+
+	/**
+	 * Traditional long-running server boot.  All route discovery and mounting
+	 * lives in {@link prepare}; only this path binds a Node server and starts
+	 * process/server lifecycle services.
+	 */
 	async listen(): Promise<number> {
 		// #693 — offline route-table mode (`blokctl routes`). Short-circuits
 		// BEFORE any server/metrics/tracing bootstrap.
 		if (process.env.BLOK_ROUTES_ONLY === "1") {
 			return this.printRoutesAndExit();
 		}
+		await this.prepare("server");
+		return this.bindServer();
+	}
 
+	private async prepareApplication(mode: HttpPreparationMode): Promise<Hono<AppBindings>> {
+		const ownsProcessLifecycle = mode === "server";
 		// Metrics opt-out gate. ON by default; `BLOK_METRICS_DISABLED=1` skips the
 		// exporter + global MeterProvider entirely (every blok_* instrument then
 		// no-ops) and the `/metrics` route below is not registered. Previously the
@@ -1432,7 +1474,10 @@ export default class HttpTrigger extends TriggerBase {
 		// via `metrics.getMeter(...)`) record into a no-op meter and `/metrics`
 		// shows "# no registered metrics" whenever OTLP tracing is enabled. Setting
 		// the metrics provider first lets metrics + tracing coexist.
-		const metricsBootstrap = await bootstrapMetrics();
+		// A serverless function must never bind the Prometheus exporter's own
+		// listener.  Metrics remain available on the long-running app port, while
+		// function platforms use their native telemetry integration.
+		const metricsBootstrap = ownsProcessLifecycle ? await bootstrapMetrics() : null;
 		if (!metricsBootstrap) {
 			this.logger.log("[blok][metrics] disabled (BLOK_METRICS_DISABLED=1) — no /metrics endpoint, instruments no-op.");
 		}
@@ -1443,7 +1488,7 @@ export default class HttpTrigger extends TriggerBase {
 		// `recordException`) actually export to Tempo/Jaeger/etc. Without this the
 		// global tracer is a no-op: spans run but go nowhere. No-op + zero
 		// overhead when the env var is unset.
-		await this.maybeBootstrapTracing();
+		if (ownsProcessLifecycle) await this.maybeBootstrapTracing();
 
 		try {
 			this.nodeMap.workflows = (await resolveManualWorkflowMap(
@@ -1568,314 +1613,318 @@ export default class HttpTrigger extends TriggerBase {
 			);
 		}
 
-		return new Promise((done, fail) => {
-			this.app.use(
-				"*",
-				inertiaDevtools(() => this.routeTable),
-			);
-			// Inertia's 303 rule — outermost middleware so it also covers the
-			// error branch (a middleware `throw` with `code: 302`), which never
-			// reaches `emitWorkflowResponse`. No-op for every non-Inertia
-			// request. See `responseEmitter.inertia303SafetyNet`.
-			this.app.use("*", inertia303SafetyNet);
+		this.app.use(
+			"*",
+			inertiaDevtools(() => this.routeTable),
+		);
+		// Inertia's 303 rule — outermost middleware so it also covers the
+		// error branch (a middleware `throw` with `code: 302`), which never
+		// reaches `emitWorkflowResponse`. No-op for every non-Inertia
+		// request. See `responseEmitter.inertia303SafetyNet`.
+		this.app.use("*", inertia303SafetyNet);
 
-			// Static files
-			this.app.use("/public/*", serveStatic({ root: "./" }));
+		// Static files
+		this.app.use("/public/*", serveStatic({ root: "./" }));
 
-			// CORS — configurable via BLOK_CORS_ORIGIN.
-			// Default (unset): NO CORS headers are emitted (same-origin policy).
-			// Set BLOK_CORS_ORIGIN=* to opt into the permissive wildcard (public
-			// API); set a single origin or a comma-separated allow-list for a
-			// credentialed app. Previously this was an unconditional `cors()` —
-			// Hono's default is `origin: "*"`, which can't be tightened and is a
-			// footgun for any API that returns user-scoped data.
-			const corsOriginEnv = process.env.BLOK_CORS_ORIGIN;
-			if (corsOriginEnv) {
-				const origins = corsOriginEnv
-					.split(",")
-					.map((s) => s.trim())
-					.filter((s) => s.length > 0);
-				if (origins.length > 0) {
-					this.app.use(
-						cors({
-							origin: origins.length === 1 ? origins[0] : origins,
-							// #1000 — a named origin is the standalone-SPA case (Vite on
-							// :5173, session cookie on the API), and an allow-LIST is
-							// just as much that case (dev + preview): Hono echoes the
-							// one matched origin, never the list, so credentials stay
-							// valid. The wildcard is the exception: `Allow-Origin: *`
-							// with `Allow-Credentials: true` is rejected by every
-							// browser, so a list containing `*` stays uncredentialed.
-							credentials: !origins.includes("*"),
-							allowHeaders: CORS_ALLOW_HEADERS,
-							exposeHeaders: CORS_EXPOSE_HEADERS,
-						}),
-					);
-				}
+		// CORS — configurable via BLOK_CORS_ORIGIN.
+		// Default (unset): NO CORS headers are emitted (same-origin policy).
+		// Set BLOK_CORS_ORIGIN=* to opt into the permissive wildcard (public
+		// API); set a single origin or a comma-separated allow-list for a
+		// credentialed app. Previously this was an unconditional `cors()` —
+		// Hono's default is `origin: "*"`, which can't be tightened and is a
+		// footgun for any API that returns user-scoped data.
+		const corsOriginEnv = process.env.BLOK_CORS_ORIGIN;
+		if (corsOriginEnv) {
+			const origins = corsOriginEnv
+				.split(",")
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+			if (origins.length > 0) {
+				this.app.use(
+					cors({
+						origin: origins.length === 1 ? origins[0] : origins,
+						// #1000 — a named origin is the standalone-SPA case (Vite on
+						// :5173, session cookie on the API), and an allow-LIST is
+						// just as much that case (dev + preview): Hono echoes the
+						// one matched origin, never the list, so credentials stay
+						// valid. The wildcard is the exception: `Allow-Origin: *`
+						// with `Allow-Credentials: true` is rejected by every
+						// browser, so a list containing `*` stays uncredentialed.
+						credentials: !origins.includes("*"),
+						allowHeaders: CORS_ALLOW_HEADERS,
+						exposeHeaders: CORS_EXPOSE_HEADERS,
+					}),
+				);
 			}
+		}
 
-			// #1000 — the built client. Registered AFTER the CORS middleware so
-			// asset responses carry the same CORS headers as everything else,
-			// and BEFORE the workflow routes so `/assets/*` is never dispatched
-			// as a workflow.
-			mountStatic?.(this.app);
+		// #1000 — the built client. Registered AFTER the CORS middleware so
+		// asset responses carry the same CORS headers as everything else,
+		// and BEFORE the workflow routes so `/assets/*` is never dispatched
+		// as a workflow.
+		mountStatic?.(this.app);
 
-			// #1016 · request scope for parsed bodies — deletes the temp files a
-			// spooled multipart upload left behind, once the response is out.
-			// (The over-cap 413 is decided in `parseRequestOr413`, at the handler
-			// that parses: Hono turns a throw into a 500 before an enclosing
-			// middleware could map it.)
-			this.app.use("*", async (c, next) => {
+		// #1016 · request scope for parsed bodies — deletes the temp files a
+		// spooled multipart upload left behind, once the response is out.
+		// (The over-cap 413 is decided in `parseRequestOr413`, at the handler
+		// that parses: Hono turns a throw into a 500 before an enclosing
+		// middleware could map it.)
+		this.app.use("*", async (c, next) => {
+			try {
+				await next();
+			} finally {
+				await this.releaseRequest(c as HonoContext<AppBindings>);
+			}
+		});
+
+		// Health check
+		this.app.all("/health-check", (c) => {
+			return c.text("Online and ready for action", 200);
+		});
+
+		// Prometheus metrics — uses raw Node.js req/res since the
+		// OpenTelemetry Prometheus exporter expects (IncomingMessage, ServerResponse).
+		// Only registered when metrics are enabled (see the bootstrap gate above);
+		// with BLOK_METRICS_DISABLED=1 there is no /metrics route at all (→ 404).
+		if (metricsBootstrap) {
+			this.app.get("/metrics", (c) => {
 				try {
-					await next();
-				} finally {
-					await this.releaseRequest(c as HonoContext<AppBindings>);
+					metricsBootstrap.metricsHandler(c.env.incoming, c.env.outgoing);
+					return RESPONSE_ALREADY_SENT;
+				} catch (error) {
+					return c.text("Error serving metrics", 500);
 				}
 			});
+		}
 
-			// Health check
-			this.app.all("/health-check", (c) => {
-				return c.text("Online and ready for action", 200);
-			});
-
-			// Prometheus metrics — uses raw Node.js req/res since the
-			// OpenTelemetry Prometheus exporter expects (IncomingMessage, ServerResponse).
-			// Only registered when metrics are enabled (see the bootstrap gate above);
-			// with BLOK_METRICS_DISABLED=1 there is no /metrics route at all (→ 404).
-			if (metricsBootstrap) {
-				this.app.get("/metrics", (c) => {
-					try {
-						metricsBootstrap.metricsHandler(c.env.incoming, c.env.outgoing);
-						return RESPONSE_ALREADY_SENT;
-					} catch (error) {
-						return c.text("Error serving metrics", 500);
-					}
-				});
+		// --- Typed client RPC mount (P1.3) ---
+		// `POST /__blok/rpc/:name` runs a registered workflow BY NAME and
+		// returns its output as JSON — the name-keyed entrypoint the typed
+		// `@blokjs/client` calls (SPEC-blok-client-sdk.md §4.3). Registered
+		// BEFORE the `/__blok` trace router so it isn't swallowed by it. The
+		// request body is the workflow's input; the workflow's own middleware
+		// chain (auth, etc.) still runs inside `runWorkflowExecution`.
+		this.app.post("/__blok/rpc/:name", async (c) => {
+			const name = c.req.param("name");
+			const entry = WorkflowRegistry.getInstance().get(name);
+			// F8 — only run http-callable workflows over RPC. A workflow is
+			// reachable here only if it (a) is registered, (b) is not
+			// middleware, and (c) actually declares a `trigger.http` block.
+			// Without (c), a worker/cron-only workflow registered for
+			// sub-workflow lookup would be executable over HTTP with no
+			// trigger-surface gate — and `runWorkflowExecution` would resolve
+			// its middleware against the wrong (`http`) trigger kind, silently
+			// dropping the worker/cron middleware chain (e.g. auth).
+			if (!entry || entry.isMiddleware === true || !hasHttpTrigger(entry.workflow)) {
+				// #693 — same nearest-miss helper as the catch-all + subworkflow
+				// lookup. The structured log line carries the suggestion in both
+				// modes; the response body only gets it in dev (never enumerate
+				// registered workflow names in a production response).
+				const rpcCallable = WorkflowRegistry.getInstance()
+					.list()
+					.filter((w) => !w.isMiddleware && hasHttpTrigger(w.workflow));
+				const suggestions = nearestMatches(
+					name,
+					rpcCallable.map((w) => ({ key: w.name, label: w.name, source: w.sourcePath ?? w.source })),
+				);
+				const top = suggestions[0];
+				const suggestionText = top ? ` Did you mean "${top.label}"${top.source ? ` (from ${top.source})` : ""}?` : "";
+				this.logger.error(
+					`[blok][routing] 404 POST /__blok/rpc/${name} — not registered for RPC (${rpcCallable.length} RPC-callable workflow(s) registered).${suggestionText} docs: ${DOCS_ROUTING_URL}`,
+				);
+				if (!isDevMode()) {
+					return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
+				}
+				return c.json(
+					{
+						error: `Workflow "${name}" is not registered for RPC.`,
+						available: rpcCallable.length,
+						suggestions: suggestions.map((s) => ({ name: s.label, source: s.source, distance: s.distance })),
+						docs: DOCS_ROUTING_URL,
+					},
+					404,
+				);
 			}
 
-			// --- Typed client RPC mount (P1.3) ---
-			// `POST /__blok/rpc/:name` runs a registered workflow BY NAME and
-			// returns its output as JSON — the name-keyed entrypoint the typed
-			// `@blokjs/client` calls (SPEC-blok-client-sdk.md §4.3). Registered
-			// BEFORE the `/__blok` trace router so it isn't swallowed by it. The
-			// request body is the workflow's input; the workflow's own middleware
-			// chain (auth, etc.) still runs inside `runWorkflowExecution`.
-			this.app.post("/__blok/rpc/:name", async (c) => {
-				const name = c.req.param("name");
-				const entry = WorkflowRegistry.getInstance().get(name);
-				// F8 — only run http-callable workflows over RPC. A workflow is
-				// reachable here only if it (a) is registered, (b) is not
-				// middleware, and (c) actually declares a `trigger.http` block.
-				// Without (c), a worker/cron-only workflow registered for
-				// sub-workflow lookup would be executable over HTTP with no
-				// trigger-surface gate — and `runWorkflowExecution` would resolve
-				// its middleware against the wrong (`http`) trigger kind, silently
-				// dropping the worker/cron middleware chain (e.g. auth).
-				if (!entry || entry.isMiddleware === true || !hasHttpTrigger(entry.workflow)) {
-					// #693 — same nearest-miss helper as the catch-all + subworkflow
-					// lookup. The structured log line carries the suggestion in both
-					// modes; the response body only gets it in dev (never enumerate
-					// registered workflow names in a production response).
-					const rpcCallable = WorkflowRegistry.getInstance()
-						.list()
-						.filter((w) => !w.isMiddleware && hasHttpTrigger(w.workflow));
-					const suggestions = nearestMatches(
-						name,
-						rpcCallable.map((w) => ({ key: w.name, label: w.name, source: w.sourcePath ?? w.source })),
-					);
-					const top = suggestions[0];
-					const suggestionText = top ? ` Did you mean "${top.label}"${top.source ? ` (from ${top.source})` : ""}?` : "";
-					this.logger.error(
-						`[blok][routing] 404 POST /__blok/rpc/${name} — not registered for RPC (${rpcCallable.length} RPC-callable workflow(s) registered).${suggestionText} docs: ${DOCS_ROUTING_URL}`,
-					);
-					if (!isDevMode()) {
-						return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
-					}
+			// Mount-level auth gate. The RPC surface is in the /__blok/
+			// namespace but is registered BEFORE the trace router, so the
+			// trace-auth gate (FW-1) never covers it — meaning any
+			// http-triggered workflow without its own auth middleware was
+			// callable unauthenticated. Mirror the trace gate here: in
+			// production, refuse unless an authorize hook is registered (or
+			// BLOK_RPC_AUTH_DISABLED=1 opts out, e.g. /__blok/* is firewalled
+			// at the network layer). Reuses the operator's `setTraceAuth`
+			// hook so there's one auth surface for the whole /__blok/ mount.
+			// Per-workflow middleware still runs inside runWorkflowExecution.
+			const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
+			if (isProd && process.env.BLOK_RPC_AUTH_DISABLED !== "1") {
+				if (!this.traceAuthFn) {
 					return c.json(
 						{
-							error: `Workflow "${name}" is not registered for RPC.`,
-							available: rpcCallable.length,
-							suggestions: suggestions.map((s) => ({ name: s.label, source: s.source, distance: s.distance })),
-							docs: DOCS_ROUTING_URL,
+							error: "RPC endpoint requires auth in production",
+							hint: "Register an authorize hook before listen() — `trigger.setTraceAuth(req => ...)` — or set BLOK_RPC_AUTH_DISABLED=1 to opt out (typically because /__blok/* is firewalled).",
 						},
-						404,
+						503,
 					);
 				}
-
-				// Mount-level auth gate. The RPC surface is in the /__blok/
-				// namespace but is registered BEFORE the trace router, so the
-				// trace-auth gate (FW-1) never covers it — meaning any
-				// http-triggered workflow without its own auth middleware was
-				// callable unauthenticated. Mirror the trace gate here: in
-				// production, refuse unless an authorize hook is registered (or
-				// BLOK_RPC_AUTH_DISABLED=1 opts out, e.g. /__blok/* is firewalled
-				// at the network layer). Reuses the operator's `setTraceAuth`
-				// hook so there's one auth surface for the whole /__blok/ mount.
-				// Per-workflow middleware still runs inside runWorkflowExecution.
-				const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
-				if (isProd && process.env.BLOK_RPC_AUTH_DISABLED !== "1") {
-					if (!this.traceAuthFn) {
-						return c.json(
-							{
-								error: "RPC endpoint requires auth in production",
-								hint: "Register an authorize hook before listen() — `trigger.setTraceAuth(req => ...)` — or set BLOK_RPC_AUTH_DISABLED=1 to opt out (typically because /__blok/* is firewalled).",
-							},
-							503,
-						);
-					}
-					const raw = c.req.raw;
-					const allowed = await Promise.resolve()
-						.then(() =>
-							// biome-ignore lint/style/noNonNullAssertion: guarded above
-							this.traceAuthFn!({
-								method: raw.method,
-								params: c.req.param(),
-								query: Object.fromEntries(new URL(raw.url).searchParams),
-								headers: Object.fromEntries(raw.headers),
-								body: null,
-								on: () => {},
-							}),
-						)
-						.catch(() => false);
-					if (!allowed) return c.json({ error: "Unauthorized" }, 401);
-				}
-
-				const requestId = c.req.query("requestId") || (uuid() as string);
-				const parsed = await this.parseRequestOr413(c);
-				if (parsed instanceof Response) return parsed;
-				const body = parsed.body;
-				const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-
-				// Streaming request (P3.2): when the client asks for an SSE stream,
-				// run the workflow with a bound `ctx.stream` and forward its frames.
-				if ((c.req.header("accept") || "").includes("text/event-stream")) {
-					return this.runWorkflowStream(c, { name, preloadedWorkflow: entry.workflow, input, requestId });
-				}
-
-				return this.runWorkflowExecution(c, {
-					workflowName: name,
-					subPath: "",
-					parsed: { ...parsed, body: input },
-					requestId,
-					explicitRoute: true,
-					preloadedWorkflow: entry.workflow,
-					rpcInput: input,
-				});
-			});
-
-			// --- Node catalog (SPEC-B P1.3) ---
-			// `GET /__blok/nodes` lists every node across all runtimes — in-process
-			// module nodes (with their reflected JSON Schema) + each connected
-			// runtime's `ListNodes`. Powers `blokctl nodes list` + the typed
-			// client's runtime-node typing. Registered before the trace router.
-			this.app.get("/__blok/nodes", async (c) => {
-				const moduleNodes = this.nodeMap.nodes?.getNodes?.() as Map<string, unknown> | undefined;
-				const nodes = await buildNodeCatalog(moduleNodes, RuntimeRegistry.getInstance().getAll());
-				return c.json({ nodes, count: nodes.length });
-			});
-
-			// --- Blok Studio: Trace API ---
-			// Must be registered BEFORE AppRoutes and the catch-all workflow handler
-			// so that /__blok/* requests are handled by the trace router, not treated
-			// as workflow lookups.
-			if (process.env.BLOK_TRACE_ENABLED !== "false") {
-				const { traceAdapter, traceApp } = createTraceRouterAdapter();
-				const studioTrigger = new StudioTrigger();
-				studioTrigger.setNodeMap(this.nodeMap);
-				// Security review FW-1 — thread the operator-registered
-				// authorize hook (if any) into the trace router. Production
-				// without `setTraceAuth(...)` returns 503 from inside the
-				// trace router middleware.
-				registerTraceRoutes(traceAdapter, undefined, {
-					authorize: this.traceAuthFn,
-					startTestRun: async (name, request) => {
-						if (request.mode === "run") {
-							await studioTrigger.dispatch(name, request.input);
-							return;
-						}
-						const session = DebugController.getInstance().attach(request.breakpoints, {
-							stopOnEntry: request.stopOnEntry,
-						});
-						try {
-							await studioTrigger.dispatch(name, request.input, { beforeStep: session.beforeStep });
-						} finally {
-							session.dispose();
-						}
-					},
-				});
-				this.app.route("/__blok", traceApp);
+				const raw = c.req.raw;
+				const allowed = await Promise.resolve()
+					.then(() =>
+						// biome-ignore lint/style/noNonNullAssertion: guarded above
+						this.traceAuthFn!({
+							method: raw.method,
+							params: c.req.param(),
+							query: Object.fromEntries(new URL(raw.url).searchParams),
+							headers: Object.fromEntries(raw.headers),
+							body: null,
+							on: () => {},
+						}),
+					)
+					.catch(() => false);
+				if (!allowed) return c.json({ error: "Unauthorized" }, 401);
 			}
 
-			/*
-			 * You can add your own middleware or routes with custom Hono logic
-			 * to extend this project.
-			 */
-			this.app.route("/", apps);
+			const requestId = c.req.query("requestId") || (uuid() as string);
+			const parsed = await this.parseRequestOr413(c);
+			if (parsed instanceof Response) return parsed;
+			const body = parsed.body;
+			const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 
-			// File-based routing — register every scanned workflow at its
-			// resolved URL (explicit `trigger.http.path` wins; otherwise the
-			// file-derived path is used). Registered BEFORE the catch-all so
-			// matching requests are routed directly without filename-prefix
-			// dispatch. Empty when `BLOK_FILE_BASED_ROUTING=false` or
-			// `BLOK_ROUTING_LEGACY=1` is set.
-			// Hot-reload overlay. Sits in front of the boot-time explicit routes
-			// so a workflow file CREATED while the server is running is served
-			// without a restart — Hono freezes its router after the first match,
-			// so new paths can only be mounted on a fresh app instance. Costs a
-			// null check per request until the first new route appears.
-			this.app.use("*", async (c, next) => {
-				const overlay = this.hmrOverlay;
-				if (!overlay) return next();
-				const res = await overlay.fetch(c.req.raw, c.env);
-				if (res.headers.get("x-blok-hmr-miss") === "1") return next();
-				return res;
+			// Streaming request (P3.2): when the client asks for an SSE stream,
+			// run the workflow with a bound `ctx.stream` and forward its frames.
+			if ((c.req.header("accept") || "").includes("text/event-stream")) {
+				return this.runWorkflowStream(c, { name, preloadedWorkflow: entry.workflow, input, requestId });
+			}
+
+			return this.runWorkflowExecution(c, {
+				workflowName: name,
+				subPath: "",
+				parsed: { ...parsed, body: input },
+				requestId,
+				explicitRoute: true,
+				preloadedWorkflow: entry.workflow,
+				rpcInput: input,
 			});
+		});
 
-			if (fileBasedRoutes.length > 0) this.registerExplicitRoutes(fileBasedRoutes);
+		// --- Node catalog (SPEC-B P1.3) ---
+		// `GET /__blok/nodes` lists every node across all runtimes — in-process
+		// module nodes (with their reflected JSON Schema) + each connected
+		// runtime's `ListNodes`. Powers `blokctl nodes list` + the typed
+		// client's runtime-node typing. Registered before the trace router.
+		this.app.get("/__blok/nodes", async (c) => {
+			const moduleNodes = this.nodeMap.nodes?.getNodes?.() as Map<string, unknown> | undefined;
+			const nodes = await buildNodeCatalog(moduleNodes, RuntimeRegistry.getInstance().getAll());
+			return c.json({ nodes, count: nodes.length });
+		});
 
-			// Catch-all workflow handler — legacy /<workflow-key>/<path> dispatch.
-			// Falls through here only when no explicit file-based route matched.
-			const workflowHandler = async (c: HonoContext<AppBindings>) => {
-				const requestId = c.req.query("requestId") || (uuid() as string);
-				const workflowNameInPath = c.req.param("workflow") as string;
+		// --- Blok Studio: Trace API ---
+		// Must be registered BEFORE AppRoutes and the catch-all workflow handler
+		// so that /__blok/* requests are handled by the trace router, not treated
+		// as workflow lookups.
+		if (process.env.BLOK_TRACE_ENABLED !== "false") {
+			const { traceAdapter, traceApp } = createTraceRouterAdapter();
+			const studioTrigger = new StudioTrigger();
+			studioTrigger.setNodeMap(this.nodeMap);
+			// Security review FW-1 — thread the operator-registered
+			// authorize hook (if any) into the trace router. Production
+			// without `setTraceAuth(...)` returns 503 from inside the
+			// trace router middleware.
+			registerTraceRoutes(traceAdapter, undefined, {
+				authorize: this.traceAuthFn,
+				startTestRun: async (name, request) => {
+					if (request.mode === "run") {
+						await studioTrigger.dispatch(name, request.input);
+						return;
+					}
+					const session = DebugController.getInstance().attach(request.breakpoints, {
+						stopOnEntry: request.stopOnEntry,
+					});
+					try {
+						await studioTrigger.dispatch(name, request.input, { beforeStep: session.beforeStep });
+					} finally {
+						session.dispose();
+					}
+				},
+			});
+			this.app.route("/__blok", traceApp);
+		}
 
-				// Skip internal paths — these are handled by dedicated routers above
-				if (workflowNameInPath === "__blok") {
-					return c.json({ error: "Not found" }, 404);
-				}
+		/*
+		 * You can add your own middleware or routes with custom Hono logic
+		 * to extend this project.
+		 */
+		this.app.route("/", apps);
 
-				// Compute the sub-path (equivalent to Express req.path in use() middleware context)
-				const fullPath = c.req.path;
-				const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
+		// File-based routing — register every scanned workflow at its
+		// resolved URL (explicit `trigger.http.path` wins; otherwise the
+		// file-derived path is used). Registered BEFORE the catch-all so
+		// matching requests are routed directly without filename-prefix
+		// dispatch. Empty when `BLOK_FILE_BASED_ROUTING=false` or
+		// `BLOK_ROUTING_LEGACY=1` is set.
+		// Hot-reload overlay. Sits in front of the boot-time explicit routes
+		// so a workflow file CREATED while the server is running is served
+		// without a restart — Hono freezes its router after the first match,
+		// so new paths can only be mounted on a fresh app instance. Costs a
+		// null check per request until the first new route appears.
+		this.app.use("*", async (c, next) => {
+			const overlay = this.hmrOverlay;
+			if (!overlay) return next();
+			const res = await overlay.fetch(c.req.raw, c.env);
+			if (res.headers.get("x-blok-hmr-miss") === "1") return next();
+			return res;
+		});
 
-				const parsed = await this.parseRequestOr413(c);
-				if (parsed instanceof Response) return parsed;
-				const body = parsed.body;
+		if (fileBasedRoutes.length > 0) this.registerExplicitRoutes(fileBasedRoutes);
 
-				// Remote node execution dispatch (header-based) — only meaningful for
-				// the catch-all path, never for explicit routes.
-				let remoteNodeExecution = false;
-				let runtimeWorkflow: RuntimeWorkflow | undefined;
-				if (c.req.header("x-blok-execute-node") === "true" && c.req.method.toLowerCase() === "post") {
-					remoteNodeExecution = true;
-					const coder = new MessageDecode();
-					const messageContext: Context = coder.requestDecode(body as WorkflowRequest);
-					runtimeWorkflow = messageContext as unknown as RuntimeWorkflow;
-				}
+		// Catch-all workflow handler — legacy /<workflow-key>/<path> dispatch.
+		// Falls through here only when no explicit file-based route matched.
+		const workflowHandler = async (c: HonoContext<AppBindings>) => {
+			const requestId = c.req.query("requestId") || (uuid() as string);
+			const workflowNameInPath = c.req.param("workflow") as string;
 
-				return this.runWorkflowExecution(c, {
-					workflowName: workflowNameInPath,
-					subPath,
-					parsed,
-					requestId,
-					remoteNodeExecution,
-					runtimeWorkflow,
-				});
-			};
+			// Skip internal paths — these are handled by dedicated routers above
+			if (workflowNameInPath === "__blok") {
+				return c.json({ error: "Not found" }, 404);
+			}
 
-			this.app.all("/:workflow{.+}/*", workflowHandler);
-			this.app.all("/:workflow{.+}", workflowHandler);
+			// Compute the sub-path (equivalent to Express req.path in use() middleware context)
+			const fullPath = c.req.path;
+			const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
 
+			const parsed = await this.parseRequestOr413(c);
+			if (parsed instanceof Response) return parsed;
+			const body = parsed.body;
+
+			// Remote node execution dispatch (header-based) — only meaningful for
+			// the catch-all path, never for explicit routes.
+			let remoteNodeExecution = false;
+			let runtimeWorkflow: RuntimeWorkflow | undefined;
+			if (c.req.header("x-blok-execute-node") === "true" && c.req.method.toLowerCase() === "post") {
+				remoteNodeExecution = true;
+				const coder = new MessageDecode();
+				const messageContext: Context = coder.requestDecode(body as WorkflowRequest);
+				runtimeWorkflow = messageContext as unknown as RuntimeWorkflow;
+			}
+
+			return this.runWorkflowExecution(c, {
+				workflowName: workflowNameInPath,
+				subPath,
+				parsed,
+				requestId,
+				remoteNodeExecution,
+				runtimeWorkflow,
+			});
+		};
+
+		this.app.all("/:workflow{.+}/*", workflowHandler);
+		this.app.all("/:workflow{.+}", workflowHandler);
+
+		return this.app;
+	}
+
+	private async bindServer(): Promise<number> {
+		return new Promise((done, fail) => {
 			const server = serve({ fetch: this.app.fetch, port: Number(this.port) }, async () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
 

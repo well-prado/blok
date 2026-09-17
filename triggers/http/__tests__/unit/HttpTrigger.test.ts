@@ -96,6 +96,34 @@ describe("HttpTrigger", () => {
 		});
 	});
 
+	describe("prepare() / fetch() — serverless lifecycle", () => {
+		it("prepares the app without binding a server", async () => {
+			const { serve } = await import("@hono/node-server");
+			vi.clearAllMocks();
+			const app = await trigger.prepare();
+
+			expect(app).toBe(trigger.getApp());
+			expect(serve).not.toHaveBeenCalled();
+			const response = await app.fetch(new Request("http://localhost/health-check"));
+			expect(response.status).toBe(200);
+		});
+
+		it("shares one preparation promise for repeated and concurrent callers", async () => {
+			const first = trigger.prepare();
+			const second = trigger.prepare();
+
+			expect(first).toBe(second);
+			expect(await Promise.all([first, second])).toEqual([trigger.getApp(), trigger.getApp()]);
+		});
+
+		it("handles a serverless request after preparing the app", async () => {
+			const response = await trigger.fetch(new Request("http://localhost/health-check"));
+
+			expect(response.status).toBe(200);
+			expect(await response.text()).toBe("Online and ready for action");
+		});
+	});
+
 	// v0.7 — same-port multiplex foundation. Optional constructor arg lets
 	// an orchestrator (or future WS / SSE / Webhook triggers) construct ONE
 	// Hono app externally and thread it into HttpTrigger. The trigger
