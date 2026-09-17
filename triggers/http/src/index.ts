@@ -9,6 +9,12 @@ import { type Span, metrics, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import HttpTrigger, { type AppBindings } from "./runner/HttpTrigger.js";
 
+// Serverless adapters use the prepared HTTP trigger directly.  Keep the
+// traditional default App export for long-running projects, while exposing
+// the lifecycle-aware trigger as a named public entry point.
+export { default as HttpTrigger } from "./runner/HttpTrigger.js";
+export type { AppBindings, HttpPreparationMode } from "./runner/HttpTrigger.js";
+
 // #721 — `import.meta.main` alone isn't enough: Bun always has it, but Node
 // only unflagged it in v22.18.0 (see nodejs/node#57804), and this package's
 // own `engines` floor is Node >=18 (it ships as scaffolded-project source,
