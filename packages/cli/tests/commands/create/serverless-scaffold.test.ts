@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { scaffoldServerlessDeployment } from "../../../src/commands/create/project";
+import { scaffoldServerlessDeployment, validateServerlessTriggers } from "../../../src/commands/create/project";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -31,5 +31,11 @@ describe("serverless scaffold", () => {
 		fs.writeFileSync(path.join(dir, "api/index.ts"), "user code\n");
 		expect(() => scaffoldServerlessDeployment(dir)).toThrow(/overwrite existing file/);
 		expect(fs.readFileSync(path.join(dir, "api/index.ts"), "utf8")).toBe("user code\n");
+	});
+
+	it("reports unsupported long-running capabilities explicitly", () => {
+		expect(() => validateServerlessTriggers(["http", "websocket"])).toThrow(/unsupported trigger: websocket/);
+		expect(() => validateServerlessTriggers(["worker"])).toThrow(/requires the http trigger/);
+		expect(() => validateServerlessTriggers(["http"])).not.toThrow();
 	});
 });

@@ -1554,9 +1554,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// install so the generated package is immediately deployable and so an
 		// existing config is never overwritten silently.
 		if (opts.serverless) {
-			if (!selectedTriggers.includes("http")) {
-				throw new Error("--serverless requires the http trigger.");
-			}
+			validateServerlessTriggers(selectedTriggers);
 			scaffoldServerlessDeployment(dirPath);
 			const currentEnv = fsExtra.existsSync(envLocal) ? fsExtra.readFileSync(envLocal, "utf8") : "";
 			if (!/^BLOK_SERVERLESS=/m.test(currentEnv)) {
@@ -1730,6 +1728,17 @@ export default handler;
 		)}
 `,
 	);
+}
+
+/** Validate the explicit capability boundary for a serverless project. */
+export function validateServerlessTriggers(selectedTriggers: readonly string[]): void {
+	if (!selectedTriggers.includes("http")) throw new Error("--serverless requires the http trigger.");
+	const unsupported = selectedTriggers.filter((kind) => kind !== "http");
+	if (unsupported.length > 0) {
+		throw new Error(
+			`--serverless currently supports HTTP Functions only; unsupported trigger${unsupported.length > 1 ? "s" : ""}: ${unsupported.join(", ")}. Use a long-running deployment for streaming, WebSockets, workers, cron, or scheduling.`,
+		);
+	}
 }
 
 /**

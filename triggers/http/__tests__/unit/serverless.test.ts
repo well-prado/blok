@@ -120,6 +120,24 @@ describe("Vercel serverless HTTP adapter", () => {
 		expect(logError).toHaveBeenCalledWith("blok.serverless.initialization_failed", expect.any(Error));
 	});
 
+	it("redacts initialization details from the provider response", async () => {
+		const logError = vi.fn();
+		const handler = createVercelHandler({
+			createTrigger: () => ({
+				prepare: async () => {
+					throw new Error("DATABASE_URL=super-secret");
+				},
+				fetch: async () => new Response("never"),
+			}),
+			logError,
+		});
+		const response = await handler(new Request("https://example.test/cold"));
+		const body = await response.text();
+		expect(response.status).toBe(503);
+		expect(body).not.toContain("super-secret");
+		expect(logError).toHaveBeenCalledWith("blok.serverless.initialization_failed", expect.any(Error));
+	});
+
 	it("exposes the documented Blok Vercel factory alias", async () => {
 		const { trigger } = triggerFor(new Response("alias"));
 		const handler = createBlokVercelHandler(() => trigger);
