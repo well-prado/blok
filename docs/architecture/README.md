@@ -17,6 +17,7 @@ they must not silently contradict it.
 - [Dart runtime conformance](runtime/dart-conformance.md)
 - [ADR 0003 — Zig runtime: transport decision (deferred)](runtime/adr/0003-zig-transport-decision.md)
 - [ADR 0017 — Elixir/BEAM runtime sidecar](adr-0017-elixir-beam-runtime.md)
+- [ADR 0018 — Serverless HTTP lifecycle and capability contract](adr-0018-serverless-http-lifecycle.md)
 
 ## Decision governance
 
