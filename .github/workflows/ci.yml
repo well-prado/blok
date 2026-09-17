@@ -172,6 +172,9 @@ jobs:
       - name: Build workspace packages (dist for source-import resolution)
         run: bun run build
 
+      - name: Serverless HTTP deployment conformance
+        run: bun run serverless:conformance
+
       - name: Source-under-Bun import check
         run: bun run check:source-imports
 
