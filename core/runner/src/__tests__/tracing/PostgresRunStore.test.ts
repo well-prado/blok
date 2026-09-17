@@ -34,6 +34,11 @@ import type { Dashboard, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from ".
 function createTestStore(): PostgresRunStore {
 	return new PostgresRunStore({
 		connectionString: "postgres://test:test@localhost:5432/test",
+		pool: {
+			query: mockQuery,
+			connect: mockConnect,
+			end: mockEnd,
+		} as never,
 	});
 }
 
@@ -431,6 +436,11 @@ describe("PostgresRunStore: durable schema (Tier 2 follow-up · migration v3)", 
 		vi.clearAllMocks();
 		store = new PostgresRunStore({
 			connectionString: "postgres://test:test@localhost:5432/test",
+			pool: {
+				query: mockQuery,
+				connect: mockConnect,
+				end: mockEnd,
+			} as never,
 		});
 	});
 

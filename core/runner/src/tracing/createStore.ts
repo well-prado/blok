@@ -19,6 +19,12 @@ export interface CreateStoreOptions {
 	postgresPoolSize?: number;
 	/** PostgreSQL SSL mode. Default: false */
 	postgresSsl?: boolean | { rejectUnauthorized: boolean };
+	/** Connection establishment timeout (default: 5000ms). */
+	postgresConnectionTimeoutMillis?: number;
+	/** Idle pool timeout (default: 10000ms). */
+	postgresIdleTimeoutMillis?: number;
+	/** Retries for transient Neon/network errors (default: 2). */
+	postgresRetries?: number;
 	/** Data retention in days. Runs older than this are auto-deleted. 0 = no retention. */
 	retentionDays?: number;
 }
@@ -29,9 +35,9 @@ export interface CreateStoreOptions {
  * Reads from environment variables when options are not provided:
  * - `BLOK_TRACE_STORE` → "memory" | "sqlite" | "postgres" (default: "memory")
  * - `BLOK_TRACE_SQLITE_PATH` → SQLite file path (default: ".blok/trace.db")
- * - `BLOK_TRACE_DATABASE_URL` → PostgreSQL connection string
- * - `BLOK_TRACE_PG_POOL_SIZE` → PostgreSQL pool size (default: 5)
- * - `BLOK_TRACE_PG_SSL` → Enable PostgreSQL SSL (default: false)
+ * - `BLOK_TRACE_DATABASE_URL` (or `BLOK_DATABASE_URL` / `DATABASE_URL`) → PostgreSQL connection string
+ * - `BLOK_TRACE_PG_POOL_SIZE` (or `BLOK_PG_POOL_SIZE`) → PostgreSQL pool size (default: 1 for serverless, 5 otherwise)
+ * - `BLOK_TRACE_PG_SSL` (or `BLOK_PG_SSL`) → Enable PostgreSQL SSL (default: false)
  * - `BLOK_TRACE_RETENTION_DAYS` → Auto-delete after N days (default: 7, 0 = disabled)
  */
 export function createStore(opts?: CreateStoreOptions): RunStore {
@@ -52,7 +58,11 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 
 	switch (type) {
 		case "postgres": {
-			const connectionString = opts?.postgresUrl || process.env.BLOK_TRACE_DATABASE_URL;
+			const connectionString =
+				opts?.postgresUrl ||
+				process.env.BLOK_TRACE_DATABASE_URL ||
+				process.env.BLOK_DATABASE_URL ||
+				process.env.DATABASE_URL;
 			if (!connectionString) {
 				throw new Error(
 					"PostgresRunStore requires a connection string.\n" +
@@ -61,12 +71,12 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 				);
 			}
 
+			const serverless = process.env.BLOK_SERVERLESS === "1";
 			const poolSize =
 				opts?.postgresPoolSize ??
-				(process.env.BLOK_TRACE_PG_POOL_SIZE ? Number.parseInt(process.env.BLOK_TRACE_PG_POOL_SIZE, 10) : 5);
+				parsePositiveInt(process.env.BLOK_TRACE_PG_POOL_SIZE || process.env.BLOK_PG_POOL_SIZE, serverless ? 1 : 5);
 
-			const ssl =
-				opts?.postgresSsl ?? (process.env.BLOK_TRACE_PG_SSL === "true" ? { rejectUnauthorized: false } : false);
+			const ssl = opts?.postgresSsl ?? parseSsl(process.env.BLOK_TRACE_PG_SSL || process.env.BLOK_PG_SSL);
 
 			// Dynamic require to avoid hard dependency on pg
 			const { PostgresRunStore } = esmRequire("./PostgresRunStore") as typeof import("./PostgresRunStore");
@@ -74,6 +84,9 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 				connectionString,
 				max: poolSize,
 				ssl: ssl || undefined,
+				connectionTimeoutMillis: opts?.postgresConnectionTimeoutMillis ?? 5_000,
+				idleTimeoutMillis: opts?.postgresIdleTimeoutMillis ?? 10_000,
+				retries: opts?.postgresRetries ?? parsePositiveInt(process.env.BLOK_PG_RETRIES, 2),
 			});
 
 			// Apply retention policy after initialization completes
@@ -149,4 +162,15 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 	}
 
 	return store;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+	if (!raw || !/^\d+$/.test(raw)) return fallback;
+	const value = Number(raw);
+	return value > 0 ? value : fallback;
+}
+
+function parseSsl(raw: string | undefined): boolean | { rejectUnauthorized: boolean } | undefined {
+	if (!raw || raw === "false" || raw === "0") return undefined;
+	return raw === "no-verify" ? { rejectUnauthorized: false } : true;
 }

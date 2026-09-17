@@ -546,10 +546,12 @@
       "peerDependencies": {
         "better-sqlite3": "^11.0.0",
         "ioredis": "^5.9.2",
+        "pg": "^8.18.0",
       },
       "optionalPeers": [
         "better-sqlite3",
         "ioredis",
+        "pg",
       ],
     },
     "packages/syntax": {

@@ -34,6 +34,26 @@ export interface SessionStore {
 	destroy(id: string): Promise<void>;
 }
 
+/** Minimal pg client surface accepted by {@link PostgresSessionStore}. */
+export interface SessionPgClient {
+	query<Row = Record<string, unknown>>(
+		text: string,
+		values?: readonly unknown[],
+	): Promise<{
+		rows: Row[];
+		rowCount?: number;
+	}>;
+}
+
+export interface PostgresSessionStoreOptions {
+	connectionString: string;
+	max?: number;
+	ssl?: boolean | { rejectUnauthorized: boolean };
+	connectionTimeoutMillis?: number;
+	idleTimeoutMillis?: number;
+	retries?: number;
+}
+
 // =============================================================================
 // memory
 // =============================================================================
@@ -257,15 +277,170 @@ export class RedisSessionStore implements SessionStore {
 }
 
 // =============================================================================
+// postgres / Neon
+// =============================================================================
+
+interface SessionPgPool extends SessionPgClient {
+	end?(): Promise<void>;
+}
+
+/**
+ * Postgres-backed cookie sessions for serverless deployments.
+ *
+ * The pool is deliberately created lazily and kept module-local by the
+ * caller's configured store, which lets warm Function invocations reuse a
+ * connection while `max=1` remains a safe Neon default. Every operation waits
+ * for the schema migration, so a cold request cannot race table creation.
+ */
+export class PostgresSessionStore implements SessionStore {
+	private readonly client: SessionPgClient;
+	private readonly pool?: SessionPgPool;
+	private readonly retries: number;
+	private readonly readyPromise: Promise<void>;
+
+	constructor(options: PostgresSessionStoreOptions | SessionPgClient) {
+		if ("connectionString" in options) {
+			const config = options as PostgresSessionStoreOptions;
+			let Pool: new (options: Record<string, unknown>) => SessionPgPool;
+			try {
+				const mod = esmRequire("pg") as { Pool?: typeof Pool };
+				if (!mod.Pool) throw new Error("no Pool export");
+				Pool = mod.Pool;
+			} catch (error) {
+				throw new Error(
+					`[blok] @blokjs/session: the postgres backend needs the optional 'pg' peer. Fix: bun add pg. Underlying: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			this.pool = new Pool({
+				connectionString: config.connectionString,
+				max: config.max ?? 1,
+				ssl: config.ssl,
+				connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5_000,
+				idleTimeoutMillis: config.idleTimeoutMillis ?? 10_000,
+			});
+			this.client = this.pool;
+			this.retries = config.retries ?? 2;
+		} else {
+			this.client = options;
+			this.retries = 0;
+		}
+		this.readyPromise = this.migrateSchema();
+	}
+
+	/** Resolve only after the schema exists; required before serving traffic. */
+	ready(): Promise<void> {
+		return this.readyPromise;
+	}
+
+	async migrate(): Promise<void> {
+		await this.readyPromise;
+	}
+
+	private async migrateSchema(): Promise<void> {
+		await this.withRetry(() =>
+			this.client.query(`
+				CREATE TABLE IF NOT EXISTS blok_sessions (
+					id TEXT PRIMARY KEY,
+					data JSONB NOT NULL,
+					expires_at BIGINT NOT NULL
+				);
+				CREATE INDEX IF NOT EXISTS idx_blok_sessions_expires ON blok_sessions(expires_at);
+			`),
+		);
+	}
+
+	async read(id: string): Promise<SessionRecord | undefined> {
+		await this.readyPromise;
+		const result = await this.withRetry(() =>
+			this.client.query<{ id: string; data: unknown; expires_at: number | string }>(
+				"SELECT id, data, expires_at FROM blok_sessions WHERE id = $1",
+				[id],
+			),
+		);
+		const row = result.rows[0];
+		if (!row) return undefined;
+		const expiresAt = Number(row.expires_at);
+		if (expiresAt <= Date.now()) {
+			await this.destroy(id);
+			return undefined;
+		}
+		return { id: row.id, data: parsePgData(row.data), expiresAt };
+	}
+
+	async write(record: SessionRecord): Promise<void> {
+		await this.readyPromise;
+		await this.withRetry(() =>
+			this.client.query(
+				"INSERT INTO blok_sessions (id, data, expires_at) VALUES ($1, $2::jsonb, $3) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at",
+				[record.id, JSON.stringify(record.data), record.expiresAt],
+			),
+		);
+	}
+
+	async destroy(id: string): Promise<void> {
+		await this.readyPromise;
+		await this.withRetry(() => this.client.query("DELETE FROM blok_sessions WHERE id = $1", [id]));
+	}
+
+	/** Delete expired rows; call from an external cron rather than a Function loop. */
+	async sweep(now = Date.now()): Promise<number> {
+		await this.readyPromise;
+		const result = await this.withRetry(() =>
+			this.client.query("DELETE FROM blok_sessions WHERE expires_at <= $1", [now]),
+		);
+		return result.rowCount ?? 0;
+	}
+
+	async close(): Promise<void> {
+		await this.pool?.end?.();
+	}
+
+	private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+		let attempt = 0;
+		while (true) {
+			try {
+				return await operation();
+			} catch (error) {
+				if (attempt >= this.retries || !isTransientPgError(error)) throw error;
+				const delay = 25 * 2 ** attempt;
+				await new Promise((resolve) => setTimeout(resolve, delay));
+				attempt += 1;
+			}
+		}
+	}
+}
+
+function parsePgData(raw: unknown): Record<string, unknown> {
+	if (typeof raw === "string") {
+		try {
+			const parsed: unknown = JSON.parse(raw);
+			return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+		} catch {
+			return {};
+		}
+	}
+	return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+function isTransientPgError(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false;
+	const code = String((error as { code?: unknown }).code ?? "");
+	return (
+		["08000", "08003", "08006", "40001", "40P01", "57P01", "57P02", "57P03"].includes(code) ||
+		["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE"].includes(code)
+	);
+}
+
+// =============================================================================
 // selection
 // =============================================================================
 
-export type SessionStoreType = "memory" | "sqlite" | "redis";
+export type SessionStoreType = "memory" | "sqlite" | "redis" | "postgres";
 
 /**
  * The backend this process should use, from the environment:
  *
- * - `BLOK_SESSION_STORE` wins when set (`memory` | `sqlite` | `redis`).
+ * - `BLOK_SESSION_STORE` wins when set (`memory` | `sqlite` | `redis` | `postgres`).
  * - otherwise `redis` when `REDIS_URL` is set,
  * - otherwise `memory` under `NODE_ENV=test` (so suites need no fixture — the
  *   same rule `createStore()` applies to the run store),
@@ -273,8 +448,17 @@ export type SessionStoreType = "memory" | "sqlite" | "redis";
  */
 export function createSessionStore(): SessionStore {
 	const explicit = process.env.BLOK_SESSION_STORE as SessionStoreType | undefined;
+	const databaseUrl =
+		process.env.BLOK_SESSION_DATABASE_URL || process.env.BLOK_DATABASE_URL || process.env.DATABASE_URL;
 	const type: SessionStoreType =
-		explicit ?? (process.env.REDIS_URL ? "redis" : process.env.NODE_ENV === "test" ? "memory" : "sqlite");
+		explicit ??
+		(process.env.BLOK_SERVERLESS === "1" && databaseUrl
+			? "postgres"
+			: process.env.REDIS_URL
+				? "redis"
+				: process.env.NODE_ENV === "test"
+					? "memory"
+					: "sqlite");
 	switch (type) {
 		case "memory":
 			return new MemorySessionStore();
@@ -282,9 +466,35 @@ export function createSessionStore(): SessionStore {
 			return new RedisSessionStore();
 		case "sqlite":
 			return new SqliteSessionStore(process.env.BLOK_SESSION_SQLITE_PATH || ".blok/sessions.db");
+		case "postgres": {
+			if (!databaseUrl) {
+				throw new Error(
+					"[blok] @blokjs/session: postgres backend requires BLOK_SESSION_DATABASE_URL, BLOK_DATABASE_URL, or DATABASE_URL.",
+				);
+			}
+			const poolSize = parsePositiveInt(process.env.BLOK_SESSION_PG_POOL_SIZE || process.env.BLOK_PG_POOL_SIZE, 1);
+			const ssl = parseSsl(process.env.BLOK_SESSION_PG_SSL || process.env.BLOK_PG_SSL);
+			return new PostgresSessionStore({
+				connectionString: databaseUrl,
+				max: poolSize,
+				ssl,
+				retries: parsePositiveInt(process.env.BLOK_PG_RETRIES, 2),
+			});
+		}
 		default:
 			throw new Error(
-				`[blok] @blokjs/session: BLOK_SESSION_STORE="${String(type)}" is not a known backend.\nFix: use one of memory | sqlite | redis, or pass your own store to configureSession({ store }).`,
+				`[blok] @blokjs/session: BLOK_SESSION_STORE="${String(type)}" is not a known backend.\nFix: use one of memory | sqlite | redis | postgres, or pass your own store to configureSession({ store }).`,
 			);
 	}
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+	if (!raw || !/^\d+$/.test(raw)) return fallback;
+	const value = Number(raw);
+	return value > 0 ? value : fallback;
+}
+
+function parseSsl(raw: string | undefined): boolean | { rejectUnauthorized: boolean } | undefined {
+	if (!raw || raw === "false" || raw === "0") return undefined;
+	return raw === "no-verify" ? { rejectUnauthorized: false } : true;
 }

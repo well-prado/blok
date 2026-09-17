@@ -2,7 +2,7 @@
 
 The server half of Blok's auth starter kit: password hashing, the
 login / register / logout / password-reset nodes, login throttling, and a
-six-method `UserStore` with a SQLite default.
+six-method `UserStore` with a SQLite default and a Neon/Postgres adapter.
 
 **No ORM.** The store is an interface you implement over whatever database your
 app already has — `pg`, Drizzle and a hand-rolled adapter are all a few lines
@@ -63,6 +63,14 @@ exact map through a live `HttpTrigger`. Read
    node, which answers `303`.
 
 ## `UserStore`
+
+For a serverless deployment, set `BLOK_SERVERLESS=1` and
+`BLOK_DATABASE_URL` (or explicitly set `BLOK_AUTH_STORE=postgres` and
+`BLOK_AUTH_DATABASE_URL`). The built-in `PostgresUserStore` creates its schema
+before the first operation, uses one pooled connection per warm Function by
+default, atomically consumes password-reset tokens, and retries transient Neon
+failover errors. Set `BLOK_AUTH_PG_SSL=true` for verified TLS. Keep preview and
+production URLs and session secrets separate.
 
 ```ts
 interface UserStore {

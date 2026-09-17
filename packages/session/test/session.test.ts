@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	MemorySessionStore,
+	PostgresSessionStore,
 	SESSION_COOKIE,
 	SESSION_SECRET_ENV,
 	SqliteSessionStore,
@@ -30,6 +31,42 @@ import {
 } from "../src/index.js";
 
 const SECRET = "unit-test-session-secret-value";
+
+function fakePg() {
+	const rows = new Map<string, { id: string; data: Record<string, unknown>; expires_at: number }>();
+	return {
+		rows,
+		async query<T = Record<string, unknown>>(sql: string, values: readonly unknown[] = []) {
+			if (sql.includes("CREATE TABLE")) return { rows: [] as T[] };
+			if (sql.startsWith("SELECT id")) {
+				const row = rows.get(String(values[0]));
+				return { rows: (row ? [row] : []) as T[] };
+			}
+			if (sql.startsWith("INSERT")) {
+				rows.set(String(values[0]), {
+					id: String(values[0]),
+					data: JSON.parse(String(values[1])),
+					expires_at: Number(values[2]),
+				});
+				return { rows: [] as T[] };
+			}
+			if (sql.startsWith("DELETE FROM blok_sessions WHERE id")) {
+				const existed = rows.delete(String(values[0]));
+				return { rows: [] as T[], rowCount: existed ? 1 : 0 };
+			}
+			if (sql.startsWith("DELETE FROM blok_sessions WHERE expires_at")) {
+				let count = 0;
+				for (const [id, row] of rows)
+					if (row.expires_at <= Number(values[0])) {
+						rows.delete(id);
+						count += 1;
+					}
+				return { rows: [] as T[], rowCount: count };
+			}
+			throw new Error(`unexpected SQL: ${sql}`);
+		},
+	};
+}
 
 /** A ctx stand-in: everything here only ever reads `ctx.request`. */
 function makeCtx(cookie?: string): { request: { headers: Record<string, string> } } {
@@ -161,6 +198,28 @@ describe("@blokjs/session — lifecycle", () => {
 		const clearing = await destroySession(next);
 		expect(clearing).toContain("Max-Age=0");
 		expect(await loadSession(makeCtx(pair(cookie)))).toEqual({ id: null, data: {} });
+	});
+});
+
+describe("@blokjs/session — postgres/Neon store", () => {
+	it("runs schema initialization and shares expiring records through Postgres", async () => {
+		const pg = fakePg();
+		const first = new PostgresSessionStore(pg);
+		const second = new PostgresSessionStore(pg);
+		await first.ready();
+		await first.write({ id: "shared", data: { userId: "u-1" }, expiresAt: Date.now() + 60_000 });
+		expect(await second.read("shared")).toMatchObject({ id: "shared", data: { userId: "u-1" } });
+		await second.destroy("shared");
+		expect(await first.read("shared")).toBeUndefined();
+	});
+
+	it("deletes expired records during reads and sweep", async () => {
+		const pg = fakePg();
+		const store = new PostgresSessionStore(pg);
+		await store.write({ id: "expired", data: {}, expiresAt: Date.now() - 1 });
+		expect(await store.read("expired")).toBeUndefined();
+		await store.write({ id: "old", data: {}, expiresAt: Date.now() - 1 });
+		expect(await store.sweep()).toBe(1);
 	});
 });
 

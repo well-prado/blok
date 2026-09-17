@@ -13,7 +13,7 @@ Every workflow execution produces a trace. Blok records it through the
 |---|---|---|
 | `SqliteRunStore` | default | persists to `.blok/runs.db` |
 | `InMemoryRunStore` | dev / tests | process-local |
-| `PostgresRunStore` | when configured | partial — see notes below |
+| `PostgresRunStore` | when configured | durable; recommended for serverless/Neon |
 
 The same store backs the [idempotency cache](/d/reliability/idempotency)
 and the run lineage records used by
@@ -298,9 +298,20 @@ sweeps expired rows alongside `idempotency_cache` and
 ## Postgres store
 
 The `PostgresRunStore` runs a hybrid model: synchronous reads against
-an in-memory mirror for hot-path performance, with asynchronous
-writes to PG via the existing write queue. The mirror is rehydrated
-from PG on `loadRecent()` at boot.
+an in-memory mirror for hot-path performance, with writes drained to PG
+through a bounded queue. The mirror is rehydrated from PG on `loadRecent()`
+at boot. A Function adapter must await `store.ready()` before serving its
+first request and `store.flush()` before an invocation is frozen; this closes
+the durability window that is acceptable for a long-running process.
+
+Use `BLOK_TRACE_STORE=postgres` with `BLOK_TRACE_DATABASE_URL` (or
+`BLOK_DATABASE_URL` / `DATABASE_URL`) and set `BLOK_SERVERLESS=1` to default
+the pool to one connection per warm instance. Neon TLS is enabled with
+`BLOK_TRACE_PG_SSL=true`; certificate verification is on by default. Schema
+migrations take a PostgreSQL advisory lock, so concurrent cold starts can
+safely initialize the same database. Transient connection/failover errors
+are retried twice with short exponential backoff; authentication and schema
+errors fail startup.
 
 PG migration v3 adds the three Tier 2 cache / lock / dispatch tables:
 
@@ -315,13 +326,15 @@ This means:
 - **Cross-restart hits work.** The mirror rehydrates from PG on boot.
   Idempotency caches, concurrency leases, and scheduled dispatches
   survive restart.
-- **Concurrency gating is single-process.** PG persistence here is for
-  crash-recovery within a single PG-backed process; cross-process
-  concurrency coordination is not yet available.
+- **Concurrency gating is cross-process for recovery.** Claims use atomic
+  PostgreSQL updates; ordinary run reads remain hot-memory snapshots. The
+  Function adapter's readiness/flush hooks are required for request-scoped
+  durability.
 
-The migration is forward-compatible: it silently ignores `relation
-does not exist` errors during the first migration window so a pre-v3
-PG schema doesn't crash the loader.
+Migrations are additive and guarded by an advisory lock. A migration failure
+is surfaced by `ready()` and must prevent the adapter from serving traffic;
+there is no silent fallback to SQLite or memory when Postgres is explicitly
+selected.
 
 ## InMemory store
 

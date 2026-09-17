@@ -21,11 +21,33 @@ store).
 | Variable | Default | Purpose |
 |---|---|---|
 | `BLOK_TRACE_ENABLED` | `true` | Master kill-switch. `false` disables tracing AND every store-backed feature (cache, gate, scheduler). |
-| `BLOK_TRACE_STORE` | `sqlite` | Run store backend: `sqlite`, `inmemory`, or `postgres`. |
+| `BLOK_TRACE_STORE` | `sqlite` | Run store backend: `sqlite`, `memory`, or `postgres`. Use `postgres` for serverless/Neon. |
 | `BLOK_TRACE_SQLITE_PATH` | `.blok/runs.db` | SQLite database path when `BLOK_TRACE_STORE=sqlite`. |
-| `BLOK_TRACE_PG_*` | unset | Postgres connection params (host, port, user, password, database). See [trace storage · Postgres](/d/reference/trace-storage#postgres-store). |
-| `BLOK_TRACE_RETENTION_DAYS` | `30` | Older runs evicted by `evictOldRuns()`. The [janitor](/d/operations/janitor-and-shutdown#janitor) handles ancillary tables (cache, locks, dispatches). |
+| `BLOK_TRACE_DATABASE_URL` | unset | Neon/Postgres connection string. `BLOK_DATABASE_URL` and `DATABASE_URL` are accepted fallbacks when the store is explicitly `postgres`. |
+| `BLOK_TRACE_PG_POOL_SIZE` | `5` (`1` with `BLOK_SERVERLESS=1`) | Maximum connections per warm instance. Keep Neon/Vercel at `1` unless your plan supports more. `BLOK_PG_POOL_SIZE` is an alias. |
+| `BLOK_TRACE_PG_SSL` | unset | TLS for Postgres. `true` enables certificate verification; `no-verify` is an explicit local-only escape hatch. `BLOK_PG_SSL` is an alias. |
+| `BLOK_PG_RETRIES` | `2` | Bounded exponential retries for transient connection, serialization, and failover errors. Retries never hide permanent schema/auth errors. |
+| `BLOK_TRACE_RETENTION_DAYS` | `7` | Older completed/failed traces are removed at startup. In serverless, run the janitor/cleanup from an external scheduler because Functions do not stay alive. |
 | `BLOK_INDEXED_METADATA_KEYS` | unset | Comma-separated metadata keys to promote to indexed columns on `workflow_runs` (F1). Each declared key gets a `metadata_<key>_idx` VIRTUAL generated column + btree index. Queries against declared keys use the index instead of a sequential `json_extract` scan — meaningful for 100K+ row stores. Example: `BLOK_INDEXED_METADATA_KEYS=tier,region`. Keys outside `^[a-zA-Z0-9_-]+$` are silently dropped. SQLite-only — the in-memory and Postgres-via-mirror stores already keep everything in memory. |
+
+## Serverless sessions and auth
+
+Set `BLOK_SERVERLESS=1` in a Function deployment. When a database URL is
+present, the session and auth kits then select their Postgres stores instead of
+creating SQLite files in the read-only Function filesystem. Explicit store
+variables always win.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_SERVERLESS` | unset | `1` selects Neon/Postgres for sessions/auth when a database URL exists and makes the trace pool default to one connection. |
+| `BLOK_SESSION_STORE` | `sqlite` | Session backend: `memory`, `sqlite`, `redis`, or `postgres`. |
+| `BLOK_SESSION_DATABASE_URL` | `BLOK_DATABASE_URL` / `DATABASE_URL` | Connection string for sessions. Keep it separate from `BLOK_TRACE_DATABASE_URL` so preview and production can use different databases. |
+| `BLOK_SESSION_PG_POOL_SIZE` | `1` | Maximum session-store connections per warm Function. `BLOK_PG_POOL_SIZE` is an alias. |
+| `BLOK_SESSION_PG_SSL` | unset | Postgres TLS (`true` verifies certificates; `no-verify` is local-only). |
+| `BLOK_AUTH_STORE` | `sqlite` | Auth user backend: `postgres` is selected automatically with `BLOK_SERVERLESS=1` and a database URL. |
+| `BLOK_AUTH_DATABASE_URL` | `BLOK_DATABASE_URL` / `DATABASE_URL` | Connection string for auth users and reset tokens. |
+| `BLOK_AUTH_PG_POOL_SIZE` | `1` | Maximum auth-store connections per warm Function. |
+| `BLOK_AUTH_PG_SSL` | unset | Postgres TLS for auth. |
 
 ## Workflow loading
 

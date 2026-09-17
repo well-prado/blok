@@ -2,7 +2,7 @@
 	"name": "@blokjs/auth",
 	"version": "2.4.0",
 	"files": ["dist"],
-	"description": "Blok's auth starter kit — scrypt password hashing, login/register/logout/reset nodes, login throttling, and a UserStore interface with a SQLite default. No ORM.",
+	"description": "Blok's auth starter kit — scrypt password hashing, login/register/logout/reset nodes, login throttling, and a UserStore interface with SQLite and Neon/Postgres backends. No ORM.",
 	"type": "module",
 	"engines": {
 		"node": ">=18.0.0"
@@ -47,5 +47,11 @@
 	"private": false,
 	"publishConfig": {
 		"access": "public"
+	},
+	"peerDependencies": {
+		"pg": "^8.18.0"
+	},
+	"peerDependenciesMeta": {
+		"pg": { "optional": true }
 	}
 }

@@ -2,7 +2,7 @@
 	"name": "@blokjs/session",
 	"version": "2.4.0",
 	"files": ["dist"],
-	"description": "Signed, HttpOnly server-side sessions for Blok — pluggable store (memory / sqlite / redis), session.get/set/forget/regenerate nodes, and the inertia.session middleware.",
+	"description": "Signed, HttpOnly server-side sessions for Blok — pluggable store (memory / sqlite / postgres / redis), session.get/set/forget/regenerate nodes, and the inertia.session middleware.",
 	"type": "module",
 	"engines": {
 		"node": ">=18.0.0"
@@ -17,7 +17,15 @@
 		"test": "vitest run",
 		"test:dev": "vitest"
 	},
-	"keywords": ["blok", "session", "cookie", "sqlite", "redis"],
+	"keywords": [
+		"blok",
+		"session",
+		"cookie",
+		"sqlite",
+		"postgres",
+		"neon",
+		"redis"
+	],
 	"devDependencies": {
 		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^24.13.5",
@@ -33,13 +41,17 @@
 	},
 	"peerDependencies": {
 		"better-sqlite3": "^11.0.0",
-		"ioredis": "^5.9.2"
+		"ioredis": "^5.9.2",
+		"pg": "^8.18.0"
 	},
 	"peerDependenciesMeta": {
 		"better-sqlite3": {
 			"optional": true
 		},
 		"ioredis": {
+			"optional": true
+		},
+		"pg": {
 			"optional": true
 		}
 	},

@@ -31,8 +31,11 @@ export {
 export { SESSION_SECRET_ENV, resolveSessionSecret } from "./secret.js";
 export {
 	MemorySessionStore,
+	PostgresSessionStore,
+	type PostgresSessionStoreOptions,
 	RedisSessionStore,
 	type SessionRecord,
+	type SessionPgClient,
 	type SessionStore,
 	type SessionStoreType,
 	type SqliteDatabase,

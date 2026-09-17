@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	DuplicateEmailError,
 	MemoryUserStore,
+	PostgresUserStore,
 	SqliteUserStore,
 	_resetAuth,
 	_resetThrottle,
@@ -28,6 +29,52 @@ import {
 const SECRET = "unit-test-session-secret-value";
 
 let users: MemoryUserStore;
+
+function fakePg() {
+	const users = new Map<
+		string,
+		{ id: string; name: string; email: string; password_hash: string; created_at: number }
+	>();
+	const resets = new Map<string, { user_id: string; expires_at: number }>();
+	return {
+		async query<T = Record<string, unknown>>(sql: string, values: readonly unknown[] = []) {
+			if (sql.includes("CREATE TABLE")) return { rows: [] as T[] };
+			if (sql.includes("SELECT id, name")) {
+				const row = sql.includes("WHERE email")
+					? [...users.values()].find((candidate) => candidate.email === String(values[0]))
+					: users.get(String(values[0]));
+				return { rows: (row ? [row] : []) as T[] };
+			}
+			if (sql.startsWith("INSERT INTO blok_users")) {
+				if ([...users.values()].some((row) => row.email === String(values[2]))) {
+					const error = new Error("duplicate");
+					Object.assign(error, { code: "23505" });
+					throw error;
+				}
+				users.set(String(values[0]), {
+					id: String(values[0]),
+					name: String(values[1]),
+					email: String(values[2]),
+					password_hash: String(values[3]),
+					created_at: Number(values[4]),
+				});
+				return { rows: [] as T[] };
+			}
+			if (sql.startsWith("INSERT INTO blok_password_resets")) {
+				resets.set(String(values[0]), { user_id: String(values[1]), expires_at: Number(values[2]) });
+				return { rows: [] as T[] };
+			}
+			if (sql.startsWith("DELETE FROM blok_password_resets")) {
+				const row = resets.get(String(values[0]));
+				resets.delete(String(values[0]));
+				return { rows: (row ? [row] : []) as T[] };
+			}
+			if (sql.startsWith("UPDATE") || sql.startsWith("DELETE FROM"))
+				return { rows: [], rowCount: 0 } as { rows: T[]; rowCount: number };
+			throw new Error(`unexpected SQL: ${sql}`);
+		},
+	};
+}
 
 beforeEach(() => {
 	process.env[SESSION_SECRET_ENV] = SECRET;
@@ -124,6 +171,14 @@ describe("@blokjs/auth — throttle", () => {
 });
 
 describe("@blokjs/auth — UserStore", () => {
+	it("persists users and atomically consumes reset tokens through Postgres", async () => {
+		const store = new PostgresUserStore(fakePg());
+		const user = await store.create({ name: "Ada", email: "ADA@example.com", passwordHash: "hash" });
+		expect(await store.findByEmail("ada@example.com")).toMatchObject({ id: user.id, email: "ada@example.com" });
+		await store.createResetToken({ userId: user.id, tokenHash: "token", expiresAt: Date.now() + 60_000 });
+		expect(await store.consumeResetToken("token")).toEqual({ userId: user.id });
+		expect(await store.consumeResetToken("token")).toBeUndefined();
+	});
 	it("matches email case-insensitively and refuses a duplicate", async () => {
 		await users.create({ name: "Ada", email: "Ada@Example.COM", passwordHash: "h" });
 		expect((await users.findByEmail("ada@example.com"))?.name).toBe("Ada");
