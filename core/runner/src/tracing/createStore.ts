@@ -35,7 +35,8 @@ export interface CreateStoreOptions {
  * Reads from environment variables when options are not provided:
  * - `BLOK_TRACE_STORE` → "memory" | "sqlite" | "postgres" (default: "memory")
  * - `BLOK_TRACE_SQLITE_PATH` → SQLite file path (default: ".blok/trace.db")
- * - `BLOK_TRACE_DATABASE_URL` (or `BLOK_DATABASE_URL` / `DATABASE_URL`) → PostgreSQL connection string
+ * - `BLOK_TRACE_DATABASE_URL` (or `BLOK_TRACE_PG_CONNECTION_STRING`,
+ *   `BLOK_DATABASE_URL`, `DATABASE_URL`) → PostgreSQL connection string
  * - `BLOK_TRACE_PG_POOL_SIZE` (or `BLOK_PG_POOL_SIZE`) → PostgreSQL pool size (default: 1 for serverless, 5 otherwise)
  * - `BLOK_TRACE_PG_SSL` (or `BLOK_PG_SSL`) → Enable PostgreSQL SSL (default: false)
  * - `BLOK_TRACE_RETENTION_DAYS` → Auto-delete after N days (default: 7, 0 = disabled)
@@ -61,12 +62,13 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 			const connectionString =
 				opts?.postgresUrl ||
 				process.env.BLOK_TRACE_DATABASE_URL ||
+				process.env.BLOK_TRACE_PG_CONNECTION_STRING ||
 				process.env.BLOK_DATABASE_URL ||
 				process.env.DATABASE_URL;
 			if (!connectionString) {
 				throw new Error(
 					"PostgresRunStore requires a connection string.\n" +
-						"Set BLOK_TRACE_DATABASE_URL environment variable or pass postgresUrl option.\n" +
+						"Set BLOK_TRACE_DATABASE_URL (or BLOK_TRACE_PG_CONNECTION_STRING) or pass postgresUrl option.\n" +
 						"Example: BLOK_TRACE_DATABASE_URL=postgres://user:pass@localhost:5432/blok",
 				);
 			}

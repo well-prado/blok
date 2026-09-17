@@ -1454,6 +1454,16 @@ export default class HttpTrigger extends TriggerBase {
 		return app.fetch(request, env);
 	}
 
+	/** Serverless lifecycle hook for network-backed stores such as Neon. */
+	public async ready(): Promise<void> {
+		await RunTracker.getInstance().getStore().ready?.();
+	}
+
+	/** Serverless lifecycle hook that drains queued trace writes. */
+	public async flush(): Promise<void> {
+		await RunTracker.getInstance().getStore().flush?.();
+	}
+
 	/**
 	 * Traditional long-running server boot.  All route discovery and mounting
 	 * lives in {@link prepare}; only this path binds a Node server and starts

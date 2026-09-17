@@ -5,6 +5,10 @@ import HttpTrigger from "./runner/HttpTrigger.js";
 export interface ServerlessHttpTrigger {
 	prepare(mode?: "server" | "serverless"): Promise<unknown>;
 	fetch(request: Request, env?: AppBindings["Bindings"]): Promise<Response>;
+	/** Complete async store initialization before the first request. */
+	ready?(): Promise<void>;
+	/** Drain async persistence before the platform freezes the invocation. */
+	flush?(): Promise<void>;
 }
 
 export interface ServerlessHandlerOptions {
@@ -71,6 +75,7 @@ export function createVercelHandler(options: ServerlessHandlerOptions = {}): Ser
 	return async (request: Request): Promise<Response> => {
 		try {
 			await prepare();
+			await getTrigger().ready?.();
 		} catch (error: unknown) {
 			const details = errorDetails(error);
 			logError("blok.serverless.initialization_failed", error);
@@ -96,6 +101,8 @@ export function createVercelHandler(options: ServerlessHandlerOptions = {}): Ser
 				},
 				{ status: 500 },
 			);
+		} finally {
+			await getTrigger().flush?.();
 		}
 	};
 }
