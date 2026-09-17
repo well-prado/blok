@@ -1713,7 +1713,7 @@ export default handler;
 		`${JSON.stringify(
 			{
 				version: 2,
-				functions: { "api/index.ts": { runtime: "nodejs22.x", maxDuration: 60 } },
+				functions: { "api/index.ts": { runtime: "nodejs24.x", maxDuration: 60 } },
 				rewrites: [
 					{ source: "/api/:path*", destination: "/api/index" },
 					{ source: "/((?!_next/|assets/|api/).*)", destination: "/api/index" },
