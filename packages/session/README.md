@@ -62,7 +62,8 @@ From node code, the same operations are plain functions: `loadSession(ctx)`,
 |---|---|---|
 | `memory` | `BLOK_SESSION_STORE=memory`, or `NODE_ENV=test` | Dev and tests. Not durable, not shared. |
 | `sqlite` | the default | `bun:sqlite` under Bun, else the `better-sqlite3` optional peer. File at `BLOK_SESSION_SQLITE_PATH` (default `.blok/sessions.db`). |
-| `redis` | `REDIS_URL` is set | `ioredis` optional peer. The only backend that is correct across replicas. |
+| `postgres` | `BLOK_SESSION_STORE=postgres`, or `BLOK_SERVERLESS=1` with a database URL | Neon-compatible `pg` optional peer. Uses a pooled connection (`max=1` by default), guarded schema initialization, atomic upserts, expiry cleanup, and bounded transient-error retries. Set `BLOK_SESSION_DATABASE_URL` (or `BLOK_DATABASE_URL` / `DATABASE_URL`) and `BLOK_SESSION_PG_SSL=true`. |
+| `redis` | `REDIS_URL` is set | `ioredis` optional peer. Shared across replicas, but not the default for serverless session persistence. |
 
 Or bring your own — the contract is three methods:
 
@@ -78,6 +79,10 @@ configureSession({
 
 Expiry is enforced on **read** in every backend, so a stale row can never
 authenticate anyone even if a sweep has not run.
+
+For Functions, await `store.ready()` during cold-start preparation. Run
+`await store.sweep()` from an external scheduler (not an in-process interval),
+because a serverless instance may be frozen immediately after a response.
 
 ## Cookie
 

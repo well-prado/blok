@@ -25,9 +25,12 @@
 export { DEFAULT_SCRYPT, type ScryptParams, decoyHash, hashPassword, verifyPassword } from "./password.js";
 export {
 	type AuthUser,
+	type AuthPgClient,
 	DuplicateEmailError,
 	MemoryUserStore,
+	PostgresUserStore,
 	type NewUser,
+	type PostgresUserStoreOptions,
 	type ResetTokenRecord,
 	SqliteUserStore,
 	type UserStore,

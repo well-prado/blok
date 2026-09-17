@@ -7,7 +7,10 @@
  * ```
  */
 
-import { MemoryUserStore, SqliteUserStore, type UserStore } from "./user-store.js";
+import { createRequire } from "node:module";
+import { MemoryUserStore, PostgresUserStore, SqliteUserStore, type UserStore } from "./user-store.js";
+
+const esmRequire = createRequire(import.meta.url);
 
 export interface AuthOptions {
 	/** Where users live. Default: sqlite at `BLOK_AUTH_SQLITE_PATH` (memory under `NODE_ENV=test`). */
@@ -89,6 +92,34 @@ export function authOptions(): Required<Omit<AuthOptions, "users" | "secret" | "
  */
 export function getUserStore(): UserStore {
 	if (!users) {
+		const databaseUrl = process.env.BLOK_AUTH_DATABASE_URL || process.env.BLOK_DATABASE_URL || process.env.DATABASE_URL;
+		const configuredStore = process.env.BLOK_AUTH_STORE;
+		if (configuredStore === "postgres" || (process.env.BLOK_SERVERLESS === "1" && databaseUrl)) {
+			if (!databaseUrl) {
+				throw new Error(
+					"[blok] @blokjs/auth: postgres backend requires BLOK_AUTH_DATABASE_URL, BLOK_DATABASE_URL, or DATABASE_URL.",
+				);
+			}
+			let Pool: new (options: Record<string, unknown>) => { query: (...args: never[]) => Promise<unknown> };
+			try {
+				const mod = esmRequire("pg") as { Pool?: typeof Pool };
+				if (!mod.Pool) throw new Error("no Pool export");
+				Pool = mod.Pool;
+			} catch (error) {
+				throw new Error(
+					`[blok] @blokjs/auth: the postgres backend needs the optional 'pg' peer. Fix: bun add pg. Underlying: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			const pool = new Pool({
+				connectionString: databaseUrl,
+				max: parsePositiveInt(process.env.BLOK_AUTH_PG_POOL_SIZE || process.env.BLOK_PG_POOL_SIZE, 1),
+				ssl: parseSsl(process.env.BLOK_AUTH_PG_SSL || process.env.BLOK_PG_SSL),
+				connectionTimeoutMillis: 5_000,
+				idleTimeoutMillis: 10_000,
+			});
+			users = new PostgresUserStore(pool as unknown as ConstructorParameters<typeof PostgresUserStore>[0]);
+			return users;
+		}
 		users =
 			options.users ??
 			(process.env.NODE_ENV === "test"
@@ -96,6 +127,17 @@ export function getUserStore(): UserStore {
 				: new SqliteUserStore(process.env.BLOK_AUTH_SQLITE_PATH || ".blok/auth.db"));
 	}
 	return users;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+	if (!raw || !/^\d+$/.test(raw)) return fallback;
+	const value = Number(raw);
+	return value > 0 ? value : fallback;
+}
+
+function parseSsl(raw: string | undefined): boolean | { rejectUnauthorized: boolean } | undefined {
+	if (!raw || raw === "false" || raw === "0") return undefined;
+	return raw === "no-verify" ? { rejectUnauthorized: false } : true;
 }
 
 /** Test-only: drop the configuration and the memoised store. */

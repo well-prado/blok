@@ -28,6 +28,14 @@ export interface PostgresConfig {
 	max?: number;
 	/** SSL configuration */
 	ssl?: boolean | { rejectUnauthorized: boolean };
+	/** Connection establishment timeout (default: 5000ms). */
+	connectionTimeoutMillis?: number;
+	/** Idle connection timeout (default: 10000ms; important for warm Functions). */
+	idleTimeoutMillis?: number;
+	/** Retries for transient Neon/network failures (default: 2). */
+	retries?: number;
+	/** Inject a pg-compatible pool for tests or an application-managed pool. */
+	pool?: PgPool;
 }
 
 type PgPool = import("pg").Pool;
@@ -51,30 +59,38 @@ export class PostgresRunStore implements RunStore {
 	private flushTimer: ReturnType<typeof setInterval> | null = null;
 	private initPromise: Promise<void>;
 	private closed = false;
+	private readonly retries: number;
 
 	constructor(config: PostgresConfig) {
 		this.memory = new InMemoryRunStore();
 
-		let Pool: typeof import("pg").Pool;
-		try {
-			const mod = "pg";
-			Pool = esmRequire(mod).Pool;
-		} catch {
-			throw new Error(
-				"PostgresRunStore requires 'pg'. Install it:\n" + "  npm install pg\n" + "  # or\n" + "  pnpm add pg",
-			);
+		if (config.pool) {
+			this.pool = config.pool;
+		} else {
+			let Pool: typeof import("pg").Pool;
+			try {
+				const mod = "pg";
+				Pool = esmRequire(mod).Pool;
+			} catch {
+				throw new Error(
+					"PostgresRunStore requires 'pg'. Install it:\n" + "  npm install pg\n" + "  # or\n" + "  pnpm add pg",
+				);
+			}
+
+			this.pool = new Pool({
+				connectionString: config.connectionString,
+				max: config.max ?? 5,
+				ssl: config.ssl,
+				connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5_000,
+				idleTimeoutMillis: config.idleTimeoutMillis ?? 10_000,
+			});
 		}
+		this.retries = config.retries ?? 2;
 
-		this.pool = new Pool({
-			connectionString: config.connectionString,
-			max: config.max ?? 5,
-			ssl: config.ssl,
-		});
-
-		// Start async initialization in background
-		this.initPromise = this.initialize().catch((err) => {
-			console.error("[PostgresRunStore] Initialization failed:", err.message);
-		});
+		// Start initialization immediately. Consumers of serverless adapters must
+		// await ready() before serving the first request; this also makes migration
+		// failures visible instead of silently serving a half-created schema.
+		this.initPromise = this.initialize();
 	}
 
 	/**
@@ -86,17 +102,27 @@ export class PostgresRunStore implements RunStore {
 		return this.initPromise;
 	}
 
+	/** Explicit schema/readiness hook for cold starts and deployment checks. */
+	async migrate(): Promise<void> {
+		await this.initPromise;
+	}
+
 	// === Initialization ===
 
 	private async initialize(): Promise<void> {
-		await this.migrate();
+		await this.migrateSchema();
 		await this.loadRecent();
 		this.startFlushLoop();
 	}
 
-	private async migrate(): Promise<void> {
+	private async migrateSchema(): Promise<void> {
 		const client = await this.pool.connect();
+		const lockKey = "blok:trace-schema:v1";
 		try {
+			// PostgreSQL advisory locking makes concurrent cold starts safe. Neon
+			// may create several Function instances at once; only one migrates,
+			// while peers wait and then observe the committed versions.
+			await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
 			await client.query(`
 				CREATE TABLE IF NOT EXISTS _trace_migrations (
 					version INTEGER PRIMARY KEY,
@@ -444,6 +470,11 @@ export class PostgresRunStore implements RunStore {
 				}
 			}
 		} finally {
+			try {
+				await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+			} catch {
+				// A broken connection is already unusable; preserve the migration error.
+			}
 			client.release();
 		}
 	}
@@ -1618,7 +1649,9 @@ export class PostgresRunStore implements RunStore {
 		this.writeQueue.push(fn);
 	}
 
-	private async flush(): Promise<void> {
+	/** Drain all queued writes before a serverless invocation can be frozen. */
+	async flush(): Promise<void> {
+		await this.initPromise;
 		if (this.flushing || this.writeQueue.length === 0) return;
 		this.flushing = true;
 
@@ -1626,7 +1659,7 @@ export class PostgresRunStore implements RunStore {
 			const batch = this.writeQueue.splice(0, 50);
 			await Promise.allSettled(
 				batch.map((fn) =>
-					fn().catch((err) => {
+					this.withRetry(fn).catch((err) => {
 						console.error("[PostgresRunStore] Write failed:", err.message);
 					}),
 				),
@@ -1634,6 +1667,19 @@ export class PostgresRunStore implements RunStore {
 		}
 
 		this.flushing = false;
+	}
+
+	private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+		let attempt = 0;
+		while (true) {
+			try {
+				return await operation();
+			} catch (error) {
+				if (attempt >= this.retries || !isTransientPgError(error)) throw error;
+				await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
+				attempt += 1;
+			}
+		}
 	}
 
 	private startFlushLoop(): void {
@@ -1782,6 +1828,25 @@ function parseJson(value: unknown): unknown {
 		}
 	}
 	return value;
+}
+
+function isTransientPgError(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false;
+	const code = String((error as { code?: unknown }).code ?? "");
+	return [
+		"08000",
+		"08003",
+		"08006",
+		"40001",
+		"40P01",
+		"57P01",
+		"57P02",
+		"57P03",
+		"ECONNRESET",
+		"ECONNREFUSED",
+		"ETIMEDOUT",
+		"EPIPE",
+	].includes(code);
 }
 
 /**

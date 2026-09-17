@@ -26,7 +26,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { type SqliteDatabase, ensureSqliteDir, openSqlite } from "@blokjs/session";
+
+const esmRequire = createRequire(import.meta.url);
 
 /** A stored user. `passwordHash` never leaves the server. */
 export interface AuthUser {
@@ -64,6 +67,26 @@ export interface UserStore {
 	createResetToken(record: ResetTokenRecord): Promise<void>;
 	/** Delete the token and return its owner — or `undefined` when unknown or expired. */
 	consumeResetToken(tokenHash: string): Promise<{ userId: string } | undefined>;
+}
+
+/** Minimal pg client surface accepted by {@link PostgresUserStore}. */
+export interface AuthPgClient {
+	query<Row = Record<string, unknown>>(
+		text: string,
+		values?: readonly unknown[],
+	): Promise<{
+		rows: Row[];
+		rowCount?: number;
+	}>;
+}
+
+export interface PostgresUserStoreOptions {
+	connectionString: string;
+	max?: number;
+	ssl?: boolean | { rejectUnauthorized: boolean };
+	connectionTimeoutMillis?: number;
+	idleTimeoutMillis?: number;
+	retries?: number;
 }
 
 /** The single definition of "the same email address". */
@@ -237,6 +260,215 @@ export class SqliteUserStore implements UserStore {
 	close(): void {
 		this.db.close();
 	}
+}
+
+// =============================================================================
+// postgres / Neon
+// =============================================================================
+
+interface AuthPgPool extends AuthPgClient {
+	end?(): Promise<void>;
+}
+
+/** Durable, cross-instance auth users and single-use reset tokens. */
+export class PostgresUserStore implements UserStore {
+	private readonly client: AuthPgClient;
+	private readonly pool?: AuthPgPool;
+	private readonly retries: number;
+	private readonly readyPromise: Promise<void>;
+
+	constructor(options: PostgresUserStoreOptions | AuthPgClient) {
+		if ("connectionString" in options) {
+			const config = options as PostgresUserStoreOptions;
+			let Pool: new (options: Record<string, unknown>) => AuthPgPool;
+			try {
+				const mod = esmRequire("pg") as { Pool?: typeof Pool };
+				if (!mod.Pool) throw new Error("no Pool export");
+				Pool = mod.Pool;
+			} catch (error) {
+				throw new Error(
+					`[blok] @blokjs/auth: the postgres backend needs the optional 'pg' peer. Fix: bun add pg. Underlying: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			this.pool = new Pool({
+				connectionString: config.connectionString,
+				max: config.max ?? 1,
+				ssl: config.ssl,
+				connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5_000,
+				idleTimeoutMillis: config.idleTimeoutMillis ?? 10_000,
+			});
+			this.client = this.pool;
+			this.retries = config.retries ?? 2;
+		} else {
+			this.client = options;
+			this.retries = 0;
+		}
+		this.readyPromise = this.migrateSchema();
+	}
+
+	ready(): Promise<void> {
+		return this.readyPromise;
+	}
+
+	async migrate(): Promise<void> {
+		await this.readyPromise;
+	}
+
+	private async migrateSchema(): Promise<void> {
+		await this.withRetry(() =>
+			this.client.query(`
+				CREATE TABLE IF NOT EXISTS blok_users (
+					id TEXT PRIMARY KEY,
+					name TEXT NOT NULL,
+					email TEXT NOT NULL UNIQUE,
+					password_hash TEXT NOT NULL,
+					created_at BIGINT NOT NULL
+				);
+				CREATE TABLE IF NOT EXISTS blok_password_resets (
+					token_hash TEXT PRIMARY KEY,
+					user_id TEXT NOT NULL REFERENCES blok_users(id) ON DELETE CASCADE,
+					expires_at BIGINT NOT NULL
+				);
+				CREATE INDEX IF NOT EXISTS idx_blok_password_resets_expires ON blok_password_resets(expires_at);
+			`),
+		);
+	}
+
+	async findByEmail(email: string): Promise<AuthUser | undefined> {
+		await this.readyPromise;
+		const result = await this.withRetry(() =>
+			this.client.query<AuthUserRow>(`${AUTH_SELECT} WHERE email = $1`, [normalizeEmail(email)]),
+		);
+		return authRow(result.rows[0]);
+	}
+
+	async findById(id: string): Promise<AuthUser | undefined> {
+		await this.readyPromise;
+		const result = await this.withRetry(() => this.client.query<AuthUserRow>(`${AUTH_SELECT} WHERE id = $1`, [id]));
+		return authRow(result.rows[0]);
+	}
+
+	async create(input: NewUser): Promise<AuthUser> {
+		await this.readyPromise;
+		const user: AuthUser = {
+			id: randomUUID(),
+			name: input.name,
+			email: normalizeEmail(input.email),
+			passwordHash: input.passwordHash,
+			createdAt: Date.now(),
+		};
+		try {
+			await this.withRetry(() =>
+				this.client.query(
+					"INSERT INTO blok_users (id, name, email, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)",
+					[user.id, user.name, user.email, user.passwordHash, user.createdAt],
+				),
+			);
+		} catch (error) {
+			if (isUniqueConstraintError(error)) throw new DuplicateEmailError(user.email);
+			throw error;
+		}
+		return user;
+	}
+
+	async updatePassword(id: string, passwordHash: string): Promise<void> {
+		await this.readyPromise;
+		await this.withRetry(() =>
+			this.client.query("UPDATE blok_users SET password_hash = $1 WHERE id = $2", [passwordHash, id]),
+		);
+	}
+
+	async createResetToken(record: ResetTokenRecord): Promise<void> {
+		await this.readyPromise;
+		await this.withRetry(() =>
+			this.client.query(
+				"INSERT INTO blok_password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, $3) ON CONFLICT (token_hash) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at",
+				[record.tokenHash, record.userId, record.expiresAt],
+			),
+		);
+	}
+
+	async consumeResetToken(tokenHash: string): Promise<{ userId: string } | undefined> {
+		await this.readyPromise;
+		const result = await this.withRetry(() =>
+			this.client.query<{ user_id: string; expires_at: number | string }>(
+				"DELETE FROM blok_password_resets WHERE token_hash = $1 RETURNING user_id, expires_at",
+				[tokenHash],
+			),
+		);
+		const row = result.rows[0];
+		return row && Number(row.expires_at) > Date.now() ? { userId: row.user_id } : undefined;
+	}
+
+	async sweep(now = Date.now()): Promise<number> {
+		await this.readyPromise;
+		const result = await this.withRetry(() =>
+			this.client.query("DELETE FROM blok_password_resets WHERE expires_at <= $1", [now]),
+		);
+		return result.rowCount ?? 0;
+	}
+
+	async close(): Promise<void> {
+		await this.pool?.end?.();
+	}
+
+	private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+		let attempt = 0;
+		while (true) {
+			try {
+				return await operation();
+			} catch (error) {
+				if (attempt >= this.retries || !isTransientPgError(error)) throw error;
+				await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
+				attempt += 1;
+			}
+		}
+	}
+}
+
+interface AuthUserRow {
+	id: string;
+	name: string;
+	email: string;
+	password_hash: string;
+	created_at: number | string;
+}
+
+const AUTH_SELECT = "SELECT id, name, email, password_hash, created_at FROM blok_users";
+
+function authRow(row: AuthUserRow | undefined): AuthUser | undefined {
+	return row
+		? {
+				id: row.id,
+				name: row.name,
+				email: row.email,
+				passwordHash: row.password_hash,
+				createdAt: Number(row.created_at),
+			}
+		: undefined;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+	return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "23505");
+}
+
+function isTransientPgError(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false;
+	const code = String((error as { code?: unknown }).code ?? "");
+	return [
+		"08000",
+		"08003",
+		"08006",
+		"40001",
+		"40P01",
+		"57P01",
+		"57P02",
+		"57P03",
+		"ECONNRESET",
+		"ECONNREFUSED",
+		"ETIMEDOUT",
+		"EPIPE",
+	].includes(code);
 }
 
 const SELECT = "SELECT id, name, email, password_hash, created_at FROM blok_users";
