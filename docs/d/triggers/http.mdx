@@ -10,6 +10,12 @@ the listening Node server and exposes a Hono app that
 [Webhook](./webhook.mdx) triggers can mount on for shared-port
 operation.
 
+For request-scoped platforms, the trigger also exposes a serverless lifecycle:
+prepare the workflow registry and Hono routes once, then call `fetch(request)`
+for each invocation. Preparation never binds a socket or installs process
+shutdown handlers; `listen()` remains the unchanged long-running entrypoint.
+See [Vercel and serverless deployments](/d/deployment/vercel).
+
 ## Quickstart
 
 The build callback's argument is the **entry handle** — for HTTP it's the request, named `req`
