@@ -126,6 +126,7 @@ async function main() {
 			)
 			.option("--examples", "Install example workflows and nodes")
 			.option("--spa <framework>", "Also run `add spa` with this framework: react, vue, svelte")
+			.option("--serverless", "Scaffold a Vercel-compatible HTTP Function entrypoint and routing config")
 			.option("--ssr", "With --spa: also scaffold the Inertia SSR entry and build:ssr script")
 			.option("--kit <value>", "With --spa: starter kit to include (auth)")
 			.action(
