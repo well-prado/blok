@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/code-mode",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"description": "Typed, policy-bound Code Mode workflow and capability bindings for Blok.",
 	"type": "module",
 	"main": "dist/index.js",

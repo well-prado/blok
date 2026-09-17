@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-webhook",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Webhook trigger for Blok workflows - supports GitHub, Stripe, Shopify, and custom webhooks",
 	"type": "module",

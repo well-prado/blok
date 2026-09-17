@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/session",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Signed, HttpOnly server-side sessions for Blok — pluggable store (memory / sqlite / postgres / redis), session.get/set/forget/regenerate nodes, and the inertia.session middleware.",
 	"type": "module",

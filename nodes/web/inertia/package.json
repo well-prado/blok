@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/inertia",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Inertia v3 protocol adapter node — serializes an Inertia page object into a Blok HTTP response (HTML shell, JSON page object, and the version/redirect/location control responses).",
 	"type": "module",
