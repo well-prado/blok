@@ -19,7 +19,7 @@ describe("serverless scaffold", () => {
 			'import handler from "../src/triggers/http/serverless.js"',
 		);
 		const config = JSON.parse(fs.readFileSync(path.join(dir, "vercel.json"), "utf8"));
-		expect(config.functions["api/index.ts"].runtime).toBe("nodejs22.x");
+		expect(config.functions["api/index.ts"].runtime).toBe("nodejs24.x");
 		expect(config.rewrites[0]).toEqual({ source: "/api/:path*", destination: "/api/index" });
 		expect(config.rewrites[1].destination).toBe("/api/index");
 	});
