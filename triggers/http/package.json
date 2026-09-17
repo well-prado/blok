@@ -21,6 +21,10 @@
 			"types": "./dist/serverless.d.ts",
 			"import": "./dist/serverless.js"
 		},
+		"./dist/*": {
+			"types": "./dist/*",
+			"import": "./dist/*"
+		},
 		"./package.json": "./package.json"
 	},
 	"author": "Deskree Technologies Inc.",
