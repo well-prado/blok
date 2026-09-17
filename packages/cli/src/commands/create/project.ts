@@ -146,6 +146,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		: opts.trigger
 			? [opts.trigger]
 			: ["http"];
+	if (opts.serverless) validateServerlessTriggers(selectedTriggers);
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
 	const unknownRuntimeKinds = selectedRuntimeKinds.filter((kind) => kind !== "node" && !getRuntimeDefinition(kind));
@@ -389,6 +390,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		selectedObsTier = parseObsTier(blokctlProject.obsStack as string);
 		selectedObsModules = (blokctlProject.observability as string[] | undefined) ?? [];
 		selectedManager = blokctlProject.selectedManager;
+		if (opts.serverless) validateServerlessTriggers(selectedTriggers);
 
 		// Warn about unavailable runtimes
 		const unavailableSelected = selectedRuntimeKinds.filter((kind) => {
