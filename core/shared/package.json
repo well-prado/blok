@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/shared",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Shared class, interfaces and types",
 	"type": "module",

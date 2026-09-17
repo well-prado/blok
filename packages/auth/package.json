@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/auth",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Blok's auth starter kit — scrypt password hashing, login/register/logout/reset nodes, login throttling, and a UserStore interface with SQLite and Neon/Postgres backends. No ORM.",
 	"type": "module",

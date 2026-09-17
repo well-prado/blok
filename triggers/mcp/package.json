@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-mcp",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"files": ["dist"],
 	"description": "Model Context Protocol (MCP) trigger for Blok workflows — expose workflows as MCP tools over SSE + Streamable-HTTP on the shared Hono port.",
 	"type": "module",
