@@ -11,7 +11,7 @@
 	"types": "dist/index.d.ts",
 	"type": "module",
 	"bin": {
-		"blokctl": "./dist/index.js"
+		"blokctl": "dist/index.js"
 	},
 	"files": ["dist"],
 	"scripts": {
