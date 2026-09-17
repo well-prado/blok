@@ -116,6 +116,21 @@ describe("HttpTrigger", () => {
 			expect(await Promise.all([first, second])).toEqual([trigger.getApp(), trigger.getApp()]);
 		});
 
+		it("clears a rejected preparation so a later cold request can retry", async () => {
+			const app = trigger.getApp() as unknown as { use: (...args: unknown[]) => unknown };
+			const originalUse = app.use;
+			let attempts = 0;
+			vi.spyOn(app, "use").mockImplementation((...args: unknown[]) => {
+				attempts++;
+				if (attempts === 1) throw new Error("transient preparation failure");
+				return originalUse(...args);
+			});
+
+			await expect(trigger.prepare()).rejects.toThrow("transient preparation failure");
+			await expect(trigger.prepare()).resolves.toBe(trigger.getApp());
+			expect(attempts).toBeGreaterThan(1);
+		});
+
 		it("handles a serverless request after preparing the app", async () => {
 			const response = await trigger.fetch(new Request("http://localhost/health-check"));
 

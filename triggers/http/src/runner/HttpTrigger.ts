@@ -1430,7 +1430,17 @@ export default class HttpTrigger extends TriggerBase {
 	 * is idempotent and concurrent-safe for the lifetime of this trigger.
 	 */
 	public prepare(mode: HttpPreparationMode = "serverless"): Promise<Hono<AppBindings>> {
-		if (!this.preparation) this.preparation = this.prepareApplication(mode);
+		if (!this.preparation) {
+			const attempt = this.prepareApplication(mode);
+			const tracked = attempt.catch((error: unknown) => {
+				// A transient cold-start failure must not poison a warm instance
+				// forever. Keep this identity check so a later retry cannot be
+				// accidentally cleared by an older rejected attempt.
+				if (this.preparation === tracked) this.preparation = null;
+				throw error;
+			});
+			this.preparation = tracked;
+		}
 		return this.preparation;
 	}
 
