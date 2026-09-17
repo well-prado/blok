@@ -1,4 +1,4 @@
-#! /usr/bin/env bun
+#!/usr/bin/env node
 import child_process from "node:child_process";
 import os from "node:os";
 import util from "node:util";
