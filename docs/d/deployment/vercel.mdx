@@ -1,0 +1,183 @@
+---
+title: "Vercel and serverless deployments"
+description: "Deploy a Blok HTTP application and Inertia SPA as a Vercel Function, with safe routing, durable storage, and explicit capability limits."
+icon: "cloud"
+---
+
+This guide describes the serverless deployment contract for Blok. The
+long-running `blokctl dev`, Docker, and container deployments remain fully
+supported; a Function is an additional entry point that receives a Web
+Standard `Request` and returns a `Response`.
+
+## Choose a deployment shape
+
+| Shape | Frontend | Backend | Use when |
+| --- | --- | --- | --- |
+| Static SPA only | Vercel static output | another host | the SPA calls an existing API |
+| In-project | `client/dist` in the same project | `/api` Function | one origin and the simplest Inertia setup |
+| Split projects | a Vercel SPA project | a separate Blok Function | independent frontend/backend deploys |
+| Long-running server | Vite or static files | `blokctl start` / container | WebSockets, workers, cron, or long-lived streams |
+
+The Function path never calls `listen()` and never binds a port. The local
+server path still calls `listen()` exactly as before.
+
+## Minimal Function entrypoint
+
+After the serverless scaffold is installed, the generated `api/index.ts` is a
+small adapter around the application:
+
+```ts
+import { createBlokVercelHandler } from "@blokjs/trigger-http/vercel";
+import { app } from "../src/app";
+
+export default createBlokVercelHandler(() => app);
+```
+
+The handler prepares the workflow registry once per warm instance, waits for
+concurrent cold requests to share the same initialization promise, and then
+delegates every request to Hono's `fetch` contract. Initialization failures
+are logged with a request id and return a structured `503` response; they do
+not leave a partially registered router in memory.
+
+`runtime: "nodejs"` is the default. Select Bun explicitly when the Vercel
+project supports it:
+
+```json vercel.json
+{
+  "functions": {
+    "api/index.ts": { "runtime": "bun1.x", "maxDuration": 60 }
+  }
+}
+```
+
+## Same-origin Inertia routing
+
+For an in-project SPA, API/function routes must win before the frontend
+fallback. Never put a broad `/(.*)` rewrite before `/api`:
+
+```json vercel.json
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public,max-age=31536000,immutable" }]
+    }
+  ]
+}
+```
+
+Fingerprinting keeps assets immutable. `favicon.ico`, `robots.txt`, and every
+generated page route are served as static files when present; an unknown SPA
+route receives the shell so the client can render its own 404 page. `/api/*`
+is never rewritten to HTML.
+
+The Function preserves the Inertia protocol: `X-Inertia`, `Vary`, asset
+version mismatches (`409` + `X-Inertia-Location`), `303` redirects after
+non-GET writes, validation error bags, and the JSON page object all behave the
+same as the long-running HTTP trigger.
+
+For a split frontend, set the backend origin in the Vite client and configure
+an explicit allow-list on the Function:
+
+```dotenv
+BLOK_CORS_ORIGIN=https://spa.example.com
+BLOK_SESSION_SECRET=<unique-production-secret>
+BLOK_FLASH_SECRET=<unique-production-secret>
+BLOK_CSRF_SECRET=<unique-production-secret>
+```
+
+Credentialed CORS is opt-in. Do not use `*` with cookies; expose the Inertia
+response headers required by the client.
+
+## Durable state with Neon/Postgres
+
+Function filesystems and memory are ephemeral. Production serverless projects
+must use Postgres (Neon is supported) for traces, sessions, idempotency, and
+scheduled dispatches:
+
+```dotenv
+BLOK_TRACE_STORE=postgres
+BLOK_TRACE_PG_CONNECTION_STRING=postgresql://...
+BLOK_TRACE_PG_SSL=true
+BLOK_TRACE_RETENTION_DAYS=30
+```
+
+Run migrations explicitly during deployment (`blokctl db migrate` or the
+project's migration command) before sending traffic. Use a pooled Neon
+connection string, keep preview and production databases separate, and set a
+finite connection/statement timeout. Startup does not create SQLite files
+when Postgres is selected, so a read-only Function filesystem is safe.
+
+Retention is server-side: traces, idempotency records, session rows, and
+scheduled dispatches are expired by the configured cleanup job. A Function
+invocation must not rely on a janitor or scheduler loop remaining alive; use a
+Neon-backed external scheduler/queue for work that outlives the request.
+
+## Capability boundaries
+
+| Capability | Serverless behavior |
+| --- | --- |
+| Unary HTTP / Inertia | Supported |
+| Bounded streaming | Supported until the Function duration limit |
+| SSE | Conditional; clients must reconnect and respect the platform timeout |
+| WebSockets | Unsupported by the Function adapter; returns a deterministic diagnostic |
+| Workers / queues | Use an external durable queue and an authenticated HTTP consumer |
+| Cron | Use Vercel Cron (or another scheduler) to call an authenticated workflow endpoint |
+| Delayed dispatch / recovery | Requires durable Postgres plus an external scheduler |
+| Studio and trace API | Disabled by default; enable only behind an authorization hook |
+
+The existing long-running server remains the supported deployment for
+WebSockets, unbounded streams, in-process workers, and process-owned cron.
+
+## Security and observability checklist
+
+- Set unique session, flash, CSRF, and history-encryption secrets per preview
+  and production environment. Missing secrets fail startup with an actionable
+  diagnostic.
+- Register a trace authorization hook before exposing `/__blok/*` in
+  production. The default is closed.
+- Keep CORS closed unless a specific origin is required; never log secrets or
+  connection strings.
+- Return and log the request/correlation id (`X-Request-Id`) for every
+  invocation. Include cold-start duration and database failures in Vercel
+  logs or your OTLP/Sentry sink.
+- Set `BLOK_TRACE_STORE=postgres` and a pooled connection string; do not point
+  a production Function at `.blok/runs.db`.
+
+## Scaffold and deploy
+
+The opt-in scaffold writes `api/index.ts` and `vercel.json` without replacing
+an existing deployment file:
+
+```bash
+blokctl create project --name storefront --spa react --serverless
+cd storefront
+bun install
+bun run gen:types
+bun run build
+vercel dev
+```
+
+Use `--serverless --force` only when you intentionally want to replace the
+generated Function/configuration. Without `--force`, an existing `vercel.json`
+is left untouched and the CLI explains the files that need to be merged.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Function returns 404 | `/api/:path*` rewrite precedes the SPA catch-all; inspect the generated route table |
+| Hard refresh shows blank page | `client/dist` is deployed and the SPA fallback targets `index.html` |
+| Stale Inertia page | bump `ASSET_VERSION` with the client build; a mismatch intentionally returns `409` |
+| Cookies missing in split mode | use an explicit `BLOK_CORS_ORIGIN`, `credentials: true`, and a compatible cookie domain |
+| Cold start timeout | reduce boot work, use pooled Neon, and set a realistic `maxDuration` |
+| Database connection failures | verify the Neon pooled URL, TLS setting, and preview/production variables |
+| WebSocket hangs | move the endpoint to the long-running deployment; Functions return an unsupported diagnostic |
+
+See [SPA (Inertia)](/d/spa), [HTTP trigger](/d/triggers/http), and
+[environment variables](/d/operations/env-vars) for the protocol and local
+development details.

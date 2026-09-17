@@ -166,6 +166,7 @@
 					{
 						"group": "Operations",
 						"pages": [
+							"d/deployment/vercel",
 							"d/operations/overview",
 							"d/operations/env-vars",
 							"d/operations/observability",
