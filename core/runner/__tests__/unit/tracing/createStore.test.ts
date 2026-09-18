@@ -54,12 +54,9 @@ describe("createStore — default backend (OBS-04)", () => {
 		const memWarn = warn.mock.calls.find((c) => String(c[0]).includes("IN-MEMORY"));
 		expect(memWarn).toBeUndefined();
 
-		// In a real (compiled) runtime the sqlite store is created + the db file
-		// exists. Under vitest the dynamic `require("./SqliteRunStore")` of the
-		// sibling .ts can't resolve, so the default path gracefully falls back to
-		// memory with a "sqlite unavailable" warning — exactly the safety net for
-		// Node consumers missing the better-sqlite3 peer dep. Either outcome proves
-		// the DEFAULT was sqlite (attempted), never the memory default branch.
+		// The default selects SQLite. If the optional better-sqlite3 peer is
+		// unavailable, the safety net falls back to memory with a warning. Either
+		// outcome proves the DEFAULT was sqlite (attempted), never the memory branch.
 		const sqliteCreated = !(store instanceof InMemoryRunStore) && fs.existsSync(path.join(tmpDir, "trace.db"));
 		const sqliteAttemptedThenFellBack = warn.mock.calls.some((c) => String(c[0]).includes("sqlite unavailable"));
 		expect(sqliteCreated || sqliteAttemptedThenFellBack).toBe(true);
