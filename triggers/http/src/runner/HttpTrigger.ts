@@ -170,8 +170,9 @@ function hasHttpTrigger(wf: unknown): boolean {
 
 /**
  * #693 — every trigger kind a workflow object declares (root `trigger` OR
- * `_config.trigger`). Used only for the boot-time route table's "non-HTTP
- * triggers this boot" summary — never gates dispatch.
+ * `_config.trigger`). Used for the boot-time route table's "non-HTTP triggers
+ * this boot" summary and to register non-HTTP-triggered scanned workflows into
+ * the WorkflowRegistry for sibling triggers — never gates HTTP dispatch.
  */
 function extractTriggerKinds(wf: unknown): string[] {
 	if (!wf || typeof wf !== "object") return [];
@@ -926,8 +927,27 @@ export default class HttpTrigger extends TriggerBase {
 		// deterministic winner (first-registered) so boot stays tolerant, but no
 		// longer hide the collision.
 		const registered = new Map<string, string>();
-		for (const r of table) {
-			const wfName = readWorkflowName(r.workflow) ?? r.workflowKey;
+		// A scanned workflow with only non-HTTP triggers (mcp, webhook, sse,
+		// websocket, …) never enters the route table, yet the sibling triggers
+		// mounted on this process find their workflows by walking this registry
+		// — without this an MCP-only `src/workflows/*.ts` file was scanned and
+		// then exposed zero tools. The RPC mount stays http-only (`hasHttpTrigger`).
+		const nonHttpScanned = [...scannedJson, ...scannedTs].filter(
+			(sw) =>
+				!hasHttpTrigger(sw.workflow) && !readMiddlewareFlag(sw.workflow) && extractTriggerKinds(sw.workflow).length > 0,
+		);
+		const entries = [
+			...table.map((r) => ({ ...r, wfName: readWorkflowName(r.workflow) ?? r.workflowKey })),
+			...nonHttpScanned.map((sw) => ({
+				source: sw.source,
+				sourcePath: sw.source,
+				workflow: sw.workflow,
+				wfName: readWorkflowName(sw.workflow) ?? sw.name,
+			})),
+		];
+		for (const r of entries) {
+			const wfName = r.wfName;
+			if (!wfName) continue;
 			const existingSource = registered.get(wfName);
 			if (existingSource !== undefined) {
 				if (existingSource !== r.source) {
