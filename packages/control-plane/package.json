@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/control-plane",
-	"version": "2.5.4",
+	"version": "2.5.5",
 	"description": "Versioned gRPC control plane for Blok agent harness sessions.",
 	"type": "module",
 	"main": "dist/index.js",
