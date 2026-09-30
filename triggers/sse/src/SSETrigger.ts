@@ -476,7 +476,11 @@ export default class SSETrigger extends TriggerBase {
 		const registry = WorkflowRegistry.getInstance();
 		const out: Array<{ workflowName: string; config: SSETriggerConfig }> = [];
 		for (const entry of registry.list()) {
-			const wf = entry.workflow as { trigger?: { sse?: SSETriggerConfig } } | undefined;
+			// `workflow()` builders keep config on `_config` (HttpTrigger's file scan
+			// registers them as-is); plain objects / JSON expose it at the top level.
+			const wf = ((entry.workflow as { _config?: unknown } | undefined)?._config ?? entry.workflow) as
+				| { trigger?: { sse?: SSETriggerConfig } }
+				| undefined;
 			const sseCfg = wf?.trigger?.sse;
 			if (!sseCfg || typeof sseCfg.path !== "string") continue;
 			out.push({ workflowName: entry.name, config: sseCfg });

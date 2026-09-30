@@ -503,7 +503,11 @@ export default class WebhookTrigger extends TriggerBase {
 		const registry = WorkflowRegistry.getInstance();
 		const out: Array<{ workflowName: string; config: WebhookTriggerConfig }> = [];
 		for (const entry of registry.list()) {
-			const wf = entry.workflow as { trigger?: { webhook?: WebhookTriggerConfig } } | undefined;
+			// `workflow()` builders keep config on `_config` (HttpTrigger's file scan
+			// registers them as-is); plain objects / JSON expose it at the top level.
+			const wf = ((entry.workflow as { _config?: unknown } | undefined)?._config ?? entry.workflow) as
+				| { trigger?: { webhook?: WebhookTriggerConfig } }
+				| undefined;
 			const cfg = wf?.trigger?.webhook;
 			if (!cfg) continue;
 			// Skip configs missing both provider AND signature — they can't

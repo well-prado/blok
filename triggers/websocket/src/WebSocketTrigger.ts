@@ -942,7 +942,11 @@ export default class WebSocketTrigger extends TriggerBase {
 		const registry = WorkflowRegistry.getInstance();
 		const out: Array<{ workflowName: string; config: WebSocketTriggerConfig }> = [];
 		for (const entry of registry.list()) {
-			const wf = entry.workflow as { trigger?: { websocket?: WebSocketTriggerConfig } } | undefined;
+			// `workflow()` builders keep config on `_config` (HttpTrigger's file scan
+			// registers them as-is); plain objects / JSON expose it at the top level.
+			const wf = ((entry.workflow as { _config?: unknown } | undefined)?._config ?? entry.workflow) as
+				| { trigger?: { websocket?: WebSocketTriggerConfig } }
+				| undefined;
 			const wsCfg = wf?.trigger?.websocket;
 			if (!wsCfg || typeof wsCfg.path !== "string") continue;
 			out.push({ workflowName: entry.name, config: wsCfg });

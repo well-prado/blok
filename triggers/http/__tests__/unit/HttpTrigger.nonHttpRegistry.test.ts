@@ -6,9 +6,10 @@
  * only, so `McpTrigger.registerRoutesFromRegistry()` — which walks that
  * registry — logged "no workflows with trigger.mcp found".
  *
- * Boots the real HttpTrigger + a same-app McpTrigger (the mounted layout the
- * scaffold generates) against a temp project whose only workflow is MCP-only
- * and on disk only (no `Workflows.ts` entry).
+ * Boots the real HttpTrigger + same-app WS / SSE / Webhook / MCP triggers (the
+ * mounted layout the scaffold generates) against a temp project whose
+ * workflows are builder-shaped, non-HTTP-only, and on disk only (no
+ * `Workflows.ts` entry).
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -43,21 +44,36 @@ vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new 
 
 import { RoutingDiagnostics, WorkflowRegistry } from "@blokjs/runner";
 import McpTrigger from "@blokjs/trigger-mcp";
+import SSETrigger from "@blokjs/trigger-sse";
+import WebhookTrigger from "@blokjs/trigger-webhook";
+import WebSocketTrigger from "@blokjs/trigger-websocket";
 import { Hono } from "hono";
 import HttpTrigger, { type AppBindings } from "../../src/runner/HttpTrigger.js";
 
 // The `workflow()` builder shape (`_blokV2` + `_config`) with no imports, so
-// the fixture loads from a temp dir outside the workspace.
-const MCP_ONLY_WORKFLOW = `export default {
+// the fixtures load from a temp dir outside the workspace.
+const builderWorkflow = (name: string, trigger: unknown) => `export default {
 	_blokV2: true,
 	_config: {
-		name: "mcp-greeter",
+		name: ${JSON.stringify(name)},
 		version: "1.0.0",
-		trigger: { mcp: { path: "/mcp", serverName: "blok-test", tool: { name: "greet" } } },
-		steps: [{ id: "greet", use: "@blokjs/respond", inputs: {} }],
+		trigger: ${JSON.stringify(trigger)},
+		steps: [{ id: "respond", use: "@blokjs/respond", inputs: {} }],
 	},
 };
 `;
+
+const FIXTURES: Record<string, string> = {
+	"tools/greet.ts": builderWorkflow("mcp-greeter", {
+		mcp: { path: "/mcp", serverName: "blok-test", tool: { name: "greet" } },
+	}),
+	// v2.5.4 regression: once HttpTrigger registered scanned builders as-is, the
+	// WS / SSE / Webhook triggers (which read `trigger` at the top level only)
+	// stopped seeing them and the scaffold's /ws/echo never opened.
+	"events/echo.ts": builderWorkflow("ws-echo", { websocket: { path: "/ws/echo" } }),
+	"events/feed.ts": builderWorkflow("sse-feed", { sse: { path: "/events/feed" } }),
+	"hooks/stripe.ts": builderWorkflow("stripe-hook", { webhook: { provider: "stripe" } }),
+};
 
 describe("HttpTrigger — non-HTTP-triggered scanned workflows reach the WorkflowRegistry", () => {
 	let projectDir: string;
@@ -67,8 +83,11 @@ describe("HttpTrigger — non-HTTP-triggered scanned workflows reach the Workflo
 		WorkflowRegistry.resetInstance();
 		RoutingDiagnostics.resetInstance();
 		projectDir = mkdtempSync(join(tmpdir(), "blok-mcp-only-"));
-		mkdirSync(join(projectDir, "src", "workflows", "tools"), { recursive: true });
-		writeFileSync(join(projectDir, "src", "workflows", "tools", "greet.ts"), MCP_ONLY_WORKFLOW);
+		for (const [file, source] of Object.entries(FIXTURES)) {
+			const target = join(projectDir, "src", "workflows", file);
+			mkdirSync(join(target, ".."), { recursive: true });
+			writeFileSync(target, source);
+		}
 		vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 		process.env.WORKFLOWS_PATH = join(projectDir, "workflows");
 		process.env.BLOK_FILE_BASED_ROUTING = "true";
@@ -81,16 +100,23 @@ describe("HttpTrigger — non-HTTP-triggered scanned workflows reach the Workflo
 		rmSync(projectDir, { recursive: true, force: true });
 	});
 
-	it("an MCP-only TS workflow on disk is exposed as an MCP tool", async () => {
+	it("builder-shaped workflows with only non-HTTP triggers mount on every sibling trigger", async () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const app = new Hono<AppBindings>();
 		const http = new HttpTrigger(app);
-		const mcp = new McpTrigger(app, http);
-		mcp.setNodeMap(http.getNodeMap());
-		await mcp.listen();
+		const siblings = [
+			new WebSocketTrigger(app, http),
+			new SSETrigger(app, http),
+			new WebhookTrigger(app, http),
+			new McpTrigger(app, http),
+		];
+		for (const t of siblings) {
+			t.setNodeMap(http.getNodeMap());
+			await t.listen();
+		}
 		await http.listen();
 		const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-		await mcp.stop();
+		for (const t of siblings) await t.stop();
 
 		expect(WorkflowRegistry.getInstance().get("mcp-greeter")?.sourcePath).toBe(
 			join(projectDir, "src", "workflows", "tools", "greet.ts"),
@@ -100,5 +126,8 @@ describe("HttpTrigger — non-HTTP-triggered scanned workflows reach the Workflo
 		// count also includes the dev-only Inertia builtin tools (#1019).
 		const tools = Number(logged.match(/server \\?"blok-test\\?" at \/mcp — (\d+) tool\(s\)/)?.[1] ?? 0);
 		expect(tools).toBeGreaterThanOrEqual(1);
+		expect(logged).toMatch(/\[blok\]\[ws\]\s+GET\s+\/ws\/echo\s+←\s+ws-echo/);
+		expect(logged).toMatch(/\[blok\]\[sse\]\s+GET\s+\/events\/feed\s+←\s+sse-feed/);
+		expect(logged).toMatch(/\[blok\]\[webhook\]\s+POST\s+\/webhooks\/stripe\s+←\s+stripe-hook/);
 	});
 });
