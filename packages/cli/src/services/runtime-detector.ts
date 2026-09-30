@@ -419,14 +419,14 @@ export async function detectRuntimes(): Promise<RuntimeInfo[]> {
  *
  * @returns The detected version string, or undefined if not installed.
  */
-export async function detectRuntimeVersion(kind: string): Promise<string | undefined> {
+export async function detectRuntimeVersion(kind: string, commands?: string[]): Promise<string | undefined> {
 	const def = RUNTIME_DEFINITIONS.find((r) => r.kind === kind);
 	if (!def) return undefined;
 
 	// Return the HIGHEST version across all probe commands (see detectRuntimes)
 	// so a Homebrew Ruby 3.x is picked over the EOL system Ruby 2.6.
 	let best: string | undefined;
-	for (const cmd of def.commands) {
+	for (const cmd of commands ?? def.commands) {
 		const output = await tryExec(cmd);
 		if (!output) continue;
 		const parsed = parseVersion(output, def.kind);

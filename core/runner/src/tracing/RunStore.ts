@@ -23,6 +23,11 @@ import type {
  * added for PostgreSQL / Prisma without changing this interface.
  */
 export interface RunStore {
+	/** Optional async initialization hook for network-backed stores. */
+	ready?(): Promise<void>;
+	/** Optional async drain hook for serverless invocation lifecycles. */
+	flush?(): Promise<void>;
+
 	// === Writes ===
 	saveRun(run: WorkflowRun): void;
 	updateRun(runId: string, updates: Partial<WorkflowRun>): void;

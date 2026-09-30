@@ -99,6 +99,24 @@ describe("Vercel serverless HTTP adapter", () => {
 		expect(preparations).toBe(1);
 	});
 
+	it("waits for store readiness and flushes after the invocation", async () => {
+		const lifecycle: string[] = [];
+		const trigger: ServerlessHttpTrigger = {
+			prepare: async () => lifecycle.push("prepare"),
+			ready: async () => lifecycle.push("ready"),
+			fetch: async () => {
+				lifecycle.push("fetch");
+				return new Response("ok");
+			},
+			flush: async () => lifecycle.push("flush"),
+		};
+		const handler = createVercelHandler({ createTrigger: () => trigger });
+
+		await handler(new Request("https://example.test/lifecycle"));
+
+		expect(lifecycle).toEqual(["prepare", "ready", "fetch", "flush"]);
+	});
+
 	it("returns structured 503 and logs when initialization fails", async () => {
 		const logError = vi.fn();
 		const trigger: ServerlessHttpTrigger = {

@@ -59,7 +59,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v2.5.0";
+const GITHUB_REPO_RELEASE_TAG = "v2.5.3";
 // Scaffold assets bundled into the built package by scripts/
 // bundle-scaffold-assets.ts — repo-relative layout, so it substitutes for a
 // repo checkout. Compiled location: dist/commands/create/project.js →
@@ -447,11 +447,13 @@ export async function createProject(opts: OptionValues, version: string, current
 	} else if (nonInteractive) {
 		// Validate required fields in non-interactive mode
 		projectName = resolveOrThrow("name", opts.name);
+	}
 
-		// Detect runtimes if non-node runtimes requested
-		if (selectedRuntimeKinds.some((k) => k !== "node")) {
-			detectedRuntimes = await detectRuntimes();
-		}
+	// `--name` alone skips the prompts in a TTY too, where neither branch above
+	// detects runtimes — every requested non-node runtime was then silently
+	// dropped at setup (`if (!rt) continue`).
+	if (detectedRuntimes.length === 0 && selectedRuntimeKinds.some((k) => k !== "node")) {
+		detectedRuntimes = await detectRuntimes();
 	}
 
 	const s = p.spinner();
