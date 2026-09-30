@@ -1177,7 +1177,15 @@ export async function validateProjectRuntimes(projectDir: string): Promise<Runti
 		// Skip runtimes without version constraints (backward compatibility)
 		if (!rc.requiredVersion) continue;
 
-		const currentVersion = await detectRuntimeVersion(kind);
+		// The python3 sidecar boots with its venv interpreter (see setupPython3),
+		// so that is the version that must satisfy the constraint — not whatever
+		// `python3` is first on PATH (macOS ships 3.9).
+		const venvPython =
+			kind === "python3" && rc.cwd ? path.join(projectDir, rc.cwd, "python3_runtime", "bin", "python3") : undefined;
+		const currentVersion = await detectRuntimeVersion(
+			kind,
+			venvPython && fsExtra.existsSync(venvPython) ? [`"${venvPython}" --version`] : undefined,
+		);
 
 		const satisfied = currentVersion ? satisfiesConstraint(currentVersion, rc.requiredVersion) : false;
 
