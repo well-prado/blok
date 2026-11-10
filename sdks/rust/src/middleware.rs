@@ -113,11 +113,10 @@ impl NodeHandler for TimeoutHandler {
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
         match tokio::time::timeout(self.timeout, self.inner.execute(ctx, config)).await {
             Ok(result) => result,
-            Err(_) => Err(format!(
-                "execution timed out after {:?}",
-                self.timeout
-            )
-            .into()),
+            Err(_) => Err(Box::new(crate::blok_error::BlokError::timeout()
+                .code("TIMEOUT")
+                .message(format!("execution timed out after {:?}", self.timeout))
+                .build())),
         }
     }
 }
@@ -177,5 +176,35 @@ mod tests {
         let mut ctx = MockContext::new().build();
         let result = wrapped.execute(&mut ctx, &HashMap::new()).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn timeout_drops_handler_future() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct PendingNode(Arc<AtomicBool>);
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        #[async_trait]
+        impl NodeHandler for PendingNode {
+            async fn execute(
+                &self,
+                _ctx: &mut Context,
+                _config: &HashMap<String, serde_json::Value>,
+            ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+                let _guard = DropFlag(self.0.clone());
+                std::future::pending().await
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handler = TimeoutMiddleware::new(Duration::from_millis(20))
+            .wrap(Arc::new(PendingNode(dropped.clone())));
+        let mut ctx = MockContext::new().build();
+        let error = handler.execute(&mut ctx, &HashMap::new()).await.unwrap_err();
+        assert_eq!(error.downcast::<crate::blok_error::BlokError>().unwrap().code, "TIMEOUT");
+        assert!(dropped.load(Ordering::SeqCst));
     }
 }

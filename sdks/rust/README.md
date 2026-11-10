@@ -60,7 +60,18 @@ async fn main() {
 | `RUST_LOG` | `info` | tracing log level |
 | `ENABLE_CORS` | `false` | Enable CORS |
 | `ENABLE_GRPC` | `false` | Enable gRPC server |
-| `GRPC_PORT` | `50051` | gRPC port |
+| `GRPC_PORT` | `10002` | gRPC port |
+| `GRPC_HOST` | `127.0.0.1` | gRPC bind address; containers set `GRPC_HOST=0.0.0.0` for external access |
+
+The gRPC server has no TLS or authentication and defaults to loopback. Set
+`GRPC_HOST=0.0.0.0` only when network access is intended and protected by the host.
+
+Concurrent gRPC calls run independently. For Execute and ExecuteStream, a positive
+`ExecuteOptions.deadline_ms` limits execution time in milliseconds; zero or negative
+values leave execution unlimited. Expiry returns a `NodeError` with code `TIMEOUT`
+and category `TIMEOUT`, and drops the handler future. Nodes must yield to the async
+runtime for cancellation to take effect. Nodes spawning child processes should set
+`tokio::process::Command::kill_on_drop(true)` so dropping the future also kills the child.
 
 ## Cargo Features
 

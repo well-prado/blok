@@ -8,6 +8,7 @@ pub struct ServerConfig {
     pub host: String,
     pub version: String,
     pub grpc_port: u16,
+    pub grpc_host: String,
     pub enable_grpc: bool,
     pub log_level: LogLevel,
     pub enable_cors: bool,
@@ -29,6 +30,7 @@ impl Default for ServerConfig {
             // `DEFAULT_GRPC_PORTS.rust = 10002` (HTTP port 9002 + 1000) so a
             // freshly-launched runner and SDK pair speak by default.
             grpc_port: 10002,
+            grpc_host: "127.0.0.1".into(),
             enable_grpc: false,
             log_level: LogLevel::Info,
             enable_cors: false,
@@ -45,6 +47,7 @@ impl ServerConfig {
     /// - `HOST` (default: 0.0.0.0)
     /// - `VERSION` (default: 1.0.0)
     /// - `GRPC_PORT` (default: 10002 — matches `DEFAULT_GRPC_PORTS.rust`)
+    /// - `GRPC_HOST` (default: 127.0.0.1; containers may opt into 0.0.0.0)
     /// - `ENABLE_GRPC` (default: false)
     /// - `LOG_LEVEL` (default: INFO)
     /// - `ENABLE_CORS` (default: false)
@@ -61,6 +64,7 @@ impl ServerConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10002),
+            grpc_host: env::var("GRPC_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
             // Honor the standard BLOK_TRANSPORT selector every other Blok SDK +
             // `blokctl dev` set (=grpc); fall back to the legacy ENABLE_GRPC bool.
             enable_grpc: resolve_grpc_enabled(env::var("BLOK_TRANSPORT").ok(), env::var("ENABLE_GRPC").ok()),
