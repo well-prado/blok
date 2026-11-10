@@ -157,6 +157,24 @@ pub struct BlokNodeRuntime {
 }
 
 impl BlokNodeRuntime {
+    async fn dispatch(&self, req: ProtoExecuteRequest) -> Result<ProtoExecuteResponse, Status> {
+        use crate::middleware::{Middleware, TimeoutMiddleware};
+        let deadline_ms = req.options.as_ref().map(|o| o.deadline_ms).unwrap_or(0);
+        let mut exec_req = decode_execute_request(req)?;
+        let mut handler = {
+            let registry = self.registry.lock().await;
+            registry.execution_handler(&exec_req.node.name)
+        };
+        if deadline_ms > 0 {
+            handler = handler.map(|h| {
+                TimeoutMiddleware::new(std::time::Duration::from_millis(deadline_ms as u64))
+                    .wrap(h)
+            });
+        }
+        let result = NodeRegistry::execute_handler(handler, &mut exec_req).await;
+        Ok(encode_execute_response(result, &exec_req.node.name, &self.sdk_version))
+    }
+
     /// Create a new service instance bound to a shared registry.
     pub fn new(registry: Arc<Mutex<NodeRegistry>>, sdk_version: impl Into<String>) -> Self {
         Self {
@@ -173,13 +191,7 @@ impl NodeRuntime for BlokNodeRuntime {
         &self,
         request: Request<ProtoExecuteRequest>,
     ) -> Result<Response<ProtoExecuteResponse>, Status> {
-        let req = request.into_inner();
-        let mut exec_req = decode_execute_request(req)?;
-
-        let registry = self.registry.lock().await;
-        let result = registry.execute(&mut exec_req).await;
-
-        let proto_response = encode_execute_response(result, &exec_req.node.name, &self.sdk_version);
+        let proto_response = self.dispatch(request.into_inner()).await?;
         Ok(Response::new(proto_response))
     }
 
@@ -200,19 +212,13 @@ impl NodeRuntime for BlokNodeRuntime {
         &self,
         request: Request<ProtoExecuteRequest>,
     ) -> Result<Response<Self::ExecuteStreamStream>, Status> {
-        let req = request.into_inner();
-        let mut exec_req = decode_execute_request(req)?;
-        let node_name = exec_req.node.name.clone();
-
         let started_event = ProtoExecuteEvent {
             event: Some(proto::execute_event::Event::Started(proto::NodeStarted {
                 at: Some(now_timestamp()),
             })),
         };
 
-        let registry = self.registry.lock().await;
-        let result = registry.execute(&mut exec_req).await;
-        let final_response = encode_execute_response(result, &node_name, &self.sdk_version);
+        let final_response = self.dispatch(request.into_inner()).await?;
 
         let final_event = ProtoExecuteEvent {
             event: Some(proto::execute_event::Event::Final(final_response)),
@@ -295,12 +301,24 @@ pub async fn serve_grpc(
     sdk_version: impl Into<String>,
     max_message_bytes: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = format!("0.0.0.0:{}", port).parse()?;
+    let config = crate::config::ServerConfig::from_env();
+    serve_grpc_on(registry, &config.grpc_host, port, sdk_version, max_message_bytes).await
+}
+
+/// Start gRPC on an explicit host (no TLS or authentication).
+pub async fn serve_grpc_on(
+    registry: Arc<Mutex<NodeRegistry>>,
+    host: &str,
+    port: u16,
+    sdk_version: impl Into<String>,
+    max_message_bytes: usize,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let listener = bind_grpc(host, port).await?;
     let service = BlokNodeRuntime::new(registry, sdk_version);
 
     info!(
-        "Blok gRPC server (NodeRuntime v1) listening on port {} (max message size {} bytes)",
-        port, max_message_bytes
+        "Blok gRPC server (NodeRuntime v1) listening on {} (max message size {} bytes)",
+        listener.local_addr()?, max_message_bytes
     );
 
     // Apply the configurable max message size to BOTH decode (incoming
@@ -313,10 +331,14 @@ pub async fn serve_grpc(
                 .max_decoding_message_size(max_message_bytes)
                 .max_encoding_message_size(max_message_bytes),
         )
-        .serve(addr)
+        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await?;
 
     Ok(())
+}
+
+async fn bind_grpc(host: &str, port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::bind((host, port)).await
 }
 
 // =============================================================================
@@ -699,6 +721,15 @@ fn encode_json_bytes(value: &serde_json::Value) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn default_grpc_listener_is_loopback() {
+        let config = crate::config::ServerConfig::default();
+        let listener = bind_grpc(&config.grpc_host, 0).await.unwrap();
+        assert_eq!(listener.local_addr().unwrap().ip(), "127.0.0.1".parse::<std::net::IpAddr>().unwrap());
+        let listener = bind_grpc("0.0.0.0", 0).await.unwrap();
+        assert!(listener.local_addr().unwrap().ip().is_unspecified());
+    }
 
     #[test]
     fn decode_json_object_handles_empty_bytes() {

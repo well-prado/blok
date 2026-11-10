@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             result = blok::server::serve(http_registry, config.port) => {
                 result?;
             }
-            result = blok::grpc_server::serve_grpc(grpc_shared, config.grpc_port, version, config.grpc_max_message_bytes) => {
+            result = blok::grpc_server::serve_grpc_on(grpc_shared, &config.grpc_host, config.grpc_port, version, config.grpc_max_message_bytes) => {
                 result.map_err(|e| -> Box<dyn std::error::Error> { e })?;
             }
         }

@@ -57,7 +57,21 @@ impl NodeRegistry {
 
     /// Execute a node by dispatching through the registry.
     pub async fn execute(&self, req: &mut ExecutionRequest) -> ExecutionResult {
-        let handler = match self.get(&req.node.name) {
+        Self::execute_handler(self.execution_handler(&req.node.name), req).await
+    }
+
+    /// Resolve a handler with middleware while the registry is locked.
+    pub fn execution_handler(&self, name: &str) -> Option<Arc<dyn NodeHandler>> {
+        self.get(name)
+            .map(|handler| crate::middleware::apply_middleware(handler, &self.middlewares))
+    }
+
+    /// Execute a resolved handler without retaining a registry lock.
+    pub async fn execute_handler(
+        handler: Option<Arc<dyn NodeHandler>>,
+        req: &mut ExecutionRequest,
+    ) -> ExecutionResult {
+        let wrapped = match handler {
             Some(h) => h,
             None => {
                 return ExecutionResult::error(&format!(
@@ -66,12 +80,6 @@ impl NodeRegistry {
                 ));
             }
         };
-
-        // Apply middleware chain
-        let mut wrapped = handler;
-        for mw in &self.middlewares {
-            wrapped = mw.wrap(wrapped);
-        }
 
         let start = Instant::now();
 

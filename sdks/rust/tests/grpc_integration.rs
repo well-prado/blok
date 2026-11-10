@@ -36,6 +36,20 @@ use tonic::transport::{Channel, Endpoint};
 /// Trivial node that echoes its config back as data.
 struct EchoNode;
 
+struct SlowNode;
+
+#[async_trait]
+impl NodeHandler for SlowNode {
+    async fn execute(
+        &self,
+        _ctx: &mut Context,
+        config: &HashMap<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        tokio::time::sleep(Duration::from_millis(config["delay_ms"].as_u64().unwrap())).await;
+        Ok(json!("finished"))
+    }
+}
+
 #[async_trait]
 impl NodeHandler for EchoNode {
     async fn execute(
@@ -57,10 +71,11 @@ async fn start_server_with_limit(max_message_bytes: usize) -> (u16, tokio::task:
 
     let mut registry = NodeRegistry::new("1.0.0-test");
     registry.register("echo", EchoNode);
+    registry.register("slow", SlowNode);
     let shared = Arc::new(Mutex::new(registry));
 
     let handle = tokio::spawn(async move {
-        // serve_grpc binds on 0.0.0.0:<port>; we connect via 127.0.0.1.
+        // serve_grpc defaults to loopback.
         let _ = serve_grpc(shared, port, "1.0.0-test", max_message_bytes).await;
     });
 
@@ -73,6 +88,53 @@ async fn start_server_with_limit(max_message_bytes: usize) -> (u16, tokio::task:
 /// Start a server with the default 16 MiB limit.
 async fn start_server() -> (u16, tokio::task::JoinHandle<()>) {
     start_server_with_limit(16 * 1024 * 1024).await
+}
+
+#[tokio::test]
+async fn concurrent_calls_run_outside_registry_lock() {
+    let (port, server) = start_server().await;
+    let mut first = make_client(port).await;
+    let mut second = first.clone();
+    let start = std::time::Instant::now();
+    let (a, b) = tokio::join!(
+        first.execute(empty_request("slow", json!({"delay_ms": 500}))),
+        second.execute(empty_request("slow", json!({"delay_ms": 500}))),
+    );
+    let elapsed = start.elapsed();
+    server.abort();
+    assert!(a.unwrap().into_inner().success);
+    assert!(b.unwrap().into_inner().success);
+    assert!(elapsed < Duration::from_millis(850), "calls took {elapsed:?}");
+}
+
+#[tokio::test]
+async fn deadline_returns_structured_timeout() {
+    let (port, server) = start_server().await;
+    let mut client = make_client(port).await;
+    let mut req = empty_request("slow", json!({"delay_ms": 1000}));
+    req.options = Some(ExecuteOptions { deadline_ms: 200, ..Default::default() });
+    let start = std::time::Instant::now();
+    let response = client.execute(req.clone()).await.unwrap().into_inner();
+    let elapsed = start.elapsed();
+    assert!(!response.success);
+    let error = response.error.unwrap();
+    assert_eq!(error.code, "TIMEOUT");
+    assert_eq!(error.category, proto::ErrorCategory::Timeout as i32);
+    assert!(elapsed >= Duration::from_millis(180), "returned too early: {elapsed:?}");
+    assert!(elapsed < Duration::from_millis(600), "deadline took {elapsed:?}");
+    let start = std::time::Instant::now();
+    let mut stream = client.execute_stream(req).await.unwrap().into_inner();
+    let mut final_response = None;
+    while let Some(event) = stream.message().await.unwrap() {
+        if let Some(proto::execute_event::Event::Final(response)) = event.event {
+            final_response = Some(response);
+        }
+    }
+    server.abort();
+    let error = final_response.unwrap().error.unwrap();
+    assert_eq!(error.code, "TIMEOUT");
+    assert_eq!(error.category, proto::ErrorCategory::Timeout as i32);
+    assert!(start.elapsed() < Duration::from_millis(600));
 }
 
 async fn make_client(port: u16) -> NodeRuntimeClient<Channel> {
