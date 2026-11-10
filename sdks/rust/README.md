@@ -65,6 +65,9 @@ async fn main() {
 
 The gRPC server has no TLS or authentication and defaults to loopback. Set
 `GRPC_HOST=0.0.0.0` only when network access is intended and protected by the host.
+The supplied Docker image sets `GRPC_HOST=0.0.0.0` so published ports and runners
+in other containers can reach it; override the variable when starting the container
+if a different bind address is needed.
 
 Concurrent gRPC calls run independently. For Execute and ExecuteStream, a positive
 `ExecuteOptions.deadline_ms` limits execution time in milliseconds; zero or negative

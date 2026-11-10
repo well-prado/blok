@@ -30,6 +30,8 @@ EXPOSE 8080 10002
 
 ENV PORT=8080
 ENV GRPC_PORT=10002
+# Accept calls from the runner outside the container; native installs default to loopback.
+ENV GRPC_HOST=0.0.0.0
 ENV ENABLE_GRPC=true
 ENV VERSION=1.0.0
 ENV RUST_LOG=info
