@@ -14,11 +14,20 @@ export interface Locked {
 	input: unknown;
 	output: unknown;
 	errors: string[];
+	/** When each error happens. For readers: a better description is not a change of contract. */
+	errorMeanings?: Record<string, string>;
 }
 
 export function lockOf(unit: Unit): Locked {
 	const described = contract(unit);
-	return { id: unit.id, input: described.input, output: described.output, errors: [...described.errors].sort() };
+	const meanings = Object.keys(described.errorMeanings).length > 0 ? { errorMeanings: described.errorMeanings } : {};
+	return {
+		id: unit.id,
+		input: described.input,
+		output: described.output,
+		errors: [...described.errors].sort(),
+		...meanings,
+	};
 }
 
 /** JSON with the keys in one order, so two equal contracts are equal text. */

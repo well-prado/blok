@@ -6,7 +6,7 @@ export default node({
 	description: "Charges a card token for an order.",
 	input: z.object({ orderId: z.string(), amountCents: z.number().int().positive(), token: z.string().min(1) }),
 	output: z.object({ receiptId: z.string() }),
-	errors: ["card_declined"],
+	errors: { card_declined: "The payment provider refused the card." },
 	effects: ["payments:charge"],
 	timeoutMs: 5_000,
 	async run(input, { ports, signal, fail }) {

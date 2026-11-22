@@ -114,7 +114,8 @@ const stepsIn = (entries: Entry[] = []): string[] =>
 		if ("conditions" in entry)
 			return entry.conditions.flatMap((branch) => stepsIn("else" in branch ? branch.else : branch.steps));
 		if ("parallel" in entry) return stepsIn(entry.parallel);
-		return [entry.node, ...stepsIn(entry.onError ?? [])];
+		if ("fail" in entry) return [];
+		return [entry.node, ...stepsIn(entry.onError ?? []), ...stepsIn(entry.undo ?? [])];
 	});
 
 /**

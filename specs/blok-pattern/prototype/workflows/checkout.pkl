@@ -11,6 +11,7 @@ trigger {
   http = new {
     method = "POST"
     path = "/orders"
+    status = 201
     errors {
       ["card_declined"] = 402
       ["unknown_sku"] = 422

@@ -27,8 +27,12 @@ export interface Contract<I extends Schema, O extends Schema> {
 	description?: string;
 	input: I;
 	output: O;
-	/** Business failures callers may branch on. `fail()` refuses any other code. */
-	errors?: readonly string[];
+	/**
+	 * Business failures callers may branch on, each with when it happens:
+	 * `{ card_declined: "The provider refused the card." }`. A plain list of codes also works.
+	 * `fail()` refuses any other code.
+	 */
+	errors?: readonly string[] | Readonly<Record<string, string>>;
 	/** Ports this unit touches, e.g. "payments:charge". Empty means pure. */
 	effects?: readonly string[];
 	/** Safe to run twice with the same input. Retries only apply when true. */
@@ -154,7 +158,7 @@ export function blok<P>() {
 				const input = await parse(unit.input, raw, unit.id, "invalid_input");
 				// After the input check, so a node that is only designed already refuses what its contract refuses.
 				if (isTodo(unit)) throw new BlokError("not_implemented", `${unit.id} is not implemented yet.`, unit.id);
-				const declared = new Set(unit.errors ?? []);
+				const declared = new Set(errorCodes(unit));
 				const fail = (code: string, message: string, details?: unknown) => {
 					if (!declared.has(code))
 						throw new TypeError(`${unit.id} failed with "${code}", which its contract does not declare.`);
@@ -212,9 +216,15 @@ export interface HttpBinding {
 	path: string;
 	/** Called with the request: { method, body, query, params, headers }. */
 	unit: Unit;
+	/** The status of a successful answer. Default 200. */
+	success?: number;
 	/** Error code to HTTP status. Transport details stay out of the node. */
 	status?: Record<string, number>;
 }
+
+/** The error codes a unit declares, whichever way it wrote them. */
+export const errorCodes = (unit: Pick<Unit, "errors">): string[] =>
+	Array.isArray(unit.errors) ? [...unit.errors] : Object.keys(unit.errors ?? {});
 
 const TARGET = { target: "draft-2020-12" } as const;
 
@@ -242,7 +252,9 @@ export function contract(unit: Unit) {
 		description: unit.description,
 		input: jsonSchemaOf(unit.input, "input", unit.id),
 		output: jsonSchemaOf(unit.output, "output", unit.id),
-		errors: unit.errors ?? [],
+		errors: errorCodes(unit),
+		/** When each error happens, for the ones the node described. */
+		errorMeanings: Array.isArray(unit.errors) ? {} : { ...(unit.errors as Record<string, string> | undefined) },
 		effects: unit.effects ?? [],
 		idempotent: unit.idempotent ?? false,
 		implemented: !isTodo(unit),

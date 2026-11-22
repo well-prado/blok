@@ -15,7 +15,8 @@ function steps(entries: Entry[] = []): Array<[string, string]> {
 		if ("conditions" in entry)
 			return entry.conditions.flatMap((branch) => steps("else" in branch ? branch.else : branch.steps));
 		if ("parallel" in entry) return steps(entry.parallel);
-		return [[entry.name, entry.node], ...steps(entry.onError ?? [])];
+		if ("fail" in entry) return [];
+		return [[entry.name, entry.node], ...steps(entry.onError ?? []), ...steps(entry.undo ?? [])];
 	});
 }
 
@@ -104,6 +105,8 @@ export function status(analysis: Analysis, paths: Paths): Report {
 	};
 }
 
+const meaning = (meanings: Record<string, string>, code: string) => (meanings[code] ? `  (${meanings[code]})` : "");
+
 /** One line per field, with the kind of each: enough to wire it, with the full schema in `--json`. */
 function fieldLines(shape: JsonSchema | undefined, indent: string): string[] {
 	const entries = Object.entries(shape?.properties ?? {});
@@ -136,7 +139,9 @@ export function show(analysis: Analysis, paths: Paths, given: string): Report {
 			...fieldLines(described.input as JsonSchema, "    "),
 			"  answers:",
 			...fieldLines(described.output as JsonSchema, "    "),
-			`  errors:   ${described.errors.length > 0 ? described.errors.join(", ") : "none"}`,
+			...(described.errors.length === 0
+				? ["  errors:   none"]
+				: ["  errors:", ...described.errors.map((code) => `    ${code}${meaning(described.errorMeanings, code)}`)]),
 			`  tests:    ${facts.tests.length > 0 ? facts.tests.join(", ") : "none"}`,
 			`  used by:  ${
 				facts.usedBy.length > 0

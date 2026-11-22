@@ -359,6 +359,49 @@ The rule: the workflow loops over data it already has. A node loops when it has 
 
 There is no `while`, no counting `for`, and no separate `switch` key. The owner decided on 2026-11-21 that until-style loops stay inside nodes.
 
+### Failing well
+
+The two agent runs found five places where the format fell short of common practice for a backend. The owner asked on 2026-11-22 for each to follow that practice, and each was changed.
+
+| Practice | Write | Before |
+|---|---|---|
+| A create answers 201 | `status = 201` in the trigger, beside `method` and `path` | Every success was 200 |
+| Every error is documented | `errors: { card_declined: "The provider refused the card." }` on the node. It reaches `show`, the build brief and `contract.json` | A bare list of codes |
+| A guard refuses early, in the orchestration | `new Fail { fail = "order_not_paid"; if = ...; message = "..." }` in the steps | A node whose only job was to say no |
+| A later failure takes back what was done: compensation, as in the saga pattern | `undo { ... }` on a step. Undo steps run when a later step fails, the newest first, and the workflow still fails with that step's error | Only `onError`, which covers the step it is on |
+| Types are checked all the way through | Nothing to write. The check compares a step's result with the next step's input into the fields of an object and the items of a list, and says when a value may be null or missing | Only the outermost kind was compared |
+
+```pkl
+local charge = new billing.ChargeCard {
+  name = "charge"
+  inputs { token = "${request.body.token}"; amountCents = total.outputs.totalCents }
+  undo {
+    new billing.RefundPayment {
+      name = "refund"
+      inputs { paymentId = charge.outputs.paymentId }
+    }
+  }
+}
+
+steps {
+  new Fail { fail = "cart_is_empty"; `if` = cart.outputs.lineCount.eq(0); message = "The cart is empty." }
+  charge
+  order
+}
+```
+
+If `order` fails here, `refund` runs and the caller gets `order`'s error. `onError` is still there for the other case: steps to run when the step it is on fails.
+
+What each does and does not do:
+
+- **`undo` is best effort.** An undo step that fails is logged and the others still run. Nothing is stored, so a server that dies half-way undoes nothing.
+- **A step with `each` that fails part-way is not undone by its own `undo`**, because it never finished. A node that must be all or nothing takes the whole list in one call.
+- **Steps that run in `parallel` are all left to finish before anything is undone**, so a step that was still running is taken back too.
+- **A `Fail` code is an error like any other.** It needs a status in the trigger, and a workflow that uses this one as a step has to give it one too.
+- **A condition still compares one value.** A `Fail` cannot say "the list is empty": the node that makes the list answers with its length.
+
+The deep check found a real mistake in this folder's own example app the first time it ran: `orders/validate-order` answered quantities as any number, and `orders/price-order` takes whole numbers. It found nothing in the two apps the agents built.
+
 ### The examples
 
 | File | Shows |
@@ -450,7 +493,7 @@ The experiment builds throwaway git repositories in a temp directory and removes
 
 Measured on 2026-11-21 with Bun 1.3.14, Node 24.22, Pkl 0.33.1 and git 2.54 on one Mac.
 
-- 74 tests pass: 16 for the kernel, 30 for the command-line tool, and 28 in the example app (23 for workflows loaded from Pkl, 5 for what Pkl itself refuses).
+- 88 tests pass: 25 for the kernel, 35 for the command-line tool, and 28 in the example app (23 for workflows loaded from Pkl, 5 for what Pkl itself refuses).
 - The run from an empty folder passes twice: installed with Bun and run with Bun, and installed with npm and run with Node. In both it ends with a server answering over HTTP, in a new project and in an existing Fastify app.
 - Each of the ten `.pkl` workflows evaluated to exactly the hand-written JSON file it replaced.
 - All ten generated workflows validate against `workflow.schema.json`.
@@ -472,13 +515,9 @@ A single octopus merge of all 16 pattern branches was also clean. When 4 branche
 - Only macOS on Apple silicon was run. Linux and Windows were not.
 - The download of Pkl was tested against a local server that serves this machine's own Pkl binary. The real download from GitHub was not run.
 - The loop ran twice, on apps of 10 and 28 nodes, both written from scratch. It has not been run on a change to an existing app, or with a model other than Claude Opus.
-- The check does not compare the fields of the items in a list, or a field that may be null. A list of the wrong things passes the check and fails at the node.
-- A workflow cannot refuse a request on its own. Both designs needed a small node whose only job is to say no, such as `orders/check-cart-not-empty`.
-- Steps are not a transaction. In the shop, if storing the order fails after the card was charged, nothing refunds it. The design agent listed four such gaps itself.
+- `undo` takes back finished steps when a later step fails, and that is all it is. It is best effort and keeps nothing on disk, so it is not a transaction and does not survive a crash. The two apps the agents built were designed before it existed and do not use it.
 - The pilot's design splits a check from the write it protects, so two requests at the same moment can lend the last copy of a book twice. The design brief now says to keep those in one node, and the shop's design does. No check enforces it.
-- A successful answer is always 200. A workflow cannot answer 201.
-- An error code is a bare word. A node cannot attach a description to it.
-- A request that lacks a field a step is certain to need is refused before any step runs. A field of the wrong kind is still caught later, by the node that needs it.
+- The five changes under "Failing well" were made after the agent runs. They are covered by tests and by the editor check, and the two agent-built apps still pass the check with them. No agent has designed an app with them yet.
 - Editor highlighting was checked by running the extension's language server on probe files, not by looking at the VS Code window.
 - The branches in `merge-experiment/` are written by a script. The run with real agents is the pilot above.
 - The converted original examples run against a stand-in `http/api-call@1` node and fake ports.

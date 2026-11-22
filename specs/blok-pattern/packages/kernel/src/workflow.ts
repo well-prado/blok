@@ -26,6 +26,21 @@ export interface Step {
 	concurrency?: number;
 	/** Steps to run when this one fails. They can read ${error}. The workflow still fails afterwards. */
 	onError?: Entry[];
+	/**
+	 * Steps that take this step back. They run when a LATER step fails, the newest first, and the workflow
+	 * still fails with that later step's error. They can read this step's result and ${error}.
+	 */
+	undo?: Entry[];
+}
+/**
+ * Refuses the request with an error code, which is how a workflow says no without a node for it.
+ * With `if`, it refuses only when the condition holds.
+ */
+export interface Fail {
+	fail: string;
+	/** What the caller is told. It may hold ${...} placeholders. */
+	message?: string;
+	if?: string;
 }
 /** The original `conditions` list: the first branch whose `if` holds runs, otherwise `else`. */
 export interface Conditions {
@@ -35,7 +50,7 @@ export type Branch = { if: string; steps: Entry[] } | { else: Entry[] };
 export interface Parallel {
 	parallel: Entry[];
 }
-export type Entry = Step | Conditions | Parallel;
+export type Entry = Step | Conditions | Parallel | Fail;
 
 export interface Workflow {
 	$schema?: string;
@@ -43,7 +58,15 @@ export interface Workflow {
 	description?: string;
 	version?: string;
 	trigger?: {
-		http?: { method: HttpBinding["method"]; path: string; accept?: string; errors?: Record<string, number> };
+		http?: {
+			method: HttpBinding["method"];
+			path: string;
+			accept?: string;
+			/** The status of a successful answer. Default 200. A workflow that creates something answers 201. */
+			status?: number;
+			/** Error code to HTTP status. */
+			errors?: Record<string, number>;
+		};
 	};
 	steps: Entry[];
 	/** What the workflow answers with. Left out, it answers with the result of the last step that ran. */
@@ -197,14 +220,25 @@ export function workflowUnit(
 		return op === ">" ? a > b : op === ">=" ? a >= b : op === "<" ? a < b : a <= b;
 	};
 
-	async function run(entries: Entry[], scope: Scope, call: Call): Promise<void> {
+	/** What has to be taken back if a later step fails: the undo steps of each step that finished, oldest first. */
+	type Undos = Array<{ steps: Entry[]; scope: Scope }>;
+
+	async function run(entries: Entry[], scope: Scope, call: Call, undos: Undos): Promise<void> {
 		for (const entry of entries) {
 			if ("conditions" in entry) {
 				const chosen = entry.conditions.find((branch) => "else" in branch || holds(branch.if, scope));
-				if (chosen) await run("else" in chosen ? chosen.else : chosen.steps, scope, call);
+				if (chosen) await run("else" in chosen ? chosen.else : chosen.steps, scope, call, undos);
 			} else if ("parallel" in entry) {
-				await Promise.all(entry.parallel.map((one) => run([one], scope, call)));
+				// Every branch is left to finish, also when one fails. A step still running would otherwise
+				// finish after the undo steps had run, and never be taken back.
+				const ends = await Promise.allSettled(entry.parallel.map((one) => run([one], scope, call, undos)));
+				const failed = ends.find((end) => end.status === "rejected");
+				if (failed) throw failed.reason;
 				scope.prev = NOTHING; // Several steps finished at once, so "the previous one" means nothing here.
+			} else if ("fail" in entry) {
+				if (entry.if !== undefined && !holds(entry.if, scope)) continue;
+				const told = entry.message === undefined ? `Refused: ${entry.fail}.` : String(render(entry.message, scope));
+				throw fail(entry.fail, told);
 			} else {
 				if (entry.if && !holds(entry.if, scope)) continue;
 				const unit = units.get(entry.node);
@@ -231,9 +265,10 @@ export function workflowUnit(
 					const inside: Scope = Object.create(scope);
 					const known = err instanceof BlokError ? err : new BlokError("unexpected", String(err), id);
 					inside.error = { code: known.code, message: known.message, node: known.node };
-					await run(entry.onError, inside, call);
+					await run(entry.onError, inside, call, undos);
 					throw err;
 				}
+				if (entry.undo) undos.push({ steps: entry.undo, scope });
 				scope.prev = scope[entry.name];
 			}
 		}
@@ -245,7 +280,7 @@ export function workflowUnit(
 		description: workflow.description,
 		input: ANYTHING,
 		output: ANYTHING,
-		async run(request: unknown, { call }: WorkflowCtx) {
+		async run(request: unknown, { call, log }: WorkflowCtx) {
 			// A request that lacks something a step is certain to need would fail at that step anyway.
 			// Refusing it here means no earlier step has run and nothing has to be undone.
 			const absent = needed.filter((target) => dig(request, target) === undefined);
@@ -256,7 +291,24 @@ export function workflowUnit(
 			scope.request = request ?? {};
 			scope.env = opts.env ?? {};
 			scope.prev = NOTHING;
-			await run(workflow.steps, scope, call);
+			const undos: Undos = [];
+			try {
+				await run(workflow.steps, scope, call, undos);
+			} catch (err) {
+				// Compensation: every step that finished and can be taken back is taken back, the newest first.
+				// One undo that fails does not stop the others, and the caller still gets the error that caused it.
+				const known = err instanceof BlokError ? err : new BlokError("unexpected", String(err), id);
+				for (const undo of undos.reverse()) {
+					const inside: Scope = Object.create(undo.scope);
+					inside.error = { code: known.code, message: known.message, node: known.node };
+					try {
+						await run(undo.steps, inside, call, []);
+					} catch (undoErr) {
+						log.error(`${id}: a step could not be undone after "${known.code}".`, undoErr);
+					}
+				}
+				throw err;
+			}
 			if (workflow.result !== undefined) return render(workflow.result, scope);
 			return scope.prev === NOTHING ? null : scope.prev;
 		},
@@ -266,13 +318,22 @@ export function workflowUnit(
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
 	const results: R[] = new Array(items.length);
 	let next = 0;
+	let failed = false;
 	const worker = async () => {
-		while (next < items.length) {
+		// After a failure nothing new is started, and what is already running is left to finish.
+		while (next < items.length && !failed) {
 			const index = next++;
-			results[index] = await fn(items[index]);
+			try {
+				results[index] = await fn(items[index]);
+			} catch (err) {
+				failed = true;
+				throw err;
+			}
 		}
 	};
-	await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+	const ends = await Promise.allSettled(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+	const broken = ends.find((end) => end.status === "rejected");
+	if (broken) throw broken.reason;
 	return results;
 }
 
@@ -304,7 +365,7 @@ function requiredPaths(shape: JsonSchema, prefix: Path = []): Path[] {
 export function httpBinding(workflow: Workflow, unit: Unit): HttpBinding | undefined {
 	const http = workflow.trigger?.http;
 	if (!http) return undefined;
-	return { kind: "http", method: http.method, path: http.path, unit, status: http.errors };
+	return { kind: "http", method: http.method, path: http.path, unit, success: http.status, status: http.errors };
 }
 
 // ---- check ------------------------------------------------------------------------------
@@ -318,6 +379,7 @@ export interface JsonSchema {
 	items?: JsonSchema;
 	enum?: unknown[];
 	additionalProperties?: boolean | JsonSchema;
+	anyOf?: JsonSchema[];
 }
 export type Shapes = (
 	node: string,
@@ -325,6 +387,7 @@ export type Shapes = (
 type Visible = Map<string, JsonSchema | undefined>;
 
 const NAME = /^[A-Za-z0-9_-]+$/;
+const CODE = /^[a-z][a-z0-9_]*$/;
 const RESERVED = new Set(["request", "env", "prev", "item", "error"]);
 const ERROR_SHAPE: JsonSchema = {
 	type: "object",
@@ -338,6 +401,56 @@ const fits = (from?: JsonSchema, into?: JsonSchema) => {
 	const b = typeOf(into);
 	return !a || !b || a === b || (a === "integer" && b === "number");
 };
+/** The kinds a value may be: one for "string", two for text that may be null. Unknown when the schema does not say. */
+function kindsOf(shape?: JsonSchema): string[] | undefined {
+	if (!shape) return undefined;
+	if (typeof shape.type === "string") return [shape.type];
+	if (Array.isArray(shape.type)) return shape.type;
+	if (Array.isArray(shape.anyOf)) {
+		const each = shape.anyOf.map(kindsOf);
+		return each.every((kinds) => kinds !== undefined) ? [...new Set(each.flat() as string[])] : undefined;
+	}
+	return undefined;
+}
+/** The part of a schema that describes one kind: the object inside "an object or null". */
+const asKind = (shape: JsonSchema | undefined, kind: string): JsonSchema | undefined =>
+	shape?.anyOf ? shape.anyOf.find((member) => kindsOf(member)?.includes(kind)) : shape;
+
+/**
+ * Why a value shaped like `from` cannot go where `into` is expected, all the way down: into the fields
+ * of an object and the items of a list. Nothing when it fits, or where either side does not say.
+ */
+function misfit(from: JsonSchema | undefined, into: JsonSchema | undefined, where = ""): string | undefined {
+	const have = kindsOf(from);
+	const want = kindsOf(into);
+	if (!have || !want) return undefined;
+	const wrong = have.filter((kind) => !want.includes(kind) && !(kind === "integer" && want.includes("number")));
+	if (wrong.length > 0) {
+		const it = where || "it";
+		return wrong.length === 1 && wrong[0] === "null" && have.length > 1
+			? `${it} may be null, and ${want.join(" or ")} is needed`
+			: `${it} is ${have.join(" or ")}, and ${want.join(" or ")} is needed`;
+	}
+	const [source, target] = [asKind(from, "object"), asKind(into, "object")];
+	if (source?.properties && target?.properties) {
+		for (const [key, wanted] of Object.entries(target.properties)) {
+			const path = where ? `${where}.${key}` : key;
+			const needed = (target.required ?? []).includes(key);
+			if (!(key in source.properties)) {
+				// A closed object that lacks the field can never supply it. An open one might.
+				if (needed && source.additionalProperties === false) return `${where || "it"} has no "${key}"`;
+				continue;
+			}
+			if (needed && !(source.required ?? []).includes(key)) return `${path} may be missing`;
+			const deeper = misfit(source.properties[key], wanted, path);
+			if (deeper) return deeper;
+		}
+	}
+	const [list, wantedList] = [asKind(from, "array"), asKind(into, "array")];
+	if (list?.items && wantedList?.items) return misfit(list.items, wantedList.items, `${where}[]`);
+	return undefined;
+}
+
 const literalShape = (value: unknown): JsonSchema => ({
 	type: value === null ? "null" : Number.isInteger(value) ? "integer" : typeof value,
 });
@@ -411,7 +524,7 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 
 	if (!Array.isArray(workflow.steps)) return { problems: ['A workflow needs a list of "steps".'], request, errors: [] };
 	if (workflow.steps.length === 0) return { problems: ["It has no steps yet. Add at least one."], request, errors: [] };
-	/** Each error code a step may fail with, and the first step that may. */
+	/** Each error code the workflow may fail with, and what may fail with it first. */
 	const fails = new Map<string, string>();
 
 	// Step names are one flat list across the whole workflow, branches included.
@@ -421,12 +534,19 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 			if ("conditions" in entry)
 				for (const branch of entry.conditions) collect("else" in branch ? branch.else : branch.steps);
 			else if ("parallel" in entry) collect(entry.parallel);
-			else if (typeof entry.name === "string" && typeof entry.node === "string") {
+			else if ("fail" in entry) {
+				if (typeof entry.fail !== "string" || !CODE.test(entry.fail)) {
+					problems.push(
+						`"${entry.fail}" cannot be an error code. Use lower case and underscores, such as cart_is_empty.`,
+					);
+				}
+			} else if (typeof entry.name === "string" && typeof entry.node === "string") {
 				if (!NAME.test(entry.name) || RESERVED.has(entry.name)) problems.push(`"${entry.name}" cannot be a step name.`);
 				if (names.has(entry.name)) problems.push(`Two steps are named "${entry.name}".`);
 				names.add(entry.name);
 				collect(entry.onError ?? []);
-			} else problems.push("A step needs a name and a node, or must be a conditions or parallel block.");
+				collect(entry.undo ?? []);
+			} else problems.push("A step needs a name and a node, or must be a conditions, parallel or fail entry.");
 		}
 	};
 	collect(workflow.steps);
@@ -490,8 +610,13 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 			if (refs.length === 1 && pieces.length === 1) {
 				const shape = shapeOf(refs[0].path, visible, at);
 				note(refs[0].path, expected, use.certain && use.required, at);
-				if (!fits(shape, expected))
+				if (!fits(shape, expected)) {
 					problems.push(`${at}: expects ${typeOf(expected)}, but ${value} is ${typeOf(shape)}.`);
+				} else {
+					// The same kind on the outside. Now the inside: the fields of an object, the items of a list.
+					const why = misfit(shape, expected);
+					if (why) problems.push(`${at}: ${value} does not fit. In it, ${why}.`);
+				}
 				return shape ?? {};
 			}
 			for (const ref of refs) {
@@ -549,13 +674,14 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 		}
 	};
 
-	const walk = (entries: Entry[], visible: Visible, certain: boolean): Visible => {
+	/** `counts` is false inside undo steps: a failure there is logged, and never becomes the workflow's error. */
+	const walk = (entries: Entry[], visible: Visible, certain: boolean, counts = true): Visible => {
 		for (const entry of entries) {
 			if ("conditions" in entry) {
 				const hadPrev = visible.has("prev");
 				const ends = entry.conditions.map((branch) => {
 					if (!("else" in branch)) checkIf(branch.if, visible, "conditions");
-					return walk("else" in branch ? branch.else : branch.steps, new Map(visible), false);
+					return walk("else" in branch ? branch.else : branch.steps, new Map(visible), false, counts);
 				});
 				// Whichever branch ran, its last step is the previous step afterwards.
 				const exhaustive = entry.conditions.some((branch) => "else" in branch);
@@ -566,16 +692,21 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 			} else if ("parallel" in entry) {
 				const before = new Map(visible);
 				for (const one of entry.parallel) {
-					for (const [name, shape] of walk([one], new Map(before), certain)) {
+					for (const [name, shape] of walk([one], new Map(before), certain, counts)) {
 						if (!before.has(name) && name !== "prev") visible.set(name, shape);
 					}
 				}
 				visible.delete("prev");
+			} else if ("fail" in entry) {
+				const at = `fail "${entry.fail}"`;
+				if (entry.if !== undefined) checkIf(entry.if, visible, at);
+				if (entry.message !== undefined) check(entry.message, { type: "string" }, visible, `${at}, message`);
+				if (counts && !fails.has(entry.fail)) fails.set(entry.fail, `a "fail" entry`);
 			} else if (typeof entry.name === "string" && typeof entry.node === "string") {
 				const at = `step "${entry.name}"`;
 				if (entry.if) checkIf(entry.if, visible, at);
 				const shape = shapes(entry.node);
-				for (const code of shape?.errors ?? []) if (!fails.has(code)) fails.set(code, entry.name);
+				if (counts) for (const code of shape?.errors ?? []) if (!fails.has(code)) fails.set(code, at);
 				if (!shape) problems.push(`${at}: uses "${entry.node}", which is not a known node.`);
 
 				let inside = visible;
@@ -609,9 +740,13 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 				for (const key of shape?.input?.required ?? []) {
 					if (!(key in given)) problems.push(`${at}: "${entry.node}" needs input "${key}".`);
 				}
-				if (entry.onError) walk(entry.onError, new Map(visible).set("error", ERROR_SHAPE), false);
+				if (entry.onError) walk(entry.onError, new Map(visible).set("error", ERROR_SHAPE), false, counts);
 
 				const result = entry.each ? { type: "array", items: shape?.output } : shape?.output;
+				// Undo steps run only after this step has finished, so they can always read its result.
+				if (entry.undo) {
+					walk(entry.undo, new Map(visible).set(entry.name, result).set("error", ERROR_SHAPE), false, false);
+				}
 				if (entry.if) {
 					// It may be skipped, so its name is not readable later and the previous step is uncertain.
 					if (visible.has("prev")) visible.set("prev", undefined);
@@ -639,12 +774,15 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 	// A failure the trigger gives no status would reach the caller as a 500, with nothing saying why.
 	const http = workflow.trigger?.http;
 	if (http) {
-		for (const [code, step] of fails) {
+		for (const [code, who] of fails) {
 			if (http.errors?.[code] === undefined) {
 				problems.push(
-					`step "${step}" can fail with "${code}", and the trigger gives that no status, so a caller would get a 500. Give "${code}" a status in the trigger's errors.`,
+					`${who} can fail with "${code}", and the trigger gives that no status, so a caller would get a 500. Give "${code}" a status in the trigger's errors.`,
 				);
 			}
+		}
+		if (http.status !== undefined && (!Number.isInteger(http.status) || http.status < 200 || http.status > 299)) {
+			problems.push(`The trigger's status is ${http.status}. A successful answer has a status from 200 to 299.`);
 		}
 	}
 	return { problems, returns, request, errors: [...fails.keys()] };
@@ -695,7 +833,8 @@ export function checkWorkflows(
 			if ("conditions" in entry)
 				return entry.conditions.flatMap((branch) => uses("else" in branch ? branch.else : branch.steps));
 			if ("parallel" in entry) return uses(entry.parallel);
-			return [entry.node, ...uses(entry.onError ?? [])];
+			if ("fail" in entry) return [];
+			return [entry.node, ...uses(entry.onError ?? []), ...uses(entry.undo ?? [])];
 		});
 	const problems: string[] = [];
 	const waiting = new Set(workflows);

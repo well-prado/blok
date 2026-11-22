@@ -11,7 +11,7 @@ export default node({
 	output: z.object({
 		orderId: z.string(),
 		customerId: z.string(),
-		items: z.array(z.object({ sku: z.string(), qty: z.number() })),
+		items: z.array(z.object({ sku: z.string(), qty: z.number().int() })),
 	}),
 	effects: ["ids:next"],
 	run(input, { ports }) {

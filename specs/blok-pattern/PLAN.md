@@ -179,7 +179,7 @@ None of this is built. TypeScript comes first.
 
 | Claim | Evidence |
 | --- | --- |
-| The kernel, runner, checker, command-line tool and Pkl loading work | 74 tests pass: 16 kernel, 30 command-line tool, 28 in the example app |
+| The kernel, runner, checker, command-line tool and Pkl loading work | 88 tests pass: 25 kernel, 35 command-line tool, 28 in the example app |
 | It installs and runs from an empty folder | `e2e/empty-folder.ts` passes with Bun, and with npm and Node: packed tarballs, `init`, `new node`, `new workflow`, `check`, `build`, a server answering. Also in an existing Fastify app, with one `register` line |
 | One folder per node removes fan-out conflicts | 16 branches: 0 conflicts with the pattern, 15 when every branch appends to a shared registry file |
 | Production needs no Pkl | With `pkl` removed from the path, the 10 generated JSON files load, pass the check, and checkout answers |
@@ -247,13 +247,19 @@ The plan asked for "about 30 nodes" and "zero merge conflicts and a green check"
 
 Between the two runs, the agents' own lists of what was unclear led to eight changes to the tool, the briefs and the rules page. The second run led to five more. The README has both tables.
 
-Found in the runs, and yours to decide:
+Found in the runs. The owner asked for each to follow common practice, and each was changed the same day:
 
-1. **A workflow always answers 200.** Neither app could answer 201 for a create. A `status` beside `method` and `path` would be a small addition.
-2. **An error code is a bare word.** The design agents explained each code in comments, where the brief for the build agent does not show them. `errors` could take a description for each code.
-3. **A workflow cannot refuse on its own.** Both designs needed a small node whose only job is to say no. A step that fails with a code when a condition holds would remove those nodes.
-4. **Steps are not a transaction.** The briefs now say to keep a check and its write in one node, and the shop's design does. What is left is failure after a side effect: if storing the order fails after the card was charged, nothing refunds it. `onError` covers one step, not the rest of the workflow.
-5. **The check stops at the top of a list.** It does not compare the fields of a list's items, or a field that may be null.
+| Found | Practice followed | Now |
+| --- | --- | --- |
+| A workflow always answered 200 | A create answers 201 | `status` in the trigger, from 200 to 299 |
+| An error code was a bare word | Every error is documented | `errors: { code: "when it happens" }` on the node. It reaches `show`, the build brief and `contract.json` |
+| A workflow could not refuse on its own | A guard refuses early, in the orchestration | A `Fail` entry: a code, a message and an optional condition |
+| Steps were not a transaction | Compensation, as in the saga pattern | `undo` on a step: it runs when a later step fails, newest first |
+| The check stopped at the top of a list | Types are checked all the way through | The check compares fields and list items, and says when a value may be null or missing |
+
+`undo` is compensation and not a transaction: it is best effort and keeps nothing on disk. A workflow that must survive a crash half-way needs a durable engine behind `call`, which is still outside this plan.
+
+The README section "Failing well" has the details and the limits of each.
 
 ### Phase 3: more kinds of app
 

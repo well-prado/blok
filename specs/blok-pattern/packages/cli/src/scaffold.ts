@@ -74,8 +74,10 @@ export default node({
 	description: "Say in one sentence what this node does.",
 	input: z.object({}),
 	output: z.object({}),
-	// Business failures a workflow may react to. \`fail()\` refuses a code that is not listed here.
-	errors: [],
+	// Business failures a workflow may react to, each with when it happens:
+	//   errors: { card_declined: "The provider refused the card." },
+	// \`fail()\` refuses a code that is not listed here.
+	errors: {},
 	// The contract above is enough to wire this node into a workflow. Replace \`todo\` with the logic:
 	//   async run(input, { ports, fail }) { ... }
 	run: todo,
@@ -230,7 +232,7 @@ Logic lives in **nodes**. **Workflows** wire nodes together and hold no logic. R
 9. Never change the \`input\` or \`output\` of a node that a workflow already uses. Run \`blokctl new version <module>/<node>\` and change the copy.
 10. Never edit generated files: \`${at("workflows/blok/")}\` and \`${at(".blok/")}\`.
 11. A node whose logic is not written yet has \`run: todo\`. Its contract is real, so workflows can already use it.
-12. Steps are not a transaction: something else can happen between two of them. A rule that must hold at the moment of a write, such as a limit or a unique email, is enforced by the node that writes, in one call to a port.
+12. Steps are not a transaction: something else can happen between two of them. A rule that must hold at the moment of a write, such as a limit or a unique email, is enforced by the node that writes, in one call to a port. A step that changes something outside gets an \`undo\`, so that a failure in a later step takes it back.
 13. Never edit a \`contract.json\`. It is what the node promised when the app was designed, and \`blokctl check\` refuses a node that no longer matches it.
 
 ### Commands
@@ -266,7 +268,7 @@ export default node({
 	description: "Charges a card token for an order.",
 	input: z.object({ orderId: z.string(), amountCents: z.number().int().positive(), token: z.string() }),
 	output: z.object({ receiptId: z.string() }),
-	errors: ["card_declined"],
+	errors: { card_declined: "The provider refused the card." },
 	async run(input, { ports, fail }) {
 		const result = await ports.payments.charge(input.token, input.amountCents);
 		if (!result.ok) throw fail("card_declined", result.reason);
@@ -386,7 +388,17 @@ new Conditions {
 // Run steps at the same time.
 new Parallel { parallel { shipment; receipt } }
 
-// Run steps when this step fails. They can read "\${error.code}". The workflow still fails afterwards.
+// Refuse the request with an error code, with no node for it. With \`if\`, only when the condition holds.
+new Fail { fail = "order_not_paid"; \`if\` = order.outputs.status.ne("paid"); message = "Only a paid order can ship." }
+
+// Take a step back when a LATER step fails. Undo steps run newest first, and the workflow still fails.
+local charge = new billing.ChargeCard {
+  name = "charge"
+  inputs { token = "\${request.body.token}"; amountCents = total.outputs.totalCents }
+  undo { new billing.RefundPayment { name = "refund"; inputs { paymentId = charge.outputs.paymentId } } }
+}
+
+// Run steps when THIS step fails. They can read "\${error.code}". The workflow still fails afterwards.
 onError { new orders.ReleaseStock { name = "release"; inputs { orderId = order.outputs.orderId } } }
 
 // Answer with fields, or with one step's whole result. Left out, the answer is the last step's result.
@@ -395,13 +407,14 @@ result = charge.value
 \`\`\`
 
 - Every error a step can fail with needs a status in the trigger's \`errors\`. \`blokctl check\` refuses a workflow that leaves one out, because the caller would get a 500.
-- A successful answer is always 200.
+- A successful answer is 200. A workflow that creates something says \`status = 201\` in its trigger, beside \`method\` and \`path\`.
 - A workflow's id is its file name and the first number of its version: \`checkout.pkl\` with \`version = "1.0.0"\` is \`workflows/checkout@1\`.
+- A \`Fail\` code needs a status in the trigger's \`errors\` like any other error.
 - A workflow cannot compute, cannot join two conditions with and/or, and cannot loop until something is true. Each of those is a node's job.
 
 The full schema is \`${at("workflows/blok/Workflow.pkl")}\`, which \`blokctl check\` writes once there is a workflow.
 
-What the check does not compare: the fields of the items in a list, and a field that may be null. Passing a list of the wrong things, or a null where a value is needed, is only caught by the node at run time.
+The check compares what a step gives with what the next one takes all the way down: the fields of an object, the items of a list, and whether a value may be null.
 ${END}
 `;
 }

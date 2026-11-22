@@ -47,6 +47,12 @@
 								"minimum": 400,
 								"maximum": 599
 							}
+						},
+						"status": {
+							"description": "The status of a successful answer. Default 200.",
+							"type": "integer",
+							"minimum": 200,
+							"maximum": 299
 						}
 					}
 				}
@@ -67,7 +73,7 @@
 			}
 		},
 		"entry": {
-			"description": "A step, a conditions block or a parallel block.",
+			"description": "A step, a conditions block, a parallel block or a fail entry.",
 			"type": "object",
 			"if": {
 				"required": ["conditions"]
@@ -83,7 +89,15 @@
 					"$ref": "#/$defs/parallel"
 				},
 				"else": {
-					"$ref": "#/$defs/step"
+					"if": {
+						"required": ["fail"]
+					},
+					"then": {
+						"$ref": "#/$defs/fail"
+					},
+					"else": {
+						"$ref": "#/$defs/step"
+					}
 				}
 			}
 		},
@@ -123,6 +137,10 @@
 					"minimum": 1
 				},
 				"onError": {
+					"$ref": "#/$defs/entries"
+				},
+				"undo": {
+					"description": "Steps that take this step back when a later step fails.",
 					"$ref": "#/$defs/entries"
 				}
 			}
@@ -180,6 +198,24 @@
 			"properties": {
 				"else": {
 					"$ref": "#/$defs/entries"
+				}
+			}
+		},
+		"fail": {
+			"description": "Refuses the request with an error code. With \"if\", only when the condition holds.",
+			"type": "object",
+			"required": ["fail"],
+			"additionalProperties": false,
+			"properties": {
+				"fail": {
+					"type": "string",
+					"pattern": "^[a-z][a-z0-9_]*$"
+				},
+				"message": {
+					"type": "string"
+				},
+				"if": {
+					"$ref": "#/$defs/condition"
 				}
 			}
 		}

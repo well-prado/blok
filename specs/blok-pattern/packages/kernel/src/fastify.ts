@@ -20,7 +20,9 @@ export function mount(app: FastifyInstance, binding: HttpBinding, call: Call): v
 				headers: req.headers,
 			};
 			try {
-				return await call(binding.unit, request);
+				const answer = await call(binding.unit, request);
+				if (binding.success !== undefined) reply.code(binding.success);
+				return answer;
 			} catch (err) {
 				if (!(err instanceof BlokError)) throw err;
 				const status = binding.status?.[err.code] ?? STATUS[err.code] ?? 500;

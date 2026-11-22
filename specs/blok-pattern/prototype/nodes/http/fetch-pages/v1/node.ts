@@ -12,7 +12,10 @@ export default node({
 	description: "Follows a paged API until there is no next page, or until maxPages.",
 	input: z.object({ url: z.string().url(), maxPages: z.number().int().min(1).max(100).default(10) }),
 	output: z.object({ items: z.array(z.unknown()), pages: z.number().int(), complete: z.boolean() }),
-	errors: ["upstream_failed", "bad_page"],
+	errors: {
+		upstream_failed: "The other service could not be reached, or answered with an error.",
+		bad_page: "A page came back in a shape that cannot be read.",
+	},
 	effects: ["http:request"],
 	idempotent: true,
 	timeoutMs: 30_000,

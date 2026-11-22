@@ -261,6 +261,8 @@ function find(entries: Entry[], name: string): Step | undefined {
 		} else if ("parallel" in entry) {
 			const found = find(entry.parallel, name);
 			if (found) return found;
+		} else if ("fail" in entry) {
+			// A refusal is not a step: it has no name to look for.
 		} else if (entry.name === name) return entry;
 		else if (entry.onError) {
 			const found = find(entry.onError, name);

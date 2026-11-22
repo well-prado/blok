@@ -11,7 +11,7 @@ export default node({
 		body: z.unknown().optional(),
 	}),
 	output: z.object({ status: z.number().int(), data: z.unknown() }),
-	errors: ["upstream_failed"],
+	errors: { upstream_failed: "The other service could not be reached, or answered with an error." },
 	effects: ["http:request"],
 	timeoutMs: 10_000,
 	async run(input, { ports, signal, fail }) {

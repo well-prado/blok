@@ -20,8 +20,8 @@ Read AGENTS.md first. It has the rules and one example of a node and of a workfl
 What to produce, in this order:
 
 1. ${at(`${paths.dir}/ports/index.ts`)}: the \`Ports\` interface. One entry for every outside thing the app needs: a database table, a payment provider, a mailer, a clock, an id generator. Keep each port small and named for what the app does with it, not for the product behind it. Export a \`memoryPorts()\` function that returns a fresh in-memory version of every port, and \`export const ports = memoryPorts()\`, so the app runs with no setup and every test starts clean.
-2. One node for every piece of work, created with \`blokctl new node <module>/<node>\`. In each node.ts fill in \`description\`, \`input\`, \`output\` and \`errors\`, and leave \`run: todo\`. Group nodes into modules by what they are about: orders, billing, users.
-3. One workflow for every thing the app does from outside, created with \`blokctl new workflow <name>\`. Wire the nodes with typed references. Every error a step can fail with needs a status in \`trigger.http.errors\`, and the check refuses a workflow that leaves one out.
+2. One node for every piece of work, created with \`blokctl new node <module>/<node>\`. In each node.ts fill in \`description\`, \`input\`, \`output\` and \`errors\`, and leave \`run: todo\`. Write \`errors\` as an object, with when each one happens: \`{ card_declined: "The provider refused the card." }\`. Group nodes into modules by what they are about: orders, billing, users.
+3. One workflow for every thing the app does from outside, created with \`blokctl new workflow <name>\`. Wire the nodes with typed references. A workflow that creates something answers \`status = 201\`. To refuse a request on a simple condition, use a \`Fail\` entry and not a node. Give every step that changes something outside an \`undo\`, so that a later failure takes it back. Every error a step can fail with needs a status in \`trigger.http.errors\`, and the check refuses a workflow that leaves one out.
 4. One test beside each node, in node.test.ts, that states what the node must do: the normal case and each error in its contract. These tests fail now, because the logic is not written. They are the definition of done for whoever writes it.
 
 Rules for a good design:
@@ -97,7 +97,13 @@ What it answers with (JSON Schema):
 
 ${JSON.stringify(readable(described.output), null, 2)}
 
-How it may fail: ${described.errors.length > 0 ? `${described.errors.join(", ")}. Throw these with \`throw fail("<code>", "<message>")\`. No other code is allowed.` : "it declares no business errors, so it must not call `fail`."}
+How it may fail: ${
+		described.errors.length > 0
+			? `throw one of these with \`throw fail("<code>", "<message>")\`. No other code is allowed.\n\n${described.errors
+					.map((code) => `- ${code}${described.errorMeanings[code] ? `: ${described.errorMeanings[code]}` : ""}`)
+					.join("\n")}`
+			: "it declares no business errors, so it must not call `fail`."
+	}
 
 What to do:
 

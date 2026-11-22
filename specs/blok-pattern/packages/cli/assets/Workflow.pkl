@@ -78,11 +78,13 @@ class Http {
   method: "GET"|"POST"|"PUT"|"PATCH"|"DELETE"
   path: String(startsWith("/"))
   accept: String?
-  /// Error code to HTTP status.
+  /// The status of a successful answer. Left out, it is 200. A workflow that creates something answers 201.
+  status: Int(isBetween(200, 299))?
+  /// Error code to HTTP status. Every error a step can fail with needs one.
   errors: Mapping<String, Int(isBetween(400, 599))>
 }
 
-/// Anything that can sit in a list of steps: a [Step], a [Conditions] block or a [Parallel] block.
+/// Anything that can sit in a list of steps: a [Step], a [Conditions] block, a [Parallel] block or a [Fail].
 abstract class Entry
 
 open class Step extends Entry {
@@ -98,6 +100,9 @@ open class Step extends Entry {
   concurrency: Int(isPositive)?
   /// Steps to run when this one fails. The workflow still fails afterwards.
   onError: Listing<Entry>
+  /// Steps that take this step back. They run when a later step fails, the newest first,
+  /// and the workflow still fails with that later step's error. They can read this step's result.
+  undo: Listing<Entry>
   /// A pointer to this step's whole result.
   hidden value: AnyRef = new { path = outer.name }
 }
@@ -117,6 +122,15 @@ class Else {
 
 class Parallel extends Entry {
   parallel: Listing<Entry>
+}
+
+/// Refuses the request with an error code. With `if`, only when the condition holds.
+/// The code needs a status in the trigger's errors, like any other error.
+class Fail extends Entry {
+  fail: String(matches(Regex(#"^[a-z][a-z0-9_]*$"#)))
+  /// What the caller is told. It may hold placeholders.
+  message: String?
+  `if`: (Condition|BoolRef)?
 }
 
 output {

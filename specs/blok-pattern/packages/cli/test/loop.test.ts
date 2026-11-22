@@ -253,7 +253,8 @@ test("show is one node or one workflow in full", () => {
 			"    qty: integer",
 			"  answers:",
 			"    totalCents: integer",
-			"  errors:   unknown_sku",
+			"  errors:",
+			"    unknown_sku",
 			"  tests:    nodes/shop/price/v1/node.test.ts",
 			'  used by:  workflows/price@1 (step "price")',
 		].join("\n"),
@@ -308,7 +309,9 @@ test("the two briefs: one for designing an app, one for writing a single node", 
 	// Without the noise the schema library adds: the largest safe integer is not a rule of this app.
 	expect(build).toContain('"qty": {\n      "type": "integer",\n      "exclusiveMinimum": 0\n    }');
 	expect(build).not.toContain("$schema");
-	expect(build).toContain('How it may fail: unknown_sku. Throw these with `throw fail("<code>", "<message>")`.');
+	expect(build).toContain(
+		'How it may fail: throw one of these with `throw fail("<code>", "<message>")`. No other code is allowed.\n\n- unknown_sku',
+	);
 	expect(build).toContain("Make the test in nodes/shop/price/v1/node.test.ts pass.");
 	expect(build).toContain(
 		"Run `npx blokctl check shop/price@1` from the folder that holds package.json. You are done when it says the node is done.",
