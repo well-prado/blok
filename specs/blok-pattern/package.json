@@ -1,0 +1,17 @@
+{
+	"name": "blok-pattern",
+	"private": true,
+	"type": "module",
+	"workspaces": ["packages/*", "prototype"],
+	"scripts": {
+		"build": "tsc -p packages/kernel && tsc -p packages/cli && chmod +x packages/cli/dist/cli.js",
+		"typecheck": "bun run build && tsc -p packages/kernel/tsconfig.test.json && tsc -p packages/cli/tsconfig.test.json && tsc -p prototype && tsc -p e2e && tsc -p factory",
+		"test": "bun run build && bun test packages prototype",
+		"e2e": "bun e2e/empty-folder.ts bun && bun e2e/empty-folder.ts npm"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.4.5",
+		"@types/node": "^24.0.0",
+		"typescript": "^7.0.2"
+	}
+}

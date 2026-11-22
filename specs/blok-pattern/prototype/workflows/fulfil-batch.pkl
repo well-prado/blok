@@ -1,0 +1,27 @@
+amends "blok/Workflow.pkl"
+
+import "blok/workflows.pkl"
+
+name = "Fulfil batch"
+description = "Fulfils a list of orders, two at a time. The loop body is the whole Fulfil workflow."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/fulfilments"
+  }
+}
+
+steps {
+  // The step is another workflow, run once per order.
+  new workflows.Fulfil {
+    name = "shipments"
+    each = "${request.body.orders}"
+    concurrency = 2
+    inputs {
+      orderId = "${item.orderId}"
+      totalCents = "${item.totalCents}"
+    }
+  }
+}

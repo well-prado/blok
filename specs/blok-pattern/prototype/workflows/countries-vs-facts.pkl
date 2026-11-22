@@ -1,0 +1,45 @@
+amends "blok/Workflow.pkl"
+
+import "blok/http.pkl"
+
+name = "Countries or Facts"
+description = "Answers with countries when asked for them, and with a cat fact otherwise."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "GET"
+    path = "/countries-or-facts"
+    errors { ["upstream_failed"] = 502 }
+  }
+}
+
+steps {
+  new Conditions {
+    conditions {
+      new If {
+        `if` = "${request.query.countries} == 'true'"
+        steps {
+          new http.ApiCall {
+            name = "get-countries"
+            inputs {
+              url = "https://countriesnow.space/api/v0.1/countries/capital"
+              method = "GET"
+            }
+          }
+        }
+      }
+      new Else {
+        `else` {
+          new http.ApiCall {
+            name = "get-facts"
+            inputs {
+              url = "https://catfact.ninja/fact"
+              method = "GET"
+            }
+          }
+        }
+      }
+    }
+  }
+}

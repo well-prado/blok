@@ -1,0 +1,41 @@
+amends "blok/Workflow.pkl"
+
+import "blok/orders.pkl"
+import "blok/shipping.pkl"
+
+name = "Fulfil"
+description = "Books shipping on the lane that matches the order. Very large orders are held for review."
+version = "1.0.0"
+
+local tier = new orders.ClassifyOrder {
+  name = "tier"
+  inputs { totalCents = "${request.body.totalCents}" }
+}
+
+/// The three bookings differ only by lane, so one function writes all three steps.
+local function book(laneName: "courier"|"post"|"hold"): shipping.Book = new {
+  name = laneName
+  inputs {
+    orderId = "${request.body.orderId}"
+    lane = laneName
+  }
+}
+
+steps {
+  tier
+  new Conditions {
+    conditions {
+      new If {
+        `if` = "${request.body.totalCents} > 100000"
+        steps { book("hold") }
+      }
+      new If {
+        `if` = tier.outputs.tier.eq("vip")
+        steps { book("courier") }
+      }
+      new Else {
+        `else` { book("post") }
+      }
+    }
+  }
+}

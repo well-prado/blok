@@ -1,0 +1,47 @@
+amends "blok/Workflow.pkl"
+
+import "blok/http.pkl"
+import "blok/storage.pkl"
+
+name = "Catalog sync"
+description = "Pulls every page of the supplier catalog and stores it. The paging loop is inside the node."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/catalog/sync"
+    errors {
+      ["upstream_failed"] = 502
+      ["bad_page"] = 502
+    }
+  }
+}
+
+local catalog = new http.FetchPages {
+  name = "catalog"
+  inputs {
+    url = "https://supplier.example/catalog?page=1"
+    maxPages = 50
+  }
+}
+
+local save = new storage.KvSet {
+  name = "save"
+  `if` = catalog.outputs.complete
+  inputs {
+    key = "catalog"
+    value = catalog.outputs.items
+  }
+}
+
+steps {
+  catalog
+  save
+}
+
+result {
+  items = catalog.outputs.items
+  pages = catalog.outputs.pages
+  complete = catalog.outputs.complete
+}

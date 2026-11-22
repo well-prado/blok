@@ -1,0 +1,17 @@
+amends "blok/Workflow.pkl"
+
+import "blok/storage.pkl"
+
+name = "List feedback"
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "GET"
+    path = "/feedback"
+  }
+}
+
+steps {
+  new storage.KvList { name = "feedbacks" }
+}

@@ -1,0 +1,66 @@
+amends "blok/Workflow.pkl"
+
+import "blok/billing.pkl"
+import "blok/orders.pkl"
+
+name = "Checkout"
+description = "Validates, prices and charges an order. Releases stock if the charge fails."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/orders"
+    errors {
+      ["card_declined"] = 402
+      ["unknown_sku"] = 422
+    }
+  }
+}
+
+local order = new orders.ValidateOrder {
+  name = "order"
+  inputs {
+    customerId = "${request.body.customerId}"
+    items = "${request.body.items}"
+  }
+}
+
+local price = new orders.PriceOrder {
+  name = "price"
+  inputs { items = order.outputs.items }
+}
+
+local flag = new orders.FlagVip {
+  name = "flag"
+  `if` = price.outputs.totalCents.gt(10000)
+  inputs { customerId = order.outputs.customerId }
+}
+
+local charge = new billing.ChargeCard {
+  name = "charge"
+  inputs {
+    orderId = order.outputs.orderId
+    amountCents = price.outputs.totalCents
+    token = "${request.body.token}"
+  }
+  onError {
+    new orders.ReleaseStock {
+      name = "release"
+      inputs { orderId = order.outputs.orderId }
+    }
+  }
+}
+
+steps {
+  order
+  price
+  flag
+  charge
+}
+
+result {
+  orderId = order.outputs.orderId
+  receiptId = charge.outputs.receiptId
+  totalCents = price.outputs.totalCents
+}
