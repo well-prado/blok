@@ -1,8 +1,10 @@
 // The "done when" of phase 1, run for real: start from an empty folder, install the two packages
 // as packed tarballs (what `npm publish` would upload), and end with a server that answers.
 //
-//   bun e2e/empty-folder.ts bun     install with bun, run with bun
-//   bun e2e/empty-folder.ts npm     install with npm, run with node
+//   bun e2e/empty-folder.ts bun            install with bun, run with bun
+//   bun e2e/empty-folder.ts npm            install with npm, run with node
+//   bun e2e/empty-folder.ts bun hono       the same, with the new project on Hono
+//   bun e2e/empty-folder.ts npm express    or on Express. Fastify when nothing is said.
 //
 // The one thing that cannot be done before the packages are published is `bunx blokctl@next init`.
 // The built command is run from this repo for that single step, and from node_modules after it.
@@ -14,6 +16,7 @@ import { join } from "node:path";
 
 const tool = process.argv[2] === "npm" ? "npm" : "bun";
 const runtime = tool === "npm" ? "node" : "bun";
+const server = process.argv[3] ?? "fastify";
 const repo = join(import.meta.dirname, "..");
 const work = realpathSync(mkdtempSync(join(tmpdir(), "blok-e2e-")));
 const agent = tool === "npm" ? "npm/11.0.0 node/v24.0.0" : "bun/1.3.0";
@@ -150,8 +153,8 @@ result {
 const post = (url: string, body: unknown) =>
 	fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-try {
-	console.log(`\n== Pack the two packages (${tool} install, ${runtime} to run)`);
+async function main() {
+	console.log(`\n== Pack the two packages (${tool} install, ${runtime} to run, ${server} to serve)`);
 	sh(repo, "bun", "run", "build");
 	const packed = join(work, "tarballs");
 	mkdirSync(packed);
@@ -166,7 +169,7 @@ try {
 	console.log("\n== A new project, from an empty folder");
 	const empty = join(work, "empty");
 	mkdirSync(empty);
-	show(sh(empty, "node", init, "init", "my-api"));
+	show(sh(empty, "node", init, "init", "my-api", "--server", server));
 	const api = join(empty, "my-api");
 	useTarballs(api, tarballs);
 	sh(api, tool, "install");
@@ -178,8 +181,30 @@ try {
 	writeFileSync(join(api, "nodes/shop/price/v1/node.test.ts"), priceTest);
 	show(sh(api, blokctl, "new", "workflow", "price"));
 	writeFileSync(join(api, "workflows/price.pkl"), priceWorkflow);
+	// A workflow on a schedule, so the server that starts below also starts its schedules.
+	sh(api, blokctl, "new", "workflow", "nightly", "--trigger", "cron");
+	writeFileSync(
+		join(api, "workflows/nightly.pkl"),
+		priceWorkflow
+			.replace('name = "Price"', 'name = "Nightly"')
+			.replace(
+				/trigger \{[\s\S]*?\n\}\n/,
+				'trigger {\n  cron = new { schedule = "0 2 * * *"; body { sku = "book"; qty = 1 } }\n}\n',
+			),
+	);
 	show(sh(api, blokctl, "check"));
 	show(sh(api, blokctl, "build"));
+	const described = JSON.parse(readFileSync(join(api, ".blok/openapi.json"), "utf8"));
+	expect(
+		"the build describes the two routes as OpenAPI",
+		[described.openapi, Object.keys(described.paths)],
+		["3.1.0", ["/hello", "/price"]],
+	);
+	expect(
+		"run with no input, the scheduled workflow gets its schedule's body",
+		JSON.parse(sh(api, blokctl, "run", "nightly", "--json")).output,
+		{ totalCents: 2500 },
+	);
 	// The scaffolded test for the sample node and the one written above, with the project's own test command.
 	const tests = sh(api, tool, "run", "test");
 	expect("the node tests pass", /\b2 pass\b|# pass 2\b|pass 2\b/.test(tests), true);
@@ -203,6 +228,10 @@ try {
 	});
 
 	// ------------------------------------------------------------------------------------------
+	if (server !== "fastify") {
+		console.log(`\nAll of it worked with ${tool}, ${runtime} and ${server}.`);
+		return;
+	}
 	console.log("\n== An existing Fastify app");
 	const legacy = join(work, "legacy");
 	mkdirSync(legacy);
@@ -210,14 +239,14 @@ try {
 		join(legacy, "package.json"),
 		`${JSON.stringify({ name: "legacy", private: true, type: "module", dependencies: { fastify: "^5.0.0" } }, null, "\t")}\n`,
 	);
-	const server = (extra: { imports: string; register: string }) => `import Fastify from "fastify";
+	const theirs = (extra: { imports: string; register: string }) => `import Fastify from "fastify";
 ${extra.imports}
 const app = Fastify();
 app.get("/health", () => ({ ok: true }));
 ${extra.register}
 console.log(await app.listen({ port: Number(process.env.PORT ?? 3000) }));
 `;
-	writeFileSync(join(legacy, "server.ts"), server({ imports: "", register: "" }));
+	writeFileSync(join(legacy, "server.ts"), theirs({ imports: "", register: "" }));
 	show(sh(legacy, "node", init, "init"));
 	useTarballs(legacy, tarballs);
 	sh(legacy, tool, "install");
@@ -229,7 +258,7 @@ console.log(await app.listen({ port: Number(process.env.PORT ?? 3000) }));
 	// The whole change to their server: two imports and one register line.
 	writeFileSync(
 		join(legacy, "server.ts"),
-		server({
+		theirs({
 			imports: 'import { blokFastify } from "@blokjs/kernel/fastify";\nimport { ports } from "./ports/index.ts";',
 			register: "await app.register(blokFastify, { dir: import.meta.dirname, ports });",
 		}),
@@ -242,6 +271,10 @@ console.log(await app.listen({ port: Number(process.env.PORT ?? 3000) }));
 	});
 
 	console.log(`\nAll of it worked with ${tool} and ${runtime}.`);
+}
+
+try {
+	await main();
 } finally {
 	rmSync(work, { recursive: true, force: true });
 }

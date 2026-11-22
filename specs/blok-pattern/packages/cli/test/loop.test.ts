@@ -261,11 +261,12 @@ test("show is one node or one workflow in full", () => {
 	);
 	expect(blokctl(dir, ["show", "price"]).out).toBe(
 		[
-			"workflows/price@1  POST /price",
+			"workflows/price@1",
+			"  started by: POST /price",
 			"  file:      workflows/price.pkl",
 			'  as a step: workflows.Price, after import "blok/workflows.pkl"',
 			"  reads body:",
-			"    sku: string",
+			"    sku: string  (The product's code.)",
 			"    qty: integer",
 			"  answers:",
 			"    totalCents: integer",

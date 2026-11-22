@@ -34,7 +34,11 @@ test("init <name> makes a project that checks and builds as it is", () => {
 	});
 
 	expect(blokctl(dir, ["check"])).toEqual({ exit: 0, out: "1 node and 1 workflow line up.", err: "" });
-	expect(blokctl(dir, ["build"])).toEqual({ exit: 0, out: "Built 1 workflow into .blok/workflows.", err: "" });
+	expect(blokctl(dir, ["build"])).toEqual({
+		exit: 0,
+		out: "Built 1 workflow into .blok/workflows.\nThe API is described in .blok/openapi.json.",
+		err: "",
+	});
 	// What production loads is plain JSON, with the typed references turned into placeholders.
 	expect(json(dir, ".blok/workflows/hello.json")).toEqual({
 		name: "Hello",
@@ -141,7 +145,10 @@ export default node({
 });
 `,
 	);
-	expect(blokctl(dir, ["build"])).toMatchObject({ exit: 0, out: "Built 1 workflow into .blok/workflows." });
+	expect(blokctl(dir, ["build"])).toMatchObject({
+		exit: 0,
+		out: "Built 1 workflow into .blok/workflows.\nThe API is described in .blok/openapi.json.",
+	});
 
 	const twice = blokctl(dir, ["new", "node", "billing/charge-card"]);
 	expect(twice.err).toBe(
@@ -245,7 +252,11 @@ test("a workflow can be JSON written by hand: same check, same build, and no Pkl
 	});
 	const bye = { ...hello, name: "Bye", trigger: { http: { method: "GET", path: "/bye" } } };
 	write(dir, "workflows/bye.json", JSON.stringify({ $schema: "./blok/workflow.schema.json", ...bye }));
-	expect(blokctl(dir, ["build"], noPkl)).toEqual({ exit: 0, out: "Built 2 workflows into .blok/workflows.", err: "" });
+	expect(blokctl(dir, ["build"], noPkl)).toEqual({
+		exit: 0,
+		out: "Built 2 workflows into .blok/workflows.\nThe API is described in .blok/openapi.json.",
+		err: "",
+	});
 	expect(readdirSync(join(dir, ".blok/workflows"))).toEqual(["bye.json", "hello.json"]);
 	// The schema the files point at is put beside them, so an editor completes and underlines JSON too.
 	expect(json(dir, "workflows/blok/workflow.schema.json").title).toBe("Blok workflow");

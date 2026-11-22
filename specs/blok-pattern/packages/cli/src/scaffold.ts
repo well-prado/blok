@@ -104,7 +104,48 @@ test("${id} answers with what its contract promises", async () => {
 `;
 }
 
-function workflowPkl(name: string): string {
+export const TRIGGERS = ["http", "cron", "queue", "mcp"] as const;
+export type TriggerKind = (typeof TRIGGERS)[number];
+
+const TRIGGER_PKL: Record<TriggerKind, (name: string) => string> = {
+	http: (name) => `trigger {
+  http = new {
+    method = "POST"
+    path = "/${name}"
+  }
+}`,
+	cron: () => `trigger {
+  // Five parts: minute, hour, day of month, month, day of week. This is every day at 02:00, in UTC.
+  cron = new {
+    schedule = "0 2 * * *"
+    // Nobody sends a schedule anything, so what the steps read as "\${request.body.x}" is written here:
+    // body { x = "..." }
+  }
+}`,
+	queue: (name) => `trigger {
+  // Runs once per message of this queue. The steps read the message as "\${request.body.x}".
+  queue = new {
+    name = "${name}"
+  }
+}`,
+	mcp: (name) => `// An agent chooses a tool by its description. Say what this one does and when to use it:
+//
+//   description = "..."
+
+trigger {
+  // An AI agent calls this workflow as the tool "${name.replaceAll("-", "_")}". The steps read its arguments as "\${request.body.x}".
+  mcp = new {}
+}`,
+};
+
+const TRIGGER_JSON: Record<TriggerKind, (name: string) => object> = {
+	http: (name) => ({ http: { method: "POST", path: `/${name}` } }),
+	cron: () => ({ cron: { schedule: "0 2 * * *" } }),
+	queue: (name) => ({ queue: { name } }),
+	mcp: () => ({ mcp: {} }),
+};
+
+function workflowPkl(name: string, trigger: TriggerKind): string {
 	return `amends "blok/Workflow.pkl"
 
 // Import each module whose nodes this workflow uses, right here, before anything else:
@@ -116,12 +157,7 @@ function workflowPkl(name: string): string {
 name = "${pascal(name)}"
 version = "1.0.0"
 
-trigger {
-  http = new {
-    method = "POST"
-    path = "/${name}"
-  }
-}
+${TRIGGER_PKL[trigger](name)}
 
 // One step per node:
 //
@@ -137,13 +173,13 @@ steps {
 `;
 }
 
-const workflowJson = (name: string) =>
+const workflowJson = (name: string, trigger: TriggerKind) =>
 	`${JSON.stringify(
 		{
 			$schema: "./blok/workflow.schema.json",
 			name: pascal(name),
 			version: "1.0.0",
-			trigger: { http: { method: "POST", path: `/${name}` } },
+			trigger: TRIGGER_JSON[trigger](name),
 			steps: [],
 		},
 		null,
@@ -180,16 +216,99 @@ result {
 }
 `;
 
-const appFile = `import { blokFastify } from "@blokjs/kernel/fastify";
+export const SERVERS = ["fastify", "hono", "express"] as const;
+export type ServerKind = (typeof SERVERS)[number];
+
+interface Server {
+	dependencies: Record<string, string>;
+	devDependencies: Record<string, string>;
+	/** The lines that put Blok's routes on a server, as shown to someone who already has one. */
+	mount: (dir: string) => string[];
+	/** app.ts of a new project. */
+	app: string;
+}
+
+const loadLines = `// Loads the nodes and the built workflows once. Everything below starts from it.
+const blok = await loadApp({ dir: import.meta.dirname, ports, env: process.env });`;
+const cronLines = `// Every workflow with a cron trigger runs on its schedule. With none, this does nothing.
+await startCron(blok);`;
+
+const SERVER: Record<ServerKind, Server> = {
+	fastify: {
+		dependencies: { fastify: "^5.0.0" },
+		devDependencies: {},
+		mount: (dir) => [
+			`import { blokFastify } from "@blokjs/kernel/fastify";`,
+			`await app.register(blokFastify, { dir: ${dir}, ports });`,
+		],
+		app: `import { loadApp } from "@blokjs/kernel";
+import { startCron } from "@blokjs/kernel/cron";
+import { blokFastify } from "@blokjs/kernel/fastify";
 import Fastify from "fastify";
 import { ports } from "./ports/index.ts";
 
+${loadLines}
+
 const app = Fastify();
-// Mounts every workflow that has an HTTP trigger. The rest of this server is yours.
-await app.register(blokFastify, { dir: import.meta.dirname, ports });
+// Every workflow with an HTTP trigger becomes a route. The rest of this server is yours.
+await app.register(blokFastify, blok);
+${cronLines}
 
 console.log(await app.listen({ port: Number(process.env.PORT ?? 3000) }));
-`;
+`,
+	},
+	hono: {
+		dependencies: { hono: "^4.0.0", "@hono/node-server": "^2.0.0" },
+		devDependencies: {},
+		mount: (dir) => [
+			`import { blokHono } from "@blokjs/kernel/hono";`,
+			`app.route("/", await blokHono({ dir: ${dir}, ports }));`,
+		],
+		app: `import { loadApp } from "@blokjs/kernel";
+import { startCron } from "@blokjs/kernel/cron";
+import { blokHono } from "@blokjs/kernel/hono";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { ports } from "./ports/index.ts";
+
+${loadLines}
+
+const app = new Hono();
+// Every workflow with an HTTP trigger becomes a route. The rest of this server is yours.
+app.route("/", await blokHono(blok));
+${cronLines}
+
+serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) }, ({ port }) =>
+	console.log(\`http://localhost:\${port}\`),
+);
+`,
+	},
+	express: {
+		dependencies: { express: "^5.0.0" },
+		devDependencies: { "@types/express": "^5.0.0" },
+		mount: (dir) => [
+			`import { blokExpress } from "@blokjs/kernel/express";`,
+			`app.use(await blokExpress({ dir: ${dir}, ports }));   // before express.json()`,
+		],
+		app: `import { loadApp } from "@blokjs/kernel";
+import { startCron } from "@blokjs/kernel/cron";
+import { blokExpress } from "@blokjs/kernel/express";
+import express from "express";
+import { ports } from "./ports/index.ts";
+
+${loadLines}
+
+const app = express();
+// Every workflow with an HTTP trigger becomes a route. The rest of this server is yours.
+// Keep this before express.json(), so a signed webhook can be checked against the body as it arrived.
+app.use(await blokExpress(blok));
+${cronLines}
+
+const port = Number(process.env.PORT ?? 3000);
+app.listen(port, () => console.log(\`http://localhost:\${port}\`));
+`,
+	},
+};
 
 const tsconfigFile = `{
 	"compilerOptions": {
@@ -245,14 +364,15 @@ Run them as \`${runner} blokctl ...\`, which uses this project's own copy. A bar
 | \`blokctl show <id>\` | One node or workflow in full, with its contract and the workflows that use it. |
 | \`blokctl status\` | Which nodes are still empty, untested or not locked. |
 | \`blokctl new node <module>/<node>\` | Creates the folder, the contract and a test. |
-| \`blokctl new workflow <name>\` | Creates the Pkl file. |
+| \`blokctl new workflow <name>\` | Creates the Pkl file, started by an HTTP route. \`--trigger cron\`, \`queue\` or \`mcp\` starts it another way. |
 | \`blokctl new version <module>/<node>\` | Copies the newest version to the next one. |
 | \`blokctl check\` | Says whether everything lines up, and what is wrong in full sentences. |
 | \`blokctl check <node>\` | The gate for one node: the project lines up, the node is written, its contract is unchanged, its tests pass and its types check. |
 | \`blokctl check --tests\` | The whole project: everything lines up, every node's tests pass and the types check. |
 | \`blokctl run <id> --input '<json>'\` | Runs one node or workflow and prints what it answers with and what ran. |
 | \`blokctl lock\` | Writes \`contract.json\` beside every node that has none. Run it when the contracts are settled. |
-| \`blokctl build\` | Writes the JSON the server loads. Refuses while a node is still empty. |
+| \`blokctl build\` | Writes the JSON the server loads, and \`.blok/openapi.json\`. Refuses while a node is still empty. |
+| \`blokctl openapi\` | Prints every route as an OpenAPI 3.1 document: what it takes, what it answers with, and each error with its status. |
 | \`blokctl dev -- <start command>\` | Rebuilds and restarts the server on every change. |
 
 Every command takes \`--json\`.
@@ -282,7 +402,7 @@ This is an example. The ports of this project are in \`${at("ports/index.ts")}\`
 - \`input\` reaches \`run\` already checked against the schema, with any field the schema does not list removed. What \`run\` returns is checked against \`output\` the same way, so return the output's fields and nothing else.
 - The second argument of \`run\` holds \`ports\`, \`fail\`, \`log\` and \`signal\`. Take what you use: a node that reaches nothing outside can leave it out. \`run\` may be async or not.
 - A node that is not written yet has \`run: todo\`, with \`todo\` imported from \`@blokjs/kernel\`. Remove that import when you write the logic.
-- Anything thrown that is not a \`fail(...)\` is an unexpected failure: the caller gets a 500 with the error \`unexpected\`.
+- Anything thrown that is not a \`fail(...)\` is an unexpected failure: the caller gets a 500 with the error \`unexpected\` and no detail. What was thrown goes to the server's log.
 - \`input\` and \`output\` must be describable as JSON Schema. Avoid \`.transform()\`, \`z.date()\`, \`z.undefined()\` and \`z.bigint()\`: \`blokctl check\` names the node when a schema cannot be described. Use \`.describe()\` on a field whose meaning is not obvious from its name.
 - A caller that sends a wrong or missing field gets a 400 with the error \`invalid_input\` on its own. Do not write a node to validate a request.
 - \`throw fail("card_declined", "The bank refused the card.")\` ends the node with that error. The caller receives the code and the message, so write the message for them and put nothing secret in it.
@@ -362,6 +482,8 @@ Each of these goes in a step, or in the list of steps. \`blokctl check\` reports
 
 \`\`\`pkl
 // Read the request. A request is { body, query, params, headers }.
+// A query string, a path parameter and a header arrive as text. Where the node asks for a number,
+// true/false or a list, the text is read as one, so "?page=2" reaches the node as the number 2.
 inputs { email = "\${request.body.email}"; page = "\${request.query.page}" }
 
 // A path can have parameters. They are read from request.params.
@@ -406,11 +528,73 @@ result { receiptId = charge.outputs.receiptId }
 result = charge.value
 \`\`\`
 
-- Every error a step can fail with needs a status in the trigger's \`errors\`. \`blokctl check\` refuses a workflow that leaves one out, because the caller would get a 500.
+- Every error a step can fail with needs a status in the HTTP trigger's \`errors\`. \`blokctl check\` refuses a workflow that leaves one out, because the caller would get a 500.
 - A successful answer is 200. A workflow that creates something says \`status = 201\` in its trigger, beside \`method\` and \`path\`.
 - A workflow's id is its file name and the first number of its version: \`checkout.pkl\` with \`version = "1.0.0"\` is \`workflows/checkout@1\`.
 - A \`Fail\` code needs a status in the trigger's \`errors\` like any other error.
 - A workflow cannot compute, cannot join two conditions with and/or, and cannot loop until something is true. Each of those is a node's job.
+
+### What starts a workflow
+
+The \`trigger\` says what starts a workflow from outside. A workflow may have one of each kind, and one with no trigger is only a step in other workflows. Whatever starts it, the steps read what it was given as \`"\${request.body.x}"\`. Only an HTTP request also has \`request.query\`, \`request.params\` and \`request.headers\`.
+
+\`\`\`pkl
+// A route.
+trigger { http = new { method = "POST"; path = "/orders"; status = 201; errors { ["card_declined"] = 402 } } }
+
+// A webhook: a route that answers 401 unless the request's signature matches. \`secret\` is the NAME of
+// an environment variable, never the secret. Schemes: "standard" (Standard Webhooks), "stripe", "github",
+// and "hmac" with the \`header\` that carries the signature.
+trigger {
+  http = new {
+    method = "POST"
+    path = "/webhooks/payments"
+    status = 202
+    signature = new { scheme = "standard"; secret = "PAYMENTS_WEBHOOK_SECRET" }
+  }
+}
+
+// A schedule: minute, hour, day of month, month, day of week. In UTC unless \`timezone\` names another.
+// Nobody sends a schedule anything, so \`body\` holds everything the steps read.
+trigger { cron = new { schedule = "0 2 * * *"; body { region = "eu" } } }
+
+// A queue. The workflow runs once per message, and the message is the body.
+trigger { queue = new { name = "orders.paid"; concurrency = 4 } }
+
+// A tool an AI agent can call. Its arguments are the body. The agent chooses it by the workflow's description.
+description = "Prices an order without placing it."
+trigger { mcp = new { tool = "quote_order" } }
+\`\`\`
+
+A route is served as soon as the server mounts Blok. A schedule, a queue and a tool each need one line where the app starts, in \`app.ts\`. A workflow whose line is missing never runs and never complains, so \`blokctl check\` reminds you of the line when the project has such a trigger:
+
+\`\`\`ts
+import { loadApp } from "@blokjs/kernel";
+import { startCron } from "@blokjs/kernel/cron";
+import { startQueues } from "@blokjs/kernel/queue";
+
+const blok = await loadApp({ dir: import.meta.dirname, ports, env: process.env });
+await startCron(blok); // every cron trigger
+await startQueues(blok, { subscribe }); // every queue trigger. \`subscribe(queue, handle, { concurrency })\` connects your broker.
+\`\`\`
+
+Tools are served by a file of their own, which the agent's program starts. It needs the package \`@modelcontextprotocol/sdk\`:
+
+\`\`\`ts
+import { blokMcp } from "@blokjs/kernel/mcp";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
+const server = await blokMcp(blok, { name: "my-api", version: "1.0.0" });
+await server.connect(new StdioServerTransport());
+\`\`\`
+
+- A node puts a message on a queue through a port, like everything else outside. Until there is a broker, \`memoryQueue()\` from \`@blokjs/kernel/queue\` is a queue inside the process: give its \`send\` to the port and its \`subscribe\` to \`startQueues\`.
+- A queue hands a message over at least once. A node that a queue workflow reaches must be safe to run twice with the same message: it asks a port, in one call, whether that message was already handled.
+- A message the workflow refuses, because it lacks a field or a step fails with a business error, is not handed over again. A failure nobody planned for is.
+- A webhook answers fast and works later: the signed workflow puts the event on a queue and answers 202, and a queue workflow does the rest.
+- A schedule, a queue message and a tool call have no caller waiting for a status, so their errors need no entry in \`errors\`. A run that fails is written to the log.
+- A schedule runs inside the app. An app that runs as several copies calls \`startCron\` in one of them.
+- A route, a queue and a tool name each belong to one workflow. \`blokctl check\` refuses a second workflow that claims one.
 
 The full schema is \`${at("workflows/blok/Workflow.pkl")}\`, which \`blokctl check\` writes once there is a workflow.
 
@@ -457,9 +641,14 @@ export const usesBun = (root: string) =>
  * `init <name>` starts a new project that already answers on GET /hello.
  * `init` inside an existing app adds the folders and the rules page, and leaves the server alone.
  */
-export function init(cwd: string, options: { name?: string; dir?: string } = {}): Report {
+export function init(cwd: string, options: { name?: string; dir?: string; server?: string } = {}): Report {
 	const fresh = options.name !== undefined;
 	const root = fresh ? resolve(cwd, options.name as string) : cwd;
+	if (options.server !== undefined && !(SERVERS as readonly string[]).includes(options.server)) {
+		return fail(
+			`"${options.server}" is not a server blokctl knows. Use ${SERVERS.join(", ").replace(/, ([^,]*)$/, " or $1")}.`,
+		);
+	}
 	if (fresh && existsSync(root) && readdirSync(root).length > 0) {
 		return fail(`"${options.name}" already exists and is not empty. Run "blokctl init" inside it to add Blok to it.`);
 	}
@@ -470,6 +659,14 @@ export function init(cwd: string, options: { name?: string; dir?: string } = {})
 	const dir = join(root, sub);
 	const prefix = sub ? `${sub}/` : "";
 	const bun = usesBun(root);
+	// A new project gets Fastify unless told otherwise. An existing one is asked what it already has.
+	let installed: Record<string, string> = {};
+	try {
+		const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+		installed = { ...manifest.dependencies, ...manifest.devDependencies };
+	} catch {}
+	const kind = (options.server ?? SERVERS.find((name) => name in installed) ?? "fastify") as ServerKind;
+	const server = SERVER[kind];
 	const added: string[] = [];
 	const put = (file: string, content: string) => {
 		if (add(join(root, file), content)) added.push(file);
@@ -492,15 +689,20 @@ export function init(cwd: string, options: { name?: string; dir?: string } = {})
 						test: bun ? "bun test" : "node --test",
 					},
 					imports: { "#blok": "./blok.ts", "#ports": "./ports/index.ts" },
-					dependencies: { "@blokjs/kernel": VERSION, fastify: "^5.0.0", zod: "^4.2.0" },
-					devDependencies: { "@types/node": "^24.0.0", blokctl: VERSION, typescript: "^5.9.0" },
+					dependencies: { "@blokjs/kernel": VERSION, ...server.dependencies, zod: "^4.2.0" },
+					devDependencies: {
+						...server.devDependencies,
+						"@types/node": "^24.0.0",
+						blokctl: VERSION,
+						typescript: "^5.9.0",
+					},
 				},
 				null,
 				"\t",
 			)}\n`,
 		);
 		put("tsconfig.json", tsconfigFile);
-		put("app.ts", appFile);
+		put("app.ts", server.app);
 	}
 	put(`${prefix}blok.ts`, blokFile);
 	put(`${prefix}ports/index.ts`, portsFile);
@@ -559,9 +761,8 @@ export function init(cwd: string, options: { name?: string; dir?: string } = {})
 				`${bun ? "bun add -d" : "npm install -D"} blokctl`,
 				"blokctl new node <module>/<node>",
 				"blokctl new workflow <name>",
-				"Add this to your Fastify server:",
-				`  import { blokFastify } from "@blokjs/kernel/fastify";`,
-				`  await app.register(blokFastify, { dir: ${sub ? `join(import.meta.dirname, "${sub}")` : "import.meta.dirname"}, ports });`,
+				`Add this to your ${kind[0].toUpperCase()}${kind.slice(1)} server:`,
+				...server.mount(sub ? `join(import.meta.dirname, "${sub}")` : "import.meta.dirname").map((line) => `  ${line}`),
 				"Run your server with: blokctl dev -- <your start command>",
 			];
 	const text = [
@@ -570,7 +771,7 @@ export function init(cwd: string, options: { name?: string; dir?: string } = {})
 		"Next:",
 		...next.map((line) => `  ${line}`),
 	].join("\n");
-	return { ok: true, text, data: { ok: true, root, added, next } };
+	return { ok: true, text, data: { ok: true, root, server: kind, added, next } };
 }
 
 // ---- new ---------------------------------------------------------------------------------
@@ -631,14 +832,20 @@ export function newVersion(paths: Paths, id: string): Report {
 	return { ok: true, text, data: { ok: true, id: `${base}@${latest + 1}`, folder: shown } };
 }
 
-export function newWorkflow(paths: Paths, name: string, options: { json?: boolean } = {}): Report {
+export function newWorkflow(paths: Paths, name: string, options: { json?: boolean; trigger?: string } = {}): Report {
 	if (!SEGMENT.test(name)) return fail(`"${name}" is not a workflow name. Use lower case, such as place-order.`);
+	const trigger = (options.trigger ?? "http") as TriggerKind;
+	if (!TRIGGERS.includes(trigger)) {
+		return fail(
+			`"${options.trigger}" cannot start a workflow. Use ${TRIGGERS.join(", ").replace(/, ([^,]*)$/, " or $1")}.`,
+		);
+	}
 	for (const ending of ["pkl", "json"]) {
 		if (existsSync(join(paths.workflows, `${name}.${ending}`)))
 			return fail(`workflows/${name}.${ending} already exists.`);
 	}
 	const file = join(paths.workflows, `${name}.${options.json ? "json" : "pkl"}`);
-	add(file, options.json ? workflowJson(name) : workflowPkl(name));
+	add(file, options.json ? workflowJson(name, trigger) : workflowPkl(name, trigger));
 	const shown = relative(process.cwd(), file);
 	const text = `Created ${shown}. It has no steps yet, so "blokctl check" will ask for some.`;
 	return { ok: true, text, data: { ok: true, id: `workflows/${name}@1`, file: shown } };

@@ -1,0 +1,33 @@
+amends "blok/Workflow.pkl"
+
+import "blok/payments.pkl"
+
+name = "Payment webhook"
+description = "Takes a payment event from the provider. It checks the signature, puts the event on a queue and answers at once."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/webhooks/payments"
+    // Accepted, and not done yet: the work happens when the queue hands the event over.
+    status = 202
+    // Standard Webhooks. The secret is in the environment, and this is only the name of the variable.
+    signature = new {
+      scheme = "standard"
+      secret = "PAYMENTS_WEBHOOK_SECRET"
+    }
+  }
+}
+
+steps {
+  new payments.AcceptEvent {
+    name = "accept"
+    inputs {
+      id = "${request.body.id}"
+      type = "${request.body.type}"
+      orderId = "${request.body.orderId}"
+      amountCents = "${request.body.amountCents}"
+    }
+  }
+}

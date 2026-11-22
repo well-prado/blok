@@ -22,6 +22,7 @@ What to produce, in this order:
 1. ${at(`${paths.dir}/ports/index.ts`)}: the \`Ports\` interface. One entry for every outside thing the app needs: a database table, a payment provider, a mailer, a clock, an id generator. Keep each port small and named for what the app does with it, not for the product behind it. Export a \`memoryPorts()\` function that returns a fresh in-memory version of every port, and \`export const ports = memoryPorts()\`, so the app runs with no setup and every test starts clean.
 2. One node for every piece of work, created with \`blokctl new node <module>/<node>\`. In each node.ts fill in \`description\`, \`input\`, \`output\` and \`errors\`, and leave \`run: todo\`. Write \`errors\` as an object, with when each one happens: \`{ card_declined: "The provider refused the card." }\`. Group nodes into modules by what they are about: orders, billing, users.
 3. One workflow for every thing the app does from outside, created with \`blokctl new workflow <name>\`. Wire the nodes with typed references. A workflow that creates something answers \`status = 201\`. To refuse a request on a simple condition, use a \`Fail\` entry and not a node. Give every step that changes something outside an \`undo\`, so that a later failure takes it back. Every error a step can fail with needs a status in \`trigger.http.errors\`, and the check refuses a workflow that leaves one out.
+   Not everything starts with an HTTP request. Work that happens at a time of day gets a \`cron\` trigger, work that follows a message gets a \`queue\` trigger, a webhook from another company gets an \`http\` trigger with a \`signature\`, and something an AI agent should be able to do gets an \`mcp\` trigger. \`blokctl new workflow <name> --trigger cron\` (or \`queue\`, \`mcp\`) writes the trigger. AGENTS.md, "What starts a workflow", has each form, the line \`app.ts\` needs for it, and the rules that come with a queue. Add those lines to \`app.ts\` in this pass, and when a node must send to a queue, give \`Ports\` an entry for it.
 4. One test beside each node, in node.test.ts, that states what the node must do: the normal case and each error in its contract. These tests fail now, because the logic is not written. They are the definition of done for whoever writes it.
 
 Rules for a good design:
@@ -47,7 +48,7 @@ The app to design is described below.
  * A contract as a person would want to read it. The schema library writes a long pattern beside every
  * format, and the largest safe integer as the bound of every integer. Neither is a rule of the app.
  */
-function readable(schema: unknown): unknown {
+export function readable(schema: unknown): unknown {
 	if (Array.isArray(schema)) return schema.map(readable);
 	if (schema === null || typeof schema !== "object") return schema;
 	const kept = Object.entries(schema).filter(

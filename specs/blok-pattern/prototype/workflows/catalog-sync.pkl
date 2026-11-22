@@ -7,6 +7,7 @@ name = "Catalog sync"
 description = "Pulls every page of the supplier catalog and stores it. The paging loop is inside the node."
 version = "1.0.0"
 
+// Two ways in: every night at 03:00 UTC, and by hand with a request.
 trigger {
   http = new {
     method = "POST"
@@ -15,6 +16,9 @@ trigger {
       ["upstream_failed"] = 502
       ["bad_page"] = 502
     }
+  }
+  cron = new {
+    schedule = "0 3 * * *"
   }
 }
 

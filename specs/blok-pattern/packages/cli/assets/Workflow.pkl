@@ -70,8 +70,17 @@ typealias ObjectIn = Dynamic|Mapping|ObjectRef|AnyRef|Placeholder
 
 // ---- the workflow ------------------------------------------------------------------------
 
+/// What starts the workflow from outside. One of each kind at most.
+/// With none, the workflow is only a step in other workflows.
 class Trigger {
+  /// A route on the server.
   http: Http?
+  /// A schedule. It runs only if the app calls `startCron`.
+  cron: Cron?
+  /// A queue. It runs once per message, and only if the app calls `startQueues`.
+  queue: Queue?
+  /// A tool an AI agent can call. It is served only if the app calls `blokMcp`.
+  mcp: Mcp?
 }
 
 class Http {
@@ -82,6 +91,46 @@ class Http {
   status: Int(isBetween(200, 299))?
   /// Error code to HTTP status. Every error a step can fail with needs one.
   errors: Mapping<String, Int(isBetween(400, 599))>
+  /// A webhook: a request is refused with 401 unless its signature matches.
+  signature: Signature?
+}
+
+/// How the sender of a webhook proves a request is theirs.
+class Signature {
+  /// "standard" is Standard Webhooks (standardwebhooks.com). "stripe" and "github" are theirs.
+  /// "hmac" is an HMAC-SHA256 of the body in a header you name.
+  scheme: "standard"|"stripe"|"github"|"hmac"
+  /// The NAME of the environment variable that holds the secret. Never the secret itself.
+  secret: String(matches(Regex(#"^[A-Z][A-Z0-9_]*$"#)))
+  /// For "hmac": the header that carries the signature.
+  header: String?
+  /// For "hmac": how the signature is written. Left out, it is "hex".
+  encoding: ("hex"|"base64")?
+  /// For "hmac": text before the signature, such as "sha256=".
+  prefix: String?
+}
+
+class Cron {
+  /// Five parts: minute, hour, day of month, month, day of week. "0 2 * * *" is every day at 02:00.
+  schedule: String(!isEmpty)
+  /// A time zone such as "Europe/Lisbon". Left out, it is UTC, where no clock ever moves.
+  timezone: String?
+  /// What the workflow reads as `request.body` on every run. Nobody sends a schedule anything else.
+  body: Dynamic = new {}
+}
+
+class Queue {
+  /// The queue to read. Each message is the workflow's `request.body`.
+  name: String(matches(Regex(#"^[A-Za-z0-9_.:-]+$"#)))
+  /// How many messages may be handled at once. Left out, the queue decides.
+  concurrency: Int(this >= 1)?
+}
+
+class Mcp {
+  /// The name an agent calls. Left out, it is the file name with underscores: `place-order.pkl` is `place_order`.
+  tool: String(matches(Regex(#"^[A-Za-z0-9_-]{1,64}$"#)))?
+  /// What an agent reads to choose this tool. Left out, it is the workflow's description.
+  description: String?
 }
 
 /// Anything that can sit in a list of steps: a [Step], a [Conditions] block, a [Parallel] block or a [Fail].
@@ -97,7 +146,7 @@ open class Step extends Entry {
   `if`: (Condition|BoolRef)?
   /// A list to run this step over. Inputs read the element as `${item}`.
   each: (Placeholder|ListRef|AnyRef)?
-  concurrency: Int(isPositive)?
+  concurrency: Int(this >= 1)?
   /// Steps to run when this one fails. The workflow still fails afterwards.
   onError: Listing<Entry>
   /// Steps that take this step back. They run when a later step fails, the newest first,
@@ -141,7 +190,7 @@ output {
       [Listing] = (it) -> if (it.isEmpty) null else it
       [Mapping] = (it) -> if (it.isEmpty) null else it
       [Dynamic] = (it) -> if (it.toMap().isEmpty) null else it
-      [Trigger] = (it) -> if (it.http == null) null else it
+      [Trigger] = (it) -> if (it.http == null && it.cron == null && it.queue == null && it.mcp == null) null else it
     }
   }
 }

@@ -2,15 +2,18 @@
 // its own `inputs`, so a step is defined in one place. Values are plain strings, and
 // `${step.field}` reads what an earlier step produced. Nothing is evaluated as code.
 import {
+	type Binding,
 	BlokError,
 	type Call,
 	type HttpBinding,
 	type Schema,
+	type Signature,
 	type Unit,
 	type WorkflowCtx,
 	contract,
 	defineUnit,
 } from "./kernel.ts";
+import { nextRun, parseSchedule, timeZone } from "./schedule.ts";
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -57,6 +60,7 @@ export interface Workflow {
 	name: string;
 	description?: string;
 	version?: string;
+	/** What starts the workflow from outside. One of each kind at most. With none, it is only a step in other workflows. */
 	trigger?: {
 		http?: {
 			method: HttpBinding["method"];
@@ -66,7 +70,15 @@ export interface Workflow {
 			status?: number;
 			/** Error code to HTTP status. */
 			errors?: Record<string, number>;
+			/** A webhook: the request is refused unless its signature matches. `secret` NAMES an environment variable. */
+			signature?: Omit<Signature, "secret"> & { secret: string };
 		};
+		/** Runs on a schedule. `body` is what the workflow reads as its request body. */
+		cron?: { schedule: string; timezone?: string; body?: Json };
+		/** Runs once per message of a queue. The message is the request body. */
+		queue?: { name: string; concurrency?: number };
+		/** Makes the workflow a tool an AI agent can call. The arguments are the request body. */
+		mcp?: { tool?: string; description?: string };
 	};
 	steps: Entry[];
 	/** What the workflow answers with. Left out, it answers with the result of the last step that ran. */
@@ -280,7 +292,8 @@ export function workflowUnit(
 		description: workflow.description,
 		input: ANYTHING,
 		output: ANYTHING,
-		async run(request: unknown, { call, log }: WorkflowCtx) {
+		async run(given: unknown, { call, log }: WorkflowCtx) {
+			const request = requestOf(given, opts.request);
 			// A request that lacks something a step is certain to need would fail at that step anyway.
 			// Refusing it here means no earlier step has run and nothing has to be undone.
 			const absent = needed.filter((target) => dig(request, target) === undefined);
@@ -288,7 +301,7 @@ export function workflowUnit(
 				throw fail("invalid_input", `The request is missing: ${absent.map((target) => target.join(".")).join(", ")}.`);
 			}
 			const scope: Scope = Object.create(null);
-			scope.request = request ?? {};
+			scope.request = request;
 			scope.env = opts.env ?? {};
 			scope.prev = NOTHING;
 			const undos: Undos = [];
@@ -353,6 +366,47 @@ const dig = (value: unknown, target: Path): unknown =>
 		value,
 	);
 
+/**
+ * A query string, a path parameter and a header always arrive as text. Where a step needs a number or
+ * true/false, text that reads as one becomes one. Anything else is left as it came, for the node to refuse.
+ */
+function typed(value: unknown, shape: JsonSchema | undefined): unknown {
+	const kind = typeof shape?.type === "string" ? shape.type : undefined;
+	if (value === undefined) return value;
+	if (kind === "array") return (Array.isArray(value) ? value : [value]).map((one) => typed(one, shape?.items));
+	if (typeof value !== "string") return value;
+	if ((kind === "integer" || kind === "number") && value.trim() !== "" && Number.isFinite(Number(value))) {
+		return Number(value);
+	}
+	if (kind === "boolean" && (value === "true" || value === "false")) return value === "true";
+	return value;
+}
+
+const TEXT_PARTS = ["query", "params", "headers"] as const;
+
+/**
+ * The request a workflow runs on. Every trigger hands over a body. Only HTTP has the other three parts,
+ * so they are empty for a schedule, a queue message, a tool call and a workflow used as a step.
+ */
+function requestOf(given: unknown, shape: JsonSchema | undefined): Record<string, unknown> {
+	const request: Record<string, unknown> = {
+		body: {},
+		query: {},
+		params: {},
+		headers: {},
+		...(given !== null && typeof given === "object" ? given : {}),
+	};
+	for (const part of TEXT_PARTS) {
+		const wanted = shape?.properties?.[part]?.properties;
+		const values = request[part];
+		if (!wanted || values === null || typeof values !== "object") continue;
+		const next: Record<string, unknown> = { ...values };
+		for (const [key, inner] of Object.entries(wanted)) if (key in next) next[key] = typed(next[key], inner);
+		request[part] = next;
+	}
+	return request;
+}
+
 /** Every path that is required all the way down from the root. */
 function requiredPaths(shape: JsonSchema, prefix: Path = []): Path[] {
 	return (shape.required ?? []).flatMap((field) => {
@@ -362,10 +416,71 @@ function requiredPaths(shape: JsonSchema, prefix: Path = []): Path[] {
 	});
 }
 
-export function httpBinding(workflow: Workflow, unit: Unit): HttpBinding | undefined {
+/** The HTTP route of a workflow. `env` holds the secret a signed trigger names. */
+export function httpBinding(
+	workflow: Workflow,
+	unit: Unit,
+	env: Record<string, string | undefined> = {},
+): HttpBinding | undefined {
 	const http = workflow.trigger?.http;
 	if (!http) return undefined;
-	return { kind: "http", method: http.method, path: http.path, unit, success: http.status, status: http.errors };
+	const binding: HttpBinding = {
+		kind: "http",
+		method: http.method,
+		path: http.path,
+		unit,
+		success: http.status,
+		status: http.errors,
+	};
+	if (http.signature) {
+		const secret = env[http.signature.secret];
+		if (!secret) {
+			// A webhook that cannot check its signature must not start: it would either refuse everything or accept anything.
+			throw new Error(
+				`${unit.id} checks a signature with the secret in ${http.signature.secret}, and no such value was given. Pass it in \`env\`, for example \`env: process.env\`.`,
+			);
+		}
+		binding.signature = { ...http.signature, secret };
+	}
+	return binding;
+}
+
+/** The name an agent calls the workflow by: the one its trigger gives, or its file name with underscores. */
+export const toolName = (id: string, workflow: Workflow): string =>
+	workflow.trigger?.mcp?.tool ??
+	id
+		.slice(id.indexOf("/") + 1)
+		.split("@")[0]
+		.replaceAll("-", "_");
+
+/** Everything outside that starts this workflow, as data for the adapters. */
+export function bindingsOf(
+	id: string,
+	workflow: Workflow,
+	unit: Unit,
+	shape: WorkflowShape | undefined,
+	env: Record<string, string | undefined> = {},
+): Binding[] {
+	const { cron, queue, mcp } = workflow.trigger ?? {};
+	const http = httpBinding(workflow, unit, env);
+	const out: Binding[] = http ? [http] : [];
+	if (cron) {
+		out.push({ kind: "cron", schedule: cron.schedule, timezone: cron.timezone ?? "UTC", body: cron.body ?? {}, unit });
+	}
+	if (queue) out.push({ kind: "queue", queue: queue.name, concurrency: queue.concurrency, unit });
+	if (mcp) {
+		const answers = shape?.output;
+		out.push({
+			kind: "mcp",
+			tool: toolName(id, workflow),
+			description: mcp.description ?? workflow.description ?? workflow.name,
+			input: { type: "object", ...shape?.input } as Record<string, unknown>,
+			// A tool may only promise the shape of an answer that is an object.
+			output: answers?.type === "object" ? (answers as Record<string, unknown>) : undefined,
+			unit,
+		});
+	}
+	return out;
 }
 
 // ---- check ------------------------------------------------------------------------------
@@ -380,14 +495,33 @@ export interface JsonSchema {
 	enum?: unknown[];
 	additionalProperties?: boolean | JsonSchema;
 	anyOf?: JsonSchema[];
+	/** What the value means, and what it is when left out. A schema may say more, and the rest is kept as it is. */
+	description?: string;
+	default?: unknown;
 }
 export type Shapes = (
 	node: string,
 ) => { input?: JsonSchema; output?: JsonSchema; errors?: readonly string[] } | undefined;
 type Visible = Map<string, JsonSchema | undefined>;
 
+/** What a schema says about a value besides its kind. The check does not read these. A description of the API does. */
+const DETAILS = [
+	"description",
+	"default",
+	"format",
+	"pattern",
+	"minimum",
+	"maximum",
+	"exclusiveMinimum",
+	"exclusiveMaximum",
+	"minLength",
+	"maxLength",
+	"minItems",
+	"maxItems",
+];
 const NAME = /^[A-Za-z0-9_-]+$/;
 const CODE = /^[a-z][a-z0-9_]*$/;
+const TOOL = /^[A-Za-z0-9_-]{1,64}$/;
 const RESERVED = new Set(["request", "env", "prev", "item", "error"]);
 const ERROR_SHAPE: JsonSchema = {
 	type: "object",
@@ -454,6 +588,16 @@ function misfit(from: JsonSchema | undefined, into: JsonSchema | undefined, wher
 const literalShape = (value: unknown): JsonSchema => ({
 	type: value === null ? "null" : Number.isInteger(value) ? "integer" : typeof value,
 });
+/** The shape of a value that is written out in full, such as the body a schedule starts its workflow with. */
+function writtenShape(value: Json): JsonSchema {
+	if (Array.isArray(value))
+		return value.length > 0 ? { type: "array", items: writtenShape(value[0]) } : { type: "array" };
+	if (value !== null && typeof value === "object") {
+		const properties = Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, writtenShape(inner)]));
+		return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
+	}
+	return literalShape(value);
+}
 
 /** A copy with every `required` list removed: the shape of a value nothing is certain to need. */
 function optional(shape: JsonSchema): JsonSchema {
@@ -514,6 +658,13 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 		}
 		const from = need ? structuredClone(expected) : optional(expected);
 		if (theirs && (!mine || theirs === "integer")) shape.type = theirs;
+		// What the node says about the field, such as what it means and its smallest value, is true of the request too.
+		const [said, kept] = [from as Record<string, unknown>, shape as Record<string, unknown>];
+		for (const key of DETAILS) {
+			// A schema library writes the largest number a machine can count to on every integer. That is not a rule of the app.
+			const noise = typeof said[key] === "number" && Math.abs(said[key]) === Number.MAX_SAFE_INTEGER;
+			if (said[key] !== undefined && kept[key] === undefined && !noise) kept[key] = said[key];
+		}
 		if (from.enum && !shape.enum) shape.enum = from.enum;
 		if (from.items && !shape.items) shape.items = from.items;
 		if (from.properties) {
@@ -523,7 +674,10 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 	};
 
 	if (!Array.isArray(workflow.steps)) return { problems: ['A workflow needs a list of "steps".'], request, errors: [] };
-	if (workflow.steps.length === 0) return { problems: ["It has no steps yet. Add at least one."], request, errors: [] };
+	if (workflow.steps.length === 0) {
+		const problems = ["It has no steps yet. Add at least one.", ...triggerProblems(workflow, request)];
+		return { problems, request, errors: [] };
+	}
 	/** Each error code the workflow may fail with, and what may fail with it first. */
 	const fails = new Map<string, string>();
 
@@ -784,8 +938,74 @@ export function checkWorkflow(workflow: Workflow, shapes: Shapes): Checked {
 		if (http.status !== undefined && (!Number.isInteger(http.status) || http.status < 200 || http.status > 299)) {
 			problems.push(`The trigger's status is ${http.status}. A successful answer has a status from 200 to 299.`);
 		}
+		if (http.signature) {
+			if (http.method === "GET") {
+				problems.push("A signature is made over the body of a request, and a GET has none. Make the trigger a POST.");
+			}
+			if (http.signature.scheme === "hmac" && !http.signature.header) {
+				problems.push('A signature with the scheme "hmac" needs "header": the header that carries the signature.');
+			}
+		}
 	}
+	problems.push(...triggerProblems(workflow, request));
 	return { problems, returns, request, errors: [...fails.keys()] };
+}
+
+const STARTED_BY = { cron: "a schedule", queue: "a queue message", mcp: "an agent calling it as a tool" } as const;
+
+/** What is wrong with the triggers that are not HTTP, given what the steps read from the request. */
+function triggerProblems(workflow: Workflow, request: JsonSchema): string[] {
+	const problems: string[] = [];
+	const { cron, queue, mcp } = workflow.trigger ?? {};
+	const needed = requiredPaths(request);
+	for (const kind of ["cron", "queue", "mcp"] as const) {
+		if (!workflow.trigger?.[kind]) continue;
+		// Only an HTTP request has a query, path parameters and headers.
+		for (const target of needed.filter((path) => path[0] !== "body")) {
+			problems.push(
+				`It is started by ${STARTED_BY[kind]}, which hands it a body and nothing else, but a step needs \${request.${target.join(".")}}. Read it from the body.`,
+			);
+		}
+	}
+	if (cron) {
+		const at = `The schedule "${cron.schedule}"`;
+		try {
+			timeZone(cron.timezone ?? "UTC");
+			// Finding the next time is the test that it has one: "0 0 31 2 *" reads fine and never happens.
+			nextRun(parseSchedule(cron.schedule), new Date(0), cron.timezone ?? "UTC");
+		} catch (err) {
+			if (err instanceof SyntaxError) problems.push(`${at} cannot be read: ${err.message}.`);
+			else if ((err as Error).message === "it never happens") problems.push(`${at} never happens.`);
+			else
+				problems.push(
+					`"${cron.timezone}" is not a time zone. Use a name such as "Europe/Lisbon", or leave it out for UTC.`,
+				);
+		}
+		// Nobody sends a schedule its body, so everything the steps need has to be written in the trigger.
+		const body = cron.body ?? {};
+		const absent = needed.filter((path) => path[0] === "body" && dig({ body }, path) === undefined);
+		if (absent.length > 0) {
+			problems.push(
+				`The schedule starts it with a body that lacks: ${absent.map((path) => path.slice(1).join(".")).join(", ")}. Write ${absent.length === 1 ? "it" : "them"} in the cron trigger's body.`,
+			);
+		} else {
+			const why = misfit(writtenShape(body), request.properties?.body);
+			if (why) problems.push(`The cron trigger's body does not fit what the steps read. In it, ${why}.`);
+		}
+	}
+	if (queue && (typeof queue.name !== "string" || queue.name === ""))
+		problems.push("A queue trigger needs the name of its queue.");
+	if (mcp) {
+		if (mcp.tool !== undefined && !TOOL.test(mcp.tool)) {
+			problems.push(`"${mcp.tool}" cannot be a tool name. Use letters, digits, "_" and "-", 64 at most.`);
+		}
+		if (!(mcp.description ?? workflow.description)) {
+			problems.push(
+				"It is a tool for agents and has no description, and the description is how an agent chooses a tool. Give the workflow a description.",
+			);
+		}
+	}
+	return problems;
 }
 
 /** What a workflow takes and answers with, as a step in another workflow sees it. */
@@ -860,6 +1080,28 @@ export function checkWorkflows(
 			waiting.delete(entry);
 		}
 	}
+
+	// Two agents adding a workflow each can pick the same route, queue or tool name. Each belongs to one workflow.
+	const taken = new Map<string, string>();
+	const claim = (key: string, id: string, both: string) => {
+		const other = taken.get(key);
+		if (other) problems.push(`${other} and ${id} ${both}`);
+		else taken.set(key, id);
+	};
+	for (const { id, workflow } of workflows) {
+		const { http, queue, mcp } = workflow.trigger ?? {};
+		if (http?.path) {
+			// "/orders/:id" and "/orders/:orderId" are the same route to a server.
+			const route = `${http.method} ${http.path.replace(/:[A-Za-z0-9_]+/g, ":")}`;
+			claim(`http ${route}`, id, `both answer ${http.method} ${http.path}. A route belongs to one workflow.`);
+		}
+		if (queue?.name)
+			claim(`queue ${queue.name}`, id, `both read the queue "${queue.name}". A queue belongs to one workflow.`);
+		if (mcp) {
+			const tool = toolName(id, workflow);
+			claim(`mcp ${tool}`, id, `are both the tool "${tool}". A tool name belongs to one workflow.`);
+		}
+	}
 	return { problems, shapes: done };
 }
 
@@ -872,12 +1114,21 @@ export function loadWorkflows(
 	units: Map<string, Unit>,
 	env: Record<string, string | undefined> = {},
 ): Unit[] {
+	return loadChecked(workflows, units, env).units;
+}
+
+/** The same, and also what the check learned about each workflow: what it reads and answers with. */
+export function loadChecked(
+	workflows: Array<{ id: string; workflow: Workflow }>,
+	units: Map<string, Unit>,
+	env: Record<string, string | undefined> = {},
+): { units: Unit[]; shapes: Map<string, WorkflowShape> } {
 	for (const { id } of workflows) if (units.has(id)) throw new Error(`Two units claim the id "${id}".`);
 	const { problems, shapes } = checkWorkflows(workflows, units);
 	if (problems.length > 0) throw new Error(`Workflow check failed:\n- ${problems.join("\n- ")}`);
 
 	const own = new Set(workflows.map((entry) => entry.id));
-	return workflows.map(({ id, workflow }) => {
+	const loaded = workflows.map(({ id, workflow }) => {
 		const unit = workflowUnit(id, workflow, units, {
 			isWorkflow: (node) => own.has(node),
 			env,
@@ -886,4 +1137,5 @@ export function loadWorkflows(
 		units.set(id, unit);
 		return unit;
 	});
+	return { units: loaded, shapes };
 }

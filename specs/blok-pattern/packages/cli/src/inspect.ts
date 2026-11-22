@@ -1,6 +1,6 @@
 // status and show: what is left to build, and one node or workflow in full.
 import { relative } from "node:path";
-import { type Entry, type JsonSchema, contract } from "@blokjs/kernel";
+import { type Entry, type JsonSchema, type Workflow, contract, toolName } from "@blokjs/kernel";
 import { type Analysis, type Paths, nodeFolder } from "./analyze.ts";
 import type { Report } from "./commands.ts";
 import { stepName, workflowClass } from "./pkl.ts";
@@ -8,6 +8,17 @@ import { testFiles } from "./tests.ts";
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const shown = (paths: Paths, path: string) => relative(paths.root, path) || ".";
+
+/** What starts a workflow, one phrase per trigger: "POST /orders", "cron 0 2 * * * (UTC)", "queue orders.paid", "tool place_order". */
+export function startedBy(id: string, workflow: Workflow): string[] {
+	const { http, cron, queue, mcp } = workflow.trigger ?? {};
+	return [
+		...(http ? [`${http.method} ${http.path}${http.signature ? ` (signed, ${http.signature.scheme})` : ""}`] : []),
+		...(cron ? [`cron ${cron.schedule} (${cron.timezone ?? "UTC"})`] : []),
+		...(queue ? [`queue ${queue.name}`] : []),
+		...(mcp ? [`tool ${toolName(id, workflow)}`] : []),
+	];
+}
 
 /** Every step in a workflow, branches included, as [step name, node id]. */
 function steps(entries: Entry[] = []): Array<[string, string]> {
@@ -154,9 +165,11 @@ export function show(analysis: Analysis, paths: Paths, given: string): Report {
 	if (workflow) {
 		const shape = analysis.shapes.get(workflow.id);
 		const http = workflow.workflow.trigger?.http;
+		const starts = startedBy(workflow.id, workflow.workflow);
 		const lines = [
-			`${workflow.id}${http ? `  ${http.method} ${http.path}` : ""}`,
+			workflow.id,
 			...(workflow.workflow.description ? [`  ${workflow.workflow.description}`] : []),
+			`  started by: ${starts.length > 0 ? starts.join(", ") : "nothing from outside. It is a step in other workflows"}`,
 			`  file:      ${shown(paths, `${paths.workflows}/${workflow.file}`)}`,
 			`  as a step: workflows.${workflowClass(workflow.name)}, after import "blok/workflows.pkl"`,
 			...["body", "query", "params", "headers"].flatMap((part) => {
@@ -181,6 +194,7 @@ export function show(analysis: Analysis, paths: Paths, given: string): Report {
 			id: workflow.id,
 			file: workflow.file,
 			pkl: { import: "blok/workflows.pkl", step: `workflows.${workflowClass(workflow.name)}` },
+			startedBy: starts,
 			request: shape?.request,
 			answers: shape?.output,
 			usedBy: usedBy(analysis, workflow.id),

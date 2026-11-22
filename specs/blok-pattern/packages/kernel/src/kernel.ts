@@ -58,6 +58,11 @@ export interface Log {
 	info(message: string, data?: unknown): void;
 	error(message: string, data?: unknown): void;
 }
+/** Says nothing unless something failed, and then says it on the console. What an adapter uses when it is given no log. */
+export const consoleLog: Log = {
+	info() {},
+	error: (message, data) => (data === undefined ? console.error(message) : console.error(message, data)),
+};
 interface BaseCtx {
 	log: Log;
 	signal: AbortSignal;
@@ -209,7 +214,10 @@ export function blok<P>() {
 	return { node, runtime };
 }
 
-/** A binding attaches a unit to a host event. It is data; an adapter reads it. */
+/**
+ * A binding attaches a unit to something outside: a route, a schedule, a queue or a tool.
+ * It is data. An adapter reads it and calls the unit, and each adapter is its own small file.
+ */
 export interface HttpBinding {
 	kind: "http";
 	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -220,7 +228,57 @@ export interface HttpBinding {
 	success?: number;
 	/** Error code to HTTP status. Transport details stay out of the node. */
 	status?: Record<string, number>;
+	/** A webhook: a request whose signature does not match is refused before anything runs. */
+	signature?: Signature;
 }
+/** How a sender proves a request is theirs: an HMAC-SHA256 of the body, made with a secret both sides hold. */
+export interface Signature {
+	/** "standard" is Standard Webhooks. "stripe" and "github" are theirs. "hmac" is a bare signature in a header you name. */
+	scheme: "standard" | "stripe" | "github" | "hmac";
+	/** The secret itself. A workflow names the environment variable, and loading the project reads it. */
+	secret: string;
+	/** For "hmac": the header that carries the signature. */
+	header?: string;
+	/** For "hmac": how the signature is written. Default "hex". */
+	encoding?: "hex" | "base64";
+	/** For "hmac": text before the signature, such as "sha256=". */
+	prefix?: string;
+}
+export interface CronBinding {
+	kind: "cron";
+	/** Five fields: minute, hour, day of month, month, day of week. */
+	schedule: string;
+	/** An IANA time zone. "UTC" unless the workflow says otherwise. */
+	timezone: string;
+	/** What the workflow reads as its request body on every run. */
+	body: unknown;
+	unit: Unit;
+}
+export interface QueueBinding {
+	kind: "queue";
+	queue: string;
+	concurrency?: number;
+	/** Called with each message as the request body. */
+	unit: Unit;
+}
+export interface ToolBinding {
+	kind: "mcp";
+	tool: string;
+	description: string;
+	/** JSON Schema of the arguments: the request body the workflow reads. */
+	input: Record<string, unknown>;
+	/** JSON Schema of the answer, when it is known to be an object. */
+	output?: Record<string, unknown>;
+	unit: Unit;
+}
+export type Binding = HttpBinding | CronBinding | QueueBinding | ToolBinding;
+
+/**
+ * Whether a failure is the code's or the machine's, so that running the same thing again may work.
+ * Every other code is a refusal: a business error or a wrong input, which will be refused again.
+ */
+export const mayWorkLater = (code: string): boolean =>
+	/^(unexpected|timeout|not_implemented|invalid_output|workflow_[a-z]+)$/.test(code);
 
 /** The error codes a unit declares, whichever way it wrote them. */
 export const errorCodes = (unit: Pick<Unit, "errors">): string[] =>

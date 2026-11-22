@@ -25,6 +25,7 @@
 		"ajv": "^8.20.0"
 	},
 	"devDependencies": {
-		"@modelcontextprotocol/sdk": "^1.32.2"
+		"@modelcontextprotocol/sdk": "^1.32.2",
+		"@seriousme/openapi-schema-validator": "^2.12.0"
 	}
 }

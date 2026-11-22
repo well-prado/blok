@@ -2,14 +2,14 @@
 
 Spec-stage material, started 2026-11-21. It tests one idea: that Blok can be a small pattern you apply inside any stack, with one folder per node so that parallel branches never collide.
 
-Since phase 1 of [PLAN.md](PLAN.md) this folder holds two installable packages and an example app that uses them:
+Since phase 1 of [PLAN.md](PLAN.md) this folder holds two installable packages and an example app that uses them. Phase 3 added what starts a workflow besides an HTTP request: a schedule, a queue, a signed webhook and a tool for AI agents.
 
 | Folder | Is |
 |---|---|
-| `packages/kernel/` | `@blokjs/kernel`: the runtime you call from your own server, and a Fastify adapter. No dependencies. |
-| `packages/cli/` | `blokctl` 3.0.0-next.0: 14 commands, from `init` to `mcp`. Development only. |
-| `prototype/` | The example app: 15 nodes and 10 workflows, built on the two packages. |
-| `e2e/` | A run from an empty folder to a server that answers, with the packages installed as packed tarballs. |
+| `packages/kernel/` | `@blokjs/kernel`: the runtime you call from your own server, with a small adapter each for Fastify, Hono, Express, schedules, queues and tools for agents. The core has no dependencies. |
+| `packages/cli/` | `blokctl` 3.0.0-next.0: 15 commands, from `init` to `mcp`. Development only. |
+| `prototype/` | The example app: 17 nodes and 12 workflows, built on the two packages. |
+| `e2e/` | A run from an empty folder to a server that answers, with the packages installed as packed tarballs. It runs on each of the three servers. |
 | `factory/` | The AI loop run for real: one design agent, then one build agent per node on its own branch, then every branch merged. |
 | `merge-experiment/` | 16 branches, two layouts, real git merges, written by a script. |
 
@@ -331,7 +331,7 @@ What a placeholder can read:
 
 | Root | Is |
 |---|---|
-| `request` | The trigger's request: `body`, `query`, `params`, `headers`, `method`. A workflow used as a step receives its inputs as `request.body`. |
+| `request` | What the workflow was started with. Every way of starting it gives it a `body`. Only an HTTP request also has `query`, `params`, `headers` and `method`. A workflow used as a step receives its inputs as `request.body`. |
 | A step name | That step's result. |
 | `prev` | The result of the step that ran just before. |
 | `item` | The current element, inside a step with `each`. |
@@ -402,6 +402,73 @@ What each does and does not do:
 
 The deep check found a real mistake in this folder's own example app the first time it ran: `orders/validate-order` answered quantities as any number, and `orders/price-order` takes whole numbers. It found nothing in the two apps the agents built.
 
+### What starts a workflow
+
+A workflow's `trigger` says what starts it from outside. It may have one of each kind, and a workflow with none is only a step in other workflows.
+
+| Trigger | Starts the workflow | The workflow reads |
+|---|---|---|
+| `http` | On a request to its route | `request.body`, `query`, `params` and `headers` |
+| `http` with a `signature` | The same, after the request's signature is checked. A request that fails the check gets a 401 and nothing runs | The same |
+| `cron` | On a schedule | The `body` written in the trigger |
+| `queue` | Once per message | The message, as `request.body` |
+| `mcp` | When an AI agent calls it as a tool | The tool's arguments, as `request.body` |
+
+```pkl
+trigger {
+  http = new {
+    method = "POST"
+    path = "/webhooks/payments"
+    status = 202
+    signature = new { scheme = "standard"; secret = "PAYMENTS_WEBHOOK_SECRET" }
+  }
+}
+
+trigger { cron = new { schedule = "0 2 * * *"; body { region = "eu" } } }
+
+trigger { queue = new { name = "orders.paid"; concurrency = 4 } }
+
+trigger { mcp = new { tool = "quote_order" } }
+```
+
+Nobody declares what a tool takes. It is the request body the check already works out from the node inputs the workflow wires it into, and the same shape is the body of the route in the OpenAPI file.
+
+Each kind is served by one small file in the kernel, and the app calls it where it starts:
+
+```ts
+import { loadApp } from "@blokjs/kernel";
+import { startCron } from "@blokjs/kernel/cron";
+import { blokFastify } from "@blokjs/kernel/fastify";
+import { startQueues } from "@blokjs/kernel/queue";
+
+const blok = await loadApp({ dir: import.meta.dirname, ports, env: process.env });
+await app.register(blokFastify, blok);      // every http trigger. Hono: app.route("/", await blokHono(blok))
+await startCron(blok);                       // every cron trigger
+await startQueues(blok, { subscribe });      // every queue trigger. `subscribe` connects your broker
+```
+
+`loadApp` loads the project once. The one-line form, `app.register(blokFastify, { dir, ports })`, still works for an app that only serves HTTP. Tools are served by `blokMcp(blok, { name, version })`, which returns a server from the official MCP library, so it speaks whatever transport you connect it to.
+
+What the check knows about triggers:
+
+- **A schedule's body has everything the steps need.** Nobody sends a schedule anything, so a required field that is not in the trigger's `body` is a problem, and so is one of the wrong kind.
+- **A schedule can be read and happens.** `0 25 * * *` is refused, and so is `0 0 31 2 *`, which reads fine and never happens.
+- **Only HTTP has a query, path parameters and headers.** A workflow with another trigger that needs one of them is a problem.
+- **A tool has a description.** It is how an agent chooses a tool.
+- **A route, a queue and a tool name each belong to one workflow.** Two agents each adding a workflow can pick the same one, and the second is refused.
+- **A signature needs a body.** A signed `GET` is refused.
+
+What each does and does not do:
+
+- **A query string, a path parameter and a header arrive as text.** Where the node asks for a number, true/false or a list, text that reads as one becomes one. `?page=2` reaches the node as the number 2. Text that does not read as one is left alone, and the node refuses it with a 400. Before phase 3, `?page=2` was refused by a node that asked for a number.
+- **A signature is an HMAC-SHA256 of the body as it arrived.** Four schemes: `standard` (Standard Webhooks), `stripe`, `github`, and `hmac` with a header you name. The first two also carry a time, and a request more than five minutes old is refused. `secret` names an environment variable, and an app that lacks it refuses to start.
+- **A failure nobody planned for answers 500 with no detail.** What was thrown goes to the server's log. Before phase 3 the caller got the message of whatever was thrown.
+- **The three servers give the same answers.** One test sends the same twelve requests to Fastify, Hono and Express and compares status and body.
+- **A schedule runs inside the app, in UTC unless it names a time zone.** A run that is still going when the next one is due is not joined by a second one. An app that runs as several copies starts its schedules in one of them, or every copy runs every job.
+- **A queue hands a message over at least once.** A message the workflow refuses, because it lacks a field or a step fails with a business error, is not handed over again. A failure of the machine's is. The queue itself is yours: `subscribe(queue, handle, { concurrency })` is the one function that connects a broker. `memoryQueue()` is a queue inside the process, for development and tests.
+- **A tool call that is refused tells the agent why**, with the error code and its message. What breaks inside goes to the log.
+- **`blokctl build` writes `.blok/openapi.json`**, an OpenAPI 3.1 description of every route: its parameters, its body, what it answers with, and each error with its status and the sentence its node wrote for it. `blokctl openapi` prints the same.
+
 ### The examples
 
 | File | Shows |
@@ -410,10 +477,12 @@ The deep check found a real mistake in this folder's own example app the first t
 | `countries-vs-facts.pkl` | The original example: `Conditions`, and the answer is whichever step ran |
 | `feedback-create.pkl`, `feedback-list.pkl` | The original `feedback.json`, split by route |
 | `checkout.pkl` | `if` on a step, `onError`, `result` |
-| `quote.pkl` | `each` with `concurrency`, and `${prev}` |
+| `quote.pkl` | `each` with `concurrency`, and `${prev}`. Also a tool for agents: `quote_order` |
 | `fulfil.pkl` | `Conditions` with three branches, used as a switch, and a function that writes three similar steps |
 | `fulfil-batch.pkl` | `each` over a workflow: a loop whose body has several steps |
-| `catalog-sync.pkl` | One step whose node loops until the feed ends, with its own limit |
+| `catalog-sync.pkl` | One step whose node loops until the feed ends, with its own limit. Started by a route and by a schedule |
+| `payment-webhook.pkl` | A signed webhook that puts the event on a queue and answers 202 |
+| `payment-events.pkl` | A queue trigger. Its node applies an event once, however often it arrives |
 | `place-order.pkl` | Workflows used as nodes, then `Parallel` |
 
 ## The other terms
@@ -432,11 +501,18 @@ The path is the id: `nodes/billing/charge-card/v1` is `billing/charge-card@1`.
 packages/kernel/src/
   kernel.ts               node(), call, todo, contract(). The boundary every node runs through.
   workflow.ts             runs a workflow, and checks workflows against the node contracts
-  project.ts              finds nodes by their folders, loads the built workflow JSON
-  fastify.ts              one register call that mounts every HTTP trigger
+  project.ts              finds nodes by their folders, loads the built workflow JSON, loadApp
+  schedule.ts             reads a cron schedule and works out when it next happens
+  http.ts                 what the three servers share: the signature check, statuses, the JSON answer
+  fastify.ts, hono.ts, express.ts
+                          one call each that mounts every HTTP trigger
+  cron.ts                 runs every cron trigger on its schedule
+  queue.ts                runs every queue trigger once per message, and a queue for development
+  mcp.ts                  serves every mcp trigger as a tool, on the official MCP library
 packages/cli/src/
   analyze.ts              reads a project: nodes, Pkl and JSON workflows, typed steps, problems
   commands.ts             check, build, list
+  openapi.ts              the routes as an OpenAPI 3.1 document
   inspect.ts              status and show
   lock.ts                 contract.json: what a node promised, and whether it still keeps it
   prompt.ts               the design brief and the brief for writing one node
@@ -453,8 +529,9 @@ prototype/
   blok.ts                 three lines: binds the kernel to this app's Ports type
   ports/index.ts          the port interfaces
   nodes/<module>/<node>/v1/node.ts
-  workflows/*.pkl         the ten example workflows
-  app.ts                  a Fastify server with in-memory ports
+  workflows/*.pkl         the twelve example workflows
+  app.ts                  a Fastify server with in-memory ports, its schedule and its queue
+  mcp.ts                  the example's tools for agents, on standard input and output
   bench.ts                cost of the call boundary
 e2e/empty-folder.ts       packs both packages, installs them into an empty folder, runs the result
 factory/factory.ts        sets up an app, fans it out to one branch per node, and joins the branches
@@ -473,7 +550,7 @@ bun run typecheck
 bun run e2e
 ```
 
-`bun run test` builds both packages first, because the example app and the command-line tests use the built code.
+`bun run test` builds both packages first, because the example app and the command-line tests use the built code. `bun run e2e` installs from the npm registry six times, once for each pair of Bun or npm with Fastify, Hono or Express. One pair alone: `bun e2e/empty-folder.ts npm hono`.
 
 In the example app:
 
@@ -481,6 +558,7 @@ In the example app:
 cd specs/blok-pattern/prototype
 bun run check
 bun run dev
+bun run mcp        # the tools for agents, on standard input and output
 ```
 
 ```bash
@@ -509,6 +587,18 @@ Measured on 2026-11-21 with Bun 1.3.14, Node 24.22, Pkl 0.33.1 and git 2.54 on o
 
 A single octopus merge of all 16 pattern branches was also clean. When 4 branches each created `v2` of the same node on their own, 3 of the 4 merges conflicted, so ids and version numbers have to be assigned before work fans out.
 
+Measured on 2026-11-22 for phase 3, on the same Mac:
+
+- 123 tests pass: 46 for the kernel, 44 for the command-line tool, and 33 in the example app.
+- The run from an empty folder passes six times: Bun and npm with Node, each on Fastify, Hono and Express.
+- Fastify, Hono and Express give the same status and the same body to the same twelve requests.
+- The schedule reader agrees with an established cron library, croner, on 1,344 run times: 14 schedules, 4 time zones, 4 starting moments, 6 runs each.
+- The signature check accepts the example GitHub publishes, read on the day. The Standard Webhooks and Stripe schemes were compared with Node's own HMAC, built the way each is documented, and not with a request from a real sender. No published Standard Webhooks example is in the tests: the ones in the Svix documentation carry a secret that a secret scanner takes for a real one.
+- The official MCP client lists and calls a workflow as a tool, in memory and against `prototype/mcp.ts` running as its own process.
+- An OpenAPI validator accepts the document generated for the test project and for the example app.
+- The example app was started for real: a signed webhook got a 202 and the queue applied it, and the same body with a forged signature got a 401.
+- 14 planted mistakes in the new code each turned at least one test red: among them a signature of any age accepted, a refused message handed over again, and two workflows on one route.
+
 ## What this is not
 
 - Nothing is published. The run from an empty folder installs packed tarballs, and its first step, `blokctl init`, runs from this repo because `bunx blokctl@next` cannot work before a release.
@@ -521,5 +611,14 @@ A single octopus merge of all 16 pattern branches was also clean. When 4 branche
 - Editor highlighting was checked by running the extension's language server on probe files, not by looking at the VS Code window.
 - The branches in `merge-experiment/` are written by a script. The run with real agents is the pilot above.
 - The converted original examples run against a stand-in `http/api-call@1` node and fake ports.
-- Only TypeScript exists, only HTTP triggers, and only a Fastify adapter. A second language and a durable backend behind `call` are untested.
+- Only TypeScript exists. A second language and a durable backend behind `call` are untested.
+- No agent has designed an app with the phase 3 triggers. The rules page and the design brief describe them, and no run has tested whether an agent uses them well.
+- `startQueues` was only run on the in-memory queue. No real broker was connected, so the `subscribe` function has not met one.
+- Tools for agents were run in memory and over standard input and output. Not over HTTP, which is how a remote agent would reach them, and which needs sign-in that is not built.
+- A schedule keeps nothing. A run that was due while the app was down is not made up for, and two copies of the app both run every job.
+- Express was run on version 5 only. Hono was run through `@hono/node-server` on Node and on Bun, and not on Deno or on Cloudflare Workers, where nothing keeps running between requests for a schedule to live in.
+- The OpenAPI file was checked by one validator. No client was generated from it.
+- Text becomes a number, true/false or a list. Nothing else: a date in a query string stays text.
+- The Pkl forms for the new triggers were checked by Pkl itself. The editor's language server was not run on them.
+- A `cli` trigger, WebSocket and SSE are not built.
 - The tests use `bun:test`. The rest of the repo uses Vitest.

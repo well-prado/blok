@@ -53,10 +53,90 @@
 							"type": "integer",
 							"minimum": 200,
 							"maximum": 299
+						},
+						"signature": {
+							"description": "A webhook: a request is refused with 401 unless its signature matches.",
+							"type": "object",
+							"required": ["scheme", "secret"],
+							"additionalProperties": false,
+							"properties": {
+								"scheme": {
+									"enum": ["standard", "stripe", "github", "hmac"]
+								},
+								"secret": {
+									"description": "The NAME of the environment variable that holds the secret. Never the secret itself.",
+									"type": "string",
+									"pattern": "^[A-Z][A-Z0-9_]*$"
+								},
+								"header": {
+									"description": "For \"hmac\": the header that carries the signature.",
+									"type": "string"
+								},
+								"encoding": {
+									"enum": ["hex", "base64"]
+								},
+								"prefix": {
+									"type": "string"
+								}
+							}
+						}
+					}
+				},
+				"cron": {
+					"description": "Runs on a schedule.",
+					"type": "object",
+					"required": ["schedule"],
+					"additionalProperties": false,
+					"properties": {
+						"schedule": {
+							"description": "Five parts: minute, hour, day of month, month, day of week.",
+							"type": "string",
+							"minLength": 1
+						},
+						"timezone": {
+							"description": "A time zone such as \"Europe/Lisbon\". Default UTC.",
+							"type": "string"
+						},
+						"body": {
+							"description": "What the workflow reads as request.body on every run.",
+							"type": "object"
+						}
+					}
+				},
+				"queue": {
+					"description": "Runs once per message of a queue. The message is request.body.",
+					"type": "object",
+					"required": ["name"],
+					"additionalProperties": false,
+					"properties": {
+						"name": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9_.:-]+$"
+						},
+						"concurrency": {
+							"type": "integer",
+							"minimum": 1
+						}
+					}
+				},
+				"mcp": {
+					"description": "Makes the workflow a tool an AI agent can call. The arguments are request.body.",
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"tool": {
+							"description": "Default: the file name with underscores.",
+							"type": "string",
+							"pattern": "^[A-Za-z0-9_-]{1,64}$"
+						},
+						"description": {
+							"description": "Default: the workflow's description.",
+							"type": "string"
 						}
 					}
 				}
-			}
+			},
+			"description": "What starts the workflow from outside. One of each kind at most."
 		},
 		"steps": {
 			"$ref": "#/$defs/entries"

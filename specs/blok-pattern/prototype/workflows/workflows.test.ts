@@ -19,7 +19,7 @@ import { analyze, locate } from "blokctl";
 import Fastify from "fastify";
 import { runtime } from "#blok";
 import type { Ports } from "#ports";
-import { fakePorts } from "../app.ts";
+import { DEV_SECRET, fakePorts } from "../app.ts";
 
 const root = join(import.meta.dirname, "..");
 // Workflows are written in Pkl. This does what `blokctl check` does: it regenerates the typed steps
@@ -40,7 +40,8 @@ async function start(ports: Ports = fakePorts(), onSpan?: (span: Span) => void) 
 	const { call } = runtime({ ports, onSpan });
 	const app = Fastify();
 	for (const { id, workflow } of files) {
-		const binding = httpBinding(workflow, units.get(id) as Unit);
+		// The signed webhook finds its secret here, as it does in the environment of a running app.
+		const binding = httpBinding(workflow, units.get(id) as Unit, { PAYMENTS_WEBHOOK_SECRET: DEV_SECRET });
 		if (binding) mount(app, binding, call);
 	}
 	return { app, call, unit: (id: string) => units.get(id) as Unit };
@@ -52,7 +53,7 @@ test("every example is valid against workflow.schema.json, and the schema can sa
 	const schema = join(root, "..", "packages", "cli", "assets", "workflow.schema.json");
 	const validate = new Ajv2020().compile(JSON.parse(readFileSync(schema, "utf8")));
 	for (const { file, workflow } of files) expect(`${file}: ${validate(workflow)}`).toBe(`${file}: true`);
-	expect(files).toHaveLength(10);
+	expect(files).toHaveLength(12);
 
 	const oldStyle = definition("countries");
 	Object.assign(oldStyle.steps[0], { type: "module" });
@@ -62,7 +63,7 @@ test("every example is valid against workflow.schema.json, and the schema can sa
 	expect(validate({ ...definition("countries"), nodes: { "get-countries": { inputs: {} } } })).toBe(false);
 });
 
-test("all ten workflows load and pass the check against the node contracts", async () => {
+test("all twelve workflows load and pass the check against the node contracts", async () => {
 	const units = await load();
 	expect(files.map((f) => f.id)).toEqual([
 		"workflows/catalog-sync@1",
@@ -73,10 +74,12 @@ test("all ten workflows load and pass the check against the node contracts", asy
 		"workflows/feedback-list@1",
 		"workflows/fulfil-batch@1",
 		"workflows/fulfil@1",
+		"workflows/payment-events@1",
+		"workflows/payment-webhook@1",
 		"workflows/place-order@1",
 		"workflows/quote@1",
 	]);
-	expect(units.size).toBe(15 + 10);
+	expect(units.size).toBe(17 + 12);
 });
 
 // ---- the original's own examples, converted ---------------------------------------------

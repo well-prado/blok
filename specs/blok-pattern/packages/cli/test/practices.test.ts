@@ -114,7 +114,11 @@ const order = (body: Record<string, unknown>) => ["run", "buy", "--input", JSON.
 
 test("a status, a refusal and an undo are written in Pkl and come out in the built JSON", () => {
 	const dir = shop();
-	expect(blokctl(dir, ["build"])).toEqual({ exit: 0, out: "Built 2 workflows into .blok/workflows.", err: "" });
+	expect(blokctl(dir, ["build"])).toEqual({
+		exit: 0,
+		out: "Built 2 workflows into .blok/workflows.\nThe API is described in .blok/openapi.json.",
+		err: "",
+	});
 	const built = json(dir, ".blok/workflows/buy.json");
 	expect(built.trigger.http).toEqual({
 		method: "POST",

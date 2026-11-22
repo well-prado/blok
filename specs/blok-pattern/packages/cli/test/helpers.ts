@@ -21,14 +21,18 @@ export function cleanUp() {
 	for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
-/** Stands in for `npm install`: links this repo's packages, and the libraries a project uses, into `dir`. */
-export function install(dir: string) {
+/**
+ * Stands in for `npm install`: links this repo's packages, and the libraries a project uses, into `dir`.
+ * `more` names the other libraries a test needs, such as "hono" or "express".
+ */
+export function install(dir: string, more: string[] = []) {
 	const from = join(packages, "kernel", "node_modules");
 	const links: Record<string, string> = {
 		"@blokjs/kernel": join(packages, "kernel"),
 		blokctl: join(packages, "cli"),
 		zod: realpathSync(join(from, "zod")),
 		fastify: realpathSync(join(from, "fastify")),
+		...Object.fromEntries(more.map((name) => [name, realpathSync(join(from, name))])),
 	};
 	for (const [name, target] of Object.entries(links)) {
 		const link = join(dir, "node_modules", name);
@@ -56,15 +60,17 @@ export function write(dir: string, file: string, content: string) {
 
 /** Runs `blokctl <args>` in `cwd`, in its own process, as the installed command would. */
 export function blokctl(cwd: string, args: string[], env: Record<string, string> = {}) {
-	const run = spawnSync(NODE, [CLI, ...args], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+	// Without the mark `bun run` leaves on its children, so the command behaves the same however the tests were started.
+	const { npm_config_user_agent: _launcher, ...clean } = process.env;
+	const run = spawnSync(NODE, [CLI, ...args], { cwd, encoding: "utf8", env: { ...clean, ...env } });
 	return { exit: run.status, out: run.stdout.trim(), err: run.stderr.trim() };
 }
 
 /** A project made by `blokctl init <name>`, with its dependencies in place. */
-export function project(name = "shop"): string {
+export function project(name = "shop", options: { server?: string; more?: string[] } = {}): string {
 	const parent = folder();
-	const made = blokctl(parent, ["init", name]);
+	const made = blokctl(parent, ["init", name, ...(options.server ? ["--server", options.server] : [])]);
 	if (made.exit !== 0) throw new Error(made.err);
-	install(join(parent, name));
+	install(join(parent, name), options.more);
 	return join(parent, name);
 }

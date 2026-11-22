@@ -54,10 +54,9 @@ export async function run(
 	} catch (err) {
 		return fail(`--input is not valid JSON: ${(err as Error).message}`);
 	}
-	// A workflow reads its request. A server always hands it all four parts, so the same holds here.
-	if (workflow && input !== null && typeof input === "object") {
-		input = { body: {}, query: {}, params: {}, headers: {}, ...input };
-	}
+	// Run with no input, a workflow on a schedule gets what its schedule would give it.
+	const scheduled = workflow?.workflow.trigger?.cron?.body;
+	if (options.input === undefined && scheduled !== undefined) input = { body: scheduled };
 	let ports: unknown;
 	try {
 		ports = await loadPorts(paths, options.ports);

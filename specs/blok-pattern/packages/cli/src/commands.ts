@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "nod
 import { join, relative } from "node:path";
 import { type JsonSchema, contract } from "@blokjs/kernel";
 import { type Analysis, type Paths, analyze, nodeFolder } from "./analyze.ts";
-import { resolveNode } from "./inspect.ts";
+import { resolveNode, startedBy } from "./inspect.ts";
+import { openapiDocument } from "./openapi.ts";
 import type { PklOptions } from "./pkl-bin.ts";
 import { stepName, workflowClass } from "./pkl.ts";
 import { type TestRun, runTests, testFiles, typeErrors } from "./tests.ts";
@@ -109,8 +110,34 @@ export async function check(paths: Paths, options: CheckOptions = {}): Promise<R
 			: []),
 		// For one node, the other nodes being empty is somebody else's job and would only read like a failure.
 		...(!id && analysis.empty.length > 0 ? [emptyText(analysis.empty)] : []),
+		...(!id ? notHttp(analysis) : []),
 	];
 	return { ok: true, text: lines.join("\n"), data };
+}
+
+/**
+ * A route is served as soon as the server mounts Blok. A schedule, a queue and a tool each need one
+ * more line where the app starts, and a workflow whose line is missing never runs and never complains.
+ */
+function notHttp(analysis: Analysis): string[] {
+	const kinds = [
+		["cron", "schedule", "startCron"],
+		["queue", "queue", "startQueues"],
+		["mcp", "tool", "blokMcp"],
+	] as const;
+	const found = kinds
+		.map(([kind, word, start]) => ({
+			n: analysis.workflows.filter((entry) => entry.workflow.trigger?.[kind]).length,
+			word,
+			start,
+		}))
+		.filter((one) => one.n > 0);
+	if (found.length === 0) return [];
+	const list = (words: string[]) => words.join(", ").replace(/, ([^,]*)$/, " and $1");
+	const one = found.length === 1 && found[0].n === 1;
+	return [
+		`Besides HTTP there ${one ? "is" : "are"} ${list(found.map((kind) => count(kind.n, kind.word)))}. ${one ? "It runs" : "They run"} only if the app calls ${list(found.map((kind) => kind.start))} where it starts.`,
+	];
 }
 
 /**
@@ -141,11 +168,21 @@ export async function build(paths: Paths, options: { allowEmpty?: boolean; pkl?:
 		if (current !== content) writeFileSync(join(paths.built, file), content);
 	}
 	const where = relative(process.cwd(), paths.built) || ".";
+	// The API description sits beside the workflows, for the server to serve or a client to be generated from.
+	const described = join(paths.built, "..", "openapi.json");
+	const routes = analysis.workflows.some((entry) => entry.workflow.trigger?.http);
+	if (routes) writeFileSync(described, `${JSON.stringify(openapiDocument(analysis, paths), null, "\t")}\n`);
+	else rmSync(described, { force: true });
 	const lines = [
 		`Built ${count(analysis.workflows.length, "workflow")} into ${where}.`,
+		...(routes ? [`The API is described in ${relative(process.cwd(), described)}.`] : []),
 		...(analysis.empty.length > 0 ? [emptyText(analysis.empty)] : []),
 	];
-	return { ok: true, text: lines.join("\n"), data: { ...data, ok: true, built: where } };
+	return {
+		ok: true,
+		text: lines.join("\n"),
+		data: { ...data, ok: true, built: where, ...(routes ? { openapi: relative(process.cwd(), described) } : {}) },
+	};
 }
 
 const fields = (shape: JsonSchema | undefined): string => {
@@ -169,6 +206,7 @@ export function list(analysis: Analysis): Report {
 		name: entry.workflow.name,
 		description: entry.workflow.description,
 		trigger: entry.workflow.trigger,
+		startedBy: startedBy(entry.id, entry.workflow),
 		request: analysis.shapes.get(entry.id)?.request,
 		answers: analysis.shapes.get(entry.id)?.output,
 	}));
@@ -183,8 +221,9 @@ export function list(analysis: Analysis): Report {
 	}
 	lines.push("", `Workflows (${workflows.length})`);
 	for (const workflow of workflows) {
-		const http = workflow.trigger?.http;
-		lines.push(`  ${workflow.id}  as ${workflow.pkl.step}${http ? `  ${http.method} ${http.path}` : ""}`);
+		lines.push(
+			`  ${workflow.id}  as ${workflow.pkl.step}${workflow.startedBy.length > 0 ? `  ${workflow.startedBy.join(", ")}` : ""}`,
+		);
 		if (workflow.description) lines.push(`    ${workflow.description}`);
 		for (const part of ["body", "query", "params", "headers"]) {
 			const shape = workflow.request?.properties?.[part];

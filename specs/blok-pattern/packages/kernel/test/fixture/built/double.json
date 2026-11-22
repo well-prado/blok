@@ -5,15 +5,25 @@
 		"http": {
 			"method": "POST",
 			"path": "/double/:times",
-			"errors": { "unlucky": 422 }
+			"errors": {
+				"unlucky": 422
+			}
+		},
+		"queue": {
+			"name": "numbers"
 		}
 	},
 	"steps": [
 		{
 			"name": "doubled",
 			"node": "demo/double@1",
-			"inputs": { "n": "${request.body.n}" }
+			"inputs": {
+				"n": "${request.body.n}"
+			}
 		}
 	],
-	"result": { "n": "${doubled.n}", "times": "${request.params.times}" }
+	"result": {
+		"n": "${doubled.n}",
+		"times": "${request.params.times}"
+	}
 }

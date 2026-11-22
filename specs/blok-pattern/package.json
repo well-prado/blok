@@ -7,7 +7,7 @@
 		"build": "tsc -p packages/kernel && tsc -p packages/cli && chmod +x packages/cli/dist/cli.js",
 		"typecheck": "bun run build && tsc -p packages/kernel/tsconfig.test.json && tsc -p packages/cli/tsconfig.test.json && tsc -p prototype && tsc -p e2e && tsc -p factory",
 		"test": "bun run build && bun test packages prototype",
-		"e2e": "bun e2e/empty-folder.ts bun && bun e2e/empty-folder.ts npm"
+		"e2e": "bun e2e/empty-folder.ts bun && bun e2e/empty-folder.ts npm && bun e2e/empty-folder.ts bun hono && bun e2e/empty-folder.ts npm hono && bun e2e/empty-folder.ts bun express && bun e2e/empty-folder.ts npm express"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.4.5",

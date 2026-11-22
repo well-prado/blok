@@ -3,8 +3,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { HttpBinding, Unit } from "./kernel.ts";
-import { type Workflow, httpBinding, loadWorkflows } from "./workflow.ts";
+import { type Binding, type Call, type Log, type Span, type Unit, blok, consoleLog } from "./kernel.ts";
+import { type Workflow, type WorkflowShape, bindingsOf, loadChecked } from "./workflow.ts";
 
 const NODE_FILE = /(^|[\\/])node\.[cm]?[jt]s$/;
 
@@ -64,7 +64,10 @@ export interface ProjectOptions {
 	nodes?: string;
 	/** Where the built workflow JSON is. Default: `<dir>/.blok/workflows`. */
 	workflows?: string;
-	/** What `${env.NAME}` reads in a workflow. Default: nothing. */
+	/**
+	 * What `${env.NAME}` reads in a workflow, and where a signed trigger finds its secret.
+	 * Default: nothing. Most apps pass `process.env`.
+	 */
 	env?: Record<string, string | undefined>;
 }
 
@@ -72,15 +75,52 @@ export interface Project {
 	/** Every node and every workflow, by id. Any of them can be passed to `call`. */
 	units: Map<string, Unit>;
 	workflows: Array<{ id: string; workflow: Workflow }>;
-	/** One per workflow that has an HTTP trigger. */
-	bindings: HttpBinding[];
+	/** What each workflow reads and answers with, as the check worked it out. */
+	shapes: Map<string, WorkflowShape>;
+	/** One per trigger: a route, a schedule, a queue or a tool. An adapter takes the kind it serves. */
+	bindings: Binding[];
 }
 
 /** Loads the nodes and the built workflows, and checks that every workflow lines up with its nodes. */
 export async function loadProject(options: ProjectOptions): Promise<Project> {
 	const units = await discoverNodes(options.nodes ?? join(options.dir, "nodes"));
 	const workflows = readBuiltWorkflows(options.workflows ?? join(options.dir, ".blok", "workflows"));
-	loadWorkflows(workflows, units, options.env);
-	const bindings = workflows.flatMap(({ id, workflow }) => httpBinding(workflow, units.get(id) as Unit) ?? []);
-	return { units, workflows, bindings };
+	const { shapes } = loadChecked(workflows, units, options.env);
+	const bindings = workflows.flatMap(({ id, workflow }) =>
+		bindingsOf(id, workflow, units.get(id) as Unit, shapes.get(id), options.env),
+	);
+	return { units, workflows, shapes, bindings };
 }
+
+export interface AppOptions extends ProjectOptions {
+	/** What the nodes reach the outside world through. */
+	ports: unknown;
+	/** Where failures nobody is there to answer are written. Default: the console, for errors only. */
+	log?: Log;
+	/** Called once for every node and workflow that ran. */
+	onSpan?: (span: Span) => void;
+}
+
+/** A loaded project that can run: what every adapter starts from. */
+export interface App extends Project {
+	call: Call;
+	log: Log;
+}
+
+/**
+ * Loads the project once, for an app that starts more than one thing from it:
+ *
+ *     const app = await loadApp({ dir: import.meta.dirname, ports, env: process.env });
+ *     await server.register(blokFastify, app);
+ *     await startCron(app);
+ */
+export async function loadApp(options: AppOptions): Promise<App> {
+	const project = await loadProject(options);
+	const log = options.log ?? consoleLog;
+	const { call } = blok<unknown>().runtime({ ports: options.ports, log, onSpan: options.onSpan });
+	return { ...project, call, log };
+}
+
+/** An adapter takes an app that is already loaded, or the options to load one. */
+export const ready = (source: App | AppOptions): Promise<App> =>
+	"call" in source ? Promise.resolve(source) : loadApp(source);

@@ -7,11 +7,16 @@ name = "Quote"
 description = "Prices every line of a basket, four at a time, then totals it."
 version = "1.0.0"
 
+// A route for the shop's own pages, and a tool for an AI agent. The agent's arguments are the same body.
 trigger {
   http = new {
     method = "POST"
     path = "/quotes"
     errors { ["unknown_sku"] = 422 }
+  }
+  mcp = new {
+    tool = "quote_order"
+    description = "Prices a basket without placing an order. Give it items: a list of { sku, qty }."
   }
 }
 

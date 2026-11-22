@@ -2,7 +2,7 @@
 
 Written 2026-11-21. This turns the prototype in `prototype/` into something a person installs and an AI can build a whole backend with.
 
-**Phases 1 and 2 are built**, and the agent run that phase 2 was defined by passed: 16 build agents, 28 nodes, no merge conflict, and a working app. Phase 1 was built the same day as this plan. It lives in `packages/` beside this file, outside the monorepo's workspace, so Blok 2.x is untouched. Both packages are marked `private` and nothing is published. The section "Phase 1: what was built" says what exists and where it differs from the first draft of this plan. Everything from phase 2 on is still a plan.
+**Phases 1, 2 and 3 are built**, and the agent run that phase 2 was defined by passed: 16 build agents, 28 nodes, no merge conflict, and a working app. Phase 1 was built the same day as this plan. It lives in `packages/` beside this file, outside the monorepo's workspace, so Blok 2.x is untouched. Both packages are marked `private` and nothing is published. Each built phase has a section, "what was built", that says what exists and where it differs from the plan. Phases 4 and 5 are still a plan.
 
 ## The short version
 
@@ -15,8 +15,8 @@ Written 2026-11-21. This turns the prototype in `prototype/` into something a pe
 | Piece | What it is | When you need it |
 | --- | --- | --- |
 | The pattern | One page: the folder layout, what a node declares, the workflow format, the error rules | Always. It is the same in every language |
-| The library | The kernel, the workflow runner and the Fastify adapter. About 1,150 lines | In your app, at run time |
-| The CLI | `init`, `new`, `check`, `build`, `dev`, `list` | While developing and in CI. Never in production |
+| The library | The kernel, the workflow runner, and one small adapter each for Fastify, Hono, Express, schedules, queues and tools for agents. About 2,390 lines, of which 1,650 are the core | In your app, at run time |
+| The CLI | 15 commands, from `init` to `mcp` | While developing and in CI. Never in production |
 
 The library has no opinion about your server. Today's Blok 2.x runs your app. This one is called by your app.
 
@@ -35,7 +35,7 @@ bunx blokctl@next init
 await app.register(blokFastify, { dir: import.meta.dirname, ports });
 ```
 
-For a new project, `bunx blokctl@next init my-api` creates the folder with a small Fastify server already wired.
+For a new project, `bunx blokctl@next init my-api` creates the folder with a small Fastify server already wired. `--server hono` or `--server express` wires that server instead. In an existing app, `init` reads `package.json` and prints the line for the server the app already has.
 
 The package names are a recommendation, not a decision. See "Decisions that are yours".
 
@@ -74,10 +74,11 @@ The built JSON goes to `.blok/` and not `dist/`, because many apps already build
 | --- | --- | --- |
 | `init` | Adds the folders and the rules page to a new or existing app | Built |
 | `new node billing/charge-card` | Creates the node folder with a contract, `run: todo` and a test file | Built |
-| `new workflow checkout` | Creates a Pkl workflow with an HTTP trigger, or JSON with `--json` | Built |
+| `new workflow checkout` | Creates a Pkl workflow with an HTTP trigger, or JSON with `--json`. `--trigger cron`, `queue` or `mcp` starts it another way | Built |
 | `new version billing/charge-card` | Copies `v1` to `v2` so a big change never edits the old one | Built |
 | `check` | Path matches id, contracts are valid and match what was locked, Pkl types pass, every workflow lines up with its nodes. `--tests` also runs the node tests | Built |
-| `build` | Turns every workflow into JSON under `.blok/` and refuses to ship a node that is still empty | Built |
+| `build` | Turns every workflow into JSON under `.blok/`, writes `.blok/openapi.json`, and refuses to ship a node that is still empty | Built |
+| `openapi` | Prints every route as an OpenAPI 3.1 document | Built |
 | `dev -- <start command>` | Rebuilds on every change and restarts the app when the build is good | Built |
 | `list` | The catalog: every node and workflow with what it takes and answers with. Empty nodes are marked | Built |
 | `check <node>` | The gate for one node: the project lines up, the node is written, its contract is unchanged, and its tests pass | Built |
@@ -149,15 +150,15 @@ The trigger decides. A trigger turns something from outside into a call to a wor
 
 | App | Trigger | State |
 | --- | --- | --- |
-| REST API | `http` | Built in the prototype |
-| Webhook receiver | `http` plus signature check | Planned |
-| Scheduled jobs | `cron` | Planned |
-| Background workers | `queue` | Planned |
-| Tools for AI agents | `mcp`: a workflow becomes a tool | Planned |
+| REST API | `http` | Built, on Fastify, Hono and Express |
+| Webhook receiver | `http` plus signature check | Built: four signature schemes |
+| Scheduled jobs | `cron` | Built: runs inside the app |
+| Background workers | `queue` | Built: you connect the broker with one function |
+| Tools for AI agents | `mcp`: a workflow becomes a tool | Built, on the official MCP library |
 | Command-line tools | `cli` | Planned |
 | Live connections | WebSocket, SSE | Later |
 
-Blok 2.x already has nine trigger packages. The plan is to wrap them as adapters instead of rewriting them. How much carries over is not checked yet.
+Blok 2.x already has nine trigger packages, and the first plan was to wrap them as adapters. That did not happen: see "Phase 3: what was built".
 
 Not a fit:
 
@@ -179,8 +180,13 @@ None of this is built. TypeScript comes first.
 
 | Claim | Evidence |
 | --- | --- |
-| The kernel, runner, checker, command-line tool and Pkl loading work | 88 tests pass: 25 kernel, 35 command-line tool, 28 in the example app |
-| It installs and runs from an empty folder | `e2e/empty-folder.ts` passes with Bun, and with npm and Node: packed tarballs, `init`, `new node`, `new workflow`, `check`, `build`, a server answering. Also in an existing Fastify app, with one `register` line |
+| The kernel, runner, checker, command-line tool and Pkl loading work | 123 tests pass: 46 kernel, 44 command-line tool, 33 in the example app |
+| It installs and runs from an empty folder | `e2e/empty-folder.ts` passes six times: Bun, and npm with Node, each on Fastify, Hono and Express. Packed tarballs, `init`, `new node`, `new workflow`, `check`, `build`, a server answering. Also in an existing Fastify app, with one `register` line |
+| The three servers behave the same | One test sends the same twelve requests to Fastify, Hono and Express and compares status and body |
+| A webhook is refused unless it is signed | The check accepts the example GitHub publishes, and for the other schemes a signature made with Node's own HMAC. It refuses a changed body, a wrong secret and a request older than five minutes |
+| Schedules are read correctly | The reader agrees with the cron library croner on 1,344 run times in four time zones |
+| An agent can use a workflow as a tool | The official MCP client lists and calls it, in memory and against a real process |
+| The API is described without anyone writing the description | An OpenAPI validator accepts the generated document for the test project and for the example app |
 | One folder per node removes fan-out conflicts | 16 branches: 0 conflicts with the pattern, 15 when every branch appends to a shared registry file |
 | Production needs no Pkl | With `pkl` removed from the path, the 10 generated JSON files load, pass the check, and checkout answers |
 | Design first works | All 10 workflows pass the wiring check with all 15 nodes replaced by empty stubs |
@@ -261,11 +267,40 @@ Found in the runs. The owner asked for each to follow common practice, and each 
 
 The README section "Failing well" has the details and the limits of each.
 
-### Phase 3: more kinds of app
+### Phase 3: what was built
 
-- `cron`, `queue`, webhook and `mcp` triggers.
-- Hono and Express adapters.
-- An OpenAPI file generated from the contracts.
+Done on 2026-11-22.
+
+- Four more ways to start a workflow, each written in its `trigger`: `cron`, `queue`, `mcp`, and `signature` on `http` for a webhook. A workflow may have one of each.
+- Adapters in `@blokjs/kernel`, each a file of its own: `/hono`, `/express`, `/cron`, `/queue`, `/mcp`, beside `/fastify`. What the three servers share is in `/http`.
+- `loadApp`: loads the project once for an app that starts several things from it.
+- `blokctl openapi`, and `.blok/openapi.json` written by `build`.
+- `blokctl new workflow <name> --trigger cron|queue|mcp` and `blokctl init <name> --server hono|express`.
+- The rules page has a section "What starts a workflow", and the design brief tells the design agent when to use each trigger.
+
+Every way of starting a workflow hands it a `body`, the same way a workflow used as a step already got its inputs. So one workflow can have a route, a schedule and a tool name at once, and the check that already worked out the request's shape now also gives a tool its arguments and a route its OpenAPI description.
+
+Where it differs from the plan:
+
+| The plan said | What was built, and why |
+| --- | --- |
+| Wrap the 2.x trigger packages as adapters | New adapters, written for the kernel. The 2.x packages each import the 2.x runner, which the kernel replaces, so wrapping them would bring the old runner along. The 2.x cron, worker, mcp and webhook triggers are 633, 4,143, 1,102 and 986 lines. The new ones are 272 (with the schedule reader), 130, 59 and about 80 |
+| A `queue` trigger | The trigger and the adapter are built. The queue itself is not: the app passes one `subscribe` function that connects its broker. A queue inside the process comes with it for development |
+| An `mcp` trigger | Built on the official MCP library as an optional dependency, not on a protocol reader of our own, so it follows the protocol as it changes and speaks any transport the library has |
+| | A query string, a path parameter and a header are text. Where a node asks for a number, true/false or a list, the text is now read as one. Writing the OpenAPI file showed the gap: it would have promised a number that the server then refused |
+| | A failure nobody planned for used to send the caller the message of whatever was thrown. It now sends no detail and writes the message to the log |
+| | Two workflows on the same route, queue or tool name are refused by the check. Two agents each adding a workflow can pick the same one |
+| | In Pkl, `concurrency = 0` used to pass, because Pkl's `isPositive` lets zero through. It is refused now |
+
+Not done:
+
+- No agent has designed an app with these triggers. Phase 2 was proven by an agent run, and phase 3 by tests and by starting the example app.
+- No real broker was connected to the queue adapter.
+- Tools for agents were not run over HTTP, which needs sign-in that is not built.
+- A `cli` trigger, WebSocket and SSE.
+- A schedule keeps nothing: a run that was due while the app was down is not made up for, and several copies of an app each run every job.
+
+The README section "What starts a workflow" has the format and the limits of each.
 
 ### Phase 4: a second language
 
@@ -288,4 +323,5 @@ The README section "Failing well" has the details and the limits of each.
 
 - **Pkl is young.** It is still at 0.x, and 0.33.0 dropped the native Intel Mac binary. The protection is that JSON stays the real format. Pkl can be replaced without touching the runner.
 - **Two things the editor does not underline.** A missing required input and a typo inside a `"${...}"` string. `blokctl check` catches both.
-- **Size.** The library is about 1,150 lines and the command-line tool about 1,330. Core, triggers and CLI in 2.x are about 106,000 lines of non-test TypeScript, and they do far more. Phase 3 is where the new one could grow the same way, so each trigger should be an adapter outside the kernel.
+- **Size.** The library is about 2,390 lines and the command-line tool about 2,950. Core, triggers and CLI in 2.x are about 106,000 lines of non-test TypeScript, and they do far more. Phase 3 added about 690 lines to the library as adapters, each in its own file, and about 360 to the core, most of them in the check. The command-line tool grew by about 440.
+- **Schedules in more than one copy.** `startCron` runs inside the app. Deployed as three copies, every job runs three times, and nothing in the tool warns about it. The fix belongs to the app today: start the schedules in one copy.

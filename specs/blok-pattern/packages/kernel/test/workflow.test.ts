@@ -80,7 +80,8 @@ test("a workflow's request shape is not written down: it follows from the inputs
 		required: ["sku", "token"],
 		properties: {
 			sku: { type: "string" },
-			qty: { type: "integer" },
+			// What the node says about a field besides its kind comes along, for whoever reads the API's description.
+			qty: { type: "integer", default: 1 },
 			token: { type: "string" },
 			notify: { type: "boolean" },
 			email: { type: "string" },
@@ -201,11 +202,11 @@ test("loadProject finds the nodes by their folders and the workflows by their bu
 		"demo/later@1",
 		"workflows/double@1",
 		"workflows/later@1",
+		"workflows/twice@1",
 	]);
-	expect(project.bindings.map((binding) => `${binding.method} ${binding.path}`)).toEqual([
-		"POST /double/:times",
-		"GET /later",
-	]);
+	expect(
+		project.bindings.flatMap((binding) => (binding.kind === "http" ? `${binding.method} ${binding.path}` : [])),
+	).toEqual(["POST /double/:times", "GET /later"]);
 
 	// Nothing built yet is the first thing a new user meets, so it says what to run.
 	expect(loadProject({ dir: fixture })).rejects.toThrow(/There are no built workflows at .*Run "blokctl build" first/);

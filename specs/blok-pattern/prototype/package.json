@@ -8,7 +8,8 @@
 		"dev": "blokctl dev -- bun app.ts",
 		"start": "bun app.ts",
 		"bench": "bun run bench.ts",
-		"test": "bun test"
+		"test": "bun test",
+		"mcp": "bun mcp.ts"
 	},
 	"imports": {
 		"#blok": "./blok.ts",
@@ -17,10 +18,12 @@
 	"dependencies": {
 		"@blokjs/kernel": "3.0.0-next.0",
 		"fastify": "^5.12.8",
-		"zod": "^4.6.7"
+		"zod": "^4.6.7",
+		"@modelcontextprotocol/sdk": "^1.32.2"
 	},
 	"devDependencies": {
 		"blokctl": "3.0.0-next.0",
-		"ajv": "^8.20.0"
+		"ajv": "^8.20.0",
+		"@seriousme/openapi-schema-validator": "^2.12.0"
 	}
 }
