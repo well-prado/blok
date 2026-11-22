@@ -1,0 +1,770 @@
+{
+	"about": "The request a workflow runs on: what is refused before any step runs, and how text from a query string, a path or a header becomes the kind of value a node asks for.",
+	"cases": [
+		{
+			"name": "a request that lacks what a step is certain to need is refused before any step runs",
+			"workflows": {
+				"needs": {
+					"name": "Needs",
+					"steps": [
+						{
+							"name": "started",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "started"
+							}
+						},
+						{
+							"name": "sum",
+							"node": "test/add@1",
+							"inputs": {
+								"a": "${request.body.a}",
+								"b": "${request.body.b}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/needs@1",
+					"input": {
+						"body": {
+							"a": 1,
+							"b": 2
+						}
+					},
+					"output": {
+						"sum": 3
+					}
+				},
+				{
+					"call": "workflows/needs@1",
+					"input": {
+						"body": {
+							"a": 1
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/needs@1",
+						"message": "The request is missing: body.b."
+					},
+					"journal": [],
+					"spans": [
+						{
+							"id": "workflows/needs@1",
+							"kind": "workflow",
+							"attempts": 1,
+							"ok": false,
+							"error": "invalid_input"
+						}
+					]
+				},
+				{
+					"call": "workflows/needs@1",
+					"input": {},
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/needs@1",
+						"message": "The request is missing: body.a, body.b."
+					},
+					"journal": []
+				},
+				{
+					"call": "workflows/needs@1",
+					"input": null,
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/needs@1",
+						"message": "The request is missing: body.a, body.b."
+					}
+				},
+				{
+					"call": "workflows/needs@1",
+					"input": {
+						"body": {
+							"a": 1,
+							"b": null
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/add@1"
+					},
+					"journal": ["started"]
+				}
+			],
+			"built": {
+				"workflows/needs@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"a": {
+										"type": "number"
+									},
+									"b": {
+										"type": "number"
+									}
+								},
+								"required": ["a", "b"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "what a step can do without is not required of the request",
+			"workflows": {
+				"optional": {
+					"name": "Optional",
+					"steps": [
+						{
+							"name": "hello",
+							"node": "test/greet@1",
+							"inputs": {
+								"name": "${request.body.name}",
+								"greeting": "${request.body.greeting}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/optional@1",
+					"input": {
+						"body": {
+							"name": "Ada"
+						}
+					},
+					"output": {
+						"text": "Hello, Ada!"
+					}
+				},
+				{
+					"call": "workflows/optional@1",
+					"input": {
+						"body": {
+							"name": "Ada",
+							"greeting": "Hi"
+						}
+					},
+					"output": {
+						"text": "Hi, Ada!"
+					}
+				},
+				{
+					"call": "workflows/optional@1",
+					"input": {
+						"body": {
+							"greeting": "Hi"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/optional@1",
+						"message": "The request is missing: body.name."
+					}
+				}
+			],
+			"built": {
+				"workflows/optional@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string"
+									},
+									"greeting": {
+										"type": "string",
+										"default": "Hello"
+									}
+								},
+								"required": ["name"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "a request always has a body, a query, params and headers, empty when nothing was given",
+			"workflows": {
+				"parts": {
+					"name": "Parts",
+					"steps": [
+						{
+							"name": "one",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1,
+								"b": 1
+							}
+						}
+					],
+					"result": {
+						"body": "${request.body}",
+						"query": "${request.query}",
+						"params": "${request.params}",
+						"headers": "${request.headers}"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/parts@1",
+					"input": null,
+					"output": {
+						"body": {},
+						"query": {},
+						"params": {},
+						"headers": {}
+					}
+				},
+				{
+					"call": "workflows/parts@1",
+					"input": {
+						"body": {
+							"a": 1
+						},
+						"query": {
+							"q": "x"
+						}
+					},
+					"output": {
+						"body": {
+							"a": 1
+						},
+						"query": {
+							"q": "x"
+						},
+						"params": {},
+						"headers": {}
+					}
+				}
+			],
+			"built": {
+				"workflows/parts@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {},
+							"query": {},
+							"params": {},
+							"headers": {}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "query text becomes the number, the true or false, or the list the node asks for",
+			"workflows": {
+				"typed-query": {
+					"name": "Typed query",
+					"steps": [
+						{
+							"name": "t",
+							"node": "test/typed@1",
+							"inputs": {
+								"count": "${request.query.count}",
+								"ratio": "${request.query.ratio}",
+								"flag": "${request.query.flag}",
+								"tags": "${request.query.tag}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "3",
+							"ratio": "0.5",
+							"flag": "true",
+							"tag": ["a", "b"]
+						}
+					},
+					"output": {
+						"count": 3,
+						"ratio": 0.5,
+						"flag": true,
+						"tags": ["a", "b"]
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "3",
+							"tag": "solo"
+						}
+					},
+					"output": {
+						"count": 3,
+						"ratio": 1,
+						"flag": false,
+						"tags": ["solo"]
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": " 12 ",
+							"flag": "false"
+						}
+					},
+					"output": {
+						"count": 12,
+						"ratio": 1,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "1e3",
+							"ratio": "-2"
+						}
+					},
+					"output": {
+						"count": 1000,
+						"ratio": -2,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "3.0",
+							"ratio": ".5"
+						}
+					},
+					"output": {
+						"count": 3,
+						"ratio": 0.5,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "+5",
+							"ratio": "5."
+						}
+					},
+					"output": {
+						"count": 5,
+						"ratio": 5,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "0x10",
+							"ratio": "0b11"
+						}
+					},
+					"output": {
+						"count": 16,
+						"ratio": 3,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": 7,
+							"flag": true
+						}
+					},
+					"output": {
+						"count": 7,
+						"ratio": 1,
+						"flag": true,
+						"tags": []
+					}
+				}
+			],
+			"built": {
+				"workflows/typed-query@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"query": {
+								"type": "object",
+								"properties": {
+									"count": {
+										"type": "integer"
+									},
+									"ratio": {
+										"type": "number",
+										"default": 1
+									},
+									"flag": {
+										"type": "boolean",
+										"default": false
+									},
+									"tag": {
+										"type": "array",
+										"default": [],
+										"items": {
+											"type": "string"
+										}
+									}
+								},
+								"required": ["count"]
+							}
+						},
+						"required": ["query"]
+					}
+				}
+			}
+		},
+		{
+			"name": "text that does not read as the kind asked for is left as it came, and the node refuses it",
+			"workflows": {
+				"typed-query": {
+					"name": "Typed query",
+					"steps": [
+						{
+							"name": "t",
+							"node": "test/typed@1",
+							"inputs": {
+								"count": "${request.query.count}",
+								"ratio": "${request.query.ratio}",
+								"flag": "${request.query.flag}",
+								"tags": "${request.query.tag}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "three"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": ""
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "   "
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "Infinity"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "1e1000"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "1_000"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "-0x10"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "nan"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "2.5"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "3",
+							"flag": "yes"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {
+							"count": "3",
+							"flag": "TRUE"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				},
+				{
+					"call": "workflows/typed-query@1",
+					"input": {
+						"query": {}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/typed-query@1",
+						"message": "The request is missing: query.count."
+					}
+				}
+			],
+			"built": {
+				"workflows/typed-query@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"query": {
+								"type": "object",
+								"properties": {
+									"count": {
+										"type": "integer"
+									},
+									"ratio": {
+										"type": "number",
+										"default": 1
+									},
+									"flag": {
+										"type": "boolean",
+										"default": false
+									},
+									"tag": {
+										"type": "array",
+										"default": [],
+										"items": {
+											"type": "string"
+										}
+									}
+								},
+								"required": ["count"]
+							}
+						},
+						"required": ["query"]
+					}
+				}
+			}
+		},
+		{
+			"name": "path parameters and headers are text too, and a body is JSON already, so nothing in it is converted",
+			"workflows": {
+				"typed-path": {
+					"name": "Typed path",
+					"steps": [
+						{
+							"name": "t",
+							"node": "test/typed@1",
+							"inputs": {
+								"count": "${request.params.id}",
+								"flag": "${request.headers.x-flag}"
+							}
+						}
+					]
+				},
+				"typed-body": {
+					"name": "Typed body",
+					"steps": [
+						{
+							"name": "t",
+							"node": "test/typed@1",
+							"inputs": {
+								"count": "${request.body.count}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/typed-path@1",
+					"input": {
+						"params": {
+							"id": "7"
+						},
+						"headers": {
+							"x-flag": "true"
+						}
+					},
+					"output": {
+						"count": 7,
+						"ratio": 1,
+						"flag": true,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-body@1",
+					"input": {
+						"body": {
+							"count": 7
+						}
+					},
+					"output": {
+						"count": 7,
+						"ratio": 1,
+						"flag": false,
+						"tags": []
+					}
+				},
+				{
+					"call": "workflows/typed-body@1",
+					"input": {
+						"body": {
+							"count": "7"
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/typed@1"
+					}
+				}
+			],
+			"built": {
+				"workflows/typed-path@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"params": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"type": "integer"
+									}
+								},
+								"required": ["id"]
+							},
+							"headers": {
+								"type": "object",
+								"properties": {
+									"x-flag": {
+										"type": "boolean",
+										"default": false
+									}
+								}
+							}
+						},
+						"required": ["params"]
+					}
+				},
+				"workflows/typed-body@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"count": {
+										"type": "integer"
+									}
+								},
+								"required": ["count"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		}
+	]
+}

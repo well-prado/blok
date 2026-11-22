@@ -2,7 +2,7 @@
 
 Written 2026-11-21. This turns the prototype in `prototype/` into something a person installs and an AI can build a whole backend with.
 
-**Phases 1, 2 and 3 are built**, and the agent run that phase 2 was defined by passed: 16 build agents, 28 nodes, no merge conflict, and a working app. Phase 1 was built the same day as this plan. It lives in `packages/` beside this file, outside the monorepo's workspace, so Blok 2.x is untouched. Both packages are marked `private` and nothing is published. Each built phase has a section, "what was built", that says what exists and where it differs from the plan. Phases 4 and 5 are still a plan.
+**Phases 1, 2, 3 and 4 are built**, and the agent run that phase 2 was defined by passed: 16 build agents, 28 nodes, no merge conflict, and a working app. Phase 1 was built the same day as this plan. It lives in `packages/` beside this file, outside the monorepo's workspace, so Blok 2.x is untouched. Both packages are marked `private` and nothing is published. Each built phase has a section, "what was built", that says what exists and where it differs from the plan. Phase 5 is still a plan.
 
 ## The short version
 
@@ -174,13 +174,16 @@ The JSON is the meeting point. A node contract is JSON Schema, and a workflow is
 - Each kernel prints its contracts as JSON. The CLI reads that to generate the typed Pkl steps, so it does not need to understand the language.
 - The CLI ships as a single binary so a Python project does not need Node.
 
-None of this is built. TypeScript comes first.
+This is built for Python: see "Phase 4: what was built". The rules a kernel follows are on one page, [PATTERN.md](PATTERN.md).
 
 ## Already proven
 
 | Claim | Evidence |
 | --- | --- |
-| The kernel, runner, checker, command-line tool and Pkl loading work | 123 tests pass: 46 kernel, 44 command-line tool, 33 in the example app |
+| The kernel, runner, checker, command-line tool and Pkl loading work | 183 TypeScript tests pass: 98 kernel, 52 command-line tool, 33 in the example app. 73 Python tests pass |
+| A second language follows the same rules | The TypeScript kernel and the Python kernel pass the same 52 shared tests, read from the same JSON files |
+| A Python project needs no Node | `e2e/empty-folder-python.ts` passes with `blokctl` as one file and a PATH that has no `node`, `bun`, `npm` or `npx`: `init`, `new node`, `check`, `build`, `run`, and a FastAPI server answering |
+| An app never runs on wiring checked against other contracts | In that run a contract is changed after the build, and the app refuses to start and names the node |
 | It installs and runs from an empty folder | `e2e/empty-folder.ts` passes six times: Bun, and npm with Node, each on Fastify, Hono and Express. Packed tarballs, `init`, `new node`, `new workflow`, `check`, `build`, a server answering. Also in an existing Fastify app, with one `register` line |
 | The three servers behave the same | One test sends the same twelve requests to Fastify, Hono and Express and compares status and body |
 | A webhook is refused unless it is signed | The check accepts the example GitHub publishes, and for the other schemes a signature made with Node's own HMAC. It refuses a changed body, a wrong secret and a request older than five minutes |
@@ -302,11 +305,35 @@ Not done:
 
 The README section "What starts a workflow" has the format and the limits of each.
 
-### Phase 4: a second language
+### Phase 4: what was built
 
-- The one-page pattern and the shared test files.
-- One more kernel.
-- The CLI as a single binary.
+Done on 2026-11-22. The language is Python, which the owner chose when asked.
+
+- [PATTERN.md](PATTERN.md): the pattern on one page. What a contract is, the eight steps of calling a node, how a workflow runs, what the build hands a kernel, and what a kernel answers `blokctl`.
+- `conformance/cases/`: five JSON files of shared tests, and 14 small test nodes that every kernel writes in its own language. Both kernels run the same files.
+- `python/`: `blok-kernel` 3.0.0a0. Nodes with Pydantic contracts, the workflow runner, project loading, and adapters for FastAPI, schedules, queues and tools for agents. About 2,200 lines.
+- `blokctl` on a Python project: `init --lang python`, `new node`, `new version`, `check`, `check <node>` with pytest, `list`, `show`, `status`, `lock`, `build`, `run`, `doctor`, `dev`, and both briefs and the rules page in Python's words.
+- `blokctl` as one file: `bun run binary`.
+- `.blok/app.json`, written by `build` for every project: what the check learned about each workflow, and which contracts it was checked against.
+
+The plan had three lines for this phase and all three are built. What the work decided beyond them:
+
+- **The check was not written a second time.** It is about half of the TypeScript kernel, and two copies of it would drift. `blokctl` checks every project, and tells a kernel what it found through `app.json`. So a kernel in a new language is a runner and the call rules, which in Python is about 990 lines.
+- **A kernel that does not check must refuse a stale build.** The Python kernel compares a fingerprint of each node's contract with the one in `app.json` and does not start when they differ. The fingerprint is made by the kernel that will read it, so no two languages have to agree on how to write JSON down byte for byte.
+- **`blokctl` asks, it does not read.** It runs `python -m blok contracts` with the project's own Python and gets every contract as JSON. A unit made from that JSON goes through the same code as a TypeScript node, so nothing after that step knows the language.
+- **An input is checked as JSON, in both languages.** Pydantic alone would accept `"5"` for a whole number. The Python kernel refuses it, as the TypeScript one does, so a contract means one thing. A query string, a path parameter and a header are still read as the number or true/false the node asks for, by the kernel, in one documented place.
+- **Numbers.** JSON has one kind of number and Python has two. The Python kernel turns a whole float into an int wherever data crosses a boundary, and writes numbers into text the way JSON does. The shared tests found this: `2.0` printed as `2.0` and `1e-07` are both in them.
+- **A field that is not there is not null.** TypeScript has `undefined` for it and Python has nothing, so the Python runner has a value of its own for "absent". It is why a node's default applies when a workflow hands it a field the request did not have.
+
+What is not done:
+
+- Linux and Windows. The one-file `blokctl` was built for this Mac only.
+- Publishing: the wheel is not on PyPI and the name was not looked up.
+- An agent run in Python. The loop of phase 2 was not run on a Python project.
+- The example app in Python.
+- A project with nodes in two languages.
+- Type checking of Python nodes in `blokctl check <node>`.
+- A third language. PATTERN.md ends with the four steps it would take.
 
 ### Phase 5: decide what Blok 3 is
 
@@ -317,11 +344,11 @@ The README section "What starts a workflow" has the format and the limits of eac
 
 1. **Is this Blok 3?** I recommend yes, published on the `next` tag as `@blokjs/kernel` and `blokctl@next`, with 2.x untouched until a real app has run on it. Two facts behind that: the npm name `blok` is taken by a 2022 package for building React websites, so `npx blok` must never appear in the docs. And `blokctl` 2.x already has `check`, `build`, `dev` and `list` with different meanings, so the new commands need a new major version or a new name.
 2. **Folder layout.** The prototype uses `nodes/<module>/<node>/v1/`. You first described `nodes/v1/<module>/<node>/`. I recommend the prototype's, because a new version of one node then touches one folder. This has to be settled before `init` exists.
-3. **The second language.** It sets the order of phase 4.
+3. **The second language.** Decided on 2026-11-22: Python. A third one is open.
 
 ## Risks
 
 - **Pkl is young.** It is still at 0.x, and 0.33.0 dropped the native Intel Mac binary. The protection is that JSON stays the real format. Pkl can be replaced without touching the runner.
 - **Two things the editor does not underline.** A missing required input and a typo inside a `"${...}"` string. `blokctl check` catches both.
-- **Size.** The library is about 2,390 lines and the command-line tool about 2,950. Core, triggers and CLI in 2.x are about 106,000 lines of non-test TypeScript, and they do far more. Phase 3 added about 690 lines to the library as adapters, each in its own file, and about 360 to the core, most of them in the check. The command-line tool grew by about 440.
+- **Size.** The library is about 2,390 lines, the command-line tool about 3,800 and the Python kernel about 2,200. Phase 4 added about 850 lines to the command-line tool, a third of them the Python templates. Core, triggers and CLI in 2.x are about 106,000 lines of non-test TypeScript, and they do far more. Phase 3 added about 690 lines to the library as adapters, each in its own file, and about 360 to the core, most of them in the check. The command-line tool grew by about 440.
 - **Schedules in more than one copy.** `startCron` runs inside the app. Deployed as three copies, every job runs three times, and nothing in the tool warns about it. The fix belongs to the app today: start the schedules in one copy.

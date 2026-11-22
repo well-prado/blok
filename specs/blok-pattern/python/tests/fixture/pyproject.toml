@@ -1,0 +1,10 @@
+[project]
+name = "fixture"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+# A small project the kernel's tests load. `built/` is what `blokctl build` wrote for it:
+# packages/cli/test/python.test.ts fails when the two no longer agree, and says how to write it again.
+[tool.blok]
+dir = "."
+python = "../../.venv/bin/python"

@@ -5,7 +5,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Paths } from "./analyze.ts";
 import type { Report } from "./commands.ts";
+import { pyprojectSettings } from "./language.ts";
 import { PKL_VERSION, findPkl } from "./pkl-bin.ts";
+import { PYTHON_KERNEL, python } from "./python.ts";
 import { VERSION } from "./scaffold.ts";
 
 interface Finding {
@@ -26,15 +28,18 @@ export async function doctor(paths: Paths, env: Record<string, string | undefine
 	const findings: Finding[] = [];
 	const add = (what: string, state: Finding["state"], detail: string) => findings.push({ what, state, detail });
 
-	// The command runs on Node, and imports the project's TypeScript nodes as they are.
-	const node = numbers(process.versions.node);
-	add(
-		"Node",
-		older(node, [22, 18]) ? "problem" : "ok",
-		older(node, [22, 18])
-			? `This is Node ${process.versions.node}. blokctl needs 22.18 or newer, which runs TypeScript files directly.`
-			: `Node ${process.versions.node}.`,
-	);
+	const isPython = paths.language.name === "python";
+	if (!isPython) {
+		// The command runs on Node, and imports the project's TypeScript nodes as they are.
+		const node = numbers(process.versions.node);
+		add(
+			"Node",
+			older(node, [22, 18]) ? "problem" : "ok",
+			older(node, [22, 18])
+				? `This is Node ${process.versions.node}. blokctl needs 22.18 or newer, which runs TypeScript files directly.`
+				: `Node ${process.versions.node}.`,
+		);
+	}
 
 	try {
 		const pkl = await findPkl({ env: { ...env, BLOK_OFFLINE: "1" } });
@@ -61,7 +66,40 @@ export async function doctor(paths: Paths, env: Record<string, string | undefine
 	try {
 		manifest = JSON.parse(readFileSync(join(paths.root, "package.json"), "utf8"));
 	} catch {}
-	if (!manifest) {
+	if (isPython) {
+		// blokctl reads no Python. It asks the project's own Python, so that is what has to be in place.
+		const asked = python(paths.root, ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"]);
+		const version = asked.error || asked.status !== 0 ? undefined : asked.stdout.trim();
+		add(
+			"Python",
+			version === undefined || older(numbers(version), [3, 11]) ? "problem" : "ok",
+			version === undefined
+				? `Python could not be run as "${asked.command}". Install Python 3.11 or newer, or say where it is with \`python = "..."\` under [tool.blok] in pyproject.toml.`
+				: older(numbers(version), [3, 11])
+					? `"${asked.command}" is Python ${version}. The kernel needs 3.11 or newer.`
+					: `Python ${version}, run as "${asked.command}".`,
+		);
+		add(
+			"Project",
+			pyprojectSettings(paths.root) ? "ok" : "problem",
+			pyprojectSettings(paths.root)
+				? `pyproject.toml has a [tool.blok] table${existsSync(paths.nodes) ? "" : `. There is no ${paths.nodes} folder yet`}.`
+				: 'pyproject.toml has no [tool.blok] table, which is how blokctl tells a Python project. Run "blokctl init" to add it.',
+		);
+		if (version !== undefined) {
+			const kernel = python(paths.root, ["-c", "import blok; print(blok.VERSION)"]);
+			const found = kernel.status === 0 ? kernel.stdout.trim() : undefined;
+			add(
+				"blok-kernel",
+				found === undefined ? "problem" : found === PYTHON_KERNEL ? "ok" : "note",
+				found === undefined
+					? `It is not installed for "${asked.command}". Add "blok-kernel" to the project's dependencies and install them.`
+					: found === PYTHON_KERNEL
+						? `Installed, ${found}, the version this blokctl goes with.`
+						: `The project has blok-kernel ${found} and this blokctl ${VERSION} goes with ${PYTHON_KERNEL}. Use the two that go together.`,
+			);
+		}
+	} else if (!manifest) {
 		add(
 			"Project",
 			"problem",
@@ -92,7 +130,8 @@ export async function doctor(paths: Paths, env: Record<string, string | undefine
 					? `Installed, ${kernel}, the same version as blokctl.`
 					: `The project has @blokjs/kernel ${kernel} and this is blokctl ${VERSION}. Use the same version of both.`,
 		);
-
+	}
+	if (isPython || manifest) {
 		// Git itself knows best, because the rule may be in a .gitignore further up.
 		const asked = spawnSync("git", ["check-ignore", "-q", join(paths.dir, ".blok", "workflows")], { cwd: paths.root });
 		const listed =

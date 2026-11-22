@@ -1,0 +1,2484 @@
+{
+	"about": "Running a workflow: how strings are filled in, how conditions are read, and what each kind of entry does.",
+	"cases": [
+		{
+			"name": "a step reads what an earlier step produced, and the workflow answers with its last step",
+			"workflows": {
+				"sum": {
+					"name": "Sum",
+					"steps": [
+						{
+							"name": "first",
+							"node": "test/add@1",
+							"inputs": {
+								"a": "${request.body.a}",
+								"b": "${request.body.b}"
+							}
+						},
+						{
+							"name": "second",
+							"node": "test/add@1",
+							"inputs": {
+								"a": "${first.sum}",
+								"b": 10
+							}
+						},
+						{
+							"name": "third",
+							"node": "test/add@1",
+							"inputs": {
+								"a": "${prev.sum}",
+								"b": 100
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/sum@1",
+					"input": {
+						"body": {
+							"a": 1,
+							"b": 2
+						}
+					},
+					"output": {
+						"sum": 113
+					},
+					"spans": [
+						{
+							"id": "test/add@1",
+							"kind": "node",
+							"parent": "workflows/sum@1",
+							"key": "first",
+							"attempts": 1,
+							"ok": true
+						},
+						{
+							"id": "test/add@1",
+							"kind": "node",
+							"parent": "workflows/sum@1",
+							"key": "second",
+							"attempts": 1,
+							"ok": true
+						},
+						{
+							"id": "test/add@1",
+							"kind": "node",
+							"parent": "workflows/sum@1",
+							"key": "third",
+							"attempts": 1,
+							"ok": true
+						},
+						{
+							"id": "workflows/sum@1",
+							"kind": "workflow",
+							"attempts": 1,
+							"ok": true
+						}
+					]
+				}
+			],
+			"built": {
+				"workflows/sum@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"a": {
+										"type": "number"
+									},
+									"b": {
+										"type": "number"
+									}
+								},
+								"required": ["a", "b"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "a string that is one placeholder keeps the value's kind, and text around a placeholder makes text",
+			"workflows": {
+				"shapes": {
+					"name": "Shapes",
+					"steps": [
+						{
+							"name": "sum",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1,
+								"b": 2
+							}
+						},
+						{
+							"name": "list",
+							"node": "test/items@1"
+						}
+					],
+					"result": {
+						"number": "${sum.sum}",
+						"text": "total ${sum.sum}",
+						"whole": "${sum}",
+						"mixed": ["${sum.sum}", "x", 5, true, null],
+						"nested": {
+							"first": "${list.items.0.sku}",
+							"count": "${list.total}"
+						},
+						"escaped": "$${sum.sum} costs $5",
+						"object": "it is ${sum}",
+						"items": "${list.items}",
+						"spaced": "${ sum.sum }"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/shapes@1",
+					"input": {},
+					"output": {
+						"number": 3,
+						"text": "total 3",
+						"whole": {
+							"sum": 3
+						},
+						"mixed": [3, "x", 5, true, null],
+						"nested": {
+							"first": "book",
+							"count": 7
+						},
+						"escaped": "${sum.sum} costs $5",
+						"object": "it is {\"sum\":3}",
+						"items": [
+							{
+								"sku": "book",
+								"qty": 2
+							},
+							{
+								"sku": "pen",
+								"qty": 5
+							}
+						],
+						"spaced": 3
+					}
+				}
+			],
+			"built": {
+				"workflows/shapes@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "text is made the same way from every kind of value, and nothing cannot be made into text",
+			"workflows": {
+				"text": {
+					"name": "Text",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						}
+					],
+					"result": {
+						"text": "<${e.value}>"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": "a"
+						}
+					},
+					"output": {
+						"text": "<a>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 2
+						}
+					},
+					"output": {
+						"text": "<2>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 2
+						}
+					},
+					"output": {
+						"text": "<2>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 1.5
+						}
+					},
+					"output": {
+						"text": "<1.5>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": -0.25
+						}
+					},
+					"output": {
+						"text": "<-0.25>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 0.000001
+						}
+					},
+					"output": {
+						"text": "<0.000001>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 1e-7
+						}
+					},
+					"output": {
+						"text": "<1e-7>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 123456789012345680000
+						}
+					},
+					"output": {
+						"text": "<123456789012345680000>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": 1e21
+						}
+					},
+					"output": {
+						"text": "<1e+21>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": true
+						}
+					},
+					"output": {
+						"text": "<true>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": false
+						}
+					},
+					"output": {
+						"text": "<false>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": [1, "b", false, null]
+						}
+					},
+					"output": {
+						"text": "<[1,\"b\",false,null]>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": {
+								"a": {
+									"b": null
+								},
+								"c": "é"
+							}
+						}
+					},
+					"output": {
+						"text": "<{\"a\":{\"b\":null},\"c\":\"é\"}>"
+					}
+				},
+				{
+					"call": "workflows/text@1",
+					"input": {
+						"body": {
+							"value": null
+						}
+					},
+					"error": {
+						"code": "workflow_ref",
+						"node": "workflows/text@1",
+						"message": "\"<${e.value}>\" has an empty placeholder."
+					}
+				}
+			],
+			"built": {
+				"workflows/text@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "a number that came out whole is written as a whole number, and is equal to one",
+			"workflows": {
+				"whole": {
+					"name": "Whole",
+					"steps": [
+						{
+							"name": "sum",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1.5,
+								"b": 0.5
+							}
+						},
+						{
+							"name": "is-two",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "it is 2"
+							},
+							"if": "${sum.sum} == 2"
+						},
+						{
+							"name": "at-least-two",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "at least 2"
+							},
+							"if": "${sum.sum} >= 2"
+						}
+					],
+					"result": {
+						"text": "sum ${sum.sum}",
+						"n": "${sum.sum}"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/whole@1",
+					"input": {},
+					"output": {
+						"text": "sum 2",
+						"n": 2
+					},
+					"journal": ["it is 2", "at least 2"]
+				}
+			],
+			"built": {
+				"workflows/whole@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "a field that is not there is simply absent, and reading through nothing is an error",
+			"workflows": {
+				"absent": {
+					"name": "Absent",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						},
+						{
+							"name": "g",
+							"node": "test/greet@1",
+							"inputs": {
+								"name": "${e.value.name}",
+								"greeting": "${e.value.greeting}"
+							}
+						}
+					]
+				},
+				"beyond": {
+					"name": "Beyond",
+					"steps": [
+						{
+							"name": "list",
+							"node": "test/items@1"
+						}
+					],
+					"result": {
+						"item": "${list.items.5}",
+						"kept": "${list.total}",
+						"in-a-list": ["${list.items.5}"]
+					}
+				},
+				"through": {
+					"name": "Through",
+					"steps": [
+						{
+							"name": "list",
+							"node": "test/items@1"
+						}
+					],
+					"result": {
+						"sku": "${list.items.5.sku}"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": {
+								"name": "Ada"
+							}
+						}
+					},
+					"output": {
+						"text": "Hello, Ada!"
+					}
+				},
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": {
+								"name": "Ada",
+								"greeting": "Hi"
+							}
+						}
+					},
+					"output": {
+						"text": "Hi, Ada!"
+					}
+				},
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": {
+								"greeting": "Hi"
+							}
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/greet@1"
+					}
+				},
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": {
+								"name": "Ada",
+								"greeting": null
+							}
+						}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/greet@1"
+					}
+				},
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": null
+						}
+					},
+					"error": {
+						"code": "workflow_ref",
+						"node": "workflows/absent@1",
+						"message": "\"${e.value.name}\" has nothing at \"name\"."
+					}
+				},
+				{
+					"call": "workflows/absent@1",
+					"input": {
+						"body": {
+							"value": "text"
+						}
+					},
+					"error": {
+						"code": "workflow_ref",
+						"node": "workflows/absent@1",
+						"message": "\"${e.value.name}\" has nothing at \"name\"."
+					}
+				},
+				{
+					"call": "workflows/beyond@1",
+					"input": {},
+					"output": {
+						"kept": 7,
+						"in-a-list": [null]
+					}
+				},
+				{
+					"call": "workflows/through@1",
+					"input": {},
+					"error": {
+						"code": "workflow_ref",
+						"node": "workflows/through@1",
+						"message": "\"${list.items.5.sku}\" has nothing at \"sku\"."
+					}
+				}
+			],
+			"built": {
+				"workflows/absent@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/beyond@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				},
+				"workflows/through@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "a workflow reads the environment it was loaded with",
+			"env": {
+				"REGION": "eu"
+			},
+			"workflows": {
+				"where": {
+					"name": "Where",
+					"steps": [
+						{
+							"name": "one",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1,
+								"b": 1
+							}
+						}
+					],
+					"result": {
+						"region": "${env.REGION}",
+						"text": "in ${env.REGION}"
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/where@1",
+					"input": {},
+					"output": {
+						"region": "eu",
+						"text": "in eu"
+					}
+				}
+			],
+			"built": {
+				"workflows/where@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "an if decides whether a step runs",
+			"workflows": {
+				"gate": {
+					"name": "Gate",
+					"steps": [
+						{
+							"name": "big",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "big"
+							},
+							"if": "${request.body.n} > 10"
+						},
+						{
+							"name": "small",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "small"
+							},
+							"if": "${request.body.n} <= 10"
+						},
+						{
+							"name": "ten",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "exactly ten"
+							},
+							"if": "${request.body.n} == 10"
+						},
+						{
+							"name": "not-ten",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "not ten"
+							},
+							"if": "${request.body.n}!=10"
+						},
+						{
+							"name": "at-least",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "at least m"
+							},
+							"if": "${request.body.n} >= ${request.body.m}"
+						},
+						{
+							"name": "below",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "below m"
+							},
+							"if": "  ${request.body.n} < ${request.body.m}  "
+						},
+						{
+							"name": "flagged",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "flagged"
+							},
+							"if": "${request.body.flag}"
+						}
+					],
+					"result": {
+						"done": true
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/gate@1",
+					"input": {
+						"body": {
+							"n": 11,
+							"m": 11,
+							"flag": true
+						}
+					},
+					"output": {
+						"done": true
+					},
+					"journal": ["big", "not ten", "at least m", "flagged"]
+				},
+				{
+					"call": "workflows/gate@1",
+					"input": {
+						"body": {
+							"n": 10,
+							"m": 20,
+							"flag": false
+						}
+					},
+					"output": {
+						"done": true
+					},
+					"journal": ["small", "exactly ten", "below m"]
+				},
+				{
+					"call": "workflows/gate@1",
+					"input": {
+						"body": {
+							"n": 10.5,
+							"m": 10.5,
+							"flag": false
+						}
+					},
+					"output": {
+						"done": true
+					},
+					"journal": ["big", "not ten", "at least m"]
+				}
+			],
+			"built": {
+				"workflows/gate@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"n": {
+										"type": "integer"
+									},
+									"m": {},
+									"flag": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "equal means the same kind and the same value: text is not a number, and 1 is not true",
+			"workflows": {
+				"compare": {
+					"name": "Compare",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						},
+						{
+							"name": "is-word",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "word"
+							},
+							"if": "${e.value} == open"
+						},
+						{
+							"name": "is-quoted",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "quoted"
+							},
+							"if": "${e.value} == 'two words'"
+						},
+						{
+							"name": "is-double",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "double"
+							},
+							"if": "${e.value} == \"two words\""
+						},
+						{
+							"name": "is-five",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "five"
+							},
+							"if": "${e.value} == 5"
+						},
+						{
+							"name": "is-negative",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "negative"
+							},
+							"if": "${e.value} == -2.5"
+						},
+						{
+							"name": "is-true",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "true"
+							},
+							"if": "${e.value} == true"
+						},
+						{
+							"name": "is-false",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "false"
+							},
+							"if": "${e.value} == false"
+						},
+						{
+							"name": "is-null",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "null"
+							},
+							"if": "${e.value} == null"
+						},
+						{
+							"name": "is-something",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "something"
+							},
+							"if": "${e.value} != null"
+						}
+					],
+					"result": {
+						"done": true
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": "open"
+						}
+					},
+					"journal": ["word", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": "two words"
+						}
+					},
+					"journal": ["quoted", "double", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": 5
+						}
+					},
+					"journal": ["five", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": 5
+						}
+					},
+					"journal": ["five", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": "5"
+						}
+					},
+					"journal": ["something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": -2.5
+						}
+					},
+					"journal": ["negative", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": true
+						}
+					},
+					"journal": ["true", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": 1
+						}
+					},
+					"journal": ["something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": false
+						}
+					},
+					"journal": ["false", "something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": 0
+						}
+					},
+					"journal": ["something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": "true"
+						}
+					},
+					"journal": ["something"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": null
+						}
+					},
+					"journal": ["null"]
+				},
+				{
+					"call": "workflows/compare@1",
+					"input": {
+						"body": {
+							"value": []
+						}
+					},
+					"journal": ["something"]
+				}
+			],
+			"built": {
+				"workflows/compare@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "a condition that is not true or false, or orders things that are not numbers, fails the workflow",
+			"workflows": {
+				"not-boolean": {
+					"name": "Not boolean",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						},
+						{
+							"name": "ran",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "ran"
+							},
+							"if": "${e.value}"
+						}
+					],
+					"result": {
+						"done": true
+					}
+				},
+				"not-ordered": {
+					"name": "Not ordered",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						},
+						{
+							"name": "ran",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "ran"
+							},
+							"if": "${e.value} > 3"
+						}
+					],
+					"result": {
+						"done": true
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/not-boolean@1",
+					"input": {
+						"body": {
+							"value": true
+						}
+					},
+					"journal": ["ran"]
+				},
+				{
+					"call": "workflows/not-boolean@1",
+					"input": {
+						"body": {
+							"value": false
+						}
+					},
+					"journal": []
+				},
+				{
+					"call": "workflows/not-boolean@1",
+					"input": {
+						"body": {
+							"value": "yes"
+						}
+					},
+					"error": {
+						"code": "workflow_if",
+						"node": "workflows/not-boolean@1",
+						"message": "\"${e.value}\" is not true or false."
+					}
+				},
+				{
+					"call": "workflows/not-boolean@1",
+					"input": {
+						"body": {
+							"value": 1
+						}
+					},
+					"error": {
+						"code": "workflow_if",
+						"node": "workflows/not-boolean@1",
+						"message": "\"${e.value}\" is not true or false."
+					}
+				},
+				{
+					"call": "workflows/not-boolean@1",
+					"input": {
+						"body": {
+							"value": null
+						}
+					},
+					"error": {
+						"code": "workflow_if",
+						"node": "workflows/not-boolean@1",
+						"message": "\"${e.value}\" is not true or false."
+					}
+				},
+				{
+					"call": "workflows/not-ordered@1",
+					"input": {
+						"body": {
+							"value": 4
+						}
+					},
+					"journal": ["ran"]
+				},
+				{
+					"call": "workflows/not-ordered@1",
+					"input": {
+						"body": {
+							"value": 3
+						}
+					},
+					"journal": []
+				},
+				{
+					"call": "workflows/not-ordered@1",
+					"input": {
+						"body": {
+							"value": "4"
+						}
+					},
+					"error": {
+						"code": "workflow_if",
+						"node": "workflows/not-ordered@1",
+						"message": "\"${e.value} > 3\" compares things that are not numbers."
+					}
+				},
+				{
+					"call": "workflows/not-ordered@1",
+					"input": {
+						"body": {
+							"value": true
+						}
+					},
+					"error": {
+						"code": "workflow_if",
+						"node": "workflows/not-ordered@1",
+						"message": "\"${e.value} > 3\" compares things that are not numbers."
+					}
+				}
+			],
+			"built": {
+				"workflows/not-boolean@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/not-ordered@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "conditions: the first branch that holds runs, or else the last, and its last step is the answer",
+			"workflows": {
+				"branch": {
+					"name": "Branch",
+					"steps": [
+						{
+							"conditions": [
+								{
+									"if": "${request.body.n} > 100",
+									"steps": [
+										{
+											"name": "huge",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "huge"
+											}
+										}
+									]
+								},
+								{
+									"if": "${request.body.n} > 10",
+									"steps": [
+										{
+											"name": "big",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "big"
+											}
+										}
+									]
+								},
+								{
+									"else": [
+										{
+											"name": "small",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "small"
+											}
+										}
+									]
+								}
+							]
+						},
+						{
+							"conditions": [
+								{
+									"if": "${request.body.n} == 0",
+									"steps": [
+										{
+											"name": "zero",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "zero"
+											}
+										}
+									]
+								}
+							]
+						}
+					],
+					"result": {
+						"done": true
+					}
+				},
+				"branch-answer": {
+					"name": "Branch answer",
+					"steps": [
+						{
+							"conditions": [
+								{
+									"if": "${request.body.n} > 10",
+									"steps": [
+										{
+											"name": "big",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "big"
+											}
+										}
+									]
+								},
+								{
+									"else": [
+										{
+											"name": "small",
+											"node": "test/record@1",
+											"inputs": {
+												"note": "small"
+											}
+										}
+									]
+								}
+							]
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/branch@1",
+					"input": {
+						"body": {
+							"n": 500
+						}
+					},
+					"journal": ["huge"]
+				},
+				{
+					"call": "workflows/branch@1",
+					"input": {
+						"body": {
+							"n": 50
+						}
+					},
+					"journal": ["big"]
+				},
+				{
+					"call": "workflows/branch@1",
+					"input": {
+						"body": {
+							"n": 5
+						}
+					},
+					"journal": ["small"]
+				},
+				{
+					"call": "workflows/branch@1",
+					"input": {
+						"body": {
+							"n": 0
+						}
+					},
+					"journal": ["small", "zero"]
+				},
+				{
+					"call": "workflows/branch-answer@1",
+					"input": {
+						"body": {
+							"n": 50
+						}
+					},
+					"output": {
+						"note": "big",
+						"position": 1
+					}
+				},
+				{
+					"call": "workflows/branch-answer@1",
+					"input": {
+						"body": {
+							"n": 5
+						}
+					},
+					"output": {
+						"note": "small",
+						"position": 1
+					}
+				}
+			],
+			"built": {
+				"workflows/branch@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"n": {
+										"type": "integer"
+									}
+								}
+							}
+						}
+					}
+				},
+				"workflows/branch-answer@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"n": {
+										"type": "integer"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "a step that is skipped leaves the previous answer in place",
+			"workflows": {
+				"skipped": {
+					"name": "Skipped",
+					"steps": [
+						{
+							"name": "first",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1,
+								"b": 2
+							}
+						},
+						{
+							"name": "more",
+							"node": "test/add@1",
+							"inputs": {
+								"a": "${first.sum}",
+								"b": 100
+							},
+							"if": "${request.body.more}"
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/skipped@1",
+					"input": {
+						"body": {
+							"more": true
+						}
+					},
+					"output": {
+						"sum": 103
+					}
+				},
+				{
+					"call": "workflows/skipped@1",
+					"input": {
+						"body": {
+							"more": false
+						}
+					},
+					"output": {
+						"sum": 3
+					}
+				}
+			],
+			"built": {
+				"workflows/skipped@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"more": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "each runs a step once per element, and the step's result is the list of results, in the order of the list",
+			"workflows": {
+				"each": {
+					"name": "Each",
+					"steps": [
+						{
+							"name": "list",
+							"node": "test/items@1"
+						},
+						{
+							"name": "lines",
+							"node": "test/greet@1",
+							"each": "${list.items}",
+							"inputs": {
+								"name": "${item.sku}",
+								"greeting": "Item"
+							}
+						}
+					],
+					"result": {
+						"lines": "${lines}",
+						"first": "${lines.0.text}"
+					}
+				},
+				"each-wide": {
+					"name": "Each wide",
+					"steps": [
+						{
+							"name": "hellos",
+							"node": "test/greet@1",
+							"each": "${request.body.names}",
+							"concurrency": 3,
+							"inputs": {
+								"name": "${item}"
+							}
+						}
+					]
+				},
+				"each-not-a-list": {
+					"name": "Each not a list",
+					"steps": [
+						{
+							"name": "e",
+							"node": "test/echo@1",
+							"inputs": {
+								"value": "${request.body.value}"
+							}
+						},
+						{
+							"name": "notes",
+							"node": "test/record@1",
+							"each": "${e.value}",
+							"inputs": {
+								"note": "x"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/each@1",
+					"input": {},
+					"output": {
+						"lines": [
+							{
+								"text": "Item, book!"
+							},
+							{
+								"text": "Item, pen!"
+							}
+						],
+						"first": "Item, book!"
+					}
+				},
+				{
+					"call": "workflows/each-wide@1",
+					"input": {
+						"body": {
+							"names": ["a", "b", "c", "d", "e", "f", "g"]
+						}
+					},
+					"output": [
+						{
+							"text": "Hello, a!"
+						},
+						{
+							"text": "Hello, b!"
+						},
+						{
+							"text": "Hello, c!"
+						},
+						{
+							"text": "Hello, d!"
+						},
+						{
+							"text": "Hello, e!"
+						},
+						{
+							"text": "Hello, f!"
+						},
+						{
+							"text": "Hello, g!"
+						}
+					]
+				},
+				{
+					"call": "workflows/each-wide@1",
+					"input": {
+						"body": {
+							"names": []
+						}
+					},
+					"output": []
+				},
+				{
+					"call": "workflows/each-not-a-list@1",
+					"input": {
+						"body": {
+							"value": "abc"
+						}
+					},
+					"error": {
+						"code": "workflow_each",
+						"node": "workflows/each-not-a-list@1",
+						"message": "\"${e.value}\" is not a list."
+					}
+				},
+				{
+					"call": "workflows/each-not-a-list@1",
+					"input": {
+						"body": {
+							"value": {
+								"0": "a"
+							}
+						}
+					},
+					"error": {
+						"code": "workflow_each",
+						"node": "workflows/each-not-a-list@1",
+						"message": "\"${e.value}\" is not a list."
+					}
+				}
+			],
+			"built": {
+				"workflows/each@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				},
+				"workflows/each-wide@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"names": {
+										"type": "array"
+									}
+								},
+								"required": ["names"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/each-not-a-list@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"value": {}
+								},
+								"required": ["value"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "when one element fails, nothing new is started and the workflow fails with that error",
+			"workflows": {
+				"each-stops": {
+					"name": "Each stops",
+					"steps": [
+						{
+							"name": "tries",
+							"node": "test/maybe@1",
+							"each": "${request.body.items}",
+							"inputs": {
+								"ok": "${item.ok}",
+								"note": "${item.note}"
+							}
+						}
+					]
+				},
+				"each-stops-wide": {
+					"name": "Each stops wide",
+					"steps": [
+						{
+							"name": "tries",
+							"node": "test/maybe@1",
+							"each": "${request.body.items}",
+							"concurrency": 2,
+							"inputs": {
+								"ok": "${item.ok}",
+								"note": "${item.note}"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/each-stops@1",
+					"input": {
+						"body": {
+							"items": [
+								{
+									"ok": true,
+									"note": "a"
+								},
+								{
+									"ok": false,
+									"note": "b"
+								},
+								{
+									"ok": true,
+									"note": "c"
+								}
+							]
+						}
+					},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: b"
+					},
+					"journal": ["a", "b"]
+				},
+				{
+					"call": "workflows/each-stops-wide@1",
+					"input": {
+						"body": {
+							"items": [
+								{
+									"ok": false,
+									"note": "a"
+								},
+								{
+									"ok": true,
+									"note": "b"
+								},
+								{
+									"ok": true,
+									"note": "c"
+								},
+								{
+									"ok": true,
+									"note": "d"
+								},
+								{
+									"ok": true,
+									"note": "e"
+								},
+								{
+									"ok": true,
+									"note": "f"
+								},
+								{
+									"ok": true,
+									"note": "g"
+								},
+								{
+									"ok": true,
+									"note": "h"
+								}
+							]
+						}
+					},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: a"
+					},
+					"journalLacks": ["e", "f", "g", "h"]
+				}
+			],
+			"built": {
+				"workflows/each-stops@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"items": {
+										"type": "array"
+									}
+								},
+								"required": ["items"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/each-stops-wide@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"items": {
+										"type": "array"
+									}
+								},
+								"required": ["items"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "onError steps run when their step fails, can read the error, and the workflow still fails with it",
+			"workflows": {
+				"on-error": {
+					"name": "On error",
+					"steps": [
+						{
+							"name": "try",
+							"node": "test/maybe@1",
+							"inputs": {
+								"ok": "${request.body.ok}",
+								"note": "try"
+							},
+							"onError": [
+								{
+									"name": "note-it",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "${error.code} at ${error.node}: ${error.message}"
+									}
+								}
+							]
+						},
+						{
+							"name": "after",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "after"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/on-error@1",
+					"input": {
+						"body": {
+							"ok": true
+						}
+					},
+					"output": {
+						"note": "after",
+						"position": 2
+					},
+					"journal": ["try", "after"]
+				},
+				{
+					"call": "workflows/on-error@1",
+					"input": {
+						"body": {
+							"ok": false
+						}
+					},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: try"
+					},
+					"journal": ["try", "refused at test/maybe@1: It was refused: try"]
+				}
+			],
+			"built": {
+				"workflows/on-error@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"ok": {
+										"type": "boolean"
+									}
+								},
+								"required": ["ok"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "undo steps take back the steps that finished, the newest first, when a later step fails",
+			"workflows": {
+				"undo": {
+					"name": "Undo",
+					"steps": [
+						{
+							"name": "reserve",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "reserve"
+							},
+							"undo": [
+								{
+									"name": "release",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "release ${reserve.note}"
+									}
+								}
+							]
+						},
+						{
+							"name": "charge",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "charge"
+							},
+							"undo": [
+								{
+									"name": "refund",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "refund after ${error.code}"
+									}
+								}
+							]
+						},
+						{
+							"name": "ship",
+							"node": "test/maybe@1",
+							"inputs": {
+								"ok": "${request.body.ok}",
+								"note": "ship"
+							},
+							"undo": [
+								{
+									"name": "unship",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "unship"
+									}
+								}
+							]
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/undo@1",
+					"input": {
+						"body": {
+							"ok": true
+						}
+					},
+					"output": {
+						"note": "ship"
+					},
+					"journal": ["reserve", "charge", "ship"]
+				},
+				{
+					"call": "workflows/undo@1",
+					"input": {
+						"body": {
+							"ok": false
+						}
+					},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: ship"
+					},
+					"journal": [
+						"reserve",
+						"charge",
+						"ship",
+						"refund after refused",
+						"release reserve"
+					]
+				}
+			],
+			"built": {
+				"workflows/undo@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"ok": {
+										"type": "boolean"
+									}
+								},
+								"required": ["ok"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "an undo step that fails is written to the log, the others still run, and the caller gets the first error",
+			"workflows": {
+				"undo-fails": {
+					"name": "Undo fails",
+					"steps": [
+						{
+							"name": "first",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "first"
+							},
+							"undo": [
+								{
+									"name": "undo-first",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "undo first"
+									}
+								}
+							]
+						},
+						{
+							"name": "second",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "second"
+							},
+							"undo": [
+								{
+									"name": "undo-second",
+									"node": "test/crash@1"
+								}
+							]
+						},
+						{
+							"fail": "stopped"
+						}
+					],
+					"result": {
+						"done": true
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/undo-fails@1",
+					"input": {},
+					"error": {
+						"code": "stopped",
+						"node": "workflows/undo-fails@1",
+						"message": "Refused: stopped."
+					},
+					"journal": ["first", "second", "undo first"],
+					"logged": [
+						"workflows/undo-fails@1: a step could not be undone after \"stopped\"."
+					]
+				}
+			],
+			"built": {
+				"workflows/undo-fails@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "a fail entry refuses the request with a code, and with an if only when it holds",
+			"workflows": {
+				"refuse": {
+					"name": "Refuse",
+					"steps": [
+						{
+							"fail": "cart_is_empty",
+							"message": "The cart of ${request.body.customer} is empty.",
+							"if": "${request.body.count} == 0"
+						},
+						{
+							"name": "ok",
+							"node": "test/record@1",
+							"inputs": {
+								"note": "ok"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/refuse@1",
+					"input": {
+						"body": {
+							"customer": "Ada",
+							"count": 0
+						}
+					},
+					"error": {
+						"code": "cart_is_empty",
+						"node": "workflows/refuse@1",
+						"message": "The cart of Ada is empty."
+					},
+					"journal": [],
+					"spans": [
+						{
+							"id": "workflows/refuse@1",
+							"kind": "workflow",
+							"attempts": 1,
+							"ok": false,
+							"error": "cart_is_empty"
+						}
+					]
+				},
+				{
+					"call": "workflows/refuse@1",
+					"input": {
+						"body": {
+							"customer": "Ada",
+							"count": 2
+						}
+					},
+					"output": {
+						"note": "ok",
+						"position": 1
+					}
+				}
+			],
+			"built": {
+				"workflows/refuse@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"count": {
+										"type": "integer"
+									},
+									"customer": {}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "parallel entries all run, and every one is left to finish even when one fails",
+			"workflows": {
+				"parallel": {
+					"name": "Parallel",
+					"steps": [
+						{
+							"parallel": [
+								{
+									"name": "x",
+									"node": "test/add@1",
+									"inputs": {
+										"a": 1,
+										"b": 2
+									}
+								},
+								{
+									"name": "y",
+									"node": "test/add@1",
+									"inputs": {
+										"a": 10,
+										"b": 20
+									}
+								}
+							]
+						}
+					],
+					"result": {
+						"x": "${x.sum}",
+						"y": "${y.sum}"
+					}
+				},
+				"parallel-fails": {
+					"name": "Parallel fails",
+					"steps": [
+						{
+							"parallel": [
+								{
+									"name": "a",
+									"node": "test/maybe@1",
+									"inputs": {
+										"ok": false,
+										"note": "a"
+									}
+								},
+								{
+									"name": "b",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "b"
+									}
+								},
+								{
+									"name": "c",
+									"node": "test/record@1",
+									"inputs": {
+										"note": "c"
+									}
+								}
+							]
+						}
+					],
+					"result": {
+						"done": true
+					}
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/parallel@1",
+					"input": {},
+					"output": {
+						"x": 3,
+						"y": 30
+					}
+				},
+				{
+					"call": "workflows/parallel-fails@1",
+					"input": {},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: a"
+					},
+					"journalInAnyOrder": ["a", "b", "c"]
+				}
+			],
+			"built": {
+				"workflows/parallel@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				},
+				"workflows/parallel-fails@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		},
+		{
+			"name": "a workflow used as a step receives its inputs as the request body, and its failures come through as they are",
+			"workflows": {
+				"inner": {
+					"name": "Inner",
+					"steps": [
+						{
+							"name": "hello",
+							"node": "test/greet@1",
+							"inputs": {
+								"name": "${request.body.name}"
+							}
+						}
+					]
+				},
+				"outer": {
+					"name": "Outer",
+					"steps": [
+						{
+							"name": "call-inner",
+							"node": "workflows/inner@1",
+							"inputs": {
+								"name": "${request.body.who}"
+							}
+						}
+					],
+					"result": {
+						"said": "${call-inner.text}"
+					}
+				},
+				"outer-fails": {
+					"name": "Outer fails",
+					"steps": [
+						{
+							"name": "call-inner",
+							"node": "workflows/inner-fails@1",
+							"inputs": {
+								"ok": false
+							}
+						}
+					]
+				},
+				"inner-fails": {
+					"name": "Inner fails",
+					"steps": [
+						{
+							"name": "try",
+							"node": "test/maybe@1",
+							"inputs": {
+								"ok": "${request.body.ok}",
+								"note": "inner"
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/outer@1",
+					"input": {
+						"body": {
+							"who": "Ada"
+						}
+					},
+					"output": {
+						"said": "Hello, Ada!"
+					},
+					"spans": [
+						{
+							"id": "test/greet@1",
+							"kind": "node",
+							"parent": "workflows/inner@1",
+							"key": "hello",
+							"attempts": 1,
+							"ok": true
+						},
+						{
+							"id": "workflows/inner@1",
+							"kind": "workflow",
+							"parent": "workflows/outer@1",
+							"key": "call-inner",
+							"attempts": 1,
+							"ok": true
+						},
+						{
+							"id": "workflows/outer@1",
+							"kind": "workflow",
+							"attempts": 1,
+							"ok": true
+						}
+					]
+				},
+				{
+					"call": "workflows/outer@1",
+					"input": {
+						"body": {}
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "workflows/outer@1",
+						"message": "The request is missing: body.who."
+					}
+				},
+				{
+					"call": "workflows/outer-fails@1",
+					"input": {},
+					"error": {
+						"code": "refused",
+						"node": "test/maybe@1",
+						"message": "It was refused: inner"
+					},
+					"spans": [
+						{
+							"id": "test/maybe@1",
+							"kind": "node",
+							"parent": "workflows/inner-fails@1",
+							"key": "try",
+							"attempts": 1,
+							"ok": false,
+							"error": "refused"
+						},
+						{
+							"id": "workflows/inner-fails@1",
+							"kind": "workflow",
+							"parent": "workflows/outer-fails@1",
+							"key": "call-inner",
+							"attempts": 1,
+							"ok": false,
+							"error": "refused"
+						},
+						{
+							"id": "workflows/outer-fails@1",
+							"kind": "workflow",
+							"attempts": 1,
+							"ok": false,
+							"error": "refused"
+						}
+					]
+				}
+			],
+			"built": {
+				"workflows/inner@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string"
+									}
+								},
+								"required": ["name"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/outer@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"who": {
+										"type": "string"
+									}
+								},
+								"required": ["who"]
+							}
+						},
+						"required": ["body"]
+					}
+				},
+				"workflows/outer-fails@1": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				},
+				"workflows/inner-fails@1": {
+					"request": {
+						"type": "object",
+						"properties": {
+							"body": {
+								"type": "object",
+								"properties": {
+									"ok": {
+										"type": "boolean"
+									}
+								},
+								"required": ["ok"]
+							}
+						},
+						"required": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"name": "the number after the @ is the first part of the workflow's version",
+			"workflows": {
+				"versioned": {
+					"name": "Versioned",
+					"version": "2.3.0",
+					"steps": [
+						{
+							"name": "one",
+							"node": "test/add@1",
+							"inputs": {
+								"a": 1,
+								"b": 1
+							}
+						}
+					]
+				}
+			},
+			"runs": [
+				{
+					"call": "workflows/versioned@2",
+					"input": {},
+					"output": {
+						"sum": 2
+					}
+				}
+			],
+			"built": {
+				"workflows/versioned@2": {
+					"request": {
+						"type": "object",
+						"properties": {}
+					}
+				}
+			}
+		}
+	]
+}

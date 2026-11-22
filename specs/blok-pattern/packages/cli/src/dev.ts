@@ -2,17 +2,16 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import { sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Paths } from "./analyze.ts";
-
-const SELF = fileURLToPath(new URL("./cli.js", import.meta.url));
+import { self } from "./standalone.ts";
 
 /**
  * Each rebuild runs in a fresh process. A long-lived one would keep the first version of every
  * node file it imported, and would go on checking workflows against contracts that have changed.
  */
 function rebuild(paths: Paths): boolean {
-	const run = spawnSync(process.execPath, [SELF, "build", "--allow-empty", "--dir", paths.dir], { stdio: "inherit" });
+	const [command, ...first] = self();
+	const run = spawnSync(command, [...first, "build", "--allow-empty", "--dir", paths.dir], { stdio: "inherit" });
 	return run.status === 0;
 }
 
@@ -64,7 +63,9 @@ export async function dev(paths: Paths, command: string[]): Promise<never> {
 	for (const folder of [paths.nodes, paths.workflows]) {
 		if (!existsSync(folder)) continue;
 		watch(folder, { recursive: true }, (_event, file) => {
-			if (!file || (folder === paths.workflows && file.startsWith(generated))) return;
+			// Nor to what an interpreter leaves beside the files it ran.
+			if (!file || (folder === paths.workflows && file.startsWith(generated)) || /__pycache__|\.pyc$/.test(file))
+				return;
 			clearTimeout(timer);
 			timer = setTimeout(changed, 120);
 		});

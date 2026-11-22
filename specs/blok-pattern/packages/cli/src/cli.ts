@@ -44,6 +44,7 @@ Options
   --json            Print the result as JSON. On "new workflow": write the workflow as JSON, not Pkl
   --trigger <kind>  new workflow: what starts it: http, cron, queue or mcp
   --server <name>   init <name>: the server of the new project: fastify, hono or express
+  --lang <name>     init <name>: the language of the new project: typescript or python
   --tests           check: also run every node's tests
   --allow-empty     build: also build while some nodes are still \`todo\`
   --ports <file>    run: take the ports from this file instead of ports/index
@@ -54,7 +55,7 @@ function usage(message: string): never {
 	process.exit(2);
 }
 
-const VALUED = new Set(["dir", "input", "ports", "trigger", "server"]);
+const VALUED = new Set(["dir", "input", "ports", "trigger", "server", "lang"]);
 
 async function main(argv: string[]): Promise<void> {
 	const split = argv.indexOf("--");
@@ -82,7 +83,8 @@ async function main(argv: string[]): Promise<void> {
 	const need = (what: string, example: string): string => rest[0] ?? usage(`Say ${what}: ${example}`);
 
 	let report: Report;
-	if (command === "init") report = init(cwd, { name: rest[0], dir: text("dir"), server: text("server") });
+	if (command === "init")
+		report = init(cwd, { name: rest[0], dir: text("dir"), server: text("server"), lang: text("lang") });
 	else if (command === "check") report = await check(paths, { id: rest[0], tests: flags.has("tests") });
 	else if (command === "build") report = await build(paths, { allowEmpty: flags.has("allow-empty") });
 	else if (command === "list") report = list(await analyze(paths));

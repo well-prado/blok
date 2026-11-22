@@ -2,14 +2,16 @@
 
 Spec-stage material, started 2026-11-21. It tests one idea: that Blok can be a small pattern you apply inside any stack, with one folder per node so that parallel branches never collide.
 
-Since phase 1 of [PLAN.md](PLAN.md) this folder holds two installable packages and an example app that uses them. Phase 3 added what starts a workflow besides an HTTP request: a schedule, a queue, a signed webhook and a tool for AI agents.
+Since phase 1 of [PLAN.md](PLAN.md) this folder holds two installable packages and an example app that uses them. Phase 3 added what starts a workflow besides an HTTP request: a schedule, a queue, a signed webhook and a tool for AI agents. Phase 4 added a second language: the same pattern in Python, on one page in [PATTERN.md](PATTERN.md), with shared tests that both kernels pass.
 
 | Folder | Is |
 |---|---|
 | `packages/kernel/` | `@blokjs/kernel`: the runtime you call from your own server, with a small adapter each for Fastify, Hono, Express, schedules, queues and tools for agents. The core has no dependencies. |
 | `packages/cli/` | `blokctl` 3.0.0-next.0: 15 commands, from `init` to `mcp`. Development only. |
+| `python/` | `blok-kernel` 3.0.0a0: the same runtime in Python, with Pydantic for contracts and adapters for FastAPI, schedules, queues and tools for agents. |
+| `conformance/` | The shared tests: JSON files that say what a kernel must do. The TypeScript kernel and the Python kernel run the same ones. |
 | `prototype/` | The example app: 17 nodes and 12 workflows, built on the two packages. |
-| `e2e/` | A run from an empty folder to a server that answers, with the packages installed as packed tarballs. It runs on each of the three servers. |
+| `e2e/` | A run from an empty folder to a server that answers, with the packages installed as packed tarballs. It runs on each of the three servers, and once in Python with no Node on the machine's PATH. |
 | `factory/` | The AI loop run for real: one design agent, then one build agent per node on its own branch, then every branch merged. |
 | `merge-experiment/` | 16 branches, two layouts, real git merges, written by a script. |
 
@@ -485,6 +487,68 @@ What each does and does not do:
 | `payment-events.pkl` | A queue trigger. Its node applies an event once, however often it arrives |
 | `place-order.pkl` | Workflows used as nodes, then `Parallel` |
 
+## A second language: Python
+
+A Python project has the same folders, the same workflows and the same commands. What changes is the node file:
+
+```python
+from pydantic import BaseModel, Field
+
+from blok import Ctx, node
+from ports import Ports
+
+
+class Input(BaseModel):
+    sku: str
+    qty: int = Field(gt=0)
+
+
+class Output(BaseModel):
+    total_cents: int
+
+
+def run(input: Input, ctx: Ctx[Ports]) -> Output:
+    each = ctx.ports.catalog.price_of(input.sku)
+    if each is None:
+        raise ctx.fail("unknown_sku", f'There is no product "{input.sku}".')
+    return Output(total_cents=each * input.qty)
+
+
+price = node(
+    id="shop/price@1",
+    description="Prices a quantity of one product.",
+    input=Input,
+    output=Output,
+    errors={"unknown_sku": "Nothing with that name is sold."},
+    run=run,
+)
+```
+
+It lives at `nodes/shop/price/v1/node.py`, and a workflow writes it as `shop.Price`, exactly as it would a TypeScript node. The app is three lines on a FastAPI server:
+
+```python
+blok = load_app(Path(__file__).parent, ports=ports, env=os.environ)
+app = FastAPI()
+blok_fastapi(app, blok)
+```
+
+```bash
+blokctl init my-api --lang python
+cd my-api
+uv sync
+blokctl dev -- uv run python app.py
+```
+
+How the two languages meet:
+
+- **`blokctl` reads no Python.** It asks the project's own kernel, `python -m blok contracts`, which prints every node's contract as JSON. From there on `check`, `list`, `show`, `status`, `lock`, `build`, `openapi`, `prompt` and the typed Pkl steps are the same code for both languages.
+- **The check stays in one place.** The Python kernel runs workflows and does not check them. `blokctl build` does, and writes what it learned to `.blok/app.json`: the shape of the request each workflow reads, and a fingerprint of each node's contract. When the app loads, the kernel compares those fingerprints with its own nodes and refuses to start if a contract changed after the build. It names the node and says to build again.
+- **`blokctl` is one file.** `bun run binary` builds it with everything inside, so a Python project needs no Node.
+- **A contract means the same in both.** An input is checked as JSON, so `"5"` is refused where the model says `int`, which is stricter than Pydantic is on its own. A whole number is a whole number however Python holds it: `2.0` is written as `2`.
+- **A plain `def` runs on a thread** and an `async def` on the event loop, as FastAPI does it.
+
+The rules of the pattern are on one page, [PATTERN.md](PATTERN.md), and [conformance/README.md](conformance/README.md) says how the shared tests read and how to add a third language.
+
 ## The other terms
 
 | Term | Meaning |
@@ -525,6 +589,21 @@ packages/cli/src/
 packages/cli/assets/
   Workflow.pkl            the Pkl schema for a workflow
   workflow.schema.json    JSON Schema for a workflow, for hand-written JSON and for editors
+  language.ts             what differs between languages: file names, and how a project is told apart
+  python.ts               asks a Python project's kernel for its contracts, and what init and new write in Python
+  standalone.ts, bin.ts   blokctl as one file that needs no Node
+python/src/blok/
+  kernel.py               node(), call, todo, contract(). The same boundary, with Pydantic models
+  workflow.py             runs a workflow. It does not check one: blokctl does
+  project.py              finds nodes by their folders, loads the build, refuses one made from other contracts
+  http.py, fastapi.py     the signature check, statuses and the JSON answer, and the FastAPI adapter
+  schedule.py, cron.py, queue.py, mcp.py
+                          schedules, queues and tools for agents, as in TypeScript
+  testing.py              node_beside() and call(), for a node's own test
+  __main__.py             what blokctl asks: python -m blok contracts, python -m blok run
+python/tests/             the shared tests, the kernel's own, and a small project they load
+conformance/cases/        the shared tests, as JSON
+PATTERN.md                the pattern on one page
 prototype/
   blok.ts                 three lines: binds the kernel to this app's Ports type
   ports/index.ts          the port interfaces
@@ -534,6 +613,8 @@ prototype/
   mcp.ts                  the example's tools for agents, on standard input and output
   bench.ts                cost of the call boundary
 e2e/empty-folder.ts       packs both packages, installs them into an empty folder, runs the result
+e2e/empty-folder-python.ts
+                          the same in Python: blokctl as one file, the kernel as a wheel, no Node on the PATH
 factory/factory.ts        sets up an app, fans it out to one branch per node, and joins the branches
 merge-experiment/run.py
 ```
@@ -550,7 +631,21 @@ bun run typecheck
 bun run e2e
 ```
 
-`bun run test` builds both packages first, because the example app and the command-line tests use the built code. `bun run e2e` installs from the npm registry six times, once for each pair of Bun or npm with Fastify, Hono or Express. One pair alone: `bun e2e/empty-folder.ts npm hono`.
+`bun run test` builds both packages first, because the example app and the command-line tests use the built code. It also needs [uv](https://docs.astral.sh/uv/): it installs the Python kernel's dependencies into `python/.venv` and runs the Python tests, which the command-line tests for Python projects then use. `bun run e2e` installs from the npm registry six times, once for each pair of Bun or npm with Fastify, Hono or Express, and from PyPI once. One pair alone: `bun e2e/empty-folder.ts npm hono`. Python alone: `bun e2e/empty-folder-python.ts`.
+
+The Python kernel on its own, and blokctl as one file:
+
+```bash
+cd specs/blok-pattern/python
+uv sync
+uv run pytest
+uvx ruff check . && uvx ruff format --check .
+```
+
+```bash
+cd specs/blok-pattern
+bun run binary     # writes dist/blokctl
+```
 
 In the example app:
 
@@ -599,10 +694,29 @@ Measured on 2026-11-22 for phase 3, on the same Mac:
 - The example app was started for real: a signed webhook got a 202 and the queue applied it, and the same body with a forged signature got a 401.
 - 14 planted mistakes in the new code each turned at least one test red: among them a signature of any age accepted, a refused message handed over again, and two workflows on one route.
 
+Measured on 2026-11-22 for phase 4, on the same Mac, with Python 3.12, uv 0.13, Pydantic 2.14, FastAPI 0.165 and the MCP library 2.3:
+
+- 183 TypeScript tests pass: 98 for the kernel, 52 for the command-line tool, and 33 in the example app. 73 Python tests pass.
+- Both kernels pass the same 52 shared tests, which hold 130 calls, 14 HTTP requests and 32 signature checks, and 1,344 run times of schedules taken from croner.
+- A Python project runs from an empty folder: `blokctl` as one file, the kernel installed from its wheel, a node, its test and three workflows written, checked, built and run, and a FastAPI server answering. The PATH of that run holds uv, Python and Pkl, and the run first makes sure `node`, `bun`, `npm` and `npx` are not found.
+- In that run the node's contract is then changed without building again. The app refuses to start, names the node and says to run `blokctl build`.
+- The six TypeScript runs from an empty folder still pass.
+- The official MCP client lists and calls a Python workflow as a tool, in memory.
+- 39 planted mistakes in the Python kernel each turned at least one test red: among them `1` equal to `true`, text accepted as a number, a business error tried again, a 500 that says what broke, and a build loaded against changed contracts. 11 wrong expectations planted in the shared files each failed the TypeScript run.
+- `blokctl` as one file is 61 MB on this Mac.
+
 ## What this is not
 
 - Nothing is published. The run from an empty folder installs packed tarballs, and its first step, `blokctl init`, runs from this repo because `bunx blokctl@next` cannot work before a release.
-- Only macOS on Apple silicon was run. Linux and Windows were not.
+- Only macOS on Apple silicon was run. Linux and Windows were not. That includes `blokctl` as one file: it was built and run for this Mac only.
+- The Python kernel is not on PyPI, and the name `blok-kernel` was not looked up there. The run from an empty folder installs it from a wheel built on the spot.
+- No agent has built a Python app with it. The loop of phase 2 ran in TypeScript only, and `factory/` was not run in Python.
+- The example app in `prototype/` exists in TypeScript only. The Python kernel was run on the shared tests, on a small project of its own, and on the project the empty-folder run writes.
+- One project is one language. A workflow cannot use a TypeScript node and a Python node together.
+- A Python app must be built before it starts, with `blokctl build` or `blokctl dev`, because the Python kernel does not check workflows itself. It refuses to start on a build made from other contracts. The fingerprint that decides this depends on the JSON Schema that Pydantic writes, so a different Pydantic version on the server than where the build ran may refuse a build that is fine. That was not tried.
+- In Python, `blokctl check <node>` runs the node's tests and does not check its types. A plain `def` node runs on a thread, so a port it uses must be safe to use from one.
+- The Python FastAPI adapter was run with Starlette's test client and with one real server on this Mac. Tools for agents were run in memory only, not over standard input and output or HTTP.
+- A Python node's field names are the names everywhere, and Python writes them `like_this`. A workflow moved from a TypeScript app to a Python one would need its field names changed.
 - The download of Pkl was tested against a local server that serves this machine's own Pkl binary. The real download from GitHub was not run.
 - The loop ran twice, on apps of 10 and 28 nodes, both written from scratch. It has not been run on a change to an existing app, or with a model other than Claude Opus.
 - `undo` takes back finished steps when a later step fails, and that is all it is. It is best effort and keeps nothing on disk, so it is not a transaction and does not survive a crash. The two apps the agents built were designed before it existed and do not use it.

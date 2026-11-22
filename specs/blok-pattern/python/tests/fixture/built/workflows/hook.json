@@ -1,0 +1,25 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Hook",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/hooks",
+			"status": 202,
+			"signature": {
+				"scheme": "standard",
+				"secret": "HOOK_SECRET"
+			}
+		}
+	},
+	"steps": [
+		{
+			"name": "event",
+			"node": "shop/record@1",
+			"inputs": {
+				"note": "${request.body.id}"
+			}
+		}
+	]
+}

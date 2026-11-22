@@ -1,0 +1,349 @@
+{
+	"about": "Calling one node: what is checked, in which order, what is tried again, and what a failure looks like.",
+	"cases": [
+		{
+			"name": "a node answers, and one span says it ran once",
+			"runs": [
+				{
+					"call": "test/add@1",
+					"input": {
+						"a": 1,
+						"b": 2
+					},
+					"output": {
+						"sum": 3
+					},
+					"spans": [
+						{
+							"id": "test/add@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": true
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "an input the contract does not allow is refused before the node runs",
+			"runs": [
+				{
+					"call": "test/add@1",
+					"input": {
+						"a": "one",
+						"b": 2
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/add@1"
+					},
+					"spans": [
+						{
+							"id": "test/add@1",
+							"kind": "node",
+							"attempts": 0,
+							"ok": false,
+							"error": "invalid_input"
+						}
+					]
+				},
+				{
+					"call": "test/add@1",
+					"input": {
+						"a": 1
+					},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/add@1"
+					}
+				}
+			]
+		},
+		{
+			"name": "an input that is left out takes the default its contract gives it",
+			"runs": [
+				{
+					"call": "test/greet@1",
+					"input": {
+						"name": "Ada"
+					},
+					"output": {
+						"text": "Hello, Ada!"
+					}
+				},
+				{
+					"call": "test/greet@1",
+					"input": {
+						"name": "Ada",
+						"greeting": "Welcome"
+					},
+					"output": {
+						"text": "Welcome, Ada!"
+					}
+				}
+			]
+		},
+		{
+			"name": "a node with no logic yet checks its input first, then says it is not implemented",
+			"runs": [
+				{
+					"call": "test/empty@1",
+					"input": {},
+					"error": {
+						"code": "invalid_input",
+						"node": "test/empty@1"
+					}
+				},
+				{
+					"call": "test/empty@1",
+					"input": {
+						"name": "Ada"
+					},
+					"error": {
+						"code": "not_implemented",
+						"node": "test/empty@1",
+						"message": "test/empty@1 is not implemented yet."
+					},
+					"spans": [
+						{
+							"id": "test/empty@1",
+							"kind": "node",
+							"attempts": 0,
+							"ok": false,
+							"error": "not_implemented"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "a node fails with a code its contract declares, and the caller gets the code, the message and the node",
+			"runs": [
+				{
+					"call": "test/fail@1",
+					"input": {
+						"code": "out_of_stock",
+						"message": "None left."
+					},
+					"error": {
+						"code": "out_of_stock",
+						"node": "test/fail@1",
+						"message": "None left."
+					},
+					"spans": [
+						{
+							"id": "test/fail@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": false,
+							"error": "out_of_stock"
+						}
+					]
+				},
+				{
+					"call": "test/fail@1",
+					"input": {
+						"code": "card_declined"
+					},
+					"error": {
+						"code": "card_declined",
+						"node": "test/fail@1",
+						"message": "It failed."
+					}
+				}
+			]
+		},
+		{
+			"name": "failing with a code the contract does not declare is a bug in the node, not a business error",
+			"runs": [
+				{
+					"call": "test/fail@1",
+					"input": {
+						"code": "sold_out"
+					},
+					"error": {
+						"code": "unexpected",
+						"node": "test/fail@1",
+						"message": "test/fail@1 failed with \"sold_out\", which its contract does not declare."
+					}
+				}
+			]
+		},
+		{
+			"name": "anything else a node throws reaches the caller as unexpected, with the node it came from",
+			"runs": [
+				{
+					"call": "test/crash@1",
+					"input": {},
+					"error": {
+						"code": "unexpected",
+						"node": "test/crash@1",
+						"message": "the database is down"
+					},
+					"spans": [
+						{
+							"id": "test/crash@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": false,
+							"error": "unexpected"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "an answer the contract does not allow never reaches the caller",
+			"runs": [
+				{
+					"call": "test/wrong@1",
+					"input": {},
+					"error": {
+						"code": "invalid_output",
+						"node": "test/wrong@1"
+					},
+					"spans": [
+						{
+							"id": "test/wrong@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": false,
+							"error": "invalid_output"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "a node that is safe to run twice is tried again after a failure nobody planned for",
+			"runs": [
+				{
+					"call": "test/flaky@1",
+					"input": {
+						"name": "a",
+						"failures": 2
+					},
+					"output": {
+						"calls": 3
+					},
+					"spans": [
+						{
+							"id": "test/flaky@1",
+							"kind": "node",
+							"attempts": 3,
+							"ok": true
+						}
+					]
+				},
+				{
+					"call": "test/flaky@1",
+					"input": {
+						"name": "a",
+						"failures": 3
+					},
+					"error": {
+						"code": "unexpected",
+						"node": "test/flaky@1",
+						"message": "flaky failure 3"
+					},
+					"spans": [
+						{
+							"id": "test/flaky@1",
+							"kind": "node",
+							"attempts": 3,
+							"ok": false,
+							"error": "unexpected"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "a node that is not safe to run twice is never tried again, whatever its retries say",
+			"runs": [
+				{
+					"call": "test/once@1",
+					"input": {
+						"name": "a",
+						"failures": 1
+					},
+					"error": {
+						"code": "unexpected",
+						"node": "test/once@1",
+						"message": "flaky failure 1"
+					},
+					"spans": [
+						{
+							"id": "test/once@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": false,
+							"error": "unexpected"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "a business error is an answer, so it is never tried again",
+			"runs": [
+				{
+					"call": "test/flaky@1",
+					"input": {
+						"name": "a",
+						"failures": 0,
+						"refuse": true
+					},
+					"error": {
+						"code": "refused",
+						"node": "test/flaky@1",
+						"message": "It was refused."
+					},
+					"spans": [
+						{
+							"id": "test/flaky@1",
+							"kind": "node",
+							"attempts": 1,
+							"ok": false,
+							"error": "refused"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "a node that takes longer than its contract allows is stopped, and tried again when that is safe",
+			"runs": [
+				{
+					"call": "test/slow@1",
+					"input": {
+						"ms": 1
+					},
+					"output": {
+						"slept": 1
+					}
+				},
+				{
+					"call": "test/slow@1",
+					"input": {
+						"ms": 400
+					},
+					"error": {
+						"code": "timeout",
+						"node": "test/slow@1",
+						"message": "test/slow@1 was aborted"
+					},
+					"spans": [
+						{
+							"id": "test/slow@1",
+							"kind": "node",
+							"attempts": 2,
+							"ok": false,
+							"error": "timeout"
+						}
+					]
+				}
+			]
+		}
+	]
+}

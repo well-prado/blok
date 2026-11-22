@@ -1,0 +1,18 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Events",
+	"version": "1.0.0",
+	"trigger": { "queue": { "name": "events", "concurrency": 2 } },
+	"steps": [
+		{
+			"name": "price",
+			"node": "shop/price@1",
+			"inputs": { "sku": "${request.body.sku}", "qty": 1 }
+		},
+		{
+			"name": "note",
+			"node": "shop/record@1",
+			"inputs": { "note": "${request.body.note}" }
+		}
+	]
+}

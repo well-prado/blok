@@ -1,0 +1,18 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Note",
+	"description": "Writes a note in the journal.",
+	"version": "1.0.0",
+	"trigger": {
+		"mcp": {}
+	},
+	"steps": [
+		{
+			"name": "note",
+			"node": "shop/record@1",
+			"inputs": {
+				"note": "${request.body.note}"
+			}
+		}
+	]
+}

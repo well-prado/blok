@@ -58,7 +58,7 @@ function nodeFacts(analysis: Analysis, paths: Paths, id: string) {
 		pkl: stepName(id),
 		empty: analysis.empty.includes(id),
 		locked: analysis.locked.includes(id),
-		tests: testFiles(folder).map((file) => shown(paths, file)),
+		tests: testFiles(paths, folder).map((file) => shown(paths, file)),
 		usedBy: usedBy(analysis, id),
 	};
 }

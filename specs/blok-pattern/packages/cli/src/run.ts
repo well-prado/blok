@@ -4,8 +4,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BlokError, type Span, blok, loadWorkflows } from "@blokjs/kernel";
 import type { Analysis, Paths } from "./analyze.ts";
-import type { Report } from "./commands.ts";
+import { type Report, writeBuilt } from "./commands.ts";
 import { resolveNode } from "./inspect.ts";
+import { askKernel } from "./python.ts";
 
 const fail = (text: string): Report => ({ ok: false, text, data: { ok: false, problems: [text] } });
 
@@ -25,6 +26,57 @@ async function loadPorts(paths: Paths, given?: string): Promise<unknown> {
 	return ports;
 }
 
+const ranText = (spans: Span[]) =>
+	spans
+		.map(
+			(span) =>
+				`  ${span.ok ? "ok " : "ERR"} ${span.id}${span.key ? ` (step "${span.key}")` : ""}  ${span.ms.toFixed(2)}ms${span.error ? `  ${span.error}` : ""}`,
+		)
+		.join("\n");
+
+/** What the Python kernel answers to `python -m blok run`. */
+interface KernelRan {
+	ok: boolean;
+	id?: string;
+	output?: unknown;
+	error?: { code: string; message: string; node: string };
+	spans?: Span[];
+	problems?: string[];
+}
+
+/**
+ * The same in a Python project: the workflows are built as they are now, and the project's own kernel runs
+ * the node or the workflow from that build, with the project's own ports.
+ */
+function runPython(
+	analysis: Analysis,
+	paths: Paths,
+	given: string,
+	options: { input?: string; ports?: string },
+): Report {
+	writeBuilt(analysis, paths);
+	let ran: KernelRan;
+	try {
+		ran = askKernel<KernelRan>(paths.root, paths.dir, [
+			"run",
+			given,
+			...(options.input === undefined ? [] : ["--input", options.input]),
+			...(options.ports === undefined ? [] : ["--ports", options.ports]),
+		]);
+	} catch (err) {
+		return fail((err as Error).message);
+	}
+	if (ran.problems) return fail(ran.problems.join("\n"));
+	const { id, spans = [] } = ran;
+	if (ran.ok) {
+		const text = `${JSON.stringify(ran.output, null, 2)}\n\nWhat ran:\n${ranText(spans)}`;
+		return { ok: true, text, data: { ok: true, id, output: ran.output, spans } };
+	}
+	const error = ran.error ?? { code: "unexpected", message: "The kernel gave no error.", node: id ?? given };
+	const text = `${id} failed with "${error.code}" at ${error.node}: ${error.message}\n\nWhat ran:\n${ranText(spans)}`;
+	return { ok: false, text, data: { ok: false, id, error, spans } };
+}
+
 /**
  * Runs a node with the input given, or a workflow with the request given, and prints what it answers with.
  * A workflow's input is its request: {"body": {...}, "query": {...}, "params": {...}}.
@@ -38,6 +90,7 @@ export async function run(
 	if (analysis.problems.length > 0) {
 		return fail(`This project has problems, so nothing was run:\n${analysis.problems.map((p) => `- ${p}`).join("\n")}`);
 	}
+	if (paths.language.name === "python") return runPython(analysis, paths, given, options);
 	const units = new Map(analysis.nodes);
 	loadWorkflows(analysis.workflows, units);
 	// A workflow answers to its id, its id without the version, and its file name.
@@ -67,13 +120,7 @@ export async function run(
 	const spans: Span[] = [];
 	const { call } = blok<unknown>().runtime({ ports, onSpan: (span) => spans.push(span) });
 	const trace = () => spans.map((span) => ({ ...span, ms: Math.round(span.ms * 100) / 100 }));
-	const traceText = () =>
-		spans
-			.map(
-				(span) =>
-					`  ${span.ok ? "ok " : "ERR"} ${span.id}${span.key ? ` (step "${span.key}")` : ""}  ${span.ms.toFixed(2)}ms${span.error ? `  ${span.error}` : ""}`,
-			)
-			.join("\n");
+	const traceText = () => ranText(spans);
 	try {
 		const output = await call(unit, input);
 		const text = `${JSON.stringify(output, null, 2)}\n\nWhat ran:\n${traceText()}`;

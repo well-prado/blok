@@ -13,15 +13,22 @@ import {
 	workflowId,
 } from "@blokjs/kernel";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { type Language, languageOf, pyprojectSettings } from "./language.ts";
 import { LOCK_FILE, type Locked, drift, readLock } from "./lock.ts";
 import { type PklOptions, findPkl } from "./pkl-bin.ts";
 import { type StepsFile, classesUsed, evaluate, nodeSteps, workflowClass, workflowSteps } from "./pkl.ts";
+import { pythonNodes } from "./python.ts";
+import { assetText } from "./standalone.ts";
 
-const asset = (name: string) => fileURLToPath(new URL(`../assets/${name}`, import.meta.url));
+/** A file that ships with this tool. The single-file build carries them inside itself. */
+const asset = (name: string) =>
+	assetText(name) ?? readFileSync(fileURLToPath(new URL(`../assets/${name}`, import.meta.url)), "utf8");
 
 export interface Paths {
-	/** Where the command was run: the folder with package.json. */
+	/** Where the command was run: the folder with package.json or pyproject.toml. */
 	root: string;
+	/** The language the nodes are written in. */
+	language: Language;
 	/** The folder that holds `nodes/` and `workflows/`. */
 	dir: string;
 	nodes: string;
@@ -32,15 +39,23 @@ export interface Paths {
 	built: string;
 }
 
-/** The project folder: `--dir`, or `"blok": { "dir": "src" }` in package.json, or where the command was run. */
+/**
+ * The project folder: `--dir`, or `"blok": { "dir": "src" }` in package.json, or `dir = "src"` under
+ * [tool.blok] in pyproject.toml, or where the command was run.
+ */
 export function locate(cwd: string, flag?: string): Paths {
+	const language = languageOf(cwd);
 	let configured: string | undefined;
-	try {
-		configured = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).blok?.dir;
-	} catch {}
+	if (language.name === "python") configured = pyprojectSettings(cwd)?.dir;
+	else {
+		try {
+			configured = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).blok?.dir;
+		} catch {}
+	}
 	const dir = resolve(cwd, flag ?? configured ?? ".");
 	return {
 		root: cwd,
+		language,
 		dir,
 		nodes: join(dir, "nodes"),
 		workflows: join(dir, "workflows"),
@@ -75,6 +90,11 @@ export interface Analysis {
 	empty: string[];
 	/** Nodes that have a contract.json beside them. */
 	locked: string[];
+	/**
+	 * What a kernel that does not check workflows itself calls each node's contract. The build writes these
+	 * down, and that kernel refuses to load a build made from other contracts. Empty for TypeScript.
+	 */
+	fingerprints: Record<string, string>;
 	problems: string[];
 }
 
@@ -91,9 +111,7 @@ function writeIfChanged(file: string, content: string) {
 let validator: ReturnType<Ajv2020["compile"]> | undefined;
 /** What is wrong with the structure of a hand-written JSON workflow, as sentences. */
 function structure(value: unknown): string[] {
-	validator ??= new Ajv2020({ allErrors: true }).compile(
-		JSON.parse(readFileSync(asset("workflow.schema.json"), "utf8")),
-	);
+	validator ??= new Ajv2020({ allErrors: true }).compile(JSON.parse(asset("workflow.schema.json")));
 	if (validator(value)) return [];
 	const said = new Set<string>();
 	for (const error of validator.errors ?? []) {
@@ -130,10 +148,18 @@ export async function analyze(paths: Paths, pkl: PklOptions = {}): Promise<Analy
 		shapes: new Map(),
 		empty: [],
 		locked: [],
+		fingerprints: {},
 		problems: [],
 	};
 	try {
-		result.nodes = await discoverNodes(paths.nodes);
+		if (paths.language.name === "python") {
+			// The project's own kernel reads the node files and prints their contracts.
+			const found = pythonNodes(paths.root, paths.dir);
+			result.nodes = found.nodes;
+			result.fingerprints = found.fingerprints;
+			result.problems.push(...found.problems);
+			if (result.problems.length > 0) return result;
+		} else result.nodes = await discoverNodes(paths.nodes);
 	} catch (err) {
 		result.problems.push((err as Error).message);
 		return result;
@@ -198,7 +224,7 @@ export async function analyze(paths: Paths, pkl: PklOptions = {}): Promise<Analy
 	// The schema goes beside the files, where their "$schema" finds it and an editor reads it.
 	if (jsonFiles.length > 0) {
 		mkdirSync(paths.generated, { recursive: true });
-		writeIfChanged(join(paths.generated, "workflow.schema.json"), readFileSync(asset("workflow.schema.json"), "utf8"));
+		writeIfChanged(join(paths.generated, "workflow.schema.json"), asset("workflow.schema.json"));
 		writeIfChanged(join(paths.generated, ".gitignore"), "*\n");
 	}
 	const ready: WorkflowFile[] = [];
@@ -219,7 +245,7 @@ export async function analyze(paths: Paths, pkl: PklOptions = {}): Promise<Analy
 
 	if (pklFiles.length > 0) {
 		mkdirSync(paths.generated, { recursive: true });
-		writeIfChanged(join(paths.generated, "Workflow.pkl"), readFileSync(asset("Workflow.pkl"), "utf8"));
+		writeIfChanged(join(paths.generated, "Workflow.pkl"), asset("Workflow.pkl"));
 		for (const { file, content } of nodeFiles) writeIfChanged(join(paths.generated, file), content);
 		writeIfChanged(join(paths.generated, ".gitignore"), "*\n");
 		// The folder is this tool's alone. A typed-steps file for a module that is gone would keep an editor

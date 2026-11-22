@@ -61,26 +61,30 @@ export async function check(paths: Paths, options: CheckOptions = {}): Promise<R
 	if (id) {
 		data.id = id;
 		const folder = nodeFolder(paths, id);
-		const files = testFiles(folder);
-		if (analysis.empty.includes(id)) problems.push(`${id} is still empty. Replace \`run: todo\` with its logic.`);
+		const files = testFiles(paths, folder);
+		if (analysis.empty.includes(id)) {
+			problems.push(`${id} is still empty. Replace \`${paths.language.todo}\` with its logic.`);
+		}
 		if (files.length === 0) {
-			problems.push(`${id} has no test. Write one beside it, in ${relative(paths.root, folder)}/node.test.ts.`);
+			problems.push(
+				`${id} has no test. Write one beside it, in ${relative(paths.root, folder)}/${paths.language.testFile}.`,
+			);
 		} else {
-			ran = runTests(paths.root, files);
+			ran = runTests(paths, files);
 			if (!ran.ok) problems.push(`${id}: its tests fail. This is what "${ran.command}" printed:\n${ran.output}`);
 		}
 		// Most test runners run TypeScript without checking it, so a type error can hide behind passing tests.
-		const types = typeErrors(paths.root, folder);
+		const types = typeErrors(paths, folder);
 		typed = types.checked;
 		data.types = { checked: types.checked, errors: types.errors.length };
 		if (types.errors.length > 0) problems.push(`${id}: its code has type errors:\n${types.errors.join("\n")}`);
 	} else if (options.tests && analysis.problems.length === 0) {
-		const files = testFiles(paths.nodes);
+		const files = testFiles(paths, paths.nodes);
 		if (files.length > 0) {
-			ran = runTests(paths.root, files);
+			ran = runTests(paths, files);
 			if (!ran.ok) problems.push(`The node tests fail. This is what "${ran.command}" printed:\n${ran.output}`);
 		}
-		const types = typeErrors(paths.root, paths.nodes);
+		const types = typeErrors(paths, paths.nodes);
 		typed = types.checked;
 		data.types = { checked: types.checked, errors: types.errors.length };
 		if (types.errors.length > 0) problems.push(`The nodes have type errors:\n${types.errors.join("\n")}`);
@@ -110,7 +114,7 @@ export async function check(paths: Paths, options: CheckOptions = {}): Promise<R
 			: []),
 		// For one node, the other nodes being empty is somebody else's job and would only read like a failure.
 		...(!id && analysis.empty.length > 0 ? [emptyText(analysis.empty)] : []),
-		...(!id ? notHttp(analysis) : []),
+		...(!id ? notHttp(analysis, paths) : []),
 	];
 	return { ok: true, text: lines.join("\n"), data };
 }
@@ -119,11 +123,12 @@ export async function check(paths: Paths, options: CheckOptions = {}): Promise<R
  * A route is served as soon as the server mounts Blok. A schedule, a queue and a tool each need one
  * more line where the app starts, and a workflow whose line is missing never runs and never complains.
  */
-function notHttp(analysis: Analysis): string[] {
+function notHttp(analysis: Analysis, paths: Paths): string[] {
+	const python = paths.language.name === "python";
 	const kinds = [
-		["cron", "schedule", "startCron"],
-		["queue", "queue", "startQueues"],
-		["mcp", "tool", "blokMcp"],
+		["cron", "schedule", python ? "start_cron" : "startCron"],
+		["queue", "queue", python ? "start_queues" : "startQueues"],
+		["mcp", "tool", python ? "blok_mcp" : "blokMcp"],
 	] as const;
 	const found = kinds
 		.map(([kind, word, start]) => ({
@@ -153,26 +158,7 @@ export async function build(paths: Paths, options: { allowEmpty?: boolean; pkl?:
 		return { ok: false, text, data };
 	}
 
-	mkdirSync(paths.built, { recursive: true });
-	const wanted = new Map(
-		analysis.workflows.map((entry) => [`${entry.name}.json`, `${JSON.stringify(entry.workflow, null, "\t")}\n`]),
-	);
-	for (const file of readdirSync(paths.built)) {
-		if (file.endsWith(".json") && !wanted.has(file)) rmSync(join(paths.built, file));
-	}
-	for (const [file, content] of wanted) {
-		let current: string | undefined;
-		try {
-			current = readFileSync(join(paths.built, file), "utf8");
-		} catch {}
-		if (current !== content) writeFileSync(join(paths.built, file), content);
-	}
-	const where = relative(process.cwd(), paths.built) || ".";
-	// The API description sits beside the workflows, for the server to serve or a client to be generated from.
-	const described = join(paths.built, "..", "openapi.json");
-	const routes = analysis.workflows.some((entry) => entry.workflow.trigger?.http);
-	if (routes) writeFileSync(described, `${JSON.stringify(openapiDocument(analysis, paths), null, "\t")}\n`);
-	else rmSync(described, { force: true });
+	const { where, described, routes } = writeBuilt(analysis, paths);
 	const lines = [
 		`Built ${count(analysis.workflows.length, "workflow")} into ${where}.`,
 		...(routes ? [`The API is described in ${relative(process.cwd(), described)}.`] : []),
@@ -183,6 +169,59 @@ export async function build(paths: Paths, options: { allowEmpty?: boolean; pkl?:
 		text: lines.join("\n"),
 		data: { ...data, ok: true, built: where, ...(routes ? { openapi: relative(process.cwd(), described) } : {}) },
 	};
+}
+
+/**
+ * Writes what an app loads: one JSON file per workflow, `app.json` with what the check learned about each,
+ * and the API description. Nothing is checked here.
+ */
+export function writeBuilt(analysis: Analysis, paths: Paths): { where: string; described: string; routes: boolean } {
+	const write = (file: string, content: string) => {
+		let current: string | undefined;
+		try {
+			current = readFileSync(file, "utf8");
+		} catch {}
+		if (current !== content) writeFileSync(file, content);
+	};
+	mkdirSync(paths.built, { recursive: true });
+	const wanted = new Map(
+		analysis.workflows.map((entry) => [`${entry.name}.json`, `${JSON.stringify(entry.workflow, null, "\t")}\n`]),
+	);
+	for (const file of readdirSync(paths.built)) {
+		if (file.endsWith(".json") && !wanted.has(file)) rmSync(join(paths.built, file));
+	}
+	for (const [file, content] of wanted) write(join(paths.built, file), content);
+
+	// What the check worked out, for a kernel that runs workflows and does not check them: what each workflow
+	// reads from its request, and which contracts all of this was checked against.
+	const manifest = {
+		blok: 1,
+		language: paths.language.name,
+		nodes: analysis.fingerprints,
+		workflows: Object.fromEntries(
+			analysis.workflows.map((entry) => {
+				const shape = analysis.shapes.get(entry.id);
+				return [
+					entry.id,
+					{
+						file: `workflows/${entry.name}.json`,
+						request: shape?.request,
+						answers: shape?.output,
+						errors: shape?.errors,
+					},
+				];
+			}),
+		),
+	};
+	write(join(paths.built, "..", "app.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
+
+	const where = relative(process.cwd(), paths.built) || ".";
+	// The API description sits beside the workflows, for the server to serve or a client to be generated from.
+	const described = join(paths.built, "..", "openapi.json");
+	const routes = analysis.workflows.some((entry) => entry.workflow.trigger?.http);
+	if (routes) write(described, `${JSON.stringify(openapiDocument(analysis, paths), null, "\t")}\n`);
+	else rmSync(described, { force: true });
+	return { where, described, routes };
 }
 
 const fields = (shape: JsonSchema | undefined): string => {

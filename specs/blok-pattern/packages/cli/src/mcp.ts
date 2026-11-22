@@ -2,11 +2,10 @@
 // Every tool call runs the matching command in a fresh process, so it always sees the project as it is on disk.
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import type { Paths } from "./analyze.ts";
 import { VERSION } from "./scaffold.ts";
+import { self } from "./standalone.ts";
 
-const SELF = fileURLToPath(new URL("./cli.js", import.meta.url));
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 interface Tool {
@@ -104,7 +103,8 @@ function answer(paths: Paths, request: Request): unknown {
 		if (missing.length > 0) {
 			return { content: [{ type: "text", text: `${tool.name} needs "${missing.join('", "')}".` }], isError: true };
 		}
-		const run = spawnSync(process.execPath, [SELF, ...tool.command(args), "--dir", paths.dir], {
+		const [command, ...first] = self();
+		const run = spawnSync(command, [...first, ...tool.command(args), "--dir", paths.dir], {
 			cwd: paths.root,
 			encoding: "utf8",
 		});

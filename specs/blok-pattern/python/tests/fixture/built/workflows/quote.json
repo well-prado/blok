@@ -1,0 +1,28 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Quote",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "GET",
+			"path": "/shops/:shop/prices/:sku",
+			"errors": {
+				"unknown_sku": 404
+			}
+		}
+	},
+	"steps": [
+		{
+			"name": "price",
+			"node": "shop/price@1",
+			"inputs": {
+				"sku": "${request.params.sku}",
+				"qty": "${request.query.qty}"
+			}
+		}
+	],
+	"result": {
+		"shop": "${request.params.shop}",
+		"totalCents": "${price.total_cents}"
+	}
+}

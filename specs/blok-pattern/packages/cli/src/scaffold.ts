@@ -4,13 +4,25 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Paths, locate } from "./analyze.ts";
 import type { Report } from "./commands.ts";
+import { LANGUAGES, type Language, PYTHON, TYPESCRIPT, languageOf } from "./language.ts";
 import { LOCK_FILE } from "./lock.ts";
 import { pascal } from "./pkl.ts";
+import {
+	pyproject,
+	pythonApp,
+	pythonMount,
+	pythonNodeFile,
+	pythonNodeRules,
+	pythonPorts,
+	pythonStartRules,
+	pythonTestFile,
+} from "./python.ts";
+import { standaloneVersion } from "./standalone.ts";
 
 const SEGMENT = /^[a-z][a-z0-9-]*$/;
-const VERSION: string = JSON.parse(
-	readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
-).version;
+const VERSION: string =
+	standaloneVersion() ??
+	JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
 export { VERSION };
 
 const camel = (text: string) => text.replace(/-([a-z0-9])/g, (_, char: string) => char.toUpperCase());
@@ -331,18 +343,18 @@ const START = "<!-- blok:start -->";
 const END = "<!-- blok:end -->";
 
 /** The page an AI agent reads before it touches the project. */
-function rules(prefix: string, runner: string): string {
+function rules(prefix: string, runner: string, lang: Language = TYPESCRIPT): string {
 	const at = (path: string) => `${prefix}${path}`;
-	return `${START}
+	const page = `${START}
 ## Blok: how this backend is built
 
-Logic lives in **nodes**. **Workflows** wire nodes together and hold no logic. Run \`${runner} blokctl check\` before you say you are done.
+Logic lives in **nodes**. **Workflows** wire nodes together and hold no logic. Run \`${runner} check\` before you say you are done.
 
 ### Rules
 
-1. One node, one folder: \`${at("nodes/<module>/<node>/v<N>/node.ts")}\`. The path is the id: \`<module>/<node>@<N>\`.
+1. One node, one folder: \`${at(`nodes/<module>/<node>/v<N>/${lang.nodeFile}`)}\`. The path is the id: \`<module>/<node>@<N>\`.
 2. A node declares its \`input\`, \`output\` and \`errors\`, and returns its output. It never imports another node.
-3. A node reaches the outside world only through \`ports\` (\`${at("ports/index.ts")}\`). No database client, HTTP call or clock of its own.
+3. A node reaches the outside world only through \`ports\` (\`${at(lang.portsFile)}\`). No database client, HTTP call or clock of its own.
 4. A loop that waits for something, such as paging or polling, lives inside a node.
 5. A workflow only wires: steps, \`if\`, \`each\`, \`conditions\`, \`parallel\`, \`onError\`. There is no code in a workflow.
 6. Workflows are written in Pkl in \`${at("workflows/<name>.pkl")}\`. A node is a step by its module and name: \`billing/charge-card@1\` is \`billing.ChargeCard\`, after \`import "blok/billing.pkl"\`. Version 2 is \`billing.ChargeCardV2\`, and a module with a hyphen loses it: \`user-accounts\` is \`userAccounts\`. Another workflow is \`workflows.PlaceOrder\`, after \`import "blok/workflows.pkl"\`.
@@ -350,13 +362,13 @@ Logic lives in **nodes**. **Workflows** wire nodes together and hold no logic. R
 8. Do not give a step variable the name of a module you import. With \`import "blok/billing.pkl"\`, write \`local charge = ...\`, not \`local billing = ...\`. It also cannot be a word Pkl keeps for itself, such as \`open\`, \`new\`, \`in\`, \`out\`, \`is\`, \`as\`, \`for\`, \`let\`, \`when\`, \`if\`, \`else\`, \`import\`, \`function\`, \`local\`, \`module\`, \`class\`, \`this\`, \`super\`, \`delete\`, \`read\`, \`case\`, \`switch\`, \`record\`, \`const\`, \`fixed\` or \`hidden\`.
 9. Never change the \`input\` or \`output\` of a node that a workflow already uses. Run \`blokctl new version <module>/<node>\` and change the copy.
 10. Never edit generated files: \`${at("workflows/blok/")}\` and \`${at(".blok/")}\`.
-11. A node whose logic is not written yet has \`run: todo\`. Its contract is real, so workflows can already use it.
+11. A node whose logic is not written yet has \`${lang.todo}\`. Its contract is real, so workflows can already use it.
 12. Steps are not a transaction: something else can happen between two of them. A rule that must hold at the moment of a write, such as a limit or a unique email, is enforced by the node that writes, in one call to a port. A step that changes something outside gets an \`undo\`, so that a failure in a later step takes it back.
 13. Never edit a \`contract.json\`. It is what the node promised when the app was designed, and \`blokctl check\` refuses a node that no longer matches it.
 
 ### Commands
 
-Run them as \`${runner} blokctl ...\`, which uses this project's own copy. A bare \`blokctl\` may be another version installed on the machine.
+${lang.name === "python" ? `Run them as \`blokctl ...\`. \`blokctl --version\` says ${VERSION}: an older blokctl on the machine is another tool.` : `Run them as \`${runner} ...\`, which uses this project's own copy. A bare \`blokctl\` may be another version installed on the machine.`}
 
 | Command | What it does |
 | --- | --- |
@@ -367,8 +379,8 @@ Run them as \`${runner} blokctl ...\`, which uses this project's own copy. A bar
 | \`blokctl new workflow <name>\` | Creates the Pkl file, started by an HTTP route. \`--trigger cron\`, \`queue\` or \`mcp\` starts it another way. |
 | \`blokctl new version <module>/<node>\` | Copies the newest version to the next one. |
 | \`blokctl check\` | Says whether everything lines up, and what is wrong in full sentences. |
-| \`blokctl check <node>\` | The gate for one node: the project lines up, the node is written, its contract is unchanged, its tests pass and its types check. |
-| \`blokctl check --tests\` | The whole project: everything lines up, every node's tests pass and the types check. |
+| \`blokctl check <node>\` | The gate for one node: the project lines up, the node is written, its contract is unchanged${lang.name === "python" ? " and its tests pass" : ", its tests pass and its types check"}. |
+| \`blokctl check --tests\` | The whole project: everything lines up${lang.name === "python" ? " and every node's tests pass" : ", every node's tests pass and the types check"}. |
 | \`blokctl run <id> --input '<json>'\` | Runs one node or workflow and prints what it answers with and what ran. |
 | \`blokctl lock\` | Writes \`contract.json\` beside every node that has none. Run it when the contracts are settled. |
 | \`blokctl build\` | Writes the JSON the server loads, and \`.blok/openapi.json\`. Refuses while a node is still empty. |
@@ -601,7 +613,25 @@ The full schema is \`${at("workflows/blok/Workflow.pkl")}\`, which \`blokctl che
 The check compares what a step gives with what the next one takes all the way down: the fields of an object, the items of a list, and whether a value may be null.
 ${END}
 `;
+	if (lang.name !== "python") return page;
+	// The same page for a Python project: how a node is written and what starts the app are said in Python.
+	const between = (text: string, from: string, to: string, put: string) => {
+		const [start, end] = [text.indexOf(from), text.indexOf(to)];
+		if (start < 0 || end < start) throw new Error(`The rules page has no part from "${from}" to "${to}".`);
+		return text.slice(0, start) + put + text.slice(end);
+	};
+	const nodes = between(page, "### Writing a node", "### Writing a workflow", `${pythonNodeRules(at)}\n`);
+	return between(
+		nodes,
+		"A route is served as soon as",
+		"- A queue hands a message over",
+		`${pythonStartRules}\n`,
+	).replace("calls `startCron` in one of them", "calls `start_cron` in one of them");
 }
+
+/** How this project runs blokctl: its own copy through the package manager, or the single file on the PATH. */
+export const ownCommand = (paths: Paths): string =>
+	paths.language.name === "python" ? "blokctl" : `${usesBun(paths.root) ? "bunx" : "npx"} blokctl`;
 
 // ---- init --------------------------------------------------------------------------------
 
@@ -641,9 +671,18 @@ export const usesBun = (root: string) =>
  * `init <name>` starts a new project that already answers on GET /hello.
  * `init` inside an existing app adds the folders and the rules page, and leaves the server alone.
  */
-export function init(cwd: string, options: { name?: string; dir?: string; server?: string } = {}): Report {
+export function init(
+	cwd: string,
+	options: { name?: string; dir?: string; server?: string; lang?: string } = {},
+): Report {
 	const fresh = options.name !== undefined;
 	const root = fresh ? resolve(cwd, options.name as string) : cwd;
+	if (options.lang !== undefined && !(options.lang in LANGUAGES)) {
+		return fail(`"${options.lang}" is not a language blokctl knows. Use typescript or python.`);
+	}
+	// A new project is TypeScript unless told otherwise. An existing one is whatever it already is.
+	const lang = options.lang ? LANGUAGES[options.lang as keyof typeof LANGUAGES] : fresh ? TYPESCRIPT : languageOf(root);
+	if (lang.name === "python") return initPython(cwd, root, options);
 	if (options.server !== undefined && !(SERVERS as readonly string[]).includes(options.server)) {
 		return fail(
 			`"${options.server}" is not a server blokctl knows. Use ${SERVERS.join(", ").replace(/, ([^,]*)$/, " or $1")}.`,
@@ -727,7 +766,7 @@ export function init(cwd: string, options: { name?: string; dir?: string; server
 		);
 		put("workflows/hello.pkl", helloPkl);
 	}
-	if (mergeRules(join(root, "AGENTS.md"), rules(prefix, bun ? "bunx" : "npx"))) added.push("AGENTS.md");
+	if (mergeRules(join(root, "AGENTS.md"), rules(prefix, `${bun ? "bunx" : "npx"} blokctl`))) added.push("AGENTS.md");
 	if (ignore(join(root, ".gitignore"), fresh ? ["node_modules/", `${prefix}.blok/`] : [`${prefix}.blok/`])) {
 		added.push(".gitignore");
 	}
@@ -774,6 +813,93 @@ export function init(cwd: string, options: { name?: string; dir?: string; server
 	return { ok: true, text, data: { ok: true, root, server: kind, added, next } };
 }
 
+/** `init` for a Python project: the same folders and the same rules page, with FastAPI as the server. */
+function initPython(cwd: string, root: string, options: { name?: string; dir?: string; server?: string }): Report {
+	const fresh = options.name !== undefined;
+	if (options.server !== undefined && options.server !== "fastapi") {
+		return fail(`"${options.server}" is not a server blokctl knows for Python. It writes a FastAPI app.`);
+	}
+	if (fresh && existsSync(root) && readdirSync(root).length > 0) {
+		return fail(`"${options.name}" already exists and is not empty. Run "blokctl init" inside it to add Blok to it.`);
+	}
+	if (!fresh && !existsSync(join(root, "pyproject.toml"))) {
+		return fail('There is no pyproject.toml here. Run "blokctl init <name> --lang python" to start a new project.');
+	}
+	const sub = options.dir?.replace(/^\.\//, "").replace(/\/$/, "") ?? "";
+	const dir = join(root, sub);
+	const prefix = sub ? `${sub}/` : "";
+	const added: string[] = [];
+	const put = (file: string, content: string) => {
+		if (add(join(root, file), content)) added.push(file);
+	};
+
+	if (fresh) {
+		put("pyproject.toml", pyproject((options.name as string).split(/[\\/]/).pop() as string));
+		put("app.py", pythonApp);
+	}
+	put(`${prefix}ports/__init__.py`, pythonPorts);
+	mkdirSync(join(dir, "nodes"), { recursive: true });
+	mkdirSync(join(dir, "workflows"), { recursive: true });
+	if (fresh) {
+		put(
+			"nodes/hello/greet/v1/node.py",
+			pythonNodeFile("hello/greet@1", "greet", {
+				description: "Builds a greeting for a name.",
+				input: 'class Input(BaseModel):\n    name: str = Field(default="world", min_length=1)',
+				output: "class Output(BaseModel):\n    message: str\n    at: str",
+				run: 'def run(input: Input, ctx: Ctx[Ports]) -> Output:\n    return Output(message=f"Hello, {input.name}!", at=ctx.ports.clock.now().isoformat())',
+			}),
+		);
+		put(
+			"nodes/hello/greet/v1/test_node.py",
+			pythonTestFile("hello/greet@1", "greet", {
+				ports: "memory_ports(now=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc))",
+				input: '{"name": "Ada"}',
+				output: '{"message": "Hello, Ada!", "at": "2026-01-01T00:00:00+00:00"}',
+			}),
+		);
+		put("workflows/hello.pkl", helloPkl);
+	}
+	if (mergeRules(join(root, "AGENTS.md"), rules(prefix, "blokctl", PYTHON))) added.push("AGENTS.md");
+	const ignored = fresh ? [".venv/", "__pycache__/", `${prefix}.blok/`] : [`${prefix}.blok/`];
+	if (ignore(join(root, ".gitignore"), ignored)) added.push(".gitignore");
+
+	if (!fresh) {
+		// blokctl tells a Python project by this table, and the tests import `ports` from the project folder.
+		const file = join(root, "pyproject.toml");
+		const source = readFileSync(file, "utf8");
+		if (!/^\[tool\.blok\]/m.test(source)) {
+			const table = `\n# blokctl reads this table. \`dir\` is the folder that holds nodes/ and workflows/.\n[tool.blok]\ndir = "${sub || "."}"\n`;
+			writeFileSync(file, `${source.trimEnd()}\n${table}`);
+			added.push("pyproject.toml ([tool.blok])");
+		}
+	}
+
+	const next = fresh
+		? [
+				`cd ${options.name}`,
+				"uv sync",
+				"blokctl dev -- uv run python app.py",
+				"Then open http://localhost:3000/hello?name=Ada",
+			]
+		: [
+				'Add "blok-kernel[fastapi]" to your dependencies, and "pytest" to the ones for development',
+				`Add this under [tool.pytest.ini_options] in pyproject.toml: pythonpath = ["${sub || "."}"] and addopts = "--import-mode=importlib"`,
+				"blokctl new node <module>/<node>",
+				"blokctl new workflow <name>",
+				"Add this to your FastAPI app:",
+				...pythonMount(sub ? `Path(__file__).parent / "${sub}"` : "Path(__file__).parent").map((line) => `  ${line}`),
+				"Run your server with: blokctl dev -- <your start command>",
+			];
+	const text = [
+		added.length > 0 ? `Added:\n${added.map((file) => `  ${file}`).join("\n")}` : "Everything was already in place.",
+		"",
+		"Next:",
+		...next.map((line) => `  ${line}`),
+	].join("\n");
+	return { ok: true, text, data: { ok: true, root, language: "python", server: "fastapi", added, next } };
+}
+
 // ---- new ---------------------------------------------------------------------------------
 
 const fail = (text: string): Report => ({ ok: false, text, data: { ok: false, problems: [text] } });
@@ -800,9 +926,11 @@ export function newNode(paths: Paths, id: string): Report {
 	if (versionsOf(folder).length > 0) {
 		return fail(`${id} already exists. To change what it takes or answers with, run "blokctl new version ${id}".`);
 	}
-	const files = [join(folder, "v1", "node.ts"), join(folder, "v1", "node.test.ts")];
-	add(files[0], nodeFile(`${id}@1`));
-	add(files[1], nodeTestFile(`${id}@1`, where.name));
+	const lang = paths.language;
+	const python = lang.name === "python";
+	const files = [join(folder, "v1", lang.nodeFile), join(folder, "v1", lang.testFile)];
+	add(files[0], python ? pythonNodeFile(`${id}@1`, where.name) : nodeFile(`${id}@1`));
+	add(files[1], python ? pythonTestFile(`${id}@1`, where.name) : nodeTestFile(`${id}@1`, where.name));
 	const shown = files.map((file) => relative(process.cwd(), file));
 	const text = `Created ${id}@1:\n${shown.map((file) => `  ${file}`).join("\n")}\nIts contract is empty and its logic is \`todo\`. Fill in the input and output first.`;
 	return { ok: true, text, data: { ok: true, id: `${id}@1`, files: shown } };
@@ -822,7 +950,7 @@ export function newVersion(paths: Paths, id: string): Report {
 	rmSync(join(to, LOCK_FILE), { force: true });
 	// The id is in the node file and usually in its test. Nothing else in the copy changes.
 	for (const file of readdirSync(to, { recursive: true, encoding: "utf8" })) {
-		if (!/\.[cm]?[jt]s$/.test(file)) continue;
+		if (!paths.language.source.test(file) || file.split(/[\\/]/).includes("__pycache__")) continue;
 		const content = readFileSync(join(to, file), "utf8");
 		const next = content.replaceAll(`${base}@${latest}`, `${base}@${latest + 1}`);
 		if (next !== content) writeFileSync(join(to, file), next);
