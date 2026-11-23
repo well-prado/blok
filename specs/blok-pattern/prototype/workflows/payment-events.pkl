@@ -1,0 +1,26 @@
+amends "blok/Workflow.pkl"
+
+import "blok/payments.pkl"
+
+name = "Payment events"
+description = "Applies one payment event to its order. It runs once per message of the queue."
+version = "1.0.0"
+
+trigger {
+  queue = new {
+    name = "payment-events"
+    concurrency = 2
+  }
+}
+
+steps {
+  new payments.ApplyEvent {
+    name = "apply"
+    inputs {
+      id = "${request.body.id}"
+      type = "${request.body.type}"
+      orderId = "${request.body.orderId}"
+      amountCents = "${request.body.amountCents}"
+    }
+  }
+}

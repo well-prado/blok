@@ -1,0 +1,65 @@
+amends "blok/Workflow.pkl"
+
+import "blok/notify.pkl"
+import "blok/workflows.pkl"
+
+name = "Place order"
+description = "Checks out, then books shipping and emails the receipt at the same time."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/orders/place"
+    errors {
+      ["card_declined"] = 402
+      ["unknown_sku"] = 422
+    }
+  }
+}
+
+// A workflow is used like a node. `workflows.Checkout` is generated from checkout.pkl:
+// its inputs are what that workflow reads from its request body, and its outputs are its result.
+local checkout = new workflows.Checkout {
+  name = "checkout"
+  inputs {
+    customerId = "${request.body.customerId}"
+    items = "${request.body.items}"
+    token = "${request.body.token}"
+  }
+}
+
+local shipment = new workflows.Fulfil {
+  name = "shipment"
+  inputs {
+    orderId = checkout.outputs.orderId
+    totalCents = checkout.outputs.totalCents
+  }
+}
+
+local receipt = new notify.SendReceipt {
+  name = "receipt"
+  inputs {
+    customerId = "${request.body.customerId}"
+    orderId = checkout.outputs.orderId
+    receiptId = checkout.outputs.receiptId
+    totalCents = checkout.outputs.totalCents
+  }
+}
+
+steps {
+  checkout
+  new Parallel {
+    parallel {
+      shipment
+      receipt
+    }
+  }
+}
+
+result {
+  orderId = checkout.outputs.orderId
+  receiptId = checkout.outputs.receiptId
+  trackingId = shipment.outputs.trackingId
+  emailed = receipt.outputs.sent
+}

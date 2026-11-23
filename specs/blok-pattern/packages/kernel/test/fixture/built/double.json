@@ -1,0 +1,29 @@
+{
+	"name": "Double",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/double/:times",
+			"errors": {
+				"unlucky": 422
+			}
+		},
+		"queue": {
+			"name": "numbers"
+		}
+	},
+	"steps": [
+		{
+			"name": "doubled",
+			"node": "demo/double@1",
+			"inputs": {
+				"n": "${request.body.n}"
+			}
+		}
+	],
+	"result": {
+		"n": "${doubled.n}",
+		"times": "${request.params.times}"
+	}
+}

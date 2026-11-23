@@ -1,0 +1,5 @@
+{
+	"name": "Later",
+	"trigger": { "http": { "method": "GET", "path": "/later" } },
+	"steps": [{ "name": "later", "node": "demo/later@1" }]
+}

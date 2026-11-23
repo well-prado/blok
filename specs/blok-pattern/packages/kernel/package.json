@@ -1,0 +1,78 @@
+{
+	"name": "@blokjs/kernel",
+	"version": "3.0.0-next.0",
+	"description": "Blok as a pattern: nodes with contracts, workflows as data, and one small runtime you call from your own server, schedule, queue or tool server.",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./fastify": {
+			"types": "./dist/fastify.d.ts",
+			"default": "./dist/fastify.js"
+		},
+		"./hono": {
+			"types": "./dist/hono.d.ts",
+			"default": "./dist/hono.js"
+		},
+		"./express": {
+			"types": "./dist/express.d.ts",
+			"default": "./dist/express.js"
+		},
+		"./cron": {
+			"types": "./dist/cron.d.ts",
+			"default": "./dist/cron.js"
+		},
+		"./queue": {
+			"types": "./dist/queue.d.ts",
+			"default": "./dist/queue.js"
+		},
+		"./mcp": {
+			"types": "./dist/mcp.d.ts",
+			"default": "./dist/mcp.js"
+		},
+		"./http": {
+			"types": "./dist/http.d.ts",
+			"default": "./dist/http.js"
+		}
+	},
+	"files": ["dist"],
+	"engines": {
+		"node": ">=22.18"
+	},
+	"scripts": {
+		"build": "tsc -p ."
+	},
+	"peerDependencies": {
+		"@modelcontextprotocol/sdk": "^1.20.0",
+		"express": "^5.0.0",
+		"fastify": "^5.0.0",
+		"hono": "^4.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@modelcontextprotocol/sdk": {
+			"optional": true
+		},
+		"express": {
+			"optional": true
+		},
+		"fastify": {
+			"optional": true
+		},
+		"hono": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@hono/node-server": "^2.1.11",
+		"@modelcontextprotocol/sdk": "^1.32.2",
+		"@types/express": "^5.0.6",
+		"croner": "^11.0.1",
+		"express": "^5.3.0",
+		"fastify": "^5.12.8",
+		"hono": "^4.13.20",
+		"zod": "^4.6.7"
+	}
+}

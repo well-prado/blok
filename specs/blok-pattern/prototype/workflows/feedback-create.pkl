@@ -1,0 +1,40 @@
+amends "blok/Workflow.pkl"
+
+import "blok/feedback.pkl"
+import "blok/storage.pkl"
+
+name = "Create feedback"
+description = "Scores a piece of feedback and stores it."
+version = "1.0.0"
+
+trigger {
+  http = new {
+    method = "POST"
+    path = "/feedback"
+    status = 201
+  }
+}
+
+local sentiment = new feedback.ScoreSentiment {
+  name = "sentiment"
+  inputs {
+    id = "${request.body.id}"
+    title = "${request.body.title}"
+    comment = "${request.body.comment}"
+  }
+}
+
+local save = new storage.KvSet {
+  name = "save"
+  inputs {
+    key = "feedback:${request.body.id}"
+    value = sentiment.value
+  }
+}
+
+steps {
+  sentiment
+  save
+}
+
+result = sentiment.value

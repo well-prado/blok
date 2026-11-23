@@ -1,0 +1,48 @@
+amends "blok/Workflow.pkl"
+
+import "blok/catalog.pkl"
+import "blok/orders.pkl"
+
+name = "Quote"
+description = "Prices every line of a basket, four at a time, then totals it."
+version = "1.0.0"
+
+// A route for the shop's own pages, and a tool for an AI agent. The agent's arguments are the same body.
+trigger {
+  http = new {
+    method = "POST"
+    path = "/quotes"
+    errors { ["unknown_sku"] = 422 }
+  }
+  mcp = new {
+    tool = "quote_order"
+    description = "Prices a basket without placing an order. Give it items: a list of { sku, qty }."
+  }
+}
+
+// Not named `lines`: inside `inputs { lines = ... }` below, that name means the input itself.
+local pricedLines = new catalog.PriceLine {
+  name = "lines"
+  each = "${request.body.items}"
+  concurrency = 4
+  inputs {
+    sku = "${item.sku}"
+    qty = "${item.qty}"
+  }
+}
+
+local total = new orders.SumLines {
+  name = "total"
+  inputs { lines = pricedLines.value }
+}
+
+steps {
+  pricedLines
+  total
+}
+
+result {
+  lines = pricedLines.value
+  totalCents = total.outputs.totalCents
+  lineCount = total.outputs.lineCount
+}

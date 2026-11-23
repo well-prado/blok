@@ -1,0 +1,386 @@
+{
+	"openapi": "3.1.0",
+	"info": {
+		"title": "API",
+		"version": "0.0.0"
+	},
+	"paths": {
+		"/hooks": {
+			"post": {
+				"operationId": "hook",
+				"summary": "Hook",
+				"parameters": [
+					{
+						"name": "webhook-id",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Part of the request's signature."
+					},
+					{
+						"name": "webhook-timestamp",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Part of the request's signature."
+					},
+					{
+						"name": "webhook-signature",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Part of the request's signature."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"type": "string"
+									}
+								},
+								"required": ["id"]
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "It worked.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"note": {
+											"type": "string"
+										},
+										"position": {
+											"type": "integer"
+										}
+									},
+									"required": ["note", "position"],
+									"type": "object",
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "invalid_input: The request lacks something, or has something of the wrong kind.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["invalid_input"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "invalid_signature: The signature does not match the body.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["invalid_signature"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "unexpected: Something failed that nobody planned for.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["unexpected"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/price": {
+			"post": {
+				"operationId": "price",
+				"summary": "Price",
+				"description": "Prices a quantity of one product, without ordering it.",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"sku": {
+										"type": "string"
+									},
+									"qty": {
+										"type": "integer",
+										"exclusiveMinimum": 0
+									}
+								},
+								"required": ["sku", "qty"]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "It worked.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"totalCents": {
+											"type": "integer"
+										}
+									},
+									"required": ["totalCents"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "invalid_input: The request lacks something, or has something of the wrong kind.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["invalid_input"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "unknown_sku: Nothing with that name is sold.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["unknown_sku"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "unexpected: Something failed that nobody planned for.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["unexpected"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/shops/{shop}/prices/{sku}": {
+			"get": {
+				"operationId": "quote",
+				"summary": "Quote",
+				"parameters": [
+					{
+						"name": "shop",
+						"in": "path",
+						"required": true,
+						"schema": {}
+					},
+					{
+						"name": "sku",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "qty",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"exclusiveMinimum": 0
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "It worked.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"shop": {},
+										"totalCents": {
+											"type": "integer"
+										}
+									},
+									"required": ["shop", "totalCents"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "invalid_input: The request lacks something, or has something of the wrong kind.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["invalid_input"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "unknown_sku: Nothing with that name is sold.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["unknown_sku"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "unexpected: Something failed that nobody planned for.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["error", "message"],
+									"properties": {
+										"error": {
+											"enum": ["unexpected"]
+										},
+										"message": {
+											"type": "string"
+										},
+										"node": {
+											"type": "string",
+											"description": "The node or workflow that refused."
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,20 @@
+{
+	"name": "Twice",
+	"description": "Doubles a number.",
+	"version": "1.0.0",
+	"trigger": {
+		"cron": {
+			"schedule": "30 6 * * mon-fri",
+			"timezone": "Europe/Lisbon",
+			"body": { "n": 21 }
+		},
+		"mcp": {}
+	},
+	"steps": [
+		{
+			"name": "doubled",
+			"node": "demo/double@1",
+			"inputs": { "n": "${request.body.n}" }
+		}
+	]
+}

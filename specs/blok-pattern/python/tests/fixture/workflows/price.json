@@ -1,0 +1,22 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Price",
+	"description": "Prices a quantity of one product, without ordering it.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/price",
+			"errors": { "unknown_sku": 404 }
+		},
+		"mcp": { "tool": "price_order" }
+	},
+	"steps": [
+		{
+			"name": "price",
+			"node": "shop/price@1",
+			"inputs": { "sku": "${request.body.sku}", "qty": "${request.body.qty}" }
+		}
+	],
+	"result": { "totalCents": "${price.total_cents}" }
+}

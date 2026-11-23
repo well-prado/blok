@@ -1,0 +1,215 @@
+{
+	"blok": 1,
+	"language": "python",
+	"nodes": {
+		"shop/price@1": "6324fff89b2e95f20b9d00dcab9fe8b3b2e4944f6046b6f24a6b04ab0f00c55a",
+		"shop/record@1": "a39a73f015b1616dd4c39fba3eec0033680f9660b103f7b3dbb5f1a1735b2cd2"
+	},
+	"workflows": {
+		"workflows/events@1": {
+			"file": "workflows/events.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"body": {
+						"type": "object",
+						"properties": {
+							"sku": {
+								"type": "string"
+							},
+							"note": {
+								"type": "string"
+							}
+						},
+						"required": ["sku", "note"]
+					}
+				},
+				"required": ["body"]
+			},
+			"answers": {
+				"properties": {
+					"note": {
+						"type": "string"
+					},
+					"position": {
+						"type": "integer"
+					}
+				},
+				"required": ["note", "position"],
+				"type": "object",
+				"additionalProperties": false
+			},
+			"errors": ["unknown_sku"]
+		},
+		"workflows/hook@1": {
+			"file": "workflows/hook.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"body": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							}
+						},
+						"required": ["id"]
+					}
+				},
+				"required": ["body"]
+			},
+			"answers": {
+				"properties": {
+					"note": {
+						"type": "string"
+					},
+					"position": {
+						"type": "integer"
+					}
+				},
+				"required": ["note", "position"],
+				"type": "object",
+				"additionalProperties": false
+			},
+			"errors": []
+		},
+		"workflows/nightly@1": {
+			"file": "workflows/nightly.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"body": {
+						"type": "object",
+						"properties": {
+							"note": {
+								"type": "string"
+							}
+						},
+						"required": ["note"]
+					}
+				},
+				"required": ["body"]
+			},
+			"answers": {
+				"properties": {
+					"note": {
+						"type": "string"
+					},
+					"position": {
+						"type": "integer"
+					}
+				},
+				"required": ["note", "position"],
+				"type": "object",
+				"additionalProperties": false
+			},
+			"errors": []
+		},
+		"workflows/note@1": {
+			"file": "workflows/note.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"body": {
+						"type": "object",
+						"properties": {
+							"note": {
+								"type": "string"
+							}
+						},
+						"required": ["note"]
+					}
+				},
+				"required": ["body"]
+			},
+			"answers": {
+				"properties": {
+					"note": {
+						"type": "string"
+					},
+					"position": {
+						"type": "integer"
+					}
+				},
+				"required": ["note", "position"],
+				"type": "object",
+				"additionalProperties": false
+			},
+			"errors": []
+		},
+		"workflows/price@1": {
+			"file": "workflows/price.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"body": {
+						"type": "object",
+						"properties": {
+							"sku": {
+								"type": "string"
+							},
+							"qty": {
+								"type": "integer",
+								"exclusiveMinimum": 0
+							}
+						},
+						"required": ["sku", "qty"]
+					}
+				},
+				"required": ["body"]
+			},
+			"answers": {
+				"type": "object",
+				"properties": {
+					"totalCents": {
+						"type": "integer"
+					}
+				},
+				"required": ["totalCents"],
+				"additionalProperties": false
+			},
+			"errors": ["unknown_sku"]
+		},
+		"workflows/quote@1": {
+			"file": "workflows/quote.json",
+			"request": {
+				"type": "object",
+				"properties": {
+					"params": {
+						"type": "object",
+						"properties": {
+							"sku": {
+								"type": "string"
+							},
+							"shop": {}
+						},
+						"required": ["sku"]
+					},
+					"query": {
+						"type": "object",
+						"properties": {
+							"qty": {
+								"type": "integer",
+								"exclusiveMinimum": 0
+							}
+						},
+						"required": ["qty"]
+					}
+				},
+				"required": ["params", "query"]
+			},
+			"answers": {
+				"type": "object",
+				"properties": {
+					"shop": {},
+					"totalCents": {
+						"type": "integer"
+					}
+				},
+				"required": ["shop", "totalCents"],
+				"additionalProperties": false
+			},
+			"errors": ["unknown_sku"]
+		}
+	}
+}

@@ -1,0 +1,15 @@
+{
+	"$schema": "./blok/workflow.schema.json",
+	"name": "Nightly",
+	"version": "1.0.0",
+	"trigger": {
+		"cron": { "schedule": "0 2 * * *", "body": { "note": "nightly" } }
+	},
+	"steps": [
+		{
+			"name": "note",
+			"node": "shop/record@1",
+			"inputs": { "note": "${request.body.note}" }
+		}
+	]
+}

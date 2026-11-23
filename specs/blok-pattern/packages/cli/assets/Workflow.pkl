@@ -1,0 +1,196 @@
+/// A Blok workflow. A workflow file amends this module, and `pkl eval -f json <file>`
+/// prints the JSON the runner loads.
+///
+/// A workflow is a list of steps. A step names a node and gives it its inputs.
+/// `blok/nodes.pkl` holds a typed step for every node, generated from the node contracts.
+module blok.Workflow
+
+name: String(!isEmpty)
+
+description: String?
+
+version: String(matches(Regex(#"^\d+\.\d+\.\d+$"#)))?
+
+trigger: Trigger
+
+steps: Listing<Entry>
+
+/// What the workflow answers with. Left out, it answers with the result of the last step that ran.
+result: Any = new Dynamic {}
+
+// ---- values a step can be given ----------------------------------------------------------
+
+/// A whole-string placeholder such as `"${order.items}"`. It keeps the value's own type.
+typealias Placeholder = String(matches(Regex(#"^\s*\$\{[^}]+\}\s*$"#)))
+
+/// `${a.b}`, or `${a.b}` followed by == != > >= < <= and a value.
+typealias Condition = String(matches(Regex(#"^\s*\$\{[^}]+\}.*$"#)))
+
+/// A typed pointer to a value an earlier step produced. It renders as `"${path}"`.
+abstract class Ref {
+  hidden path: String
+  /// The placeholder text, for use inside a longer string: `"order \(order.outputs.orderId.text)"`.
+  hidden text: String = "${\(path)}"
+  function eq(other: String|Number|Boolean|Ref): Condition = "\(text) == \(shown(other))"
+  function ne(other: String|Number|Boolean|Ref): Condition = "\(text) != \(shown(other))"
+}
+
+/// A value whose type is not known, such as a step's whole result.
+class AnyRef extends Ref
+
+class StringRef extends Ref
+
+open class NumberRef extends Ref {
+  function gt(other: Number|NumberRef): Condition = "\(text) > \(shown(other))"
+  function gte(other: Number|NumberRef): Condition = "\(text) >= \(shown(other))"
+  function lt(other: Number|NumberRef): Condition = "\(text) < \(shown(other))"
+  function lte(other: Number|NumberRef): Condition = "\(text) <= \(shown(other))"
+}
+
+class IntRef extends NumberRef
+
+class BoolRef extends Ref
+
+class ListRef extends Ref
+
+class ObjectRef extends Ref
+
+const local function shown(value: Any): String =
+  if (value is Ref) value.text
+  else if (value is String) "'\(value)'"
+  else "\(value)"
+
+// What an input of each kind accepts: a literal, a typed pointer of the same kind, or a placeholder.
+typealias StringIn = String|StringRef|AnyRef
+typealias IntIn = Int|IntRef|AnyRef|Placeholder
+typealias NumberIn = Number|NumberRef|AnyRef|Placeholder
+typealias BoolIn = Boolean|BoolRef|AnyRef|Placeholder
+typealias ListIn = Listing|ListRef|AnyRef|Placeholder
+typealias ObjectIn = Dynamic|Mapping|ObjectRef|AnyRef|Placeholder
+
+// ---- the workflow ------------------------------------------------------------------------
+
+/// What starts the workflow from outside. One of each kind at most.
+/// With none, the workflow is only a step in other workflows.
+class Trigger {
+  /// A route on the server.
+  http: Http?
+  /// A schedule. It runs only if the app calls `startCron`.
+  cron: Cron?
+  /// A queue. It runs once per message, and only if the app calls `startQueues`.
+  queue: Queue?
+  /// A tool an AI agent can call. It is served only if the app calls `blokMcp`.
+  mcp: Mcp?
+}
+
+class Http {
+  method: "GET"|"POST"|"PUT"|"PATCH"|"DELETE"
+  path: String(startsWith("/"))
+  accept: String?
+  /// The status of a successful answer. Left out, it is 200. A workflow that creates something answers 201.
+  status: Int(isBetween(200, 299))?
+  /// Error code to HTTP status. Every error a step can fail with needs one.
+  errors: Mapping<String, Int(isBetween(400, 599))>
+  /// A webhook: a request is refused with 401 unless its signature matches.
+  signature: Signature?
+}
+
+/// How the sender of a webhook proves a request is theirs.
+class Signature {
+  /// "standard" is Standard Webhooks (standardwebhooks.com). "stripe" and "github" are theirs.
+  /// "hmac" is an HMAC-SHA256 of the body in a header you name.
+  scheme: "standard"|"stripe"|"github"|"hmac"
+  /// The NAME of the environment variable that holds the secret. Never the secret itself.
+  secret: String(matches(Regex(#"^[A-Z][A-Z0-9_]*$"#)))
+  /// For "hmac": the header that carries the signature.
+  header: String?
+  /// For "hmac": how the signature is written. Left out, it is "hex".
+  encoding: ("hex"|"base64")?
+  /// For "hmac": text before the signature, such as "sha256=".
+  prefix: String?
+}
+
+class Cron {
+  /// Five parts: minute, hour, day of month, month, day of week. "0 2 * * *" is every day at 02:00.
+  schedule: String(!isEmpty)
+  /// A time zone such as "Europe/Lisbon". Left out, it is UTC, where no clock ever moves.
+  timezone: String?
+  /// What the workflow reads as `request.body` on every run. Nobody sends a schedule anything else.
+  body: Dynamic = new {}
+}
+
+class Queue {
+  /// The queue to read. Each message is the workflow's `request.body`.
+  name: String(matches(Regex(#"^[A-Za-z0-9_.:-]+$"#)))
+  /// How many messages may be handled at once. Left out, the queue decides.
+  concurrency: Int(this >= 1)?
+}
+
+class Mcp {
+  /// The name an agent calls. Left out, it is the file name with underscores: `place-order.pkl` is `place_order`.
+  tool: String(matches(Regex(#"^[A-Za-z0-9_-]{1,64}$"#)))?
+  /// What an agent reads to choose this tool. Left out, it is the workflow's description.
+  description: String?
+}
+
+/// Anything that can sit in a list of steps: a [Step], a [Conditions] block, a [Parallel] block or a [Fail].
+abstract class Entry
+
+open class Step extends Entry {
+  name: String(matches(Regex(#"^[A-Za-z0-9_-]+$"#)))
+  /// `<module>/<node>@<version>`, the folder the node lives in. The typed steps in `nodes.pkl` fill this in.
+  node: String(matches(Regex(#"^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)+@[1-9][0-9]*$"#)))
+  /// What the node is given.
+  inputs: Any = new Dynamic {}
+  /// Run this step only when the condition holds.
+  `if`: (Condition|BoolRef)?
+  /// A list to run this step over. Inputs read the element as `${item}`.
+  each: (Placeholder|ListRef|AnyRef)?
+  concurrency: Int(this >= 1)?
+  /// Steps to run when this one fails. The workflow still fails afterwards.
+  onError: Listing<Entry>
+  /// Steps that take this step back. They run when a later step fails, the newest first,
+  /// and the workflow still fails with that later step's error. They can read this step's result.
+  undo: Listing<Entry>
+  /// A pointer to this step's whole result.
+  hidden value: AnyRef = new { path = outer.name }
+}
+
+class Conditions extends Entry {
+  conditions: Listing<If|Else>(!isEmpty)
+}
+
+class If {
+  `if`: Condition|BoolRef
+  steps: Listing<Entry>
+}
+
+class Else {
+  `else`: Listing<Entry>
+}
+
+class Parallel extends Entry {
+  parallel: Listing<Entry>
+}
+
+/// Refuses the request with an error code. With `if`, only when the condition holds.
+/// The code needs a status in the trigger's errors, like any other error.
+class Fail extends Entry {
+  fail: String(matches(Regex(#"^[a-z][a-z0-9_]*$"#)))
+  /// What the caller is told. It may hold placeholders.
+  message: String?
+  `if`: (Condition|BoolRef)?
+}
+
+output {
+  renderer = new JsonRenderer {
+    converters {
+      [Ref] = (it) -> it.text
+      // Anything left empty is left out of the JSON.
+      [Listing] = (it) -> if (it.isEmpty) null else it
+      [Mapping] = (it) -> if (it.isEmpty) null else it
+      [Dynamic] = (it) -> if (it.toMap().isEmpty) null else it
+      [Trigger] = (it) -> if (it.http == null && it.cron == null && it.queue == null && it.mcp == null) null else it
+    }
+  }
+}
