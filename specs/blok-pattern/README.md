@@ -2,6 +2,8 @@
 
 Spec-stage material, started 2026-11-21. It tests one idea: that Blok can be a small pattern you apply inside any stack, with one folder per node so that parallel branches never collide.
 
+How a whole app is put together from features that share no file, so that many agents can build it at once without regressing each other, is on one page in [LEGO.md](LEGO.md).
+
 Since phase 1 of [PLAN.md](PLAN.md) this folder holds two installable packages and an example app that uses them. Phase 3 added what starts a workflow besides an HTTP request: a schedule, a queue, a signed webhook and a tool for AI agents. Phase 4 added a second language: the same pattern in Python, on one page in [PATTERN.md](PATTERN.md), with shared tests that both kernels pass.
 
 | Folder | Is |
