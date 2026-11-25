@@ -2,6 +2,8 @@
 
 This is what a kernel has to do, in any language. The shared tests in [conformance/](conformance/README.md) decide whether it does: the TypeScript kernel and the Python kernel both pass the same files.
 
+How a whole app is made of such pieces, so that its features never edit the same file, is [LEGO.md](LEGO.md).
+
 ## The four things
 
 - A **node** is a contract and the function that keeps it. Its id is `<module>/<node>@<version>`, and that is also where it lives: `nodes/<module>/<node>/v<version>/`. A node never calls another node.
